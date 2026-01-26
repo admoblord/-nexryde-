@@ -1,129 +1,94 @@
-/**
- * KODA Premium Design System
- * The Most Magnificent Ride-Hailing App in Nigeria
- * 
- * PREMIUM 3-COLOR PHILOSOPHY:
- * - Deep Obsidian (#0D0D0D): Luxury, sophistication, premium feel
- * - Electric Gold (#FFD700): Nigerian excellence, prosperity, energy
- * - Pure White (#FFFFFF): Clarity, trust, elegance
- */
+// KODA Premium Theme - Luxury Rose Collection
+// A unique, never-before-seen color palette for Nigeria's premium ride platform
 
 export const COLORS = {
-  // PRIMARY - Deep Obsidian (Luxury & Power)
-  primary: '#0D0D0D',
-  primaryDark: '#000000',
-  primaryLight: '#1A1A1A',
-  primaryMid: '#121212',
+  // Primary - Deep Wine/Burgundy (Luxurious, Unique)
+  primary: '#1A0A0F',           // Deep wine black
+  primaryDark: '#0D0508',       // Darker shade
+  primaryLight: '#2D1219',      // Lighter shade
   
-  // ACCENT - Electric Gold (Premium & Excellence)
-  accent: '#FFD700',
-  accentDark: '#E6C200',
-  accentLight: '#FFE44D',
-  accentSoft: 'rgba(255, 215, 0, 0.15)',
-  accentMuted: '#C9A227',
+  // Accent - Rose Gold (Premium, Elegant)
+  accent: '#C9A9A6',            // Dusty rose gold
+  accentLight: '#E8D4D2',       // Light rose
+  accentDark: '#9D7B78',        // Deep rose gold
+  accentSoft: 'rgba(201, 169, 166, 0.15)',
   
-  // PURE - Clean White (Clarity)
-  pure: '#FFFFFF',
-  pureOff: '#FAFAFA',
-  pureSoft: '#F5F5F5',
+  // Gold - Champagne (Luxury Touch)
+  gold: '#D4AF37',              // Classic gold
+  goldLight: '#F4E4BA',         // Light champagne
+  goldSoft: 'rgba(212, 175, 55, 0.15)',
   
-  // Extended Palette
-  secondary: '#1E1E1E',
-  secondaryLight: '#2A2A2A',
-  
-  // Status Colors (Premium Tones)
-  success: '#00D26A',
-  successSoft: 'rgba(0, 210, 106, 0.12)',
-  successDark: '#00B85C',
-  
-  warning: '#FFB800',
-  warningSoft: 'rgba(255, 184, 0, 0.12)',
-  
-  error: '#FF3B30',
-  errorSoft: 'rgba(255, 59, 48, 0.12)',
-  
-  info: '#007AFF',
-  infoSoft: 'rgba(0, 122, 255, 0.12)',
-  
-  // Neutrals - Luxury Gray Scale
-  white: '#FFFFFF',
-  black: '#000000',
-  gray50: '#FAFAFA',
-  gray100: '#F5F5F5',
-  gray200: '#E8E8E8',
-  gray300: '#D1D1D1',
-  gray400: '#9E9E9E',
-  gray500: '#757575',
-  gray600: '#545454',
-  gray700: '#3D3D3D',
-  gray800: '#262626',
-  gray900: '#171717',
+  // Rose Petals Colors (For Animation)
+  rosePetal1: '#E8B4B8',        // Soft pink
+  rosePetal2: '#D4919A',        // Medium rose
+  rosePetal3: '#C9A9A6',        // Dusty rose
+  rosePetal4: '#B76E79',        // Deep rose
+  rosePetal5: '#8B5A5A',        // Dark rose
   
   // Backgrounds
-  background: '#FAFAFA',
-  backgroundDark: '#0D0D0D',
-  surface: '#FFFFFF',
-  surfaceDark: '#1A1A1A',
-  card: '#FFFFFF',
-  cardDark: '#1E1E1E',
+  background: '#0F0709',        // Rich dark background
+  surface: '#1A0D10',           // Card surfaces
+  surfaceLight: '#251418',      // Elevated surfaces
   
   // Text Colors
-  textPrimary: '#0D0D0D',
-  textSecondary: '#545454',
-  textTertiary: '#9E9E9E',
-  textLight: '#FFFFFF',
-  textMuted: '#757575',
-  textGold: '#FFD700',
-  textOnDark: '#FFFFFF',
-  textOnGold: '#0D0D0D',
+  white: '#FDF8F8',             // Warm white
+  textPrimary: '#FDF8F8',       // Primary text on dark
+  textSecondary: '#C9A9A6',     // Secondary text (rose tint)
+  textMuted: '#8B7577',         // Muted text
   
-  // Special Purpose
-  driver: '#00D26A',
-  driverSoft: 'rgba(0, 210, 106, 0.12)',
-  rider: '#007AFF',
-  riderSoft: 'rgba(0, 122, 255, 0.12)',
-  online: '#00D26A',
-  offline: '#FF3B30',
+  // Semantic Colors
+  success: '#7CB798',           // Soft sage green
+  successSoft: 'rgba(124, 183, 152, 0.15)',
+  error: '#D4626E',             // Soft rose red
+  errorSoft: 'rgba(212, 98, 110, 0.15)',
+  warning: '#D4AF37',           // Gold warning
+  warningSoft: 'rgba(212, 175, 55, 0.15)',
+  info: '#A6C9C9',              // Soft teal
+  infoSoft: 'rgba(166, 201, 201, 0.15)',
   
-  // Glassmorphism
-  glass: 'rgba(255, 255, 255, 0.95)',
-  glassDark: 'rgba(13, 13, 13, 0.95)',
-  glassBlur: 'rgba(255, 255, 255, 0.8)',
+  // Grays (Warm tinted)
+  gray50: '#FDF8F8',
+  gray100: '#F5ECED',
+  gray200: '#E8DCDD',
+  gray300: '#C9B8BA',
+  gray400: '#9D8A8C',
+  gray500: '#7A6A6C',
+  gray600: '#5C4E50',
+  gray700: '#3D3233',
+  gray800: '#251A1C',
+  gray900: '#130C0D',
   
   // Overlay
-  overlay: 'rgba(0, 0, 0, 0.6)',
-  overlayLight: 'rgba(0, 0, 0, 0.3)',
-  overlayGold: 'rgba(255, 215, 0, 0.1)',
+  overlay: 'rgba(13, 5, 8, 0.85)',
+  overlayLight: 'rgba(13, 5, 8, 0.5)',
   
-  // Borders
-  border: '#E8E8E8',
-  borderDark: '#2A2A2A',
-  borderGold: 'rgba(255, 215, 0, 0.3)',
+  // Gradients (CSS strings for web, array for native)
+  gradientPrimary: ['#1A0A0F', '#2D1219', '#1A0A0F'],
+  gradientRose: ['#C9A9A6', '#B76E79', '#8B5A5A'],
+  gradientGold: ['#D4AF37', '#F4E4BA', '#D4AF37'],
 };
 
 export const SPACING = {
-  xxs: 2,
   xs: 4,
   sm: 8,
   md: 16,
   lg: 24,
   xl: 32,
   xxl: 48,
-  xxxl: 64,
-  huge: 80,
+  huge: 64,
+  xxxl: 40,
 };
 
 export const FONT_SIZE = {
-  xxs: 10,
-  xs: 12,
-  sm: 14,
-  md: 16,
-  lg: 18,
-  xl: 22,
-  xxl: 28,
-  xxxl: 36,
-  display: 48,
-  hero: 64,
+  xs: 11,
+  sm: 13,
+  md: 15,
+  lg: 17,
+  xl: 20,
+  xxl: 24,
+  xxxl: 32,
+  hero: 48,
+  display: 56,
 };
 
 export const FONT_WEIGHT = {
@@ -132,7 +97,6 @@ export const FONT_WEIGHT = {
   medium: '500' as const,
   semibold: '600' as const,
   bold: '700' as const,
-  extrabold: '800' as const,
   black: '900' as const,
 };
 
@@ -142,121 +106,64 @@ export const BORDER_RADIUS = {
   md: 12,
   lg: 16,
   xl: 20,
-  xxl: 24,
-  xxxl: 32,
+  xxl: 28,
+  xxxl: 36,
   full: 9999,
 };
 
 export const SHADOWS = {
-  none: {
-    shadowColor: 'transparent',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    elevation: 0,
-  },
-  xs: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.04,
-    shadowRadius: 3,
-    elevation: 1,
-  },
   sm: {
-    shadowColor: '#000',
+    shadowColor: '#C9A9A6',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
     elevation: 2,
   },
   md: {
-    shadowColor: '#000',
+    shadowColor: '#C9A9A6',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
     elevation: 4,
   },
   lg: {
-    shadowColor: '#000',
+    shadowColor: '#C9A9A6',
     shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.12,
-    shadowRadius: 20,
-    elevation: 8,
-  },
-  xl: {
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.16,
-    shadowRadius: 32,
-    elevation: 16,
-  },
-  // Gold glow effect
-  gold: {
-    shadowColor: '#FFD700',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 8,
   },
-  // Success glow
-  success: {
-    shadowColor: '#00D26A',
+  glow: {
+    shadowColor: '#C9A9A6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  gold: {
+    shadowColor: '#D4AF37',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
-    elevation: 6,
+    elevation: 8,
+  },
+  rose: {
+    shadowColor: '#B76E79',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 10,
   },
 };
 
-// Premium Gradients
-export const GRADIENTS = {
-  gold: ['#FFD700', '#FFC107', '#E6B800'],
-  goldDark: ['#C9A227', '#B8941F', '#A68517'],
-  dark: ['#1A1A1A', '#0D0D0D', '#000000'],
-  darkReverse: ['#000000', '#0D0D0D', '#1A1A1A'],
-  success: ['#00D26A', '#00B85C', '#009F4F'],
-  premium: ['#FFD700', '#F5C400', '#E6B800'],
-  night: ['#0D0D0D', '#1A1A1A', '#262626'],
-};
-
-// Animation Timings
-export const ANIMATION = {
-  instant: 100,
-  fast: 200,
-  normal: 300,
-  slow: 500,
-  spring: {
-    damping: 15,
-    stiffness: 120,
-    mass: 1,
-  },
-};
-
-// Icon Sizes
-export const ICON_SIZE = {
-  xs: 16,
-  sm: 20,
-  md: 24,
-  lg: 28,
-  xl: 32,
-  xxl: 40,
-  hero: 56,
-};
-
-// Touch Target (Accessibility)
-export const TOUCH_TARGET = {
-  min: 44,
-  comfortable: 48,
-  large: 56,
-};
-
-// App Constants
-export const SUBSCRIPTION_PRICE = 25000;
 export const CURRENCY = '₦';
 
-export const FARE_CONFIG = {
-  baseFare: 800,
-  perKmRate: 120,
-  perMinRate: 20,
-  maxSurge: 1.2,
+export default {
+  COLORS,
+  SPACING,
+  FONT_SIZE,
+  FONT_WEIGHT,
+  BORDER_RADIUS,
+  SHADOWS,
+  CURRENCY,
 };
