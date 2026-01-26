@@ -75,7 +75,7 @@ export default function LoginScreen() {
               <View style={styles.logoContainer}>
                 <View style={styles.logoOuter}>
                   <View style={styles.logoInner}>
-                    <Text style={styles.logoText}>K</Text>
+                    <Text style={styles.logoText}>N</Text>
                   </View>
                 </View>
               </View>
