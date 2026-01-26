@@ -7,7 +7,6 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Link } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
@@ -15,13 +14,17 @@ const { width, height } = Dimensions.get('window');
 
 export default function SplashScreen() {
   const { isAuthenticated, user } = useAppStore();
-  const destination = isAuthenticated && user ? '/(tabs)/home' : '/(auth)/login';
+  
+  // Determine destination based on auth state and user role
+  let destination = '/(auth)/login';
+  if (isAuthenticated && user) {
+    destination = user.role === 'driver' ? '/(driver-tabs)/driver-home' : '/(rider-tabs)/rider-home';
+  }
 
   return (
     <View style={styles.container}>
       {/* Premium Dark Background */}
       <View style={styles.backgroundPattern}>
-        {/* Subtle gold accent lines */}
         <View style={styles.accentLine1} />
         <View style={styles.accentLine2} />
         <View style={styles.accentLine3} />
