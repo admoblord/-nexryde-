@@ -1,29 +1,29 @@
 {
   "expo": {
-    "name": "KODA",
-    "slug": "koda",
+    "name": "NEXRYDE",
+    "slug": "nexryde",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "koda",
+    "scheme": "nexryde",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.koda.driver",
+      "bundleIdentifier": "com.nexryde.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "KODA needs your location to find nearby drivers and calculate fares",
-        "NSLocationAlwaysUsageDescription": "KODA needs your location to track trips in the background",
-        "NSCameraUsageDescription": "KODA needs camera access for document verification"
+        "NSLocationWhenInUseUsageDescription": "NEXRYDE needs your location to find nearby drivers and calculate fares",
+        "NSLocationAlwaysUsageDescription": "NEXRYDE needs your location to track trips in the background",
+        "NSCameraUsageDescription": "NEXRYDE needs camera access for document verification"
       }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#00C853"
+        "backgroundColor": "#1A0A0F"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.koda.driver",
+      "package": "com.nexryde.app",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -41,7 +41,7 @@
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "KODA needs your location to find nearby drivers and track trips"
+          "locationAlwaysAndWhenInUsePermission": "NEXRYDE needs your location to find nearby drivers and track trips"
         }
       ],
       [
