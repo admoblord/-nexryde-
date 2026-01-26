@@ -7,15 +7,16 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { Link } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { FallingRoses, RosePetalsStatic } from '@/src/components/FallingRoses';
 
 const { width, height } = Dimensions.get('window');
 
 export default function SplashScreen() {
   const { isAuthenticated, user } = useAppStore();
   
-  // Determine destination based on auth state and user role
   let destination = '/(auth)/login';
   if (isAuthenticated && user) {
     destination = user.role === 'driver' ? '/(driver-tabs)/driver-home' : '/(rider-tabs)/rider-home';
@@ -23,43 +24,68 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Premium Dark Background */}
-      <View style={styles.backgroundPattern}>
-        <View style={styles.accentLine1} />
-        <View style={styles.accentLine2} />
-        <View style={styles.accentLine3} />
+      {/* Gradient Background */}
+      <LinearGradient
+        colors={['#1A0A0F', '#0D0508', '#1A0A0F']}
+        style={StyleSheet.absoluteFillObject}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      />
+      
+      {/* Static Rose Petals Background */}
+      <RosePetalsStatic count={20} />
+      
+      {/* Falling Rose Petals Animation */}
+      <FallingRoses intensity="medium" />
+      
+      {/* Decorative Lines */}
+      <View style={styles.decorativeLines}>
+        <View style={styles.line1} />
+        <View style={styles.line2} />
+        <View style={styles.line3} />
       </View>
 
       {/* Main Content */}
       <View style={styles.content}>
         {/* Logo Section */}
         <View style={styles.logoSection}>
-          <View style={styles.logoOuter}>
-            <View style={styles.logoInner}>
-              <Text style={styles.logoLetter}>K</Text>
+          {/* Outer Glow Ring */}
+          <View style={styles.logoGlow}>
+            <View style={styles.logoOuter}>
+              <View style={styles.logoInner}>
+                <Text style={styles.logoLetter}>K</Text>
+              </View>
             </View>
           </View>
           
+          {/* Brand Name */}
           <Text style={styles.brandName}>KODA</Text>
+          
+          {/* Elegant Tagline */}
           <View style={styles.taglineContainer}>
-            <View style={styles.taglineLine} />
-            <Text style={styles.tagline}>DRIVE YOUR WAY</Text>
-            <View style={styles.taglineLine} />
+            <View style={styles.taglineRose} />
+            <Text style={styles.tagline}>ELEGANCE IN MOTION</Text>
+            <View style={styles.taglineRose} />
           </View>
+          
+          {/* Subtitle */}
+          <Text style={styles.subtitle}>Nigeria's Premium Ride Experience</Text>
         </View>
 
-        {/* Features */}
+        {/* Features with Rose Accents */}
         <View style={styles.featuresSection}>
           <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
+            <View style={styles.featurePetal} />
             <Text style={styles.featureText}>Zero Commission</Text>
           </View>
+          <View style={styles.featureDivider} />
           <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
+            <View style={styles.featurePetal} />
             <Text style={styles.featureText}>100% Earnings</Text>
           </View>
+          <View style={styles.featureDivider} />
           <View style={styles.featureItem}>
-            <View style={styles.featureDot} />
+            <View style={styles.featurePetal} />
             <Text style={styles.featureText}>Premium Safety</Text>
           </View>
         </View>
@@ -68,15 +94,27 @@ export default function SplashScreen() {
       {/* Bottom Section */}
       <View style={styles.bottomSection}>
         <Link href={destination} asChild>
-          <TouchableOpacity style={styles.ctaButton} activeOpacity={0.9}>
-            <Text style={styles.ctaText}>Get Started</Text>
-            <View style={styles.ctaArrow}>
-              <Text style={styles.ctaArrowText}>→</Text>
-            </View>
+          <TouchableOpacity style={styles.ctaButton} activeOpacity={0.85}>
+            <LinearGradient
+              colors={[COLORS.accent, COLORS.accentDark]}
+              style={styles.ctaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Text style={styles.ctaText}>Begin Your Journey</Text>
+              <View style={styles.ctaArrow}>
+                <Text style={styles.ctaArrowText}>→</Text>
+              </View>
+            </LinearGradient>
           </TouchableOpacity>
         </Link>
         
-        <Text style={styles.footerText}>Nigeria's Premium Ride Platform</Text>
+        {/* Elegant Footer */}
+        <View style={styles.footerContainer}>
+          <View style={styles.footerLine} />
+          <Text style={styles.footerText}>WHERE LUXURY MEETS THE ROAD</Text>
+          <View style={styles.footerLine} />
+        </View>
       </View>
     </View>
   );
@@ -87,38 +125,38 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.primary,
   },
-  backgroundPattern: {
+  decorativeLines: {
     ...StyleSheet.absoluteFillObject,
     overflow: 'hidden',
   },
-  accentLine1: {
+  line1: {
     position: 'absolute',
-    top: height * 0.1,
-    left: -50,
-    width: width * 1.5,
+    top: height * 0.15,
+    left: -100,
+    width: width * 2,
     height: 1,
     backgroundColor: COLORS.accent,
-    opacity: 0.08,
-    transform: [{ rotate: '-15deg' }],
+    opacity: 0.06,
+    transform: [{ rotate: '-20deg' }],
   },
-  accentLine2: {
+  line2: {
     position: 'absolute',
-    top: height * 0.3,
-    left: -50,
-    width: width * 1.5,
+    top: height * 0.4,
+    left: -100,
+    width: width * 2,
     height: 1,
-    backgroundColor: COLORS.accent,
-    opacity: 0.05,
-    transform: [{ rotate: '-15deg' }],
+    backgroundColor: COLORS.gold,
+    opacity: 0.04,
+    transform: [{ rotate: '-20deg' }],
   },
-  accentLine3: {
+  line3: {
     position: 'absolute',
-    bottom: height * 0.25,
-    left: -50,
-    width: width * 1.5,
+    bottom: height * 0.3,
+    left: -100,
+    width: width * 2,
     height: 1,
     backgroundColor: COLORS.accent,
-    opacity: 0.08,
+    opacity: 0.06,
     transform: [{ rotate: '15deg' }],
   },
   content: {
@@ -126,123 +164,172 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: SPACING.xl,
+    zIndex: 10,
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: SPACING.huge,
+    marginBottom: SPACING.xxl,
+  },
+  logoGlow: {
+    width: 170,
+    height: 170,
+    borderRadius: 85,
+    backgroundColor: 'rgba(201, 169, 166, 0.08)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   logoOuter: {
-    width: 140,
-    height: 140,
-    borderRadius: 70,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
     backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.gold,
+    ...SHADOWS.rose,
   },
   logoInner: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 130,
+    height: 130,
+    borderRadius: 65,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: COLORS.accent,
+    borderColor: COLORS.accentLight,
   },
   logoLetter: {
-    fontSize: 72,
+    fontSize: 80,
     fontWeight: '900',
     color: COLORS.accent,
-    letterSpacing: -2,
+    letterSpacing: -3,
   },
   brandName: {
-    fontSize: FONT_SIZE.hero,
+    fontSize: FONT_SIZE.display,
     fontWeight: '900',
     color: COLORS.white,
-    letterSpacing: 16,
+    letterSpacing: 20,
     marginTop: SPACING.xl,
+    textShadowColor: 'rgba(201, 169, 166, 0.3)',
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 20,
   },
   taglineContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.md,
+    marginTop: SPACING.lg,
     gap: SPACING.md,
   },
-  taglineLine: {
-    width: 24,
-    height: 1,
-    backgroundColor: COLORS.accent,
-    opacity: 0.6,
+  taglineRose: {
+    width: 8,
+    height: 10,
+    backgroundColor: COLORS.rosePetal3,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 8,
+    transform: [{ rotate: '-45deg' }],
+    opacity: 0.8,
   },
   tagline: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     color: COLORS.accent,
-    letterSpacing: 4,
+    letterSpacing: 6,
+  },
+  subtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textMuted,
+    marginTop: SPACING.md,
+    letterSpacing: 2,
   },
   featuresSection: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.lg,
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    marginTop: SPACING.xxl,
+    paddingHorizontal: SPACING.md,
   },
   featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
   },
-  featureDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: COLORS.accent,
+  featurePetal: {
+    width: 10,
+    height: 12,
+    backgroundColor: COLORS.rosePetal2,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 10,
+    transform: [{ rotate: '-45deg' }],
   },
   featureText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.gray400,
+    color: COLORS.textSecondary,
     fontWeight: '500',
+  },
+  featureDivider: {
+    width: 1,
+    height: 20,
+    backgroundColor: COLORS.accent,
+    opacity: 0.3,
+    marginHorizontal: SPACING.md,
   },
   bottomSection: {
     paddingHorizontal: SPACING.xl,
     paddingBottom: SPACING.xxl + SPACING.md,
     alignItems: 'center',
+    zIndex: 10,
   },
   ctaButton: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: BORDER_RADIUS.full,
+    overflow: 'hidden',
+    ...SHADOWS.rose,
+  },
+  ctaGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.accent,
-    paddingVertical: SPACING.lg,
+    paddingVertical: SPACING.lg + 2,
     paddingHorizontal: SPACING.xxl,
-    borderRadius: BORDER_RADIUS.full,
-    width: '100%',
-    maxWidth: 320,
-    ...SHADOWS.gold,
   },
   ctaText: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     color: COLORS.primary,
-    marginRight: SPACING.sm,
+    marginRight: SPACING.md,
+    letterSpacing: 1,
   },
   ctaArrow: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   ctaArrowText: {
     color: COLORS.accent,
-    fontSize: FONT_SIZE.md,
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
   },
+  footerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.xl,
+    gap: SPACING.md,
+  },
+  footerLine: {
+    width: 30,
+    height: 1,
+    backgroundColor: COLORS.accent,
+    opacity: 0.3,
+  },
   footerText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray500,
-    marginTop: SPACING.lg,
-    letterSpacing: 1,
+    fontSize: 9,
+    color: COLORS.textMuted,
+    letterSpacing: 3,
   },
 });
