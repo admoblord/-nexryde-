@@ -201,6 +201,198 @@ backend:
         - agent: "main"
         - comment: "POST /api/fare/estimate - Uses Google Routes/Directions API with fallback to Haversine. Returns distance_km, duration_min, fare breakdown, price locked for 3 minutes."
 
+  - task: "AI Rider Assistant API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/ai/rider-assistant - Answers rider questions about trips, fares, drivers, safety"
+
+  - task: "AI Driver Assistant API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/ai/driver-assistant - Provides earnings insights, best times to drive, demand areas"
+
+  - task: "Emergency Contacts API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST/GET/DELETE /api/users/{id}/emergency-contacts - Manage emergency contacts"
+
+  - task: "SOS System API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/sos/trigger - Triggers SOS alert, notifies contacts and admin"
+
+  - task: "Live Trip Monitoring API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "PUT /api/trips/{id}/update-location - Tracks location, detects route deviation, abnormal stops"
+
+  - task: "Favorite/Blocked Drivers API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST/DELETE /api/users/{id}/favorite-drivers and blocked-drivers endpoints"
+
+  - task: "Face Verification API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/drivers/{id}/verify-face-at-start - Face match at ride start (MOCKED for MVP)"
+
+  - task: "Fatigue Monitoring API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/drivers/{id}/fatigue-status - Tracks driving hours, recommends breaks"
+
+  - task: "Driver Leaderboard API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/leaderboard/drivers and /top-rated - Returns ranked drivers by earnings/rating"
+
+  - task: "Streaks & Badges API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/drivers/{id}/streaks - Returns current/best streaks, earned badges"
+
+  - task: "Weekly Challenges API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/challenges/active - Returns active challenges with default fallback"
+
+  - task: "Trip Sharing API (Family & Friends)"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/trips/{id}/share - Share trip with family/friends for tracking"
+
+  - task: "Trip Recording API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/trips/{id}/start-recording and stop-recording - Audio recording metadata (MOCKED)"
+
+  - task: "Trip Insurance API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "low"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "GET /api/trips/{id}/insurance - Returns trip insurance info (MOCKED coverage)"
+
+  - task: "Grace Period API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/subscriptions/{id}/grace-period - Driver emergency access"
+
+  - task: "Risk Alert API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/trips/{id}/risk-alert - Driver protection mode trigger"
+
   - task: "Fare Calculation Formula"
     implemented: true
     working: true
