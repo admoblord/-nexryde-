@@ -2921,6 +2921,823 @@ async def get_trip_insurance(trip_id: str):
         "valid_until": trip.get("completed_at") or "Trip completion"
     }
 
+# ==================== DRIVER TIER SYSTEM ====================
+
+@api_router.get("/driver/tier/{driver_id}")
+async def get_driver_tier(driver_id: str):
+    """Get driver's current tier and requirements"""
+    tier_data = await db.driver_tiers.find_one({"driver_id": driver_id})
+    
+    if not tier_data:
+        # Create default basic tier
+        tier_data = {
+            "id": str(uuid.uuid4()),
+            "driver_id": driver_id,
+            "tier": "basic",
+            "requirements_met": {},
+            "warnings": 0,
+            "created_at": datetime.utcnow()
+        }
+        await db.driver_tiers.insert_one(tier_data)
+    
+    current_tier = tier_data.get("tier", "basic")
+    tier_config = TIER_CONFIG.get(current_tier, TIER_CONFIG["basic"])
+    
+    return {
+        "driver_id": driver_id,
+        "current_tier": current_tier,
+        "tier_name": tier_config["name"],
+        "monthly_fee": tier_config["monthly_fee"],
+        "earning_potential": tier_config["earning_per_ride"],
+        "requirements": TIER_CONFIG["premium"]["requirements"],
+        "requirements_met": tier_data.get("requirements_met", {}),
+        "warnings": tier_data.get("warnings", 0),
+        "probation_until": tier_data.get("probation_until"),
+        "can_upgrade": current_tier == "basic",
+        "upgrade_path": {
+            "steps": [
+                "Maintain 4.7★ rating for 60 days",
+                "Own/lease approved Premium vehicle (2018+)",
+                "Complete free Premium Service course",
+                "Pass vehicle inspection (₦2,000)",
+            ],
+            "extra_fee": 0  # No extra monthly fee!
+        },
+        "premium_perks": TIER_CONFIG["premium"].get("perks", [])
+    }
+
+@api_router.post("/driver/tier/upgrade")
+async def request_tier_upgrade(driver_id: str, request: DriverTierUpgradeRequest):
+    """Request upgrade to Premium tier"""
+    driver = await db.driver_profiles.find_one({"user_id": driver_id})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    user = await db.users.find_one({"id": driver_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check rating requirement
+    if user.get("rating", 0) < 4.7:
+        raise HTTPException(status_code=400, detail="Rating must be 4.7 or higher")
+    
+    # Check vehicle year
+    if request.vehicle_year < 2018:
+        raise HTTPException(status_code=400, detail="Vehicle must be 2018 or newer")
+    
+    # Create inspection request
+    inspection = {
+        "id": str(uuid.uuid4()),
+        "driver_id": driver_id,
+        "inspection_type": "initial",
+        "status": "pending",
+        "interior_photo": request.interior_photo,
+        "exterior_photo": request.exterior_photo,
+        "leather_seats": request.leather_seats,
+        "ac_working": request.dual_ac,
+        "vehicle_year": request.vehicle_year,
+        "created_at": datetime.utcnow()
+    }
+    await db.vehicle_inspections.insert_one(inspection)
+    
+    # Update tier requirements met
+    await db.driver_tiers.update_one(
+        {"driver_id": driver_id},
+        {
+            "$set": {
+                "requirements_met": {
+                    "rating_ok": True,
+                    "vehicle_year_ok": True,
+                    "leather_seats": request.leather_seats,
+                    "dual_ac": request.dual_ac,
+                    "inspection_pending": True
+                }
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "message": "Upgrade request submitted",
+        "inspection_id": inspection["id"],
+        "next_steps": [
+            "Vehicle inspection will be scheduled within 48 hours",
+            "Complete Premium Service training (free in-app course)",
+            "Inspection fee: ₦2,000 at partner garage"
+        ]
+    }
+
+@api_router.get("/tiers/config")
+async def get_tier_configuration():
+    """Get all tier configurations"""
+    return {
+        "tiers": TIER_CONFIG,
+        "same_monthly_fee": True,
+        "fee_amount": 25000,
+        "upgrade_benefit": "Higher earning potential per ride, NOT higher fee"
+    }
+
+# ==================== AUTOMATIC FARE ADJUSTMENT ====================
+
+def get_time_rate(trip_time: datetime) -> float:
+    """Get the time-based rate for fare adjustment"""
+    hour = trip_time.hour
+    weekday = trip_time.weekday()
+    
+    config = FARE_ADJUSTMENT_CONFIG
+    
+    # Night hours (10pm - 5am)
+    if hour >= config["night_hours"]["start"] or hour < config["night_hours"]["end"]:
+        return config["time_rates"]["night"]
+    
+    # Peak hours
+    peak = config["peak_hours"]
+    if (peak["morning"]["start"] <= hour < peak["morning"]["end"] or
+        peak["evening"]["start"] <= hour < peak["evening"]["end"]):
+        return config["time_rates"]["peak"]
+    
+    # Weekend
+    if weekday >= 5:
+        return config["time_rates"]["weekend"]
+    
+    return config["time_rates"]["normal"]
+
+def get_weather_surcharge(weather_condition: str) -> float:
+    """Get weather surcharge percentage"""
+    surcharges = FARE_ADJUSTMENT_CONFIG["weather_surcharges"]
+    return surcharges.get(weather_condition, 0.0)
+
+@api_router.post("/fare/calculate-adjustment")
+async def calculate_fare_adjustment(trip_id: str):
+    """Calculate automatic fare adjustment at trip end"""
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    tracking = await db.trip_tracking.find_one({"trip_id": trip_id})
+    
+    base_fare = trip.get("fare", 0)
+    estimated_time = trip.get("duration_mins", 0)
+    
+    # Calculate actual time
+    started_at = trip.get("started_at")
+    completed_at = trip.get("completed_at") or datetime.utcnow()
+    
+    if started_at:
+        actual_time = int((completed_at - started_at).total_seconds() / 60)
+    else:
+        actual_time = estimated_time
+    
+    config = FARE_ADJUSTMENT_CONFIG
+    free_buffer = config["free_buffer_minutes"]
+    
+    # Extra time calculation
+    extra_time = max(0, actual_time - estimated_time - free_buffer)
+    
+    # Get time rate
+    time_rate = get_time_rate(started_at or datetime.utcnow())
+    
+    # Calculate traffic charge
+    traffic_charge = extra_time * time_rate
+    
+    # Weather surcharge (check tracking data)
+    weather_surcharge = 0.0
+    weather_condition = None
+    if tracking:
+        weather_conditions = tracking.get("weather_conditions", [])
+        for wc in weather_conditions:
+            if wc.get("surcharge_applied"):
+                weather_condition = wc.get("condition")
+                weather_surcharge = base_fare * get_weather_surcharge(weather_condition)
+                break
+    
+    # Total adjustment
+    total_adjustment = traffic_charge + weather_surcharge
+    
+    # Apply 50% cap
+    max_cap = config["max_increase_percentage"] / 100
+    max_increase = base_fare * max_cap
+    cap_applied = total_adjustment > max_increase
+    
+    if cap_applied:
+        total_adjustment = max_increase
+    
+    final_fare = base_fare + total_adjustment
+    
+    # Store adjustment
+    adjustment = {
+        "id": str(uuid.uuid4()),
+        "trip_id": trip_id,
+        "base_fare": base_fare,
+        "estimated_time_mins": estimated_time,
+        "actual_time_mins": actual_time,
+        "extra_time_mins": extra_time,
+        "time_rate": time_rate,
+        "traffic_charge": traffic_charge,
+        "weather_surcharge": weather_surcharge,
+        "weather_condition": weather_condition,
+        "total_adjustment": total_adjustment,
+        "final_fare": final_fare,
+        "cap_applied": cap_applied,
+        "max_cap_percentage": config["max_increase_percentage"],
+        "calculated_at": datetime.utcnow()
+    }
+    await db.fare_adjustments.insert_one(adjustment)
+    
+    # Update trip with final fare
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {"fare": final_fare, "traffic_fee": traffic_charge}}
+    )
+    
+    return {
+        "trip_id": trip_id,
+        "breakdown": {
+            "base_fare": base_fare,
+            "traffic_delay": {
+                "extra_minutes": extra_time,
+                "rate_per_minute": time_rate,
+                "charge": traffic_charge
+            },
+            "weather_surcharge": weather_surcharge,
+            "weather_condition": weather_condition,
+            "total_adjustment": total_adjustment,
+            "cap_applied": cap_applied,
+            "max_cap": f"{config['max_increase_percentage']}%"
+        },
+        "final_fare": final_fare,
+        "message": "Fare calculated automatically based on actual trip conditions"
+    }
+
+@api_router.get("/fare/breakdown/{trip_id}")
+async def get_fare_breakdown(trip_id: str):
+    """Get detailed fare breakdown for a completed trip"""
+    adjustment = await db.fare_adjustments.find_one({"trip_id": trip_id})
+    trip = await db.trips.find_one({"id": trip_id})
+    
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if not adjustment:
+        # No adjustment was made
+        return {
+            "trip_id": trip_id,
+            "base_fare": trip.get("fare", 0),
+            "adjustments": None,
+            "final_fare": trip.get("fare", 0),
+            "message": "No adjustments applied to this trip"
+        }
+    
+    return {
+        "trip_id": trip_id,
+        "base_fare": adjustment.get("base_fare"),
+        "estimated_time": adjustment.get("estimated_time_mins"),
+        "actual_time": adjustment.get("actual_time_mins"),
+        "breakdown": {
+            "traffic_delay": {
+                "extra_minutes": adjustment.get("extra_time_mins"),
+                "rate": adjustment.get("time_rate"),
+                "charge": adjustment.get("traffic_charge")
+            },
+            "weather": {
+                "condition": adjustment.get("weather_condition"),
+                "surcharge": adjustment.get("weather_surcharge")
+            }
+        },
+        "total_adjustment": adjustment.get("total_adjustment"),
+        "cap_applied": adjustment.get("cap_applied"),
+        "final_fare": adjustment.get("final_fare"),
+        "calculated_at": adjustment.get("calculated_at")
+    }
+
+@api_router.post("/trips/{trip_id}/track")
+async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate):
+    """Update trip tracking data (speed, location)"""
+    tracking = await db.trip_tracking.find_one({"trip_id": trip_id})
+    
+    speed_log = {
+        "timestamp": update.timestamp.isoformat(),
+        "speed_kmh": update.speed_kmh,
+        "location": {"lat": update.latitude, "lng": update.longitude}
+    }
+    
+    if not tracking:
+        tracking = {
+            "id": str(uuid.uuid4()),
+            "trip_id": trip_id,
+            "speed_logs": [speed_log],
+            "traffic_delays": [],
+            "weather_conditions": [],
+            "route_deviations": [],
+            "stationary_periods": [],
+            "created_at": datetime.utcnow()
+        }
+        await db.trip_tracking.insert_one(tracking)
+    else:
+        # Detect traffic (speed < 10 km/h for extended period)
+        speed_logs = tracking.get("speed_logs", [])
+        if len(speed_logs) >= 5:
+            recent_speeds = [log["speed_kmh"] for log in speed_logs[-5:]]
+            avg_speed = sum(recent_speeds) / len(recent_speeds)
+            
+            if avg_speed < 10 and update.speed_kmh < 10:
+                # Traffic detected
+                traffic_delays = tracking.get("traffic_delays", [])
+                if traffic_delays and not traffic_delays[-1].get("end"):
+                    # Continue existing delay
+                    pass
+                else:
+                    # New delay
+                    traffic_delays.append({
+                        "start": datetime.utcnow().isoformat(),
+                        "location": {"lat": update.latitude, "lng": update.longitude}
+                    })
+                    await db.trip_tracking.update_one(
+                        {"trip_id": trip_id},
+                        {"$set": {"traffic_delays": traffic_delays}}
+                    )
+        
+        await db.trip_tracking.update_one(
+            {"trip_id": trip_id},
+            {"$push": {"speed_logs": speed_log}}
+        )
+    
+    return {"message": "Tracking updated", "trip_id": trip_id}
+
+# ==================== RIDER PREFERENCES ====================
+
+@api_router.get("/rider/preferences/{user_id}")
+async def get_rider_preferences(user_id: str):
+    """Get rider's preferences"""
+    prefs = await db.rider_preferences.find_one({"user_id": user_id})
+    
+    if not prefs:
+        prefs = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "preferred_ride_type": "any",
+            "preferred_ac_level": "medium",
+            "preferred_music": "none",
+            "saved_routes": [],
+            "default_payment": "cash",
+            "auto_tip_percentage": 0.0,
+            "created_at": datetime.utcnow()
+        }
+        await db.rider_preferences.insert_one(prefs)
+    
+    return prefs
+
+@api_router.put("/rider/preferences/{user_id}")
+async def update_rider_preferences(user_id: str, request: RiderPreferencesUpdate):
+    """Update rider's preferences"""
+    update_data = {k: v for k, v in request.dict().items() if v is not None}
+    
+    await db.rider_preferences.update_one(
+        {"user_id": user_id},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    return {"message": "Preferences updated", "updated": update_data}
+
+@api_router.post("/rider/preferences/{user_id}/routes")
+async def save_route(user_id: str, route: SavedRouteRequest):
+    """Save a favorite route"""
+    saved_route = {
+        "id": str(uuid.uuid4()),
+        "name": route.name,
+        "pickup": {
+            "lat": route.pickup_lat,
+            "lng": route.pickup_lng,
+            "address": route.pickup_address
+        },
+        "dropoff": {
+            "lat": route.dropoff_lat,
+            "lng": route.dropoff_lng,
+            "address": route.dropoff_address
+        },
+        "created_at": datetime.utcnow().isoformat()
+    }
+    
+    await db.rider_preferences.update_one(
+        {"user_id": user_id},
+        {"$push": {"saved_routes": saved_route}},
+        upsert=True
+    )
+    
+    return {"message": "Route saved", "route": saved_route}
+
+@api_router.delete("/rider/preferences/{user_id}/routes/{route_id}")
+async def delete_saved_route(user_id: str, route_id: str):
+    """Delete a saved route"""
+    await db.rider_preferences.update_one(
+        {"user_id": user_id},
+        {"$pull": {"saved_routes": {"id": route_id}}}
+    )
+    
+    return {"message": "Route deleted"}
+
+# ==================== LOYALTY PROGRAM ====================
+
+@api_router.get("/loyalty/{user_id}")
+async def get_loyalty_status(user_id: str):
+    """Get user's loyalty program status"""
+    loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
+    
+    if not loyalty:
+        loyalty = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "tier": "bronze",
+            "points": 0,
+            "total_trips": 0,
+            "total_spent": 0.0,
+            "perks_earned": [],
+            "created_at": datetime.utcnow()
+        }
+        await db.loyalty_programs.insert_one(loyalty)
+    
+    current_tier = loyalty.get("tier", "bronze")
+    tier_config = LOYALTY_TIERS.get(current_tier, LOYALTY_TIERS["bronze"])
+    
+    # Find next tier
+    next_tier = None
+    next_tier_requirements = None
+    tier_order = ["bronze", "silver", "gold", "platinum"]
+    current_index = tier_order.index(current_tier)
+    if current_index < len(tier_order) - 1:
+        next_tier = tier_order[current_index + 1]
+        next_tier_requirements = LOYALTY_TIERS[next_tier]
+    
+    return {
+        "user_id": user_id,
+        "current_tier": current_tier,
+        "points": loyalty.get("points", 0),
+        "total_trips": loyalty.get("total_trips", 0),
+        "total_spent": loyalty.get("total_spent", 0),
+        "current_perks": tier_config["perks"],
+        "points_multiplier": tier_config["points_multiplier"],
+        "next_tier": next_tier,
+        "next_tier_requirements": next_tier_requirements,
+        "progress_to_next": {
+            "trips_needed": (next_tier_requirements["min_trips"] - loyalty.get("total_trips", 0)) if next_tier_requirements else 0,
+            "spent_needed": (next_tier_requirements["min_spent"] - loyalty.get("total_spent", 0)) if next_tier_requirements else 0
+        } if next_tier else None
+    }
+
+@api_router.post("/loyalty/{user_id}/add-points")
+async def add_loyalty_points(user_id: str, trip_fare: float):
+    """Add points from completed trip"""
+    loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
+    
+    if not loyalty:
+        loyalty = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "tier": "bronze",
+            "points": 0,
+            "total_trips": 0,
+            "total_spent": 0.0,
+            "perks_earned": [],
+            "created_at": datetime.utcnow()
+        }
+    
+    current_tier = loyalty.get("tier", "bronze")
+    multiplier = LOYALTY_TIERS[current_tier]["points_multiplier"]
+    
+    # 1 point per 100 NGN spent
+    base_points = int(trip_fare / 100)
+    earned_points = int(base_points * multiplier)
+    
+    new_total_trips = loyalty.get("total_trips", 0) + 1
+    new_total_spent = loyalty.get("total_spent", 0) + trip_fare
+    new_points = loyalty.get("points", 0) + earned_points
+    
+    # Check for tier upgrade
+    new_tier = current_tier
+    for tier_name in ["platinum", "gold", "silver"]:
+        tier_req = LOYALTY_TIERS[tier_name]
+        if new_total_trips >= tier_req["min_trips"] and new_total_spent >= tier_req["min_spent"]:
+            new_tier = tier_name
+            break
+    
+    tier_upgraded = new_tier != current_tier
+    
+    await db.loyalty_programs.update_one(
+        {"user_id": user_id},
+        {
+            "$set": {
+                "points": new_points,
+                "total_trips": new_total_trips,
+                "total_spent": new_total_spent,
+                "tier": new_tier
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "points_earned": earned_points,
+        "total_points": new_points,
+        "tier": new_tier,
+        "tier_upgraded": tier_upgraded,
+        "message": f"Earned {earned_points} points!" + (f" Upgraded to {new_tier}!" if tier_upgraded else "")
+    }
+
+# ==================== IN-APP MESSAGING ====================
+
+@api_router.post("/messages/send")
+async def send_message(request: SendMessageRequest, sender_id: str, sender_role: str):
+    """Send in-app message during trip"""
+    trip = await db.trips.find_one({"id": request.trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Preset messages for quick communication
+    preset_messages = {
+        "arriving_soon": "I'm arriving soon, please be ready",
+        "at_location": "I'm at the pickup location",
+        "blue_gate": "I'm at the blue gate",
+        "red_gate": "I'm at the red gate",
+        "running_late": "I'm running a few minutes late",
+        "waiting": "I'm waiting for you",
+        "wrong_location": "The pin seems to be in the wrong location",
+        "call_me": "Please call me"
+    }
+    
+    content = request.content
+    if request.message_type == "preset" and request.content in preset_messages:
+        content = preset_messages[request.content]
+    
+    message = {
+        "id": str(uuid.uuid4()),
+        "trip_id": request.trip_id,
+        "sender_id": sender_id,
+        "sender_role": sender_role,
+        "message_type": request.message_type,
+        "content": content,
+        "read": False,
+        "created_at": datetime.utcnow()
+    }
+    await db.messages.insert_one(message)
+    
+    return {"message": "Message sent", "data": message}
+
+@api_router.get("/messages/{trip_id}")
+async def get_trip_messages(trip_id: str):
+    """Get all messages for a trip"""
+    messages = await db.messages.find({"trip_id": trip_id}).sort("created_at", 1).to_list(100)
+    
+    return {
+        "trip_id": trip_id,
+        "messages": messages,
+        "preset_options": [
+            {"key": "arriving_soon", "text": "I'm arriving soon, please be ready"},
+            {"key": "at_location", "text": "I'm at the pickup location"},
+            {"key": "blue_gate", "text": "I'm at the blue gate"},
+            {"key": "running_late", "text": "I'm running a few minutes late"},
+            {"key": "call_me", "text": "Please call me"}
+        ]
+    }
+
+@api_router.put("/messages/{message_id}/read")
+async def mark_message_read(message_id: str):
+    """Mark message as read"""
+    await db.messages.update_one({"id": message_id}, {"$set": {"read": True}})
+    return {"message": "Message marked as read"}
+
+# ==================== LOST & FOUND ====================
+
+@api_router.post("/lost-found/report")
+async def report_lost_item(request: ReportLostItemRequest, reporter_id: str, reporter_role: str):
+    """Report a lost item"""
+    trip = await db.trips.find_one({"id": request.trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    item = {
+        "id": str(uuid.uuid4()),
+        "trip_id": request.trip_id,
+        "reporter_id": reporter_id,
+        "reporter_role": reporter_role,
+        "item_description": request.item_description,
+        "status": "reported",
+        "created_at": datetime.utcnow()
+    }
+    await db.lost_items.insert_one(item)
+    
+    return {
+        "message": "Lost item reported",
+        "item_id": item["id"],
+        "next_steps": [
+            "The other party will be notified",
+            "You can communicate through the app",
+            "Check back for updates on item status"
+        ]
+    }
+
+@api_router.get("/lost-found/user/{user_id}")
+async def get_user_lost_items(user_id: str):
+    """Get user's lost item reports"""
+    items = await db.lost_items.find({"reporter_id": user_id}).sort("created_at", -1).to_list(50)
+    return {"items": items}
+
+@api_router.put("/lost-found/{item_id}/respond")
+async def respond_to_lost_item(item_id: str, request: LostItemResponseRequest):
+    """Respond to lost item report"""
+    await db.lost_items.update_one(
+        {"id": item_id},
+        {
+            "$set": {
+                "status": request.response,
+                "driver_response": request.response,
+                "resolution_notes": request.notes,
+                "resolved_at": datetime.utcnow() if request.response in ["found", "returned"] else None
+            }
+        }
+    )
+    
+    return {"message": f"Item marked as {request.response}"}
+
+# ==================== DRIVER EARNINGS DASHBOARD ====================
+
+@api_router.get("/driver/earnings/{driver_id}")
+async def get_driver_earnings_dashboard(driver_id: str, period: str = "today"):
+    """Get comprehensive earnings dashboard for driver"""
+    now = datetime.utcnow()
+    
+    # Calculate date range
+    if period == "today":
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "week":
+        start_date = now - timedelta(days=7)
+    elif period == "month":
+        start_date = now - timedelta(days=30)
+    else:
+        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    # Get completed trips
+    trips = await db.trips.find({
+        "driver_id": driver_id,
+        "status": "completed",
+        "completed_at": {"$gte": start_date}
+    }).to_list(500)
+    
+    # Calculate earnings
+    total_earnings = sum(t.get("fare", 0) for t in trips)
+    total_trips = len(trips)
+    total_distance = sum(t.get("distance_km", 0) for t in trips)
+    total_time = sum(t.get("duration_mins", 0) for t in trips)
+    
+    # Traffic compensation
+    traffic_compensation = sum(t.get("traffic_fee", 0) for t in trips)
+    
+    # Get tier info
+    tier_data = await db.driver_tiers.find_one({"driver_id": driver_id})
+    current_tier = tier_data.get("tier", "basic") if tier_data else "basic"
+    tier_config = TIER_CONFIG.get(current_tier, TIER_CONFIG["basic"])
+    
+    # Calculate daily breakdown
+    daily_breakdown = {}
+    for trip in trips:
+        trip_date = trip.get("completed_at", now).strftime("%Y-%m-%d")
+        if trip_date not in daily_breakdown:
+            daily_breakdown[trip_date] = {"trips": 0, "earnings": 0, "distance": 0}
+        daily_breakdown[trip_date]["trips"] += 1
+        daily_breakdown[trip_date]["earnings"] += trip.get("fare", 0)
+        daily_breakdown[trip_date]["distance"] += trip.get("distance_km", 0)
+    
+    # Calculate averages
+    avg_per_trip = total_earnings / total_trips if total_trips > 0 else 0
+    avg_per_km = total_earnings / total_distance if total_distance > 0 else 0
+    
+    # Projection
+    if period == "today":
+        hours_worked = (now - start_date).total_seconds() / 3600
+        projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 else 0  # Assuming 10 hour day
+    else:
+        projected_daily = total_earnings / ((now - start_date).days or 1)
+    
+    return {
+        "driver_id": driver_id,
+        "period": period,
+        "tier": {
+            "name": tier_config["name"],
+            "earning_potential": tier_config["earning_per_ride"],
+            "monthly_fee": tier_config["monthly_fee"]
+        },
+        "summary": {
+            "total_earnings": total_earnings,
+            "total_trips": total_trips,
+            "total_distance_km": round(total_distance, 1),
+            "total_time_mins": total_time,
+            "traffic_compensation": traffic_compensation,
+            "keep_percentage": 100  # 100% - No commission!
+        },
+        "averages": {
+            "per_trip": round(avg_per_trip, 2),
+            "per_km": round(avg_per_km, 2),
+            "hourly": round(total_earnings / (total_time / 60), 2) if total_time > 0 else 0
+        },
+        "projections": {
+            "daily": round(projected_daily, 2),
+            "weekly": round(projected_daily * 6, 2),  # 6 working days
+            "monthly": round(projected_daily * 24, 2)  # 24 working days
+        },
+        "daily_breakdown": daily_breakdown,
+        "commission_message": "You keep 100% of all earnings. Only ₦25,000 monthly subscription."
+    }
+
+# ==================== SMART MATCHING ====================
+
+@api_router.post("/matching/find-driver")
+async def find_best_matched_driver(rider_id: str, pickup_lat: float, pickup_lng: float, service_type: str = "economy"):
+    """Find best matched driver based on location and preferences"""
+    # Get rider preferences
+    rider_prefs = await db.rider_preferences.find_one({"user_id": rider_id})
+    rider = await db.users.find_one({"id": rider_id})
+    
+    # Get available drivers
+    available_drivers = await db.driver_profiles.find({
+        "is_online": True,
+        "current_location": {"$ne": None}
+    }).to_list(50)
+    
+    if not available_drivers:
+        return {"matched_driver": None, "message": "No drivers available"}
+    
+    scored_drivers = []
+    
+    for driver in available_drivers:
+        driver_location = driver.get("current_location", {})
+        if not driver_location:
+            continue
+        
+        # Calculate distance
+        distance = calculate_distance_haversine(
+            pickup_lat, pickup_lng,
+            driver_location.get("latitude", 0),
+            driver_location.get("longitude", 0)
+        )
+        
+        # Get driver user info
+        driver_user = await db.users.find_one({"id": driver.get("user_id")})
+        if not driver_user:
+            continue
+        
+        # Get tier info
+        tier_data = await db.driver_tiers.find_one({"driver_id": driver.get("user_id")})
+        tier = tier_data.get("tier", "basic") if tier_data else "basic"
+        
+        # Calculate score (lower is better)
+        score = distance * 10  # Base score from distance
+        
+        # Bonus for higher rating
+        rating = driver_user.get("rating", 4.0)
+        score -= (rating - 4.0) * 5  # Bonus for ratings above 4
+        
+        # Premium driver preference for premium rides
+        if service_type == "premium" and tier == "premium":
+            score -= 10  # Prefer premium drivers for premium rides
+        
+        # Match preferences if available
+        if rider_prefs:
+            # Could add more preference matching here
+            pass
+        
+        # Women-only mode
+        if rider and rider.get("women_only_mode") and rider.get("gender") == "female":
+            if driver_user.get("gender") != "female":
+                continue  # Skip non-female drivers
+        
+        scored_drivers.append({
+            "driver_id": driver.get("user_id"),
+            "name": driver_user.get("name"),
+            "rating": rating,
+            "tier": tier,
+            "distance_km": round(distance, 2),
+            "eta_mins": int(distance * 3),  # Rough ETA
+            "vehicle": {
+                "model": driver.get("vehicle_model"),
+                "color": driver.get("vehicle_color"),
+                "plate": driver.get("vehicle_plate")
+            },
+            "score": score
+        })
+    
+    # Sort by score
+    scored_drivers.sort(key=lambda x: x["score"])
+    
+    if scored_drivers:
+        best_match = scored_drivers[0]
+        return {
+            "matched_driver": best_match,
+            "alternatives": scored_drivers[1:4],  # Top 3 alternatives
+            "matching_criteria": ["distance", "rating", "tier", "preferences"]
+        }
+    
+    return {"matched_driver": None, "message": "No suitable drivers found"}
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/")
