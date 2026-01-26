@@ -53,23 +53,23 @@ export default function SplashScreen() {
           <View style={styles.logoGlow}>
             <View style={styles.logoOuter}>
               <View style={styles.logoInner}>
-                <Text style={styles.logoLetter}>K</Text>
+                <Text style={styles.logoLetter}>N</Text>
               </View>
             </View>
           </View>
           
           {/* Brand Name */}
-          <Text style={styles.brandName}>KODA</Text>
+          <Text style={styles.brandName}>NEXRYDE</Text>
           
           {/* Elegant Tagline */}
           <View style={styles.taglineContainer}>
             <View style={styles.taglineRose} />
-            <Text style={styles.tagline}>ELEGANCE IN MOTION</Text>
+            <Text style={styles.tagline}>RIDE SMART. RIDE SAFE.</Text>
             <View style={styles.taglineRose} />
           </View>
           
           {/* Subtitle */}
-          <Text style={styles.subtitle}>Nigeria's Premium Ride Experience</Text>
+          <Text style={styles.subtitle}>Nigeria's Smartest Ride Platform</Text>
         </View>
 
         {/* Features with Rose Accents */}
