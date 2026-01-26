@@ -6,21 +6,29 @@ import {
   TouchableOpacity,
   Dimensions,
   Alert,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import notificationService from '@/src/services/notifications';
 
 const { width, height } = Dimensions.get('window');
 
 export default function TrackingScreen() {
   const router = useRouter();
   const { pickupLocation, dropoffLocation } = useAppStore();
+  const mapRef = React.useRef<MapView>(null);
   
   const [status, setStatus] = useState<'searching' | 'found' | 'arriving' | 'arrived' | 'trip'>('searching');
   const [eta, setEta] = useState(5);
+  const [driverLocation, setDriverLocation] = useState({
+    latitude: (pickupLocation?.latitude || 6.5244) + 0.008,
+    longitude: (pickupLocation?.longitude || 3.3792) + 0.005,
+  });
   
   const driver = {
     name: 'Chukwuemeka Okafor',
@@ -31,10 +39,32 @@ export default function TrackingScreen() {
     color: 'Silver',
   };
 
+  const pickup = pickupLocation || { latitude: 6.5244, longitude: 3.3792, address: 'Current Location' };
+  const dropoff = dropoffLocation || { latitude: 6.4541, longitude: 3.3947, address: 'Destination' };
+
+  // Simulate driver movement
   useEffect(() => {
-    // Simulate finding a driver
-    const timer1 = setTimeout(() => setStatus('found'), 2000);
-    const timer2 = setTimeout(() => setStatus('arriving'), 4000);
+    if (status === 'arriving') {
+      const interval = setInterval(() => {
+        setDriverLocation(prev => ({
+          latitude: prev.latitude - 0.0008,
+          longitude: prev.longitude - 0.0005,
+        }));
+      }, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [status]);
+
+  // Status progression simulation
+  useEffect(() => {
+    const timer1 = setTimeout(() => {
+      setStatus('found');
+      notificationService.notifyDriverAssigned(driver.name, driver.car, 5);
+    }, 2000);
+    const timer2 = setTimeout(() => {
+      setStatus('arriving');
+      notificationService.notifyDriverArriving(driver.name, 5);
+    }, 4000);
     
     return () => {
       clearTimeout(timer1);
@@ -48,6 +78,7 @@ export default function TrackingScreen() {
         setEta(prev => {
           if (prev <= 1) {
             setStatus('arrived');
+            notificationService.notifyDriverArrived(driver.name, driver.plate);
             return 0;
           }
           return prev - 1;
@@ -57,17 +88,24 @@ export default function TrackingScreen() {
     }
   }, [status]);
 
+  // Fit map to show all markers
+  useEffect(() => {
+    if (mapRef.current && status !== 'searching') {
+      const coordinates = [pickup, dropoff, driverLocation];
+      mapRef.current.fitToCoordinates(coordinates, {
+        edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
+        animated: true,
+      });
+    }
+  }, [status, driverLocation]);
+
   const handleCancel = () => {
     Alert.alert(
       'Cancel Ride',
       'Are you sure you want to cancel this ride?',
       [
         { text: 'No', style: 'cancel' },
-        { 
-          text: 'Yes, Cancel',
-          style: 'destructive',
-          onPress: () => router.back()
-        }
+        { text: 'Yes, Cancel', style: 'destructive', onPress: () => router.back() }
       ]
     );
   };
@@ -88,6 +126,18 @@ export default function TrackingScreen() {
     Alert.alert('Share Trip', 'Trip details shared with emergency contacts');
   };
 
+  // Dark map style
+  const mapStyle = [
+    { "featureType": "all", "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
+    { "featureType": "all", "elementType": "labels.text.stroke", "stylers": [{ "lightness": -80 }] },
+    { "featureType": "administrative", "elementType": "labels.text.fill", "stylers": [{ "color": "#746855" }] },
+    { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#38414e" }] },
+    { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#212a37" }] },
+    { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#9ca5b3" }] },
+    { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#746855" }] },
+    { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#17263c" }] },
+  ];
+
   const renderSearching = () => (
     <View style={styles.searchingContainer}>
       <View style={styles.searchingPulse}>
@@ -97,27 +147,13 @@ export default function TrackingScreen() {
       </View>
       <Text style={styles.searchingTitle}>Finding Your Driver</Text>
       <Text style={styles.searchingText}>Looking for nearby drivers...</Text>
-      
-      <View style={styles.searchingDots}>
-        <View style={[styles.searchingDot, styles.searchingDotActive]} />
-        <View style={styles.searchingDot} />
-        <View style={styles.searchingDot} />
-      </View>
     </View>
   );
 
   const renderDriverCard = () => (
     <View style={styles.driverCard}>
-      {/* Status Banner */}
-      <View style={[
-        styles.statusBanner,
-        status === 'arrived' && { backgroundColor: COLORS.success }
-      ]}>
-        <Ionicons 
-          name={status === 'arrived' ? 'checkmark-circle' : 'car'} 
-          size={18} 
-          color={COLORS.white} 
-        />
+      <View style={[styles.statusBanner, status === 'arrived' && { backgroundColor: COLORS.success }]}>
+        <Ionicons name={status === 'arrived' ? 'checkmark-circle' : 'car'} size={18} color={COLORS.white} />
         <Text style={styles.statusBannerText}>
           {status === 'found' && 'Driver Found!'}
           {status === 'arriving' && `Arriving in ${eta} min`}
@@ -126,7 +162,6 @@ export default function TrackingScreen() {
         </Text>
       </View>
 
-      {/* Driver Info */}
       <View style={styles.driverInfo}>
         <View style={styles.driverAvatar}>
           <Text style={styles.driverAvatarText}>{driver.name.charAt(0)}</Text>
@@ -149,7 +184,6 @@ export default function TrackingScreen() {
         </View>
       </View>
 
-      {/* Car Info */}
       <View style={styles.carInfo}>
         <View style={styles.carDetail}>
           <Text style={styles.carLabel}>Vehicle</Text>
@@ -183,46 +217,81 @@ export default function TrackingScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Map Placeholder */}
+      {/* Map */}
       <View style={styles.mapContainer}>
-        <View style={styles.mapPlaceholder}>
-          <Ionicons name="map" size={60} color={COLORS.gray300} />
-          <Text style={styles.mapPlaceholderText}>Live Map</Text>
-        </View>
-        
+        <MapView
+          ref={mapRef}
+          style={styles.map}
+          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
+          initialRegion={{
+            latitude: pickup.latitude,
+            longitude: pickup.longitude,
+            latitudeDelta: 0.02,
+            longitudeDelta: 0.02,
+          }}
+          showsUserLocation={false}
+          showsTraffic={true}
+          customMapStyle={mapStyle}
+        >
+          {/* Pickup Marker */}
+          <Marker coordinate={pickup} anchor={{ x: 0.5, y: 0.5 }}>
+            <View style={styles.pickupMarker}>
+              <View style={styles.pickupMarkerInner}>
+                <View style={styles.pickupDot} />
+              </View>
+            </View>
+          </Marker>
+
+          {/* Dropoff Marker */}
+          <Marker coordinate={dropoff} anchor={{ x: 0.5, y: 1 }}>
+            <View style={styles.dropoffMarker}>
+              <View style={styles.dropoffPin}>
+                <Ionicons name="location" size={20} color={COLORS.white} />
+              </View>
+            </View>
+          </Marker>
+
+          {/* Driver Marker */}
+          {status !== 'searching' && (
+            <Marker coordinate={driverLocation} anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={styles.driverMarker}>
+                <Ionicons name="car" size={18} color={COLORS.primary} />
+              </View>
+            </Marker>
+          )}
+
+          {/* Route Line */}
+          <Polyline
+            coordinates={[pickup, dropoff]}
+            strokeWidth={4}
+            strokeColor={COLORS.accent}
+            lineDashPattern={[1]}
+          />
+        </MapView>
+
         {/* Route Info Overlay */}
         <View style={styles.routeOverlay}>
           <View style={styles.routePoint}>
             <View style={styles.routePickupDot} />
-            <Text style={styles.routeText} numberOfLines={1}>
-              {pickupLocation?.address || 'Current Location'}
-            </Text>
+            <Text style={styles.routeText} numberOfLines={1}>{pickup.address}</Text>
           </View>
           <View style={styles.routeLineH} />
           <View style={styles.routePoint}>
             <View style={styles.routeDestDot} />
-            <Text style={styles.routeText} numberOfLines={1}>
-              {dropoffLocation?.address || 'Destination'}
-            </Text>
+            <Text style={styles.routeText} numberOfLines={1}>{dropoff.address}</Text>
           </View>
         </View>
       </View>
 
       {/* Bottom Sheet */}
       <View style={styles.bottomSheet}>
-        {status === 'searching' ? (
-          renderSearching()
-        ) : (
+        {status === 'searching' ? renderSearching() : (
           <>
             {renderDriverCard()}
             
-            {/* Trip Actions */}
             <View style={styles.tripActions}>
               {status === 'arrived' ? (
-                <TouchableOpacity 
-                  style={styles.startTripButton}
-                  onPress={handleStartTrip}
-                >
+                <TouchableOpacity style={styles.startTripButton} onPress={handleStartTrip}>
                   <Text style={styles.startTripText}>I'm in the car</Text>
                   <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
                 </TouchableOpacity>
@@ -230,7 +299,7 @@ export default function TrackingScreen() {
                 <View style={styles.tripInProgress}>
                   <View style={styles.tripProgressInfo}>
                     <Ionicons name="navigate" size={24} color={COLORS.success} />
-                    <View style={styles.tripProgressText}>
+                    <View>
                       <Text style={styles.tripProgressTitle}>Trip in progress</Text>
                       <Text style={styles.tripProgressSubtext}>Enjoy your ride!</Text>
                     </View>
@@ -247,7 +316,6 @@ export default function TrackingScreen() {
               )}
             </View>
 
-            {/* Safety Strip */}
             <TouchableOpacity style={styles.safetyStrip} onPress={handleShareTrip}>
               <Ionicons name="shield-checkmark" size={18} color={COLORS.success} />
               <Text style={styles.safetyStripText}>Share trip with emergency contacts</Text>
@@ -295,21 +363,54 @@ const styles = StyleSheet.create({
   },
   mapContainer: {
     flex: 1,
-    margin: SPACING.md,
+    margin: SPACING.sm,
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
-    position: 'relative',
   },
-  mapPlaceholder: {
+  map: {
     flex: 1,
-    backgroundColor: COLORS.gray100,
+  },
+  pickupMarker: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  mapPlaceholderText: {
-    fontSize: FONT_SIZE.lg,
-    color: COLORS.gray400,
-    marginTop: SPACING.sm,
+  pickupMarkerInner: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.md,
+  },
+  pickupDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.success,
+  },
+  dropoffMarker: {
+    alignItems: 'center',
+  },
+  dropoffPin: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.lg,
+  },
+  driverMarker: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: COLORS.white,
+    ...SHADOWS.lg,
   },
   routeOverlay: {
     position: 'absolute',
@@ -345,7 +446,7 @@ const styles = StyleSheet.create({
   },
   routeLineH: {
     width: 2,
-    height: 20,
+    height: 16,
     backgroundColor: COLORS.gray200,
     marginLeft: 4,
     marginVertical: SPACING.xs,
@@ -359,7 +460,6 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.lg,
     ...SHADOWS.lg,
   },
-  // Searching State
   searchingContainer: {
     alignItems: 'center',
     paddingVertical: SPACING.xl,
@@ -390,22 +490,7 @@ const styles = StyleSheet.create({
   searchingText: {
     fontSize: FONT_SIZE.md,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.lg,
   },
-  searchingDots: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  searchingDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.gray200,
-  },
-  searchingDotActive: {
-    backgroundColor: COLORS.accent,
-  },
-  // Driver Card
   driverCard: {
     backgroundColor: COLORS.gray50,
     borderRadius: BORDER_RADIUS.xl,
@@ -431,15 +516,15 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
   },
   driverAvatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   driverAvatarText: {
-    fontSize: FONT_SIZE.xxl,
+    fontSize: FONT_SIZE.xl,
     fontWeight: '700',
     color: COLORS.accent,
   },
@@ -455,13 +540,13 @@ const styles = StyleSheet.create({
   driverRating: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.xs,
+    marginTop: 2,
   },
   driverRatingText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
     color: COLORS.textPrimary,
-    marginLeft: SPACING.xs,
+    marginLeft: 4,
   },
   driverTrips: {
     fontSize: FONT_SIZE.sm,
@@ -473,9 +558,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   driverActionBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
@@ -495,7 +580,7 @@ const styles = StyleSheet.create({
   carLabel: {
     fontSize: FONT_SIZE.xs,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xs,
+    marginBottom: 2,
   },
   carValue: {
     fontSize: FONT_SIZE.sm,
@@ -508,13 +593,13 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
     backgroundColor: COLORS.accentSoft,
     paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
+    paddingVertical: 2,
     borderRadius: BORDER_RADIUS.sm,
   },
   carColorWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs,
+    gap: 4,
   },
   carColorDot: {
     width: 14,
@@ -523,7 +608,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.gray300,
   },
-  // Trip Actions
   tripActions: {
     marginBottom: SPACING.md,
   },
@@ -566,7 +650,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.md,
   },
-  tripProgressText: {},
   tripProgressTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
