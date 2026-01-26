@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
   Platform,
+  TouchableOpacity,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
@@ -14,29 +16,31 @@ export default function SplashScreen() {
   const router = useRouter();
   const { isAuthenticated, user } = useAppStore();
 
-  useEffect(() => {
-    // Small delay to ensure component is mounted
-    const timer = setTimeout(() => {
-      try {
-        if (isAuthenticated && user) {
-          router.replace('/(tabs)/home');
-        } else {
-          router.replace('/(auth)/login');
-        }
-      } catch (error) {
-        console.log('Router error, using fallback:', error);
-        // Fallback for web
-        if (Platform.OS === 'web' && typeof window !== 'undefined') {
-          window.location.href = isAuthenticated ? '/(tabs)/home' : '/(auth)/login';
-        }
+  const navigateNext = useCallback(() => {
+    const destination = isAuthenticated && user ? '/(tabs)/home' : '/(auth)/login';
+    
+    try {
+      router.replace(destination);
+    } catch (error) {
+      console.log('Router error:', error);
+      // Fallback for web
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = destination;
       }
-    }, 500);
+    }
+  }, [isAuthenticated, user, router]);
+
+  useEffect(() => {
+    // Auto-navigate after 2 seconds
+    const timer = setTimeout(() => {
+      navigateNext();
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, []);
+  }, [navigateNext]);
 
   return (
-    <View style={styles.container}>
+    <Pressable style={styles.container} onPress={navigateNext}>
       <View style={styles.logoContainer}>
         <View style={styles.logoCircle}>
           <Text style={styles.logoText}>K</Text>
@@ -48,8 +52,9 @@ export default function SplashScreen() {
       <View style={styles.footer}>
         <ActivityIndicator size="large" color={COLORS.primary} />
         <Text style={styles.loadingText}>Loading...</Text>
+        <Text style={styles.tapHint}>Tap anywhere to continue</Text>
       </View>
-    </View>
+    </Pressable>
   );
 }
 
@@ -98,5 +103,10 @@ const styles = StyleSheet.create({
     color: COLORS.gray400,
     marginTop: SPACING.md,
     fontSize: FONT_SIZE.md,
+  },
+  tapHint: {
+    color: COLORS.primary,
+    marginTop: SPACING.lg,
+    fontSize: FONT_SIZE.sm,
   },
 });
