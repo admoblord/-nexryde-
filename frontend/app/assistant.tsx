@@ -347,6 +347,17 @@ const styles = StyleSheet.create({
     color: COLORS.success,
     fontWeight: '500',
   },
+  languageToggle: {
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  languageToggleText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.primary,
+    fontWeight: '600',
+  },
   messagesList: {
     padding: SPACING.md,
     paddingBottom: SPACING.lg,
