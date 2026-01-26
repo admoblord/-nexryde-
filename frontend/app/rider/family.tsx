@@ -198,6 +198,17 @@ export default function FamilyModeScreen() {
     );
   };
 
+  if (initialLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={styles.loadingText}>Loading family...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -211,33 +222,153 @@ export default function FamilyModeScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Family & Friends</Text>
+          <Text style={styles.title}>KODA Family</Text>
         </View>
 
-        {/* Info Card */}
-        <Card style={styles.infoCard}>
-          <View style={styles.infoHeader}>
-            <Ionicons name="people" size={32} color={COLORS.primary} />
-            <View style={styles.infoContent}>
-              <Text style={styles.infoTitle}>Book rides for your loved ones</Text>
-              <Text style={styles.infoText}>
-                Add family members and friends to book and track rides for them
-              </Text>
+        {!family ? (
+          // No family - show create option
+          <>
+            <Card style={styles.infoCard}>
+              <View style={styles.infoHeader}>
+                <Ionicons name="people" size={48} color={COLORS.primary} />
+                <View style={styles.infoContent}>
+                  <Text style={styles.infoTitle}>Create Your KODA Family</Text>
+                  <Text style={styles.infoText}>
+                    Add up to 10 family members to book rides for them, track their trips, and keep everyone safe.
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.features}>
+                <View style={styles.featureItem}>
+                  <Ionicons name="car" size={20} color={COLORS.success} />
+                  <Text style={styles.featureText}>Book rides on their behalf</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Ionicons name="location" size={20} color={COLORS.info} />
+                  <Text style={styles.featureText}>Track their trips in real-time</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Ionicons name="shield" size={20} color={COLORS.error} />
+                  <Text style={styles.featureText}>Safety Circle - instant alerts</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Ionicons name="card" size={20} color={COLORS.accent} />
+                  <Text style={styles.featureText}>Shared payment methods</Text>
+                </View>
+              </View>
+            </Card>
+            
+            <Button
+              title="Create Family"
+              onPress={() => setShowCreateModal(true)}
+              icon="people"
+              style={styles.createButton}
+            />
+          </>
+        ) : (
+          // Has family - show members
+          <>
+            {/* Family Header */}
+            <Card style={styles.familyHeaderCard}>
+              <View style={styles.familyHeaderContent}>
+                <View style={styles.familyIcon}>
+                  <Ionicons name="home" size={32} color={COLORS.white} />
+                </View>
+                <View style={styles.familyHeaderInfo}>
+                  <Text style={styles.familyName}>{family.name}</Text>
+                  <Text style={styles.familyMemberCount}>
+                    {family.members.length} of 10 members
+                  </Text>
+                </View>
+                <View style={styles.trustScoreBadge}>
+                  <Text style={styles.trustScoreText}>{family.trust_score?.toFixed(0)}%</Text>
+                  <Text style={styles.trustScoreLabel}>Trust</Text>
+                </View>
+              </View>
+              
+              {/* Safety Circle Button */}
+              <TouchableOpacity 
+                style={styles.safetyCircleButton}
+                onPress={handleSafetyAlert}
+              >
+                <Ionicons name="alert-circle" size={20} color={COLORS.error} />
+                <Text style={styles.safetyCircleText}>Send Safety Alert to All</Text>
+              </TouchableOpacity>
+            </Card>
+
+            {/* Add Member Button */}
+            {family.members.length < 10 && (
+              <Button
+                title="Add Family Member"
+                onPress={() => setShowAddModal(true)}
+                icon="person-add"
+                variant="outline"
+                style={styles.addButton}
+              />
+            )}
+
+            {/* Members List */}
+            <View style={styles.membersSection}>
+              <Text style={styles.sectionTitle}>Family Members</Text>
+              
+              {family.members.map((member, idx) => (
+                <Card key={idx} style={styles.memberCard}>
+                  <View style={styles.memberInfo}>
+                    <View style={[
+                      styles.memberAvatar,
+                      member.role === 'owner' && styles.ownerAvatar
+                    ]}>
+                      <Text style={styles.memberInitial}>
+                        {member.name?.charAt(0).toUpperCase() || '?'}
+                      </Text>
+                      {member.role === 'owner' && (
+                        <View style={styles.ownerBadge}>
+                          <Ionicons name="star" size={10} color={COLORS.white} />
+                        </View>
+                      )}
+                    </View>
+                    <View style={styles.memberDetails}>
+                      <View style={styles.memberNameRow}>
+                        <Text style={styles.memberName}>{member.name}</Text>
+                        {member.role === 'owner' && (
+                          <Badge text="Owner" variant="success" />
+                        )}
+                        {member.is_pending && (
+                          <Badge text="Pending" variant="warning" />
+                        )}
+                      </View>
+                      <Text style={styles.memberPhone}>{member.phone}</Text>
+                      <Badge text={member.relationship} variant="info" />
+                    </View>
+                  </View>
+                  
+                  <View style={styles.memberActions}>
+                    <TouchableOpacity
+                      style={styles.bookButton}
+                      onPress={() => handleBookForMember(member)}
+                    >
+                      <Ionicons name="car" size={18} color={COLORS.primary} />
+                      <Text style={styles.bookButtonText}>Book</Text>
+                    </TouchableOpacity>
+                    
+                    {member.role !== 'owner' && (
+                      <TouchableOpacity
+                        style={styles.removeButton}
+                        onPress={() => handleRemoveMember(member)}
+                      >
+                        <Ionicons name="trash-outline" size={18} color={COLORS.error} />
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                </Card>
+              ))}
             </View>
-          </View>
-          <View style={styles.features}>
-            <View style={styles.featureItem}>
-              <Ionicons name="car" size={20} color={COLORS.success} />
-              <Text style={styles.featureText}>Book rides on their behalf</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="location" size={20} color={COLORS.info} />
-              <Text style={styles.featureText}>Track their trips in real-time</Text>
-            </View>
-            <View style={styles.featureItem}>
-              <Ionicons name="card" size={20} color={COLORS.accent} />
-              <Text style={styles.featureText}>Pay for their rides</Text>
-            </View>
+          </>
+        )}
+
+        {/* How It Works */}
+        <Card style={styles.howItWorksCard}>
+          <Text style={styles.howItWorksTitle}>How Safety Circle Works</Text>
           </View>
         </Card>
 
