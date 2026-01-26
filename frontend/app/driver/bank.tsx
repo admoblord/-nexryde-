@@ -11,9 +11,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '../../src/constants/theme';
-import { Card, Button } from '../../src/components/UI';
-import { useAppStore } from '../../src/store/appStore';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { Card, Button } from '@/src/components/UI';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function BankScreen() {
   const router = useRouter();

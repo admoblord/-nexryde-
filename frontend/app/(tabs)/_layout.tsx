@@ -1,8 +1,8 @@
 import React from 'react';
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, FONT_SIZE } from '../../src/constants/theme';
-import { useAppStore } from '../../src/store/appStore';
+import { COLORS, FONT_SIZE } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function TabLayout() {
   const { user } = useAppStore();

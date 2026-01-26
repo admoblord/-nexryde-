@@ -13,10 +13,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '../../src/constants/theme';
-import { Card, Badge, Button } from '../../src/components/UI';
-import { useAppStore } from '../../src/store/appStore';
-import { getDriverStats, toggleDriverOnline, switchRole, getSubscription } from '../../src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { Card, Badge, Button } from '@/src/components/UI';
+import { useAppStore } from '@/src/store/appStore';
+import { getDriverStats, toggleDriverOnline, switchRole, getSubscription } from '@/src/services/api';
 
 export default function HomeScreen() {
   const router = useRouter();

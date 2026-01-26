@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { View, StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { COLORS } from '../src/constants/theme';
+import { COLORS } from '@/src/constants/theme';
 
 export default function RootLayout() {
   return (

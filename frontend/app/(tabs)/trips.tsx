@@ -11,10 +11,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '../../src/constants/theme';
-import { Card, Badge } from '../../src/components/UI';
-import { useAppStore, Trip } from '../../src/store/appStore';
-import { getUserTrips } from '../../src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { Card, Badge } from '@/src/components/UI';
+import { useAppStore, Trip } from '@/src/store/appStore';
+import { getUserTrips } from '@/src/services/api';
 
 export default function TripsScreen() {
   const { user } = useAppStore();

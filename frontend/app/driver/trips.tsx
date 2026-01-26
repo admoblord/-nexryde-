@@ -12,10 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '../../src/constants/theme';
-import { Card, Badge, Button } from '../../src/components/UI';
-import { useAppStore, Trip } from '../../src/store/appStore';
-import { getPendingTrips, acceptTrip, startTrip, completeTrip, cancelTrip } from '../../src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { Card, Badge, Button } from '@/src/components/UI';
+import { useAppStore, Trip } from '@/src/store/appStore';
+import { getPendingTrips, acceptTrip, startTrip, completeTrip, cancelTrip } from '@/src/services/api';
 
 export default function DriverTripsScreen() {
   const router = useRouter();
