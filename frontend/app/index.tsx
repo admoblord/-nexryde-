@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,22 +6,35 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { Redirect } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function SplashScreen() {
+  const router = useRouter();
   const { isAuthenticated, user } = useAppStore();
 
-  // On web, redirect immediately
-  if (Platform.OS === 'web') {
-    if (isAuthenticated && user) {
-      return <Redirect href="/(tabs)/home" />;
-    }
-    return <Redirect href="/(auth)/login" />;
-  }
+  useEffect(() => {
+    // Small delay to ensure component is mounted
+    const timer = setTimeout(() => {
+      try {
+        if (isAuthenticated && user) {
+          router.replace('/(tabs)/home');
+        } else {
+          router.replace('/(auth)/login');
+        }
+      } catch (error) {
+        console.log('Router error, using fallback:', error);
+        // Fallback for web
+        if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.location.href = isAuthenticated ? '/(tabs)/home' : '/(auth)/login';
+        }
+      }
+    }, 500);
 
-  // On native, show splash screen (native handles splash screen differently)
+    return () => clearTimeout(timer);
+  }, []);
+
   return (
     <View style={styles.container}>
       <View style={styles.logoContainer}>
