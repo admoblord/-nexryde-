@@ -204,10 +204,10 @@ const styles = StyleSheet.create({
     letterSpacing: -3,
   },
   brandName: {
-    fontSize: FONT_SIZE.display,
+    fontSize: FONT_SIZE.hero,
     fontWeight: '900',
     color: COLORS.white,
-    letterSpacing: 20,
+    letterSpacing: 8,
     marginTop: SPACING.xl,
     textShadowColor: 'rgba(201, 169, 166, 0.3)',
     textShadowOffset: { width: 0, height: 4 },
