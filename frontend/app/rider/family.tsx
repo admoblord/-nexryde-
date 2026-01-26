@@ -9,44 +9,76 @@ import {
   Alert,
   Modal,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Card, Button, Badge } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
+import { 
+  createFamily, 
+  getFamily, 
+  addFamilyMember, 
+  removeFamilyMember,
+  triggerFamilySafetyAlert
+} from '@/src/services/api';
 
 interface FamilyMember {
-  id: string;
+  user_id: string;
   name: string;
   phone: string;
   relationship: string;
+  role: string;
+  is_pending?: boolean;
+  rating?: number;
+  total_trips?: number;
+}
+
+interface Family {
+  id: string;
+  name: string;
+  owner_id: string;
+  members: FamilyMember[];
+  trust_score: number;
 }
 
 export default function FamilyModeScreen() {
   const router = useRouter();
   const { user } = useAppStore();
   
-  const [familyMembers, setFamilyMembers] = useState<FamilyMember[]>([]);
+  const [family, setFamily] = useState<Family | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [newMember, setNewMember] = useState({ name: '', phone: '', relationship: '' });
+  const [newFamilyName, setNewFamilyName] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
 
-  // Mock data - in real app, fetch from API
   useEffect(() => {
-    loadFamilyMembers();
-  }, []);
+    loadFamily();
+  }, [user?.id]);
 
-  const loadFamilyMembers = async () => {
-    // Mock data
-    setFamilyMembers([]);
+  const loadFamily = async () => {
+    if (!user?.id) return;
+    try {
+      // Check if user has a family
+      if (user.family_id) {
+        const res = await getFamily(user.family_id);
+        setFamily(res.data);
+      }
+    } catch (error) {
+      console.log('No family found or error loading:', error);
+    } finally {
+      setInitialLoading(false);
+    }
   };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await loadFamilyMembers();
+    await loadFamily();
     setRefreshing(false);
   };
 
