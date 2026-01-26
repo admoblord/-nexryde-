@@ -388,6 +388,234 @@ class GracePeriodRequest(BaseModel):
     reason: str
     days_requested: int = 3
 
+# ==================== TIER SYSTEM MODELS ====================
+
+class DriverTier(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    driver_id: str
+    tier: str = "basic"  # basic or premium
+    earning_potential: dict = Field(default_factory=lambda: {"min": 200, "max": 300})
+    requirements_met: dict = Field(default_factory=dict)
+    upgraded_at: Optional[datetime] = None
+    downgraded_at: Optional[datetime] = None
+    warnings: int = 0
+    probation_until: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class VehicleInspection(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    driver_id: str
+    inspection_type: str  # initial, quarterly, random
+    status: str = "pending"  # pending, passed, failed
+    interior_photo: Optional[str] = None
+    exterior_photo: Optional[str] = None
+    ac_working: bool = False
+    leather_seats: bool = False
+    vehicle_year: Optional[int] = None
+    notes: Optional[str] = None
+    inspected_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class FareAdjustment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    trip_id: str
+    base_fare: float
+    estimated_time_mins: int
+    actual_time_mins: int
+    extra_time_mins: int = 0
+    time_rate: float = 20.0  # NGN per minute
+    traffic_charge: float = 0.0
+    weather_surcharge: float = 0.0
+    time_of_day_premium: float = 0.0
+    total_adjustment: float = 0.0
+    final_fare: float = 0.0
+    cap_applied: bool = False
+    max_cap_percentage: float = 50.0
+    calculated_at: datetime = Field(default_factory=datetime.utcnow)
+
+class TripTracking(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    trip_id: str
+    speed_logs: List[dict] = []  # [{timestamp, speed_kmh, location}]
+    traffic_delays: List[dict] = []  # [{start, end, duration_mins, location}]
+    weather_conditions: List[dict] = []  # [{timestamp, condition, surcharge_applied}]
+    route_deviations: List[dict] = []
+    stationary_periods: List[dict] = []  # [{start, end, duration_mins, at_destination}]
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class RiderPreferences(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    preferred_ride_type: str = "quiet"  # quiet, chatty, any
+    preferred_ac_level: str = "medium"  # low, medium, high
+    preferred_music: str = "none"  # none, soft, any
+    saved_routes: List[dict] = []  # [{name, pickup, dropoff}]
+    default_payment: str = "cash"
+    auto_tip_percentage: float = 0.0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class LoyaltyProgram(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    tier: str = "bronze"  # bronze, silver, gold, platinum
+    points: int = 0
+    total_trips: int = 0
+    total_spent: float = 0.0
+    perks_earned: List[str] = []
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class InAppMessage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    trip_id: str
+    sender_id: str
+    sender_role: str  # rider or driver
+    message_type: str = "text"  # text or preset
+    content: str
+    read: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class LostItem(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    trip_id: str
+    reporter_id: str
+    reporter_role: str  # rider or driver
+    item_description: str
+    status: str = "reported"  # reported, found, returned, not_found
+    driver_response: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    resolved_at: Optional[datetime] = None
+
+# Tier System Configuration
+TIER_CONFIG = {
+    "basic": {
+        "name": "KODA Basic",
+        "monthly_fee": 25000,
+        "earning_per_ride": {"min": 200, "max": 300},
+        "requirements": {
+            "vehicle_year_min": None,
+            "leather_seats": False,
+            "dual_ac": False,
+            "min_rating": 4.3
+        },
+        "color": "#C9A9A6"  # Rose gold
+    },
+    "premium": {
+        "name": "KODA Premium", 
+        "monthly_fee": 25000,  # Same fee!
+        "earning_per_ride": {"min": 300, "max": 450},
+        "requirements": {
+            "vehicle_year_min": 2018,
+            "leather_seats": True,
+            "dual_ac": True,
+            "min_rating": 4.7,
+            "premium_training": True
+        },
+        "color": "#D4AF37",  # Gold
+        "perks": [
+            "Priority support",
+            "Early access to new features", 
+            "Free vehicle inspection vouchers",
+            "Premium Driver badge"
+        ]
+    }
+}
+
+# Fare Adjustment Configuration
+FARE_ADJUSTMENT_CONFIG = {
+    "free_buffer_minutes": 5,
+    "max_increase_percentage": 50,
+    "time_rates": {
+        "normal": 20,  # NGN per minute
+        "peak": 25,    # 7-10am, 4-8pm
+        "night": 30,   # 10pm-5am
+        "weekend": 25
+    },
+    "weather_surcharges": {
+        "heavy_rain": 0.10,  # 10%
+        "flooding": 0.15,    # 15%
+        "extreme_heat": 0.05 # 5%
+    },
+    "peak_hours": {
+        "morning": {"start": 7, "end": 10},
+        "evening": {"start": 16, "end": 20}
+    },
+    "night_hours": {"start": 22, "end": 5}
+}
+
+# Loyalty Tiers Configuration  
+LOYALTY_TIERS = {
+    "bronze": {
+        "min_trips": 0,
+        "min_spent": 0,
+        "perks": ["Basic support"],
+        "points_multiplier": 1.0
+    },
+    "silver": {
+        "min_trips": 20,
+        "min_spent": 50000,
+        "perks": ["Priority support", "5% discount on 10th ride"],
+        "points_multiplier": 1.2
+    },
+    "gold": {
+        "min_trips": 50,
+        "min_spent": 150000,
+        "perks": ["Premium support", "10% discount every 5th ride", "Free cancellation"],
+        "points_multiplier": 1.5
+    },
+    "platinum": {
+        "min_trips": 100,
+        "min_spent": 500000,
+        "perks": ["Dedicated support", "15% off always", "Priority matching", "Free upgrades"],
+        "points_multiplier": 2.0
+    }
+}
+
+# Request Models for New Features
+class DriverTierUpgradeRequest(BaseModel):
+    vehicle_year: int
+    leather_seats: bool
+    dual_ac: bool
+    interior_photo: str
+    exterior_photo: str
+
+class TripTrackingUpdate(BaseModel):
+    trip_id: str
+    latitude: float
+    longitude: float
+    speed_kmh: float
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+class RiderPreferencesUpdate(BaseModel):
+    preferred_ride_type: Optional[str] = None
+    preferred_ac_level: Optional[str] = None
+    preferred_music: Optional[str] = None
+    default_payment: Optional[str] = None
+    auto_tip_percentage: Optional[float] = None
+
+class SavedRouteRequest(BaseModel):
+    name: str
+    pickup_lat: float
+    pickup_lng: float
+    pickup_address: str
+    dropoff_lat: float
+    dropoff_lng: float
+    dropoff_address: str
+
+class SendMessageRequest(BaseModel):
+    trip_id: str
+    message_type: str = "text"
+    content: str
+
+class ReportLostItemRequest(BaseModel):
+    trip_id: str
+    item_description: str
+
+class LostItemResponseRequest(BaseModel):
+    item_id: str
+    response: str  # found, not_found
+    notes: Optional[str] = None
+
 # ==================== HELPER FUNCTIONS ====================
 
 def get_cache_key(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> str:
