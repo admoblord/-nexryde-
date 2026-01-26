@@ -160,7 +160,7 @@ export const useAppStore = create<AppState>()(
       })
     }),
     {
-      name: 'koda-storage',
+      name: 'nexryde-storage',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         user: state.user,
