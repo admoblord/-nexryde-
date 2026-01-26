@@ -247,7 +247,7 @@ export const verifyFace = (userId: string, faceImage: string) =>
 export const verifyFaceAtRideStart = (userId: string, faceImage: string) =>
   api.post(`/drivers/${userId}/verify-face-at-start`, { face_image: faceImage });
 
-// KODA Family
+// NEXRYDE Family
 export const createFamily = (ownerId: string, familyName: string) =>
   api.post(`/family/create?owner_id=${ownerId}&family_name=${encodeURIComponent(familyName)}`);
 
