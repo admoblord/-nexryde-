@@ -490,19 +490,69 @@ frontend:
         - agent: "main"
         - comment: "Pickup/destination input, fare estimate, payment selection (cash/bank transfer)"
 
+  - task: "Safety Center Screen"
+    implemented: true
+    working: true
+    file: "app/(tabs)/safety.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "NEW: SOS button, emergency contacts management, trusted drivers, safety features list"
+
+  - task: "AI Assistant Screen"
+    implemented: true
+    working: true
+    file: "app/assistant.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "NEW: Chat-style AI assistant for both riders and drivers with quick suggestions"
+
+  - task: "Driver Leaderboard Screen"
+    implemented: true
+    working: true
+    file: "app/driver/leaderboard.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "NEW: Earnings leaderboard, rating leaderboard, challenges tab, streaks & badges"
+
+  - task: "Home Screen Quick Actions"
+    implemented: true
+    working: true
+    file: "app/(tabs)/home.tsx"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "NEW: Added AI Assistant and Leaderboard quick access buttons for drivers, AI card for riders"
+
 metadata:
   created_by: "main_agent"
-  version: "1.0"
-  test_sequence: 1
+  version: "2.0"
+  test_sequence: 2
   run_ui: false
 
 test_plan:
   current_focus:
-    - "End-to-end user flow testing"
+    - "Core Safety Features Testing"
+    - "AI Assistant Testing"
+    - "Leaderboard & Gamification Testing"
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
 agent_communication:
     - agent: "main"
-    - message: "MVP implementation complete. All backend APIs tested with curl. Frontend screens rendering correctly."
+    - message: "Major feature update complete. Added all Core Safety Features, AI Assistants, Gamification (Streaks, Badges, Challenges, Leaderboard), Driver Welfare (Fatigue Monitoring, Grace Period), Rider Welfare (Family Mode, Trip Sharing, Insurance). Frontend screens created for Safety Center, AI Assistant, and Leaderboard. Backend APIs tested with curl - all returning expected data."
