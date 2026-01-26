@@ -1,5 +1,4 @@
 import axios from 'axios';
-import Constants from 'expo-constants';
 
 const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8001';
 
@@ -60,14 +59,48 @@ export const getSubscriptionHistory = (driverId: string) =>
 export const createSubscription = (driverId: string, paymentMethod: string) => 
   api.post(`/subscriptions/${driverId}/subscribe`, { payment_method: paymentMethod });
 
-// Trip APIs
-export const estimateFare = (data: {
+// NEW: Fare Estimate API (uses Google Directions on backend)
+export interface FareEstimateRequest {
   pickup_lat: number;
   pickup_lng: number;
   dropoff_lat: number;
   dropoff_lng: number;
-}) => api.post('/trips/estimate', data);
+  service_type?: string;
+  city?: string;
+}
 
+export interface FareEstimateResponse {
+  estimate_id: string;
+  distance_km: number;
+  duration_min: number;
+  base_fare: number;
+  distance_fee: number;
+  time_fee: number;
+  traffic_fee: number;
+  total_fare: number;
+  multiplier: number;
+  is_peak: boolean;
+  currency: string;
+  min_fare: number;
+  service_type: string;
+  polyline: string | null;
+  pickup_address: string;
+  dropoff_address: string;
+  price_valid_until: string;
+  price_lock_minutes: number;
+}
+
+export const estimateFare = (data: FareEstimateRequest) => 
+  api.post<FareEstimateResponse>('/fare/estimate', {
+    pickup_lat: data.pickup_lat,
+    pickup_lng: data.pickup_lng,
+    dropoff_lat: data.dropoff_lat,
+    dropoff_lng: data.dropoff_lng,
+    service_type: data.service_type || 'economy',
+    city: data.city || 'lagos'
+  });
+
+// Trip APIs
 export const requestTrip = (riderId: string, data: {
   pickup_lat: number;
   pickup_lng: number;
@@ -75,7 +108,9 @@ export const requestTrip = (riderId: string, data: {
   dropoff_lat: number;
   dropoff_lng: number;
   dropoff_address: string;
+  service_type?: string;
   payment_method?: string;
+  fare_estimate_id?: string;
 }) => api.post(`/trips/request?rider_id=${riderId}`, data);
 
 export const getPendingTrips = (driverLat: number, driverLng: number) => 
