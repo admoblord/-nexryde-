@@ -82,34 +82,93 @@ export default function FamilyModeScreen() {
     setRefreshing(false);
   };
 
-  const handleAddMember = () => {
-    if (!newMember.name || !newMember.phone || !newMember.relationship) {
+  const handleCreateFamily = async () => {
+    if (!newFamilyName.trim()) {
+      Alert.alert('Error', 'Please enter a family name');
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const res = await createFamily(user!.id, newFamilyName.trim());
+      Alert.alert('Success', 'Family created! You can now add members.');
+      setShowCreateModal(false);
+      setNewFamilyName('');
+      // Update user's family_id in local state
+      await loadFamily();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to create family');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAddMember = async () => {
+    if (!family || !newMember.name || !newMember.phone || !newMember.relationship) {
       Alert.alert('Error', 'Please fill all fields');
       return;
     }
     
-    const member: FamilyMember = {
-      id: Date.now().toString(),
-      ...newMember
-    };
-    
-    setFamilyMembers([...familyMembers, member]);
-    setShowAddModal(false);
-    setNewMember({ name: '', phone: '', relationship: '' });
-    Alert.alert('Success', `${member.name} added to your family members`);
+    setLoading(true);
+    try {
+      await addFamilyMember(family.id, newMember.phone, newMember.name, newMember.relationship);
+      Alert.alert('Success', `${newMember.name} added to your family`);
+      setShowAddModal(false);
+      setNewMember({ name: '', phone: '', relationship: '' });
+      await loadFamily();
+    } catch (error: any) {
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to add member');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleRemoveMember = (id: string) => {
+  const handleRemoveMember = (member: FamilyMember) => {
+    if (member.role === 'owner') {
+      Alert.alert('Cannot Remove', 'The family owner cannot be removed');
+      return;
+    }
+    
     Alert.alert(
       'Remove Member',
-      'Are you sure you want to remove this family member?',
+      `Remove ${member.name} from your family?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
-            setFamilyMembers(familyMembers.filter(m => m.id !== id));
+          onPress: async () => {
+            try {
+              await removeFamilyMember(family!.id, member.phone);
+              await loadFamily();
+            } catch (error) {
+              Alert.alert('Error', 'Failed to remove member');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleSafetyAlert = async () => {
+    if (!family || !user?.id) return;
+    
+    Alert.alert(
+      'Safety Alert',
+      'This will send an emergency alert to all family members with your location. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Send Alert',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // In production, get real location
+              await triggerFamilySafetyAlert(family.id, user.id, 6.5244, 3.3792);
+              Alert.alert('Alert Sent', 'All family members have been notified');
+            } catch (error) {
+              Alert.alert('Error', 'Failed to send alert');
+            }
           }
         }
       ]
@@ -125,7 +184,6 @@ export default function FamilyModeScreen() {
         {
           text: 'Book',
           onPress: () => {
-            // Navigate to book screen with family member info
             router.push({
               pathname: '/rider/book',
               params: { 
