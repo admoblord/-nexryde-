@@ -249,7 +249,7 @@ async def get_directions_from_google(
     dropoff_lat: float, 
     dropoff_lng: float
 ) -> dict:
-    """Call Google Directions API to get route info"""
+    """Call Google Routes API (new) to get route info"""
     
     # Check cache first
     cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
@@ -261,13 +261,82 @@ async def get_directions_from_google(
         logger.warning("Google Maps API key not configured, using fallback calculation")
         return None
     
+    # Try Routes API (new) first
+    try:
+        url = "https://routes.googleapis.com/directions/v2:computeRoutes"
+        headers = {
+            "Content-Type": "application/json",
+            "X-Goog-Api-Key": GOOGLE_MAPS_API_KEY,
+            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline,routes.legs.startLocation,routes.legs.endLocation"
+        }
+        
+        body = {
+            "origin": {
+                "location": {
+                    "latLng": {
+                        "latitude": pickup_lat,
+                        "longitude": pickup_lng
+                    }
+                }
+            },
+            "destination": {
+                "location": {
+                    "latLng": {
+                        "latitude": dropoff_lat,
+                        "longitude": dropoff_lng
+                    }
+                }
+            },
+            "travelMode": "DRIVE",
+            "routingPreference": "TRAFFIC_AWARE",
+            "computeAlternativeRoutes": False
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=body, timeout=10.0)
+            data = response.json()
+        
+        if "routes" not in data or len(data["routes"]) == 0:
+            error_msg = data.get("error", {}).get("message", "No routes found")
+            logger.warning(f"Google Routes API: {error_msg}, trying fallback")
+            # Continue to fallback below
+            raise Exception(error_msg)
+        
+        route = data["routes"][0]
+        
+        # Parse duration (format: "1234s")
+        duration_str = route.get("duration", "0s")
+        duration_seconds = int(duration_str.replace("s", ""))
+        
+        result = {
+            "distance_meters": route.get("distanceMeters", 0),
+            "duration_seconds": duration_seconds,
+            "duration_in_traffic_seconds": duration_seconds,  # Routes API already includes traffic
+            "polyline": route.get("polyline", {}).get("encodedPolyline", ""),
+            "start_address": "",  # Routes API doesn't return addresses
+            "end_address": ""
+        }
+        
+        # Cache the result
+        route_cache[cache_key] = {
+            "data": result,
+            "cached_at": datetime.utcnow()
+        }
+        
+        logger.info(f"Fetched route from Google Routes API: {result['distance_meters']}m, {result['duration_seconds']}s")
+        return result
+        
+    except Exception as e:
+        logger.warning(f"Google Routes API failed: {e}, trying legacy Directions API")
+    
+    # Fallback to legacy Directions API
     try:
         url = "https://maps.googleapis.com/maps/api/directions/json"
         params = {
             "origin": f"{pickup_lat},{pickup_lng}",
             "destination": f"{dropoff_lat},{dropoff_lng}",
             "key": GOOGLE_MAPS_API_KEY,
-            "departure_time": "now",  # For traffic data
+            "departure_time": "now",
             "traffic_model": "best_guess"
         }
         
@@ -276,7 +345,7 @@ async def get_directions_from_google(
             data = response.json()
         
         if data.get("status") != "OK":
-            logger.error(f"Google Directions API error: {data.get('status')} - {data.get('error_message', '')}")
+            logger.warning(f"Google Directions API: {data.get('status')}, using fallback")
             return None
         
         route = data["routes"][0]
@@ -291,17 +360,16 @@ async def get_directions_from_google(
             "end_address": leg["end_address"]
         }
         
-        # Cache the result
         route_cache[cache_key] = {
             "data": result,
             "cached_at": datetime.utcnow()
         }
         
-        logger.info(f"Fetched route from Google: {result['distance_meters']}m, {result['duration_seconds']}s")
+        logger.info(f"Fetched route from Directions API: {result['distance_meters']}m, {result['duration_seconds']}s")
         return result
         
     except Exception as e:
-        logger.error(f"Error calling Google Directions API: {e}")
+        logger.error(f"All Google APIs failed: {e}")
         return None
 
 def calculate_distance_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
