@@ -38,7 +38,6 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
   
   const petalsRef = useRef<RosePetal[]>([]);
   
-  // Initialize petals
   if (petalsRef.current.length === 0) {
     for (let i = 0; i < count; i++) {
       petalsRef.current.push({
@@ -58,21 +57,17 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
   useEffect(() => {
     const animations = petalsRef.current.map((petal) => {
       const animatePetal = () => {
-        // Reset position
         petal.y.setValue(-50 - Math.random() * 100);
         petal.x.setValue(Math.random() * width);
         petal.rotation.setValue(0);
         
-        // Create falling animation
         Animated.parallel([
-          // Fall down
           Animated.timing(petal.y, {
             toValue: height + 100,
             duration: petal.duration,
             easing: Easing.linear,
             useNativeDriver: true,
           }),
-          // Sway left and right
           Animated.sequence([
             ...Array(6).fill(null).map((_, i) => 
               Animated.timing(petal.x, {
@@ -83,7 +78,6 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
               })
             ),
           ]),
-          // Rotate
           Animated.timing(petal.rotation, {
             toValue: 360 * (Math.random() > 0.5 ? 1 : -1),
             duration: petal.duration,
@@ -91,12 +85,10 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
             useNativeDriver: true,
           }),
         ]).start(() => {
-          // Loop the animation
           animatePetal();
         });
       };
       
-      // Start with delay
       const timeout = setTimeout(animatePetal, petal.delay);
       return () => clearTimeout(timeout);
     });
@@ -126,7 +118,6 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
             },
           ]}
         >
-          {/* Rose Petal Shape */}
           <View style={[styles.petalShape, { backgroundColor: petal.color }]}>
             <View style={[styles.petalInner, { backgroundColor: petal.color }]} />
           </View>
@@ -136,7 +127,178 @@ export const FallingRoses: React.FC<FallingRosesProps> = ({
   );
 };
 
-// Simple static rose petals for backgrounds
+// Floating rose bloom animation
+export const FloatingRoseBloom: React.FC<{ style?: any }> = ({ style }) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.6)).current;
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const animate = () => {
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.2,
+            duration: 3000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 3000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0.8,
+            duration: 3000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.6,
+            duration: 3000,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.timing(rotation, {
+          toValue: 360,
+          duration: 20000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        rotation.setValue(0);
+        animate();
+      });
+    };
+    animate();
+  }, []);
+
+  return (
+    <Animated.View 
+      style={[
+        styles.bloomContainer, 
+        style,
+        {
+          transform: [
+            { scale },
+            { rotate: rotation.interpolate({
+              inputRange: [0, 360],
+              outputRange: ['0deg', '360deg'],
+            })},
+          ],
+          opacity,
+        },
+      ]}
+      pointerEvents="none"
+    >
+      {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
+        <View
+          key={i}
+          style={[
+            styles.bloomPetal,
+            {
+              transform: [{ rotate: `${i * 45}deg` }, { translateY: -20 }],
+              backgroundColor: PETAL_COLORS[i % PETAL_COLORS.length],
+            },
+          ]}
+        />
+      ))}
+      <View style={styles.bloomCenter} />
+    </Animated.View>
+  );
+};
+
+// Rose border decoration
+export const RoseBorder: React.FC<{ position: 'top' | 'bottom'; style?: any }> = ({ position, style }) => {
+  return (
+    <View style={[styles.borderContainer, position === 'top' ? styles.borderTop : styles.borderBottom, style]} pointerEvents="none">
+      {Array(12).fill(null).map((_, i) => (
+        <View
+          key={i}
+          style={[
+            styles.borderPetal,
+            {
+              left: `${(i / 12) * 100}%`,
+              backgroundColor: PETAL_COLORS[i % PETAL_COLORS.length],
+              opacity: 0.15 + (i % 3) * 0.05,
+              transform: [
+                { rotate: `${-45 + Math.random() * 20}deg` },
+                { scale: 0.5 + Math.random() * 0.3 },
+              ],
+            },
+          ]}
+        />
+      ))}
+    </View>
+  );
+};
+
+// Pulsing rose glow effect
+export const RoseGlow: React.FC<{ size?: number; color?: string; style?: any }> = ({ 
+  size = 200, 
+  color = COLORS.rosePetal3,
+  style 
+}) => {
+  const scale = useRef(new Animated.Value(1)).current;
+  const opacity = useRef(new Animated.Value(0.3)).current;
+
+  useEffect(() => {
+    const animate = () => {
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(scale, {
+            toValue: 1.3,
+            duration: 2000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(scale, {
+            toValue: 1,
+            duration: 2000,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 0.5,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0.3,
+            duration: 2000,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start(() => animate());
+    };
+    animate();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        styles.glowContainer,
+        {
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          backgroundColor: color,
+          transform: [{ scale }],
+          opacity,
+        },
+        style,
+      ]}
+      pointerEvents="none"
+    />
+  );
+};
+
+// Scattered static petals for backgrounds
 export const RosePetalsStatic: React.FC<{ count?: number; style?: any }> = ({ 
   count = 12, 
   style 
@@ -148,7 +310,7 @@ export const RosePetalsStatic: React.FC<{ count?: number; style?: any }> = ({
     rotation: Math.random() * 360,
     scale: 0.3 + Math.random() * 0.5,
     color: PETAL_COLORS[Math.floor(Math.random() * PETAL_COLORS.length)],
-    opacity: 0.1 + Math.random() * 0.2,
+    opacity: 0.08 + Math.random() * 0.12,
   }));
   
   return (
@@ -178,19 +340,20 @@ export const RosePetalsStatic: React.FC<{ count?: number; style?: any }> = ({
   );
 };
 
-// Decorative rose corner accent
-export const RoseCornerAccent: React.FC<{ position?: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight' }> = ({ 
-  position = 'topRight' 
-}) => {
+// Rose corner accent
+export const RoseCornerAccent: React.FC<{ 
+  position?: 'topLeft' | 'topRight' | 'bottomLeft' | 'bottomRight';
+  size?: number;
+}> = ({ position = 'topRight', size = 80 }) => {
   const positionStyles: any = {
-    topLeft: { top: -20, left: -20 },
-    topRight: { top: -20, right: -20 },
-    bottomLeft: { bottom: -20, left: -20 },
-    bottomRight: { bottom: -20, right: -20 },
+    topLeft: { top: -size/3, left: -size/3 },
+    topRight: { top: -size/3, right: -size/3 },
+    bottomLeft: { bottom: -size/3, left: -size/3 },
+    bottomRight: { bottom: -size/3, right: -size/3 },
   };
   
   return (
-    <View style={[styles.cornerAccent, positionStyles[position]]} pointerEvents="none">
+    <View style={[styles.cornerAccent, positionStyles[position], { width: size, height: size }]} pointerEvents="none">
       {[0, 1, 2, 3, 4].map((i) => (
         <View
           key={i}
@@ -199,15 +362,71 @@ export const RoseCornerAccent: React.FC<{ position?: 'topLeft' | 'topRight' | 'b
             {
               transform: [
                 { rotate: `${i * 72}deg` },
-                { translateX: 15 + i * 5 },
+                { translateX: size * 0.2 + i * 3 },
               ],
-              opacity: 0.15 + i * 0.05,
+              opacity: 0.1 + i * 0.04,
               backgroundColor: PETAL_COLORS[i % PETAL_COLORS.length],
+              width: size * 0.25,
+              height: size * 0.3,
             },
           ]}
         />
       ))}
     </View>
+  );
+};
+
+// Animated rose ring
+export const RoseRing: React.FC<{ size?: number; style?: any }> = ({ size = 150, style }) => {
+  const rotation = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 360,
+        duration: 30000,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      })
+    ).start();
+  }, []);
+
+  return (
+    <Animated.View 
+      style={[
+        styles.ringContainer,
+        { 
+          width: size, 
+          height: size,
+          transform: [{ rotate: rotation.interpolate({
+            inputRange: [0, 360],
+            outputRange: ['0deg', '360deg'],
+          })}],
+        },
+        style,
+      ]}
+      pointerEvents="none"
+    >
+      {Array(8).fill(null).map((_, i) => (
+        <View
+          key={i}
+          style={[
+            styles.ringPetal,
+            {
+              position: 'absolute',
+              left: size/2 - 8,
+              top: 0,
+              transform: [
+                { rotate: `${i * 45}deg` },
+                { translateY: size * 0.1 },
+              ],
+              backgroundColor: PETAL_COLORS[i % PETAL_COLORS.length],
+              opacity: 0.3,
+            },
+          ]}
+        />
+      ))}
+    </Animated.View>
   );
 };
 
@@ -254,17 +473,71 @@ const styles = StyleSheet.create({
   },
   cornerAccent: {
     position: 'absolute',
-    width: 100,
-    height: 100,
   },
   cornerPetal: {
     position: 'absolute',
-    width: 20,
-    height: 24,
     borderTopLeftRadius: 16,
     borderTopRightRadius: 16,
     borderBottomLeftRadius: 3,
     borderBottomRightRadius: 16,
+  },
+  bloomContainer: {
+    width: 60,
+    height: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bloomPetal: {
+    position: 'absolute',
+    width: 16,
+    height: 22,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 3,
+    borderBottomRightRadius: 14,
+  },
+  bloomCenter: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.gold,
+  },
+  borderContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 30,
+    flexDirection: 'row',
+  },
+  borderTop: {
+    top: 0,
+  },
+  borderBottom: {
+    bottom: 0,
+  },
+  borderPetal: {
+    position: 'absolute',
+    width: 16,
+    height: 20,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 14,
+  },
+  glowContainer: {
+    position: 'absolute',
+  },
+  ringContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringPetal: {
+    width: 16,
+    height: 20,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 14,
   },
 });
 
