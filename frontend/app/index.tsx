@@ -1,48 +1,20 @@
-import React, { useEffect, useCallback } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
-  Platform,
-  Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Link } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function SplashScreen() {
-  const router = useRouter();
   const { isAuthenticated, user } = useAppStore();
-
-  const navigateNext = useCallback(() => {
-    const destination = isAuthenticated && user ? '/(tabs)/home' : '/(auth)/login';
-    
-    // On web, use direct URL navigation as a reliable fallback
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.href = destination;
-      return;
-    }
-    
-    // On native, use router
-    try {
-      router.replace(destination);
-    } catch (error) {
-      console.log('Router error:', error);
-    }
-  }, [isAuthenticated, user, router]);
-
-  useEffect(() => {
-    // Auto-navigate after 2 seconds
-    const timer = setTimeout(() => {
-      navigateNext();
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [navigateNext]);
+  const destination = isAuthenticated && user ? '/(tabs)/home' : '/(auth)/login';
 
   return (
-    <Pressable style={styles.container} onPress={navigateNext}>
+    <View style={styles.container}>
       <View style={styles.logoContainer}>
         <View style={styles.logoCircle}>
           <Text style={styles.logoText}>K</Text>
@@ -52,11 +24,13 @@ export default function SplashScreen() {
       </View>
       
       <View style={styles.footer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading...</Text>
-        <Text style={styles.tapHint}>Tap anywhere to continue</Text>
+        <Link href={destination} asChild>
+          <View style={styles.continueButton}>
+            <Text style={styles.continueText}>Get Started</Text>
+          </View>
+        </Link>
       </View>
-    </Pressable>
+    </View>
   );
 }
 
@@ -101,14 +75,15 @@ const styles = StyleSheet.create({
     bottom: 60,
     alignItems: 'center',
   },
-  loadingText: {
-    color: COLORS.gray400,
-    marginTop: SPACING.md,
-    fontSize: FONT_SIZE.md,
+  continueButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl * 2,
+    paddingVertical: SPACING.md,
+    borderRadius: 30,
   },
-  tapHint: {
-    color: COLORS.primary,
-    marginTop: SPACING.lg,
-    fontSize: FONT_SIZE.sm,
+  continueText: {
+    color: COLORS.white,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
   },
 });
