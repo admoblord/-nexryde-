@@ -17,20 +17,34 @@ export default function SplashScreen() {
   useEffect(() => {
     const timer = setTimeout(() => {
       setIsReady(true);
-    }, 2000);
+    }, 1500); // Reduced to 1.5 seconds
 
     return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     if (isReady) {
-      if (isAuthenticated && user) {
-        router.replace('/(tabs)/home');
-      } else {
-        router.replace('/(auth)/login');
-      }
+      // Use setTimeout to ensure navigation happens after component is mounted
+      const navigate = () => {
+        try {
+          if (isAuthenticated && user) {
+            router.replace('/(tabs)/home');
+          } else {
+            router.replace('/(auth)/login');
+          }
+        } catch (error) {
+          console.log('Navigation error:', error);
+          // Fallback - try again
+          setTimeout(() => {
+            router.push('/(auth)/login');
+          }, 100);
+        }
+      };
+      
+      // Small delay to ensure router is ready
+      setTimeout(navigate, 100);
     }
-  }, [isReady, isAuthenticated, user]);
+  }, [isReady, isAuthenticated, user, router]);
 
   return (
     <View style={styles.container}>
