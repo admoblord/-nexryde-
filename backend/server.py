@@ -1500,6 +1500,557 @@ async def get_driver_challenge_progress(user_id: str):
     
     return {"challenge_progress": progress}
 
+# ==================== AI ASSISTANT ENDPOINTS ====================
+
+@api_router.get("/ai/rider-assistant")
+async def rider_assistant(user_id: str, question: str):
+    """
+    AI Ride Assistant for Riders
+    Answers common questions about trips, drivers, pricing, safety
+    """
+    question_lower = question.lower()
+    
+    # Get user's current trip if any
+    current_trip = await db.trips.find_one({
+        "rider_id": user_id,
+        "status": {"$in": ["pending", "accepted", "ongoing"]}
+    })
+    
+    # Smart responses based on context
+    if "driver" in question_lower and "where" in question_lower:
+        if current_trip and current_trip.get("driver_id"):
+            driver_profile = await db.driver_profiles.find_one({"user_id": current_trip["driver_id"]})
+            if driver_profile and driver_profile.get("current_location"):
+                return {
+                    "response": f"Your driver is on the way. They should arrive shortly.",
+                    "type": "location",
+                    "data": driver_profile.get("current_location")
+                }
+        return {"response": "You don't have an active ride. Would you like to book one?", "type": "info"}
+    
+    elif "price" in question_lower or "fare" in question_lower or "cost" in question_lower:
+        if current_trip:
+            return {
+                "response": f"Your trip fare is ₦{current_trip['fare']:,.0f}. This includes base fare, distance, and time charges.",
+                "type": "fare",
+                "data": {"fare": current_trip["fare"]}
+            }
+        return {
+            "response": "Fares are calculated based on distance, time, and current traffic. Get a fare estimate by entering your destination.",
+            "type": "info"
+        }
+    
+    elif "safe" in question_lower or "safety" in question_lower:
+        return {
+            "response": "Your safety is our priority! All drivers are verified. You can use the SOS button anytime, share your trip with family, and rate your driver after the ride.",
+            "type": "safety"
+        }
+    
+    elif "cancel" in question_lower:
+        return {
+            "response": "You can cancel your ride anytime before it starts. To cancel an ongoing ride, please contact support.",
+            "type": "info"
+        }
+    
+    elif "time" in question_lower or "long" in question_lower or "eta" in question_lower:
+        if current_trip:
+            if current_trip["status"] == "ongoing":
+                return {
+                    "response": f"Estimated time to destination: {current_trip['duration_mins']} minutes.",
+                    "type": "eta",
+                    "data": {"duration_mins": current_trip["duration_mins"]}
+                }
+            elif current_trip["status"] == "accepted":
+                return {"response": "Your driver is on the way to pick you up.", "type": "info"}
+        return {"response": "Book a ride to see estimated arrival time.", "type": "info"}
+    
+    else:
+        return {
+            "response": "I'm here to help! You can ask me about your driver's location, fare details, safety features, or trip status.",
+            "type": "help"
+        }
+
+@api_router.get("/ai/driver-assistant")
+async def driver_assistant(user_id: str, question: str):
+    """
+    AI Assistant for Drivers
+    Provides insights on earnings, demand, optimal driving times
+    """
+    question_lower = question.lower()
+    
+    # Get driver stats
+    stats = await db.trips.aggregate([
+        {"$match": {"driver_id": user_id, "status": "completed"}},
+        {"$group": {
+            "_id": None,
+            "total_earnings": {"$sum": "$fare"},
+            "total_trips": {"$sum": 1},
+            "avg_fare": {"$avg": "$fare"}
+        }}
+    ]).to_list(1)
+    
+    driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}
+    
+    # Get today's stats
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_stats = await db.trips.aggregate([
+        {"$match": {"driver_id": user_id, "status": "completed", "completed_at": {"$gte": today_start}}},
+        {"$group": {"_id": None, "earnings": {"$sum": "$fare"}, "trips": {"$sum": 1}}}
+    ]).to_list(1)
+    
+    today = today_stats[0] if today_stats else {"earnings": 0, "trips": 0}
+    
+    if "earn" in question_lower or "money" in question_lower:
+        return {
+            "response": f"Today you've earned ₦{today['earnings']:,.0f} from {today['trips']} trips. Your average fare is ₦{driver_stats['avg_fare']:,.0f}.",
+            "type": "earnings",
+            "data": {
+                "today_earnings": today["earnings"],
+                "today_trips": today["trips"],
+                "total_earnings": driver_stats["total_earnings"],
+                "avg_fare": driver_stats["avg_fare"]
+            }
+        }
+    
+    elif "best time" in question_lower or "when" in question_lower or "busy" in question_lower:
+        return {
+            "response": "Peak hours are typically 7-9 AM and 5-8 PM on weekdays. Weekends see more activity in evening hours. Consider positioning yourself in business districts during morning rush.",
+            "type": "insight",
+            "data": {"peak_hours": ["7-9 AM", "5-8 PM"], "hot_areas": ["Victoria Island", "Ikeja", "Lekki"]}
+        }
+    
+    elif "demand" in question_lower or "area" in question_lower or "where" in question_lower:
+        return {
+            "response": "High demand areas right now include Victoria Island, Lekki, and Ikeja. Airport runs are also lucrative. Stay near major business hubs for consistent rides.",
+            "type": "demand",
+            "data": {"hot_spots": ["Victoria Island", "Lekki", "Ikeja", "Airport"]}
+        }
+    
+    elif "tip" in question_lower or "advice" in question_lower:
+        return {
+            "response": "Pro tips: Keep your car clean for better ratings. Stay hydrated and take breaks every 2-3 hours. Accept rides during surge times for higher earnings.",
+            "type": "tips"
+        }
+    
+    elif "rating" in question_lower:
+        profile = await db.driver_profiles.find_one({"user_id": user_id})
+        user = await db.users.find_one({"id": user_id})
+        return {
+            "response": f"Your current rating is {user.get('rating', 5.0):.1f} stars. Maintain cleanliness, politeness, and safe driving to improve your rating.",
+            "type": "rating",
+            "data": {
+                "rating": user.get("rating", 5.0) if user else 5.0,
+                "comfort_ratings": {
+                    "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
+                    "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
+                    "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0,
+                    "safety": profile.get("safety_rating", 5.0) if profile else 5.0,
+                }
+            }
+        }
+    
+    else:
+        return {
+            "response": "I can help you with earnings info, best times to drive, high-demand areas, tips for better ratings, and more. What would you like to know?",
+            "type": "help"
+        }
+
+# ==================== FATIGUE MONITORING ====================
+
+@api_router.post("/drivers/{user_id}/log-break")
+async def log_driver_break(user_id: str):
+    """Log driver taking a break for fatigue monitoring"""
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {"last_break_at": datetime.utcnow(), "fatigue_warning": False}}
+    )
+    return {"message": "Break logged successfully"}
+
+@api_router.get("/drivers/{user_id}/fatigue-status")
+async def get_fatigue_status(user_id: str):
+    """Get driver fatigue status"""
+    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    if not profile:
+        return {"hours_driven": 0, "needs_break": False, "fatigue_level": "low"}
+    
+    hours_driven = profile.get("hours_driven_today", 0)
+    last_break = profile.get("last_break_at")
+    
+    # Calculate fatigue level
+    if hours_driven >= 10:
+        fatigue_level = "critical"
+        needs_break = True
+    elif hours_driven >= 8:
+        fatigue_level = "high"
+        needs_break = True
+    elif hours_driven >= 6:
+        fatigue_level = "medium"
+        needs_break = last_break is None or (datetime.utcnow() - last_break).seconds > 7200
+    else:
+        fatigue_level = "low"
+        needs_break = False
+    
+    return {
+        "hours_driven": hours_driven,
+        "needs_break": needs_break,
+        "fatigue_level": fatigue_level,
+        "last_break_at": last_break.isoformat() if last_break else None,
+        "recommendation": "Take a 15-minute break to stay alert" if needs_break else "You're doing great!"
+    }
+
+@api_router.post("/drivers/{user_id}/update-drive-time")
+async def update_drive_time(user_id: str, hours: float):
+    """Update driver's driving time (called periodically)"""
+    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    current_hours = profile.get("hours_driven_today", 0) if profile else 0
+    new_hours = current_hours + hours
+    
+    fatigue_warning = new_hours >= 8
+    
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {"hours_driven_today": new_hours, "fatigue_warning": fatigue_warning}}
+    )
+    
+    return {"hours_driven": new_hours, "fatigue_warning": fatigue_warning}
+
+# ==================== LEADERBOARD ====================
+
+@api_router.get("/leaderboard/drivers")
+async def get_driver_leaderboard(city: str = "lagos", period: str = "weekly"):
+    """Get driver leaderboard"""
+    # Calculate date range
+    if period == "daily":
+        start_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    elif period == "weekly":
+        start_date = datetime.utcnow() - timedelta(days=7)
+    else:  # monthly
+        start_date = datetime.utcnow() - timedelta(days=30)
+    
+    # Get top earners
+    pipeline = [
+        {"$match": {"status": "completed", "completed_at": {"$gte": start_date}}},
+        {"$group": {
+            "_id": "$driver_id",
+            "total_earnings": {"$sum": "$fare"},
+            "trip_count": {"$sum": 1},
+            "avg_rating": {"$avg": "$driver_rating"}
+        }},
+        {"$sort": {"total_earnings": -1}},
+        {"$limit": 20}
+    ]
+    
+    earnings_leaders = await db.trips.aggregate(pipeline).to_list(20)
+    
+    # Enrich with driver details
+    leaderboard = []
+    for rank, leader in enumerate(earnings_leaders, 1):
+        if leader["_id"]:
+            user = await db.users.find_one({"id": leader["_id"]})
+            if user:
+                leaderboard.append({
+                    "rank": rank,
+                    "driver_id": leader["_id"],
+                    "name": user.get("name", "Anonymous")[:10] + "..." if user.get("name") else "Anonymous",
+                    "earnings": leader["total_earnings"],
+                    "trips": leader["trip_count"],
+                    "rating": round(leader["avg_rating"] or 5.0, 1)
+                })
+    
+    return {"period": period, "city": city, "leaderboard": leaderboard}
+
+@api_router.get("/leaderboard/top-rated")
+async def get_top_rated_drivers(limit: int = 20):
+    """Get top rated drivers"""
+    pipeline = [
+        {"$match": {"role": "driver", "rating": {"$exists": True}}},
+        {"$sort": {"rating": -1, "total_trips": -1}},
+        {"$limit": limit}
+    ]
+    
+    top_drivers = await db.users.aggregate(pipeline).to_list(limit)
+    
+    result = []
+    for rank, driver in enumerate(top_drivers, 1):
+        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
+        result.append({
+            "rank": rank,
+            "driver_id": driver["id"],
+            "name": (driver.get("name", "Anonymous")[:10] + "...") if driver.get("name") else "Anonymous",
+            "rating": driver.get("rating", 5.0),
+            "total_trips": driver.get("total_trips", 0),
+            "comfort_scores": {
+                "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
+                "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
+                "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0,
+                "safety": profile.get("safety_rating", 5.0) if profile else 5.0,
+            }
+        })
+    
+    return {"top_rated_drivers": result}
+
+# ==================== TRIP SHARING (Family & Friends) ====================
+
+@api_router.post("/trips/{trip_id}/share")
+async def share_trip(trip_id: str, recipient_phone: str, recipient_name: str = ""):
+    """Share trip with family/friend for live tracking"""
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Generate a share token
+    share_token = str(uuid.uuid4())[:8].upper()
+    
+    # Store share info
+    share_info = {
+        "trip_id": trip_id,
+        "token": share_token,
+        "recipient_phone": recipient_phone,
+        "recipient_name": recipient_name,
+        "shared_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(hours=24)
+    }
+    
+    await db.trip_shares.insert_one(share_info)
+    
+    # In production: Send SMS with tracking link
+    tracking_link = f"https://koda.app/track/{share_token}"
+    
+    return {
+        "message": f"Trip shared with {recipient_name or recipient_phone}",
+        "share_token": share_token,
+        "tracking_link": tracking_link
+    }
+
+@api_router.get("/trips/track/{share_token}")
+async def track_shared_trip(share_token: str):
+    """Track a shared trip (for family/friends)"""
+    share = await db.trip_shares.find_one({"token": share_token})
+    if not share:
+        raise HTTPException(status_code=404, detail="Invalid tracking link")
+    
+    if datetime.utcnow() > share["expires_at"]:
+        raise HTTPException(status_code=400, detail="Tracking link has expired")
+    
+    trip = await db.trips.find_one({"id": share["trip_id"]})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Get driver location
+    driver_location = None
+    if trip.get("driver_id"):
+        profile = await db.driver_profiles.find_one({"user_id": trip["driver_id"]})
+        driver_location = profile.get("current_location") if profile else None
+    
+    return {
+        "trip_id": trip["id"],
+        "status": trip["status"],
+        "pickup": trip["pickup_location"],
+        "dropoff": trip["dropoff_location"],
+        "driver_location": driver_location,
+        "rider_name": "Rider",  # Don't expose full name for privacy
+        "fare": trip["fare"],
+        "sos_triggered": trip.get("sos_triggered", False)
+    }
+
+# ==================== FRAUD DETECTION ====================
+
+@api_router.get("/admin/fraud-alerts")
+async def get_fraud_alerts():
+    """Get potential fraud alerts (admin only)"""
+    # Find suspicious patterns
+    alerts = []
+    
+    # High cancellation users
+    high_cancel_pipeline = [
+        {"$match": {"status": "cancelled"}},
+        {"$group": {"_id": "$cancelled_by", "count": {"$sum": 1}}},
+        {"$match": {"count": {"$gt": 5}}},
+        {"$sort": {"count": -1}}
+    ]
+    high_cancellers = await db.trips.aggregate(high_cancel_pipeline).to_list(10)
+    for item in high_cancellers:
+        if item["_id"]:
+            alerts.append({
+                "type": "high_cancellation",
+                "user_id": item["_id"],
+                "count": item["count"],
+                "severity": "medium"
+            })
+    
+    # Multiple SOS triggers
+    sos_pipeline = [
+        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
+        {"$match": {"count": {"$gt": 3}}},
+        {"$sort": {"count": -1}}
+    ]
+    sos_abusers = await db.sos_alerts.aggregate(sos_pipeline).to_list(10)
+    for item in sos_abusers:
+        if item["_id"]:
+            alerts.append({
+                "type": "sos_abuse",
+                "user_id": item["_id"],
+                "count": item["count"],
+                "severity": "high"
+            })
+    
+    # Low behavior scores
+    low_score_users = await db.users.find({"behavior_score": {"$lt": 50}}).to_list(10)
+    for user in low_score_users:
+        alerts.append({
+            "type": "low_behavior_score",
+            "user_id": user["id"],
+            "score": user.get("behavior_score", 0),
+            "severity": "medium"
+        })
+    
+    return {"fraud_alerts": alerts, "total": len(alerts)}
+
+@api_router.post("/admin/update-behavior-score")
+async def update_behavior_score(user_id: str, event_type: str):
+    """Update user behavior score based on events"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    current_score = user.get("behavior_score", 100.0)
+    change = calculate_behavior_score_change(event_type)
+    new_score = max(0, min(100, current_score + change))
+    
+    await db.users.update_one({"id": user_id}, {"$set": {"behavior_score": new_score}})
+    
+    return {"previous_score": current_score, "new_score": new_score, "change": change}
+
+# ==================== STREAK & BADGE SYSTEM ====================
+
+@api_router.get("/drivers/{user_id}/streaks")
+async def get_driver_streaks(user_id: str):
+    """Get driver's streak information"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    streaks = user.get("streaks", {"current": 0, "best": 0, "last_date": None})
+    badges = user.get("badges", [])
+    
+    # Check for badge unlocks
+    available_badges = [
+        {"id": "first_trip", "name": "First Ride", "requirement": "Complete your first trip", "icon": "🚗"},
+        {"id": "streak_7", "name": "Week Warrior", "requirement": "7-day streak", "icon": "🔥"},
+        {"id": "streak_30", "name": "Monthly Master", "requirement": "30-day streak", "icon": "⭐"},
+        {"id": "trips_100", "name": "Century Club", "requirement": "100 trips completed", "icon": "💯"},
+        {"id": "five_star", "name": "Perfect Driver", "requirement": "Maintain 5.0 rating for a week", "icon": "🌟"},
+        {"id": "early_bird", "name": "Early Bird", "requirement": "Complete 10 rides before 8 AM", "icon": "🌅"},
+        {"id": "night_owl", "name": "Night Owl", "requirement": "Complete 10 rides after 10 PM", "icon": "🦉"},
+    ]
+    
+    return {
+        "current_streak": streaks.get("current", 0),
+        "best_streak": streaks.get("best", 0),
+        "last_active": streaks.get("last_date"),
+        "earned_badges": badges,
+        "available_badges": [b for b in available_badges if b["id"] not in badges]
+    }
+
+@api_router.post("/drivers/{user_id}/check-streak")
+async def check_and_update_streak(user_id: str):
+    """Check and update driver's daily streak"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    streaks = user.get("streaks", {"current": 0, "best": 0, "last_date": None})
+    today = datetime.utcnow().date()
+    
+    last_date = streaks.get("last_date")
+    if last_date:
+        last_date = datetime.fromisoformat(last_date).date() if isinstance(last_date, str) else last_date
+    
+    new_current = streaks.get("current", 0)
+    new_best = streaks.get("best", 0)
+    
+    # Check if completed a trip today
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_trip = await db.trips.find_one({
+        "driver_id": user_id,
+        "status": "completed",
+        "completed_at": {"$gte": today_start}
+    })
+    
+    if today_trip:
+        if last_date == today - timedelta(days=1):
+            # Consecutive day
+            new_current += 1
+        elif last_date != today:
+            # Streak broken or first day
+            new_current = 1
+        
+        new_best = max(new_best, new_current)
+        
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {
+                "streaks.current": new_current,
+                "streaks.best": new_best,
+                "streaks.last_date": today.isoformat()
+            }}
+        )
+        
+        # Check for streak badges
+        badges = user.get("badges", [])
+        if new_current >= 7 and "streak_7" not in badges:
+            await db.users.update_one({"id": user_id}, {"$push": {"badges": "streak_7"}})
+        if new_current >= 30 and "streak_30" not in badges:
+            await db.users.update_one({"id": user_id}, {"$push": {"badges": "streak_30"}})
+    
+    return {
+        "current_streak": new_current,
+        "best_streak": new_best,
+        "streak_maintained": today_trip is not None
+    }
+
+# ==================== AUDIO RECORDING ====================
+
+@api_router.post("/trips/{trip_id}/start-recording")
+async def start_trip_recording(trip_id: str):
+    """Start audio recording for trip (metadata only for MVP)"""
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {"recording_enabled": True, "recording_started_at": datetime.utcnow()}}
+    )
+    return {"message": "Recording started", "trip_id": trip_id}
+
+@api_router.post("/trips/{trip_id}/stop-recording")
+async def stop_trip_recording(trip_id: str):
+    """Stop audio recording for trip"""
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {"recording_enabled": False, "recording_stopped_at": datetime.utcnow()}}
+    )
+    return {"message": "Recording stopped", "trip_id": trip_id}
+
+# ==================== INSURANCE INFO ====================
+
+@api_router.get("/trips/{trip_id}/insurance")
+async def get_trip_insurance(trip_id: str):
+    """Get trip insurance information"""
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    return {
+        "trip_id": trip_id,
+        "is_insured": trip.get("is_insured", True),
+        "insurance_id": trip.get("insurance_id"),
+        "coverage": {
+            "personal_accident": "₦500,000",
+            "medical_expenses": "₦100,000",
+            "property_damage": "₦50,000"
+        },
+        "provider": "KODA Insurance Partners",
+        "valid_until": trip.get("completed_at") or "Trip completion"
+    }
+
 # ==================== HEALTH CHECK ====================
 
 @api_router.get("/")
