@@ -15,7 +15,13 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { askRiderAssistant, askDriverAssistant } from '@/src/services/api';
+import { 
+  askRiderAssistant, 
+  askDriverAssistant,
+  askRiderAssistantPidgin,
+  askDriverAssistantPidgin,
+  predictEarnings
+} from '@/src/services/api';
 
 interface Message {
   id: string;
@@ -34,22 +40,27 @@ export default function AIAssistantScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [language, setLanguage] = useState<'english' | 'pidgin'>('english');
 
   const isDriver = user?.role === 'driver';
 
   useEffect(() => {
-    // Add welcome message
+    // Add welcome message based on language
     const welcomeMessage: Message = {
       id: '0',
-      text: isDriver 
-        ? "Hi! I'm your KODA driving assistant. Ask me about earnings, best times to drive, high-demand areas, or tips to improve your ratings!"
-        : "Hi! I'm your KODA ride assistant. Ask me about your trip, driver location, fare details, or safety features!",
+      text: language === 'pidgin' 
+        ? (isDriver 
+            ? "How far! Na KODA AI be dis. Ask me about your money, when to drive, where demand high, or how to get beta rating!"
+            : "How far! Na KODA AI be dis. Ask me about your trip, where your driver dey, price matter, or safety wahala!")
+        : (isDriver 
+            ? "Hi! I'm your KODA driving assistant. Ask me about earnings, best times to drive, high-demand areas, or tips to improve your ratings!"
+            : "Hi! I'm your KODA ride assistant. Ask me about your trip, driver location, fare details, or safety features!"),
       isUser: false,
       type: 'welcome',
       timestamp: new Date(),
     };
     setMessages([welcomeMessage]);
-  }, [isDriver]);
+  }, [isDriver, language]);
 
   const handleSend = async () => {
     if (!inputText.trim() || !user?.id || loading) return;
