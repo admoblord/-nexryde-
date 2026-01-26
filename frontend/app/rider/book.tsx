@@ -15,10 +15,10 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '../../src/constants/theme';
-import { Card, Button } from '../../src/components/UI';
-import { useAppStore } from '../../src/store/appStore';
-import { estimateFare, requestTrip } from '../../src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { Card, Button } from '@/src/components/UI';
+import { useAppStore } from '@/src/store/appStore';
+import { estimateFare, requestTrip } from '@/src/services/api';
 
 export default function BookRideScreen() {
   const router = useRouter();

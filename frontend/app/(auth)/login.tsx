@@ -13,9 +13,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../../src/constants/theme';
-import { Button } from '../../src/components/UI';
-import { sendOTP } from '../../src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { Button } from '@/src/components/UI';
+import { sendOTP } from '@/src/services/api';
 
 export default function LoginScreen() {
   const router = useRouter();

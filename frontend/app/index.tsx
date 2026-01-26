@@ -6,8 +6,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE } from '../src/constants/theme';
-import { useAppStore } from '../src/store/appStore';
+import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function SplashScreen() {
   const router = useRouter();
