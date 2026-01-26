@@ -11,9 +11,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { Card, Button } from '@/src/components/UI';
+import { Card, Button, Badge } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
-import { getDriverStats, getWallet } from '@/src/services/api';
+import { getDriverStats, getWallet, getFatigueStatus } from '@/src/services/api';
 
 export default function EarningsScreen() {
   const { user } = useAppStore();
@@ -21,6 +21,7 @@ export default function EarningsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [driverStats, setDriverStats] = useState<any>(null);
   const [wallet, setWallet] = useState<any>(null);
+  const [fatigueStatus, setFatigueStatus] = useState<any>(null);
 
   const isDriver = user?.role === 'driver';
 
@@ -32,8 +33,12 @@ export default function EarningsScreen() {
     if (!user?.id) return;
     try {
       if (isDriver) {
-        const statsRes = await getDriverStats(user.id);
+        const [statsRes, fatigueRes] = await Promise.all([
+          getDriverStats(user.id),
+          getFatigueStatus(user.id)
+        ]);
         setDriverStats(statsRes.data);
+        setFatigueStatus(fatigueRes.data);
       }
       const walletRes = await getWallet(user.id);
       setWallet(walletRes.data);
@@ -48,6 +53,50 @@ export default function EarningsScreen() {
     setRefreshing(false);
   }, [isDriver]);
 
+  const getFatigueBadge = () => {
+    if (!fatigueStatus) return null;
+    const level = fatigueStatus.fatigue_level;
+    if (level === 'critical') return { text: 'Take Break Now!', variant: 'error' as const };
+    if (level === 'high') return { text: 'Rest Recommended', variant: 'warning' as const };
+    if (level === 'medium') return { text: 'Moderate', variant: 'info' as const };
+    return { text: 'Well Rested', variant: 'success' as const };
+  };
+
+  const renderComfortRatings = () => {
+    if (!driverStats?.comfort_ratings) return null;
+    const ratings = driverStats.comfort_ratings;
+    
+    return (
+      <Card style={styles.comfortCard}>
+        <Text style={styles.comfortTitle}>Comfort Ratings</Text>
+        <Text style={styles.comfortSubtitle}>How riders rate your service</Text>
+        
+        <View style={styles.comfortGrid}>
+          <View style={styles.comfortItem}>
+            <Ionicons name="speedometer" size={20} color={COLORS.primary} />
+            <Text style={styles.comfortValue}>{ratings.smoothness?.toFixed(1) || '5.0'}</Text>
+            <Text style={styles.comfortLabel}>Smoothness</Text>
+          </View>
+          <View style={styles.comfortItem}>
+            <Ionicons name="happy" size={20} color={COLORS.success} />
+            <Text style={styles.comfortValue}>{ratings.politeness?.toFixed(1) || '5.0'}</Text>
+            <Text style={styles.comfortLabel}>Politeness</Text>
+          </View>
+          <View style={styles.comfortItem}>
+            <Ionicons name="sparkles" size={20} color={COLORS.info} />
+            <Text style={styles.comfortValue}>{ratings.cleanliness?.toFixed(1) || '5.0'}</Text>
+            <Text style={styles.comfortLabel}>Cleanliness</Text>
+          </View>
+          <View style={styles.comfortItem}>
+            <Ionicons name="shield-checkmark" size={20} color={COLORS.accent} />
+            <Text style={styles.comfortValue}>{ratings.safety?.toFixed(1) || '5.0'}</Text>
+            <Text style={styles.comfortLabel}>Safety</Text>
+          </View>
+        </View>
+      </Card>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
@@ -58,6 +107,9 @@ export default function EarningsScreen() {
       >
         <View style={styles.header}>
           <Text style={styles.title}>{isDriver ? 'Earnings' : 'Wallet'}</Text>
+          {isDriver && getFatigueBadge() && (
+            <Badge text={getFatigueBadge()!.text} variant={getFatigueBadge()!.variant} />
+          )}
         </View>
 
         {isDriver ? (
@@ -99,6 +151,51 @@ export default function EarningsScreen() {
                 <Text style={styles.statLabel}>Completion</Text>
               </Card>
             </View>
+
+            {/* Streaks Card */}
+            {driverStats?.streaks && (
+              <Card style={styles.streaksCard}>
+                <View style={styles.streaksHeader}>
+                  <Ionicons name="flame" size={24} color={COLORS.warning} />
+                  <View style={styles.streaksInfo}>
+                    <Text style={styles.streaksTitle}>
+                      {driverStats.streaks.current || 0} Day Streak
+                    </Text>
+                    <Text style={styles.streaksSubtext}>
+                      Best: {driverStats.streaks.best || 0} days
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity 
+                  style={styles.viewLeaderboard}
+                  onPress={() => router.push('/driver/leaderboard')}
+                >
+                  <Text style={styles.viewLeaderboardText}>View Leaderboard</Text>
+                  <Ionicons name="chevron-forward" size={16} color={COLORS.primary} />
+                </TouchableOpacity>
+              </Card>
+            )}
+
+            {/* Comfort Ratings */}
+            {renderComfortRatings()}
+
+            {/* Fatigue Warning */}
+            {fatigueStatus?.needs_break && (
+              <Card style={styles.fatigueCard}>
+                <View style={styles.fatigueHeader}>
+                  <Ionicons name="warning" size={24} color={COLORS.warning} />
+                  <View style={styles.fatigueInfo}>
+                    <Text style={styles.fatigueTitle}>Take a Break</Text>
+                    <Text style={styles.fatigueText}>
+                      You've been driving for {fatigueStatus.hours_driven?.toFixed(1) || 0} hours.
+                    </Text>
+                  </View>
+                </View>
+                <Text style={styles.fatigueRecommendation}>
+                  {fatigueStatus.recommendation}
+                </Text>
+              </Card>
+            )}
 
             {/* Payment Info */}
             <Card style={styles.paymentInfoCard}>
