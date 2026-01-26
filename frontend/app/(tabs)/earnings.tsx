@@ -449,4 +449,101 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
   },
+  comfortCard: {
+    marginBottom: SPACING.md,
+  },
+  comfortTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.xs,
+  },
+  comfortSubtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+  },
+  comfortGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  comfortItem: {
+    alignItems: 'center',
+    width: '22%',
+  },
+  comfortValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: SPACING.xs,
+  },
+  comfortLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  streaksCard: {
+    marginBottom: SPACING.md,
+  },
+  streaksHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  streaksInfo: {
+    marginLeft: SPACING.md,
+  },
+  streaksTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  streaksSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  viewLeaderboard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray200,
+  },
+  viewLeaderboardText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.primary,
+    fontWeight: '600',
+    marginRight: 4,
+  },
+  fatigueCard: {
+    marginBottom: SPACING.md,
+    backgroundColor: COLORS.warning + '15',
+    borderWidth: 1,
+    borderColor: COLORS.warning + '30',
+  },
+  fatigueHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fatigueInfo: {
+    marginLeft: SPACING.md,
+    flex: 1,
+  },
+  fatigueTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.warning,
+  },
+  fatigueText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  fatigueRecommendation: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textPrimary,
+    marginTop: SPACING.sm,
+    fontStyle: 'italic',
+  },
 });
