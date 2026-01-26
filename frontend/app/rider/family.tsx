@@ -62,11 +62,15 @@ export default function FamilyModeScreen() {
   }, [user?.id]);
 
   const loadFamily = async () => {
-    if (!user?.id) return;
+    if (!user?.id) {
+      setInitialLoading(false);
+      return;
+    }
     try {
-      // Check if user has a family
-      if (user.family_id) {
-        const res = await getFamily(user.family_id);
+      // Check if user has a family_id set
+      const userFamilyId = (user as any).family_id;
+      if (userFamilyId) {
+        const res = await getFamily(userFamilyId);
         setFamily(res.data);
       }
     } catch (error) {
