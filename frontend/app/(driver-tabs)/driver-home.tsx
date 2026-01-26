@@ -238,18 +238,36 @@ export default function DriverHomeScreen() {
           <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
         </TouchableOpacity>
 
+        {/* Challenges Banner */}
+        <TouchableOpacity 
+          style={styles.challengesBanner}
+          onPress={() => router.push('/driver/challenges')}
+          activeOpacity={0.85}
+        >
+          <View style={styles.challengesBannerLeft}>
+            <View style={styles.challengesBannerIcon}>
+              <Ionicons name="flame" size={24} color={COLORS.error} />
+            </View>
+            <View>
+              <Text style={styles.challengesBannerTitle}>Daily Challenges</Text>
+              <Text style={styles.challengesBannerSubtext}>3 active \u2022 Earn up to ₦30K extra</Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={COLORS.white} />
+        </TouchableOpacity>
+
         {/* Quick Actions */}
         <Text style={styles.sectionTitle}>Quick Actions</Text>
         <View style={styles.quickActionsGrid}>
           <TouchableOpacity 
             style={styles.quickActionCard}
-            onPress={() => router.push('/assistant')}
+            onPress={() => router.push('/driver/challenges')}
             activeOpacity={0.8}
           >
-            <View style={[styles.quickActionIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.info} />
+            <View style={[styles.quickActionIcon, { backgroundColor: COLORS.errorSoft }]}>
+              <Ionicons name="flame" size={24} color={COLORS.error} />
             </View>
-            <Text style={styles.quickActionText}>AI Assistant</Text>
+            <Text style={styles.quickActionText}>Challenges</Text>
           </TouchableOpacity>
           
           <TouchableOpacity 
@@ -265,6 +283,17 @@ export default function DriverHomeScreen() {
           
           <TouchableOpacity 
             style={styles.quickActionCard}
+            onPress={() => router.push('/assistant')}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.quickActionIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.info} />
+            </View>
+            <Text style={styles.quickActionText}>AI Assistant</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={styles.quickActionCard}
             onPress={() => router.push('/(driver-tabs)/driver-safety')}
             activeOpacity={0.8}
           >
@@ -272,17 +301,6 @@ export default function DriverHomeScreen() {
               <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
             </View>
             <Text style={styles.quickActionText}>Safety</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.quickActionCard}
-            onPress={() => router.push('/driver/vehicle')}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.quickActionIcon, { backgroundColor: COLORS.errorSoft }]}>
-              <Ionicons name="car-sport" size={24} color={COLORS.error} />
-            </View>
-            <Text style={styles.quickActionText}>Vehicle</Text>
           </TouchableOpacity>
         </View>
 
