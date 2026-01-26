@@ -123,7 +123,7 @@ export default function RiderHomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* KODA Family */}
+          {/* NEXRYDE Family */}
           <TouchableOpacity 
             style={styles.familyCard}
             onPress={() => router.push('/rider/family')}
@@ -133,15 +133,15 @@ export default function RiderHomeScreen() {
               <Ionicons name="people" size={24} color={COLORS.accent} />
             </View>
             <View style={styles.familyContent}>
-              <Text style={styles.familyTitle}>KODA Family</Text>
+              <Text style={styles.familyTitle}>NEXRYDE Family</Text>
               <Text style={styles.familyDesc}>Share trips with loved ones</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
           </TouchableOpacity>
 
-          {/* Why KODA Section */}
+          {/* Why NEXRYDE Section */}
           <View style={styles.whySection}>
-            <Text style={styles.sectionTitle}>Why KODA?</Text>
+            <Text style={styles.sectionTitle}>Why NEXRYDE?</Text>
             <View style={styles.whyGrid}>
               <WhyCard
                 icon="shield-checkmark"

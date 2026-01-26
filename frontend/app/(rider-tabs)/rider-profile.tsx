@@ -62,7 +62,7 @@ export default function RiderProfileScreen() {
     
     Alert.alert(
       'Welcome, Driver!',
-      'Your account has been upgraded to Driver. You can now earn with KODA!',
+      'Your account has been upgraded to Driver. You can now earn with NEXRYDE!',
       [{ text: 'Start Earning', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
     );
   };
@@ -115,7 +115,7 @@ export default function RiderProfileScreen() {
           </View>
           <View style={styles.becomeDriverContent}>
             <Text style={styles.becomeDriverTitle}>Become a Driver</Text>
-            <Text style={styles.becomeDriverText}>Earn money with KODA. Keep 100% of your fares!</Text>
+            <Text style={styles.becomeDriverText}>Earn money with NEXRYDE. Keep 100% of your fares!</Text>
           </View>
           <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
         </TouchableOpacity>
@@ -181,7 +181,7 @@ export default function RiderProfileScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={styles.versionText}>KODA v1.0.0</Text>
+        <Text style={styles.versionText}>NEXRYDE v1.0.0</Text>
       </ScrollView>
 
       {/* Become Driver Modal */}
@@ -247,7 +247,7 @@ export default function RiderProfileScreen() {
                 </View>
                 <Text style={styles.modalTitle}>Ready to Earn?</Text>
                 <Text style={styles.modalSubtitle}>
-                  You're about to become a KODA driver. Here's what you'll get:
+                  You're about to become a NEXRYDE driver. Here's what you'll get:
                 </Text>
 
                 <View style={styles.benefitsList}>

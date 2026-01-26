@@ -217,7 +217,7 @@ export default function DriverProfileScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={styles.versionText}>KODA Driver v1.0.0</Text>
+        <Text style={styles.versionText}>NEXRYDE Driver v1.0.0</Text>
       </ScrollView>
 
       {/* Switch to Rider Modal */}
