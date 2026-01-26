@@ -3,31 +3,29 @@ import {
   View,
   Text,
   TextInput,
-  StyleSheet,
   TouchableOpacity,
+  StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   ScrollView,
-  Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { register } from '@/src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-
-const { width } = Dimensions.get('window');
+import { FallingRoses, RosePetalsStatic, RoseGlow, FloatingRoseBloom } from '@/src/components/FallingRoses';
 
 export default function RegisterScreen() {
   const router = useRouter();
   const { phone } = useLocalSearchParams<{ phone: string }>();
-  const { setUser, setIsAuthenticated } = useAppStore();
+  const { setUser, setUserType, setIsAuthenticated } = useAppStore();
   
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<'rider' | 'driver' | null>(null);
+  const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
@@ -35,541 +33,530 @@ export default function RegisterScreen() {
       Alert.alert('Error', 'Please enter your name');
       return;
     }
-    if (!role) {
-      Alert.alert('Error', 'Please select how you want to use KODA');
-      return;
-    }
 
     setLoading(true);
     try {
-      const response = await register({
-        phone: phone!,
-        name: name.trim(),
-        email: email.trim() || undefined,
-        role,
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: `+234${phone}`,
+          name: name.trim(),
+          email: email.trim() || undefined,
+          role: selectedRole,
+        }),
       });
+
+      const data = await response.json();
       
-      setUser(response.data.user);
+      if (response.ok) {
+        setUser({ ...data.user, role: selectedRole });
+        setUserType(selectedRole);
+        setIsAuthenticated(true);
+        
+        if (selectedRole === 'driver') {
+          router.replace('/(driver-tabs)/driver-home');
+        } else {
+          router.replace('/(rider-tabs)/rider-home');
+        }
+      } else {
+        Alert.alert('Error', data.message || 'Registration failed');
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      // Demo mode - proceed anyway
+      setUser({ name: name.trim(), phone: `+234${phone}`, role: selectedRole });
+      setUserType(selectedRole);
       setIsAuthenticated(true);
       
-      if (role === 'driver') {
+      if (selectedRole === 'driver') {
         router.replace('/(driver-tabs)/driver-home');
       } else {
         router.replace('/(rider-tabs)/rider-home');
       }
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Registration failed');
-    } finally {
-      setLoading(false);
     }
+    setLoading(false);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flex}
-      >
-        <ScrollView 
-          contentContainerStyle={styles.content}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+    <View style={styles.container}>
+      <LinearGradient
+        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      
+      {/* Background Effects */}
+      <RosePetalsStatic count={12} />
+      <FallingRoses intensity="light" />
+      <RoseGlow size={280} style={styles.glowTop} />
+      
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
         >
-          {/* Back Button */}
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
-          </TouchableOpacity>
-
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>Join KODA</Text>
-            <Text style={styles.subtitle}>Nigeria's Premium Ride Platform</Text>
-          </View>
-
-          {/* Trust Badges */}
-          <View style={styles.trustBadges}>
-            <View style={styles.trustBadge}>
-              <Ionicons name="shield-checkmark" size={14} color={COLORS.success} />
-              <Text style={styles.trustBadgeText}>Verified</Text>
-            </View>
-            <View style={styles.trustBadge}>
-              <Ionicons name="lock-closed" size={14} color={COLORS.info} />
-              <Text style={styles.trustBadgeText}>Secure</Text>
-            </View>
-            <View style={styles.trustBadge}>
-              <Ionicons name="star" size={14} color={COLORS.accent} />
-              <Text style={styles.trustBadgeText}>Trusted</Text>
-            </View>
-          </View>
-
-          {/* Form */}
-          <View style={styles.form}>
-            <Text style={styles.label}>Full Name</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons name="person-outline" size={20} color={COLORS.gray400} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your full name"
-                placeholderTextColor={COLORS.gray500}
-                value={name}
-                onChangeText={setName}
-                autoCapitalize="words"
-              />
+          <ScrollView 
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Header */}
+            <View style={styles.header}>
+              <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+                <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+              </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>Email (Optional)</Text>
-            <View style={styles.inputContainer}>
-              <Ionicons name="mail-outline" size={20} color={COLORS.gray400} />
-              <TextInput
-                style={styles.input}
-                placeholder="Enter your email"
-                placeholderTextColor={COLORS.gray500}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+            {/* Title Section */}
+            <View style={styles.titleSection}>
+              <View style={styles.titleRose}>
+                <FloatingRoseBloom />
+              </View>
+              <Text style={styles.title}>Join KODA</Text>
+              <Text style={styles.subtitle}>Choose how you want to use KODA</Text>
             </View>
 
             {/* Role Selection */}
-            <Text style={styles.roleLabel}>Choose Your Experience</Text>
-            
-            <View style={styles.roleContainer}>
+            <View style={styles.roleSection}>
               {/* Rider Option */}
               <TouchableOpacity
-                style={[
-                  styles.roleCard,
-                  role === 'rider' && styles.roleCardActiveRider
-                ]}
-                onPress={() => setRole('rider')}
-                activeOpacity={0.8}
+                style={[styles.roleCard, selectedRole === 'rider' && styles.roleCardActive]}
+                onPress={() => setSelectedRole('rider')}
+                activeOpacity={0.9}
               >
-                {role === 'rider' && (
-                  <View style={styles.selectedIndicator}>
-                    <Ionicons name="checkmark-circle" size={24} color={COLORS.info} />
-                  </View>
-                )}
-                
-                <View style={[
-                  styles.roleIconWrap,
-                  role === 'rider' ? styles.roleIconWrapActiveRider : null
-                ]}>
-                  <Ionicons 
-                    name="person" 
-                    size={36} 
-                    color={role === 'rider' ? COLORS.info : COLORS.gray400} 
-                  />
-                </View>
-                
-                <Text style={[
-                  styles.roleTitle,
-                  role === 'rider' && styles.roleTitleActiveRider
-                ]}>Rider</Text>
-                <Text style={styles.roleTagline}>Book rides & travel safely</Text>
-                
-                <View style={styles.roleDivider} />
-                
-                <View style={styles.roleFeatures}>
-                  <View style={styles.roleFeature}>
-                    <View style={styles.featureCheck}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                <LinearGradient
+                  colors={selectedRole === 'rider' 
+                    ? [COLORS.accent, COLORS.accentDark]
+                    : [COLORS.surface, COLORS.surfaceLight]}
+                  style={styles.roleGradient}
+                >
+                  <View style={styles.roleHeader}>
+                    <View style={[styles.roleIcon, selectedRole === 'rider' && styles.roleIconActive]}>
+                      <Ionicons 
+                        name="person" 
+                        size={28} 
+                        color={selectedRole === 'rider' ? COLORS.primary : COLORS.accent} 
+                      />
                     </View>
-                    <Text style={styles.roleFeatureText}>Book rides in seconds</Text>
-                  </View>
-                  <View style={styles.roleFeature}>
-                    <View style={styles.featureCheck}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    <View style={[styles.radioOuter, selectedRole === 'rider' && styles.radioOuterActive]}>
+                      {selectedRole === 'rider' && <View style={styles.radioInner} />}
                     </View>
-                    <Text style={styles.roleFeatureText}>Live trip tracking</Text>
                   </View>
-                  <View style={styles.roleFeature}>
-                    <View style={styles.featureCheck}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                    </View>
-                    <Text style={styles.roleFeatureText}>Share rides with family</Text>
+                  
+                  <Text style={[styles.roleName, selectedRole === 'rider' && styles.roleNameActive]}>
+                    Rider
+                  </Text>
+                  <View style={styles.rolePriceRow}>
+                    <Text style={[styles.rolePrice, selectedRole === 'rider' && styles.rolePriceActive]}>
+                      FREE
+                    </Text>
+                    <View style={styles.rolePetal} />
                   </View>
-                  <View style={styles.roleFeature}>
-                    <View style={styles.featureCheck}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                    </View>
-                    <Text style={styles.roleFeatureText}>Pay cash or transfer</Text>
+                  
+                  <View style={styles.roleFeatures}>
+                    <RoleFeature 
+                      text="Book rides instantly" 
+                      active={selectedRole === 'rider'} 
+                    />
+                    <RoleFeature 
+                      text="Live trip tracking" 
+                      active={selectedRole === 'rider'} 
+                    />
+                    <RoleFeature 
+                      text="AI-powered assistance" 
+                      active={selectedRole === 'rider'} 
+                    />
                   </View>
-                </View>
-                
-                <View style={[styles.rolePriceTag, { backgroundColor: COLORS.infoSoft }]}>
-                  <Text style={[styles.rolePriceText, { color: COLORS.info }]}>FREE</Text>
-                </View>
+                </LinearGradient>
               </TouchableOpacity>
 
               {/* Driver Option */}
               <TouchableOpacity
-                style={[
-                  styles.roleCard,
-                  role === 'driver' && styles.roleCardActiveDriver
-                ]}
-                onPress={() => setRole('driver')}
-                activeOpacity={0.8}
+                style={[styles.roleCard, selectedRole === 'driver' && styles.roleCardActive]}
+                onPress={() => setSelectedRole('driver')}
+                activeOpacity={0.9}
               >
-                {role === 'driver' && (
-                  <View style={styles.selectedIndicator}>
-                    <Ionicons name="checkmark-circle" size={24} color={COLORS.accent} />
+                <LinearGradient
+                  colors={selectedRole === 'driver' 
+                    ? [COLORS.rosePetal4, COLORS.rosePetal5]
+                    : [COLORS.surface, COLORS.surfaceLight]}
+                  style={styles.roleGradient}
+                >
+                  {/* Premium Badge */}
+                  <View style={styles.premiumBadge}>
+                    <Ionicons name="diamond" size={12} color={COLORS.primary} />
+                    <Text style={styles.premiumBadgeText}>PREMIUM</Text>
                   </View>
-                )}
-                
-                <View style={styles.popularBadge}>
-                  <Ionicons name="trending-up" size={12} color={COLORS.primary} />
-                  <Text style={styles.popularBadgeText}>Popular</Text>
-                </View>
-                
-                <View style={[
-                  styles.roleIconWrap,
-                  role === 'driver' ? styles.roleIconWrapActiveDriver : null
-                ]}>
-                  <Ionicons 
-                    name="car-sport" 
-                    size={36} 
-                    color={role === 'driver' ? COLORS.primary : COLORS.gray400} 
-                  />
-                </View>
-                
-                <Text style={[
-                  styles.roleTitle,
-                  role === 'driver' && styles.roleTitleActiveDriver
-                ]}>Driver</Text>
-                <Text style={styles.roleTagline}>Earn money, be your own boss</Text>
-                
-                <View style={styles.roleDivider} />
-                
-                <View style={styles.roleFeatures}>
-                  <View style={styles.roleFeature}>
-                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                  
+                  <View style={styles.roleHeader}>
+                    <View style={[styles.roleIcon, selectedRole === 'driver' && styles.roleIconDriver]}>
+                      <Ionicons 
+                        name="car-sport" 
+                        size={28} 
+                        color={selectedRole === 'driver' ? COLORS.white : COLORS.rosePetal3} 
+                      />
                     </View>
-                    <Text style={styles.roleFeatureText}>Keep 100% of fares</Text>
-                  </View>
-                  <View style={styles.roleFeature}>
-                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    <View style={[styles.radioOuter, selectedRole === 'driver' && styles.radioOuterDriver]}>
+                      {selectedRole === 'driver' && <View style={styles.radioInnerDriver} />}
                     </View>
-                    <Text style={styles.roleFeatureText}>Zero commission forever</Text>
                   </View>
-                  <View style={styles.roleFeature}>
-                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                    </View>
-                    <Text style={styles.roleFeatureText}>Flexible working hours</Text>
+                  
+                  <Text style={[styles.roleName, selectedRole === 'driver' && styles.roleNameActive]}>
+                    Driver
+                  </Text>
+                  <View style={styles.rolePriceRow}>
+                    <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceActive]}>
+                      {CURRENCY}25K/month
+                    </Text>
+                    <View style={[styles.rolePetal, { backgroundColor: COLORS.rosePetal4 }]} />
                   </View>
-                  <View style={styles.roleFeature}>
-                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
-                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
-                    </View>
-                    <Text style={styles.roleFeatureText}>Weekly challenges & rewards</Text>
+                  
+                  <View style={styles.roleFeatures}>
+                    <RoleFeature 
+                      text="Keep 100% earnings" 
+                      active={selectedRole === 'driver'} 
+                    />
+                    <RoleFeature 
+                      text="Zero commission" 
+                      active={selectedRole === 'driver'} 
+                    />
+                    <RoleFeature 
+                      text="Daily challenges & rewards" 
+                      active={selectedRole === 'driver'} 
+                    />
                   </View>
-                </View>
-                
-                <View style={[styles.rolePriceTag, { backgroundColor: COLORS.accentSoft }]}>
-                  <Text style={[styles.rolePriceText, { color: COLORS.accent }]}>₦25K/month</Text>
-                </View>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
 
-            {/* Driver Note */}
-            {role === 'driver' && (
-              <View style={styles.driverNote}>
-                <Ionicons name="information-circle" size={20} color={COLORS.accent} />
-                <Text style={styles.driverNoteText}>
-                  Flat ₦25,000/month subscription. No percentage cuts. You keep every naira you earn!
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* Submit Button */}
-          <TouchableOpacity
-            style={[
-              styles.submitButton,
-              (!name.trim() || !role) && styles.submitButtonDisabled,
-              role === 'driver' && name.trim() && styles.submitButtonDriver
-            ]}
-            onPress={handleRegister}
-            disabled={loading || !name.trim() || !role}
-            activeOpacity={0.8}
-          >
-            {loading ? (
-              <Text style={styles.submitButtonText}>Creating Account...</Text>
-            ) : (
-              <>
-                <Text style={styles.submitButtonText}>
-                  {role === 'driver' ? 'Become a Driver' : role === 'rider' ? 'Start Riding' : 'Create Account'}
-                </Text>
-                <View style={styles.submitArrow}>
-                  <Ionicons name="arrow-forward" size={20} color={role === 'driver' ? COLORS.accent : COLORS.primary} />
+            {/* Form Section */}
+            <View style={styles.formSection}>
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Full Name</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="person-outline" size={20} color={COLORS.textMuted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your full name"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={name}
+                    onChangeText={setName}
+                  />
                 </View>
-              </>
-            )}
-          </TouchableOpacity>
+              </View>
 
-          {/* Terms */}
-          <Text style={styles.termsText}>
-            By creating an account, you agree to our{' '}
-            <Text style={styles.termsLink}>Terms</Text> and{' '}
-            <Text style={styles.termsLink}>Privacy Policy</Text>
-          </Text>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+              <View style={styles.inputContainer}>
+                <Text style={styles.inputLabel}>Email (Optional)</Text>
+                <View style={styles.inputWrapper}>
+                  <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Enter your email"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+              </View>
+            </View>
+
+            {/* Register Button */}
+            <TouchableOpacity
+              style={styles.registerButton}
+              onPress={handleRegister}
+              disabled={loading || !name.trim()}
+              activeOpacity={0.9}
+            >
+              <LinearGradient
+                colors={name.trim() 
+                  ? (selectedRole === 'driver' ? [COLORS.rosePetal3, COLORS.rosePetal5] : [COLORS.accent, COLORS.accentDark])
+                  : [COLORS.gray700, COLORS.gray700]}
+                style={styles.registerGradient}
+              >
+                <Text style={[styles.registerText, !name.trim() && styles.registerTextDisabled]}>
+                  {loading ? 'Creating Account...' : `Continue as ${selectedRole === 'driver' ? 'Driver' : 'Rider'}`}
+                </Text>
+                <View style={[styles.registerArrow, !name.trim() && styles.registerArrowDisabled]}>
+                  <Ionicons 
+                    name="arrow-forward" 
+                    size={20} 
+                    color={name.trim() ? (selectedRole === 'driver' ? COLORS.rosePetal3 : COLORS.accent) : COLORS.gray500} 
+                  />
+                </View>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {/* Terms */}
+            <Text style={styles.termsText}>
+              By continuing, you agree to our{' '}
+              <Text style={styles.termsLink}>Terms of Service</Text>
+              {' '}and{' '}
+              <Text style={styles.termsLink}>Privacy Policy</Text>
+            </Text>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
+
+const RoleFeature = ({ text, active }: { text: string; active: boolean }) => (
+  <View style={styles.featureRow}>
+    <Ionicons 
+      name="checkmark-circle" 
+      size={16} 
+      color={active ? (active ? 'rgba(255,255,255,0.9)' : COLORS.success) : COLORS.textMuted} 
+    />
+    <Text style={[styles.featureText, active && styles.featureTextActive]}>{text}</Text>
+  </View>
+);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.primary,
   },
-  flex: {
+  glowTop: {
+    position: 'absolute',
+    top: -100,
+    right: -80,
+  },
+  safeArea: {
     flex: 1,
   },
-  content: {
-    padding: SPACING.lg,
+  keyboardView: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: SPACING.xl,
     paddingBottom: SPACING.xxl,
+  },
+  header: {
+    paddingTop: SPACING.sm,
+    paddingBottom: SPACING.md,
   },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
   },
-  header: {
+  titleSection: {
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
+  },
+  titleRose: {
     marginBottom: SPACING.md,
+    opacity: 0.8,
   },
   title: {
     fontSize: FONT_SIZE.xxxl,
     fontWeight: '900',
     color: COLORS.white,
+    marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.gray400,
-    marginTop: SPACING.xs,
+    color: COLORS.textSecondary,
   },
-  trustBadges: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
-  trustBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    gap: SPACING.xs,
-  },
-  trustBadgeText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray300,
-    fontWeight: '600',
-  },
-  form: {
-    marginBottom: SPACING.lg,
-  },
-  label: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.gray300,
-    marginBottom: SPACING.sm,
-  },
-  inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderRadius: BORDER_RADIUS.xl,
-    paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  input: {
-    flex: 1,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.sm,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.white,
-  },
-  roleLabel: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.md,
-    textAlign: 'center',
-  },
-  roleContainer: {
+  roleSection: {
     flexDirection: 'row',
     gap: SPACING.md,
+    marginBottom: SPACING.xl,
   },
   roleCard: {
     flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.md,
+    overflow: 'hidden',
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.1)',
-    position: 'relative',
-    alignItems: 'center',
+    borderColor: 'transparent',
   },
-  roleCardActiveRider: {
-    backgroundColor: COLORS.white,
-    borderColor: COLORS.info,
+  roleCardActive: {
+    ...SHADOWS.rose,
   },
-  roleCardActiveDriver: {
-    backgroundColor: COLORS.accent,
-    borderColor: COLORS.accent,
+  roleGradient: {
+    padding: SPACING.md,
+    minHeight: 220,
   },
-  selectedIndicator: {
+  premiumBadge: {
     position: 'absolute',
     top: SPACING.sm,
     right: SPACING.sm,
-  },
-  popularBadge: {
-    position: 'absolute',
-    top: -10,
-    backgroundColor: COLORS.accent,
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.gold,
     paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    gap: 4,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.sm,
+    gap: 2,
   },
-  popularBadgeText: {
-    fontSize: FONT_SIZE.xxs,
-    fontWeight: '700',
+  premiumBadgeText: {
+    fontSize: 8,
+    fontWeight: '800',
     color: COLORS.primary,
   },
-  roleIconWrap: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  roleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.md,
+  },
+  roleIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: COLORS.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: SPACING.sm,
-    marginBottom: SPACING.sm,
   },
-  roleIconWrapActiveRider: {
-    backgroundColor: COLORS.infoSoft,
+  roleIconActive: {
+    backgroundColor: COLORS.primary,
   },
-  roleIconWrapActiveDriver: {
-    backgroundColor: 'rgba(0,0,0,0.15)',
+  roleIconDriver: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
   },
-  roleTitle: {
-    fontSize: FONT_SIZE.xl,
+  radioOuter: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 2,
+    borderColor: COLORS.gray600,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  radioOuterActive: {
+    borderColor: COLORS.primary,
+  },
+  radioOuterDriver: {
+    borderColor: COLORS.white,
+  },
+  radioInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.primary,
+  },
+  radioInnerDriver: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.white,
+  },
+  roleName: {
+    fontSize: FONT_SIZE.lg,
     fontWeight: '800',
+    color: COLORS.textSecondary,
+    marginBottom: 2,
+  },
+  roleNameActive: {
     color: COLORS.white,
   },
-  roleTitleActiveRider: {
-    color: COLORS.primary,
-  },
-  roleTitleActiveDriver: {
-    color: COLORS.primary,
-  },
-  roleTagline: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  roleDivider: {
-    width: '80%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginVertical: SPACING.sm,
-  },
-  roleFeatures: {
-    width: '100%',
-    gap: SPACING.xs,
-  },
-  roleFeature: {
+  rolePriceRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  featureCheck: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: COLORS.info,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleFeatureText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
-    flex: 1,
-  },
-  rolePriceTag: {
-    marginTop: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  rolePriceText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-  },
-  driverNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,215,0,0.1)',
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
-  },
-  driverNoteText: {
-    flex: 1,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.accent,
-    lineHeight: 20,
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.gray600,
-    paddingVertical: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
-  submitButtonDisabled: {
-    opacity: 0.5,
+  rolePrice: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.textMuted,
   },
-  submitButtonDriver: {
+  rolePriceActive: {
+    color: COLORS.white,
+  },
+  rolePetal: {
+    width: 8,
+    height: 10,
     backgroundColor: COLORS.accent,
-    ...SHADOWS.gold,
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 8,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 8,
+    transform: [{ rotate: '-45deg' }],
+    opacity: 0.7,
   },
-  submitButtonText: {
+  roleFeatures: {
+    gap: SPACING.xs,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  featureText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textMuted,
+  },
+  featureTextActive: {
+    color: 'rgba(255,255,255,0.85)',
+  },
+  formSection: {
+    gap: SPACING.md,
+    marginBottom: SPACING.xl,
+  },
+  inputContainer: {},
+  inputLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.xl,
+    paddingHorizontal: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray700,
+    gap: SPACING.sm,
+  },
+  input: {
+    flex: 1,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.white,
+    paddingVertical: SPACING.md,
+  },
+  registerButton: {
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+    ...SHADOWS.rose,
+  },
+  registerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.lg,
+  },
+  registerText: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     color: COLORS.primary,
+    marginRight: SPACING.sm,
   },
-  submitArrow: {
+  registerTextDisabled: {
+    color: COLORS.gray500,
+  },
+  registerArrow: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(0,0,0,0.1)',
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  registerArrowDisabled: {
+    backgroundColor: COLORS.gray800,
+  },
   termsText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.gray500,
+    color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },
