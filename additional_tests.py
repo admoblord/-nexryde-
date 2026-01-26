@@ -7,7 +7,7 @@ Tests edge cases and AI assistant responses
 import requests
 import json
 
-BASE_URL = "https://nigerian-rides.preview.emergentagent.com/api"
+BASE_URL = "https://rosy-rideshare.preview.emergentagent.com/api"
 
 def test_ai_assistants():
     print("🤖 Testing AI Assistant Responses")
