@@ -81,7 +81,7 @@ export default function LoginScreen() {
               </View>
               
               <Text style={styles.welcomeText}>Welcome to</Text>
-              <Text style={styles.brandText}>KODA</Text>
+              <Text style={styles.brandText}>NEXRYDE</Text>
               <Text style={styles.subtitleText}>Nigeria's Premium Ride Experience</Text>
               
               {/* Rose divider */}

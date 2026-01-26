@@ -111,8 +111,8 @@ export default function RegisterScreen() {
               <View style={styles.titleRose}>
                 <FloatingRoseBloom />
               </View>
-              <Text style={styles.title}>Join KODA</Text>
-              <Text style={styles.subtitle}>Choose how you want to use KODA</Text>
+              <Text style={styles.title}>Join NEXRYDE</Text>
+              <Text style={styles.subtitle}>Choose how you want to use NEXRYDE</Text>
             </View>
 
             {/* Role Selection */}
