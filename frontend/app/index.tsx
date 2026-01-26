@@ -1,59 +1,27 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ActivityIndicator,
-  TouchableOpacity,
   Platform,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function SplashScreen() {
-  const router = useRouter();
   const { isAuthenticated, user } = useAppStore();
-  const [showButton, setShowButton] = useState(false);
 
-  useEffect(() => {
-    // Show button after delay
-    const timer = setTimeout(() => {
-      setShowButton(true);
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const navigateToLogin = () => {
-    try {
-      // Try router first
-      router.push('/(auth)/login');
-    } catch (e) {
-      // Fallback for web
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.location.href = '/(auth)/login';
-      }
-    }
-  };
-
-  const navigateToHome = () => {
-    try {
-      router.push('/(tabs)/home');
-    } catch (e) {
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.location.href = '/(tabs)/home';
-      }
-    }
-  };
-
-  const handleContinue = () => {
+  // On web, redirect immediately
+  if (Platform.OS === 'web') {
     if (isAuthenticated && user) {
-      navigateToHome();
-    } else {
-      navigateToLogin();
+      return <Redirect href="/(tabs)/home" />;
     }
-  };
+    return <Redirect href="/(auth)/login" />;
+  }
 
+  // On native, show splash screen (native handles splash screen differently)
   return (
     <View style={styles.container}>
       <View style={styles.logoContainer}>
@@ -65,19 +33,8 @@ export default function SplashScreen() {
       </View>
       
       <View style={styles.footer}>
-        {!showButton ? (
-          <>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Loading...</Text>
-          </>
-        ) : (
-          <TouchableOpacity 
-            style={styles.continueButton}
-            onPress={handleContinue}
-          >
-            <Text style={styles.continueText}>Get Started</Text>
-          </TouchableOpacity>
-        )}
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     </View>
   );
@@ -128,16 +85,5 @@ const styles = StyleSheet.create({
     color: COLORS.gray400,
     marginTop: SPACING.md,
     fontSize: FONT_SIZE.md,
-  },
-  continueButton: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.xl * 2,
-    paddingVertical: SPACING.md,
-    borderRadius: 30,
-  },
-  continueText: {
-    color: COLORS.white,
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
   },
 });
