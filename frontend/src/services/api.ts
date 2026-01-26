@@ -247,4 +247,57 @@ export const verifyFace = (userId: string, faceImage: string) =>
 export const verifyFaceAtRideStart = (userId: string, faceImage: string) =>
   api.post(`/drivers/${userId}/verify-face-at-start`, { face_image: faceImage });
 
+// KODA Family
+export const createFamily = (ownerId: string, familyName: string) =>
+  api.post(`/family/create?owner_id=${ownerId}&family_name=${encodeURIComponent(familyName)}`);
+
+export const getFamily = (familyId: string) =>
+  api.get(`/family/${familyId}`);
+
+export const addFamilyMember = (familyId: string, phone: string, name: string, relationship: string) =>
+  api.post(`/family/${familyId}/add-member?phone=${phone}&name=${encodeURIComponent(name)}&relationship=${relationship}`);
+
+export const removeFamilyMember = (familyId: string, memberPhone: string) =>
+  api.delete(`/family/${familyId}/member/${memberPhone}`);
+
+export const bookForFamilyMember = (familyId: string, bookerId: string, memberPhone: string, pickup: any, dropoff: any) =>
+  api.post(`/family/${familyId}/book-for-member`, {
+    booker_id: bookerId,
+    member_phone: memberPhone,
+    pickup_lat: pickup.lat,
+    pickup_lng: pickup.lng,
+    pickup_address: pickup.address,
+    dropoff_lat: dropoff.lat,
+    dropoff_lng: dropoff.lng,
+    dropoff_address: dropoff.address
+  });
+
+export const triggerFamilySafetyAlert = (familyId: string, memberId: string, lat: number, lng: number) =>
+  api.post(`/family/${familyId}/safety-alert?member_id=${memberId}&location_lat=${lat}&location_lng=${lng}`);
+
+// Driver Certification
+export const getDriverCertification = (userId: string) =>
+  api.get(`/drivers/${userId}/certification`);
+
+// Women-Only Mode
+export const toggleWomenOnlyMode = (userId: string, enabled: boolean) =>
+  api.post(`/users/${userId}/women-only-mode?enabled=${enabled}`);
+
+export const verifyGender = (userId: string, gender: string) =>
+  api.post(`/users/${userId}/verify-gender?gender=${gender}`);
+
+export const getAvailableFemaleDrivers = (lat: number, lng: number) =>
+  api.get(`/drivers/available-female?lat=${lat}&lng=${lng}`);
+
+// Earnings Predictor
+export const predictEarnings = (userId: string, hours: number = 8) =>
+  api.get(`/ai/earnings-predictor/${userId}?hours_to_drive=${hours}`);
+
+// Pidgin English AI
+export const askRiderAssistantPidgin = (userId: string, question: string) =>
+  api.get(`/ai/rider-assistant-pidgin?user_id=${userId}&question=${encodeURIComponent(question)}`);
+
+export const askDriverAssistantPidgin = (userId: string, question: string) =>
+  api.get(`/ai/driver-assistant-pidgin?user_id=${userId}&question=${encodeURIComponent(question)}`);
+
 export default api;
