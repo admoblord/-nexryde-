@@ -226,7 +226,7 @@ export default function FamilyModeScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>KODA Family</Text>
+          <Text style={styles.title}>NEXRYDE Family</Text>
         </View>
 
         {!family ? (
@@ -236,7 +236,7 @@ export default function FamilyModeScreen() {
               <View style={styles.infoHeader}>
                 <Ionicons name="people" size={48} color={COLORS.primary} />
                 <View style={styles.infoContent}>
-                  <Text style={styles.infoTitle}>Create Your KODA Family</Text>
+                  <Text style={styles.infoTitle}>Create Your NEXRYDE Family</Text>
                   <Text style={styles.infoText}>
                     Add up to 10 family members to book rides for them, track their trips, and keep everyone safe.
                   </Text>

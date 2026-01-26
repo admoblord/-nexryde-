@@ -22,7 +22,7 @@ export default function SubscriptionScreen() {
 
   const handleSubscribe = () => {
     Alert.alert(
-      'Subscribe to KODA',
+      'Subscribe to NEXRYDE',
       `Pay ${CURRENCY}${SUBSCRIPTION_PRICE.toLocaleString()} for 30 days of unlimited earnings with zero commission.`,
       [
         { text: 'Cancel', style: 'cancel' },
