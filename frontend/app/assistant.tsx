@@ -236,6 +236,15 @@ export default function AIAssistantScreen() {
               <Text style={styles.aiText}>AI Powered</Text>
             </View>
           </View>
+          {/* Language Toggle */}
+          <TouchableOpacity 
+            style={styles.languageToggle}
+            onPress={() => setLanguage(language === 'english' ? 'pidgin' : 'english')}
+          >
+            <Text style={styles.languageToggleText}>
+              {language === 'english' ? '🇳🇬 Pidgin' : '🇬🇧 English'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         {/* Messages */}
@@ -253,7 +262,9 @@ export default function AIAssistantScreen() {
         {loading && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="small" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Thinking...</Text>
+            <Text style={styles.loadingText}>
+              {language === 'pidgin' ? 'E dey think...' : 'Thinking...'}
+            </Text>
           </View>
         )}
 
@@ -261,7 +272,7 @@ export default function AIAssistantScreen() {
         <View style={styles.inputContainer}>
           <TextInput
             style={styles.input}
-            placeholder="Ask me anything..."
+            placeholder={language === 'pidgin' ? 'Wetin you wan know?' : 'Ask me anything...'}
             placeholderTextColor={COLORS.gray400}
             value={inputText}
             onChangeText={setInputText}
