@@ -176,14 +176,14 @@ export default function SubscriptionScreen() {
 
         {/* Comparison */}
         <View style={styles.comparisonCard}>
-          <Text style={styles.comparisonTitle}>Why KODA wins</Text>
+          <Text style={styles.comparisonTitle}>Why NEXRYDE wins</Text>
           <View style={styles.comparisonTable}>
             <View style={styles.comparisonRow}>
               <Text style={styles.comparisonLabel}>Earn on ₦10,000 ride</Text>
               <View style={styles.comparisonValues}>
                 <View style={styles.comparisonKoda}>
                   <Text style={styles.comparisonKodaText}>{CURRENCY}10,000</Text>
-                  <Text style={styles.comparisonKodaLabel}>KODA</Text>
+                  <Text style={styles.comparisonKodaLabel}>NEXRYDE</Text>
                 </View>
                 <View style={styles.comparisonOther}>
                   <Text style={styles.comparisonOtherText}>{CURRENCY}7,500</Text>
@@ -211,7 +211,7 @@ export default function SubscriptionScreen() {
           
           <View style={styles.comparisonSavings}>
             <Ionicons name="trending-up" size={20} color={COLORS.success} />
-            <Text style={styles.comparisonSavingsText}>Save {CURRENCY}125,000+ monthly with KODA!</Text>
+            <Text style={styles.comparisonSavingsText}>Save {CURRENCY}125,000+ monthly with NEXRYDE!</Text>
           </View>
         </View>
 
