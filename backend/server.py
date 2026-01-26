@@ -15,6 +15,9 @@ import httpx
 import hashlib
 import json
 
+# Import LLM Chat for AI Assistants
+from emergentintegrations.llm.chat import LlmChat, UserMessage
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -25,6 +28,9 @@ db = client[os.environ.get('DB_NAME', 'koda_db')]
 
 # Google Maps API Key
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
+
+# Emergent LLM Key for AI Assistants
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 # Create the main app
 app = FastAPI(title="KODA API", version="2.0.0")
