@@ -14,26 +14,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
-// Conditionally import map components only for native platforms
-let MapView: any = null;
-let Marker: any = null;
-let Polyline: any = null;
-let PROVIDER_GOOGLE: any = null;
-
-if (Platform.OS !== 'web') {
-  const maps = require('react-native-maps');
-  MapView = maps.default;
-  Marker = maps.Marker;
-  Polyline = maps.Polyline;
-  PROVIDER_GOOGLE = maps.PROVIDER_GOOGLE;
-}
-
 const { width, height } = Dimensions.get('window');
 
 export default function TrackingScreen() {
   const router = useRouter();
   const { pickupLocation, dropoffLocation } = useAppStore();
-  const mapRef = React.useRef<MapView>(null);
   
   const [status, setStatus] = useState<'searching' | 'found' | 'arriving' | 'arrived' | 'trip'>('searching');
   const [eta, setEta] = useState(5);
@@ -71,11 +56,9 @@ export default function TrackingScreen() {
   useEffect(() => {
     const timer1 = setTimeout(() => {
       setStatus('found');
-      notificationService.notifyDriverAssigned(driver.name, driver.car, 5);
     }, 2000);
     const timer2 = setTimeout(() => {
       setStatus('arriving');
-      notificationService.notifyDriverArriving(driver.name, 5);
     }, 4000);
     
     return () => {
@@ -90,7 +73,6 @@ export default function TrackingScreen() {
         setEta(prev => {
           if (prev <= 1) {
             setStatus('arrived');
-            notificationService.notifyDriverArrived(driver.name, driver.plate);
             return 0;
           }
           return prev - 1;
@@ -99,17 +81,6 @@ export default function TrackingScreen() {
       return () => clearInterval(interval);
     }
   }, [status]);
-
-  // Fit map to show all markers
-  useEffect(() => {
-    if (mapRef.current && status !== 'searching') {
-      const coordinates = [pickup, dropoff, driverLocation];
-      mapRef.current.fitToCoordinates(coordinates, {
-        edgePadding: { top: 100, right: 50, bottom: 300, left: 50 },
-        animated: true,
-      });
-    }
-  }, [status, driverLocation]);
 
   const handleCancel = () => {
     Alert.alert(
@@ -137,18 +108,6 @@ export default function TrackingScreen() {
   const handleShareTrip = () => {
     Alert.alert('Share Trip', 'Trip details shared with emergency contacts');
   };
-
-  // Dark map style
-  const mapStyle = [
-    { "featureType": "all", "elementType": "geometry", "stylers": [{ "color": "#242f3e" }] },
-    { "featureType": "all", "elementType": "labels.text.stroke", "stylers": [{ "lightness": -80 }] },
-    { "featureType": "administrative", "elementType": "labels.text.fill", "stylers": [{ "color": "#746855" }] },
-    { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#38414e" }] },
-    { "featureType": "road", "elementType": "geometry.stroke", "stylers": [{ "color": "#212a37" }] },
-    { "featureType": "road", "elementType": "labels.text.fill", "stylers": [{ "color": "#9ca5b3" }] },
-    { "featureType": "road.highway", "elementType": "geometry", "stylers": [{ "color": "#746855" }] },
-    { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#17263c" }] },
-  ];
 
   const renderSearching = () => (
     <View style={styles.searchingContainer}>
@@ -216,6 +175,39 @@ export default function TrackingScreen() {
     </View>
   );
 
+  // Map placeholder for web preview
+  const renderMapPlaceholder = () => (
+    <View style={styles.mapPlaceholder}>
+      <View style={styles.mapPlaceholderContent}>
+        <Ionicons name="map" size={60} color={COLORS.accent} />
+        <Text style={styles.mapPlaceholderTitle}>Live Map</Text>
+        <Text style={styles.mapPlaceholderSubtext}>Available on mobile app</Text>
+        
+        {status !== 'searching' && (
+          <View style={styles.mapDriverInfo}>
+            <View style={styles.mapDriverDot} />
+            <Text style={styles.mapDriverText}>
+              Driver is {status === 'arrived' ? 'here!' : `${eta} min away`}
+            </Text>
+          </View>
+        )}
+      </View>
+      
+      {/* Route Info Overlay */}
+      <View style={styles.routeOverlay}>
+        <View style={styles.routePoint}>
+          <View style={styles.routePickupDot} />
+          <Text style={styles.routeText} numberOfLines={1}>{pickup.address}</Text>
+        </View>
+        <View style={styles.routeLineH} />
+        <View style={styles.routePoint}>
+          <View style={styles.routeDestDot} />
+          <Text style={styles.routeText} numberOfLines={1}>{dropoff.address}</Text>
+        </View>
+      </View>
+    </View>
+  );
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -231,68 +223,7 @@ export default function TrackingScreen() {
 
       {/* Map */}
       <View style={styles.mapContainer}>
-        <MapView
-          ref={mapRef}
-          style={styles.map}
-          provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-          initialRegion={{
-            latitude: pickup.latitude,
-            longitude: pickup.longitude,
-            latitudeDelta: 0.02,
-            longitudeDelta: 0.02,
-          }}
-          showsUserLocation={false}
-          showsTraffic={true}
-          customMapStyle={mapStyle}
-        >
-          {/* Pickup Marker */}
-          <Marker coordinate={pickup} anchor={{ x: 0.5, y: 0.5 }}>
-            <View style={styles.pickupMarker}>
-              <View style={styles.pickupMarkerInner}>
-                <View style={styles.pickupDot} />
-              </View>
-            </View>
-          </Marker>
-
-          {/* Dropoff Marker */}
-          <Marker coordinate={dropoff} anchor={{ x: 0.5, y: 1 }}>
-            <View style={styles.dropoffMarker}>
-              <View style={styles.dropoffPin}>
-                <Ionicons name="location" size={20} color={COLORS.white} />
-              </View>
-            </View>
-          </Marker>
-
-          {/* Driver Marker */}
-          {status !== 'searching' && (
-            <Marker coordinate={driverLocation} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.driverMarker}>
-                <Ionicons name="car" size={18} color={COLORS.primary} />
-              </View>
-            </Marker>
-          )}
-
-          {/* Route Line */}
-          <Polyline
-            coordinates={[pickup, dropoff]}
-            strokeWidth={4}
-            strokeColor={COLORS.accent}
-            lineDashPattern={[1]}
-          />
-        </MapView>
-
-        {/* Route Info Overlay */}
-        <View style={styles.routeOverlay}>
-          <View style={styles.routePoint}>
-            <View style={styles.routePickupDot} />
-            <Text style={styles.routeText} numberOfLines={1}>{pickup.address}</Text>
-          </View>
-          <View style={styles.routeLineH} />
-          <View style={styles.routePoint}>
-            <View style={styles.routeDestDot} />
-            <Text style={styles.routeText} numberOfLines={1}>{dropoff.address}</Text>
-          </View>
-        </View>
+        {renderMapPlaceholder()}
       </View>
 
       {/* Bottom Sheet */}
@@ -379,50 +310,48 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
   },
-  map: {
+  mapPlaceholder: {
     flex: 1,
+    backgroundColor: COLORS.gray100,
+    borderRadius: BORDER_RADIUS.xxl,
   },
-  pickupMarker: {
+  mapPlaceholderContent: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  pickupMarkerInner: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+  mapPlaceholderTitle: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginTop: SPACING.md,
+  },
+  mapPlaceholderSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+  },
+  mapDriverInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
     backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: BORDER_RADIUS.full,
     ...SHADOWS.md,
   },
-  pickupDot: {
+  mapDriverDot: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.success,
-  },
-  dropoffMarker: {
-    alignItems: 'center',
-  },
-  dropoffPin: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.error,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.lg,
-  },
-  driverMarker: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
     backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.white,
-    ...SHADOWS.lg,
+    marginRight: SPACING.sm,
+  },
+  mapDriverText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
   routeOverlay: {
     position: 'absolute',
