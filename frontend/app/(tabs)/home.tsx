@@ -246,6 +246,39 @@ export default function HomeScreen() {
               </TouchableOpacity>
             </Card>
 
+            {/* Quick Actions for Driver */}
+            <View style={styles.driverQuickActions}>
+              <TouchableOpacity 
+                style={styles.driverQuickAction}
+                onPress={() => router.push('/assistant')}
+              >
+                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.info + '20' }]}>
+                  <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.info} />
+                </View>
+                <Text style={styles.driverQuickText}>AI Assistant</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.driverQuickAction}
+                onPress={() => router.push('/driver/leaderboard')}
+              >
+                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.accent + '20' }]}>
+                  <Ionicons name="trophy" size={24} color={COLORS.accent} />
+                </View>
+                <Text style={styles.driverQuickText}>Leaderboard</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.driverQuickAction}
+                onPress={() => router.push('/(tabs)/safety')}
+              >
+                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.success + '20' }]}>
+                  <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
+                </View>
+                <Text style={styles.driverQuickText}>Safety</Text>
+              </TouchableOpacity>
+            </View>
+
             {/* Pending Trips */}
             {isOnline && (
               <TouchableOpacity 
@@ -295,6 +328,21 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             </Card>
+
+            {/* AI Assistant for Riders */}
+            <TouchableOpacity 
+              style={styles.aiAssistantCard}
+              onPress={() => router.push('/assistant')}
+            >
+              <View style={styles.aiAssistantIcon}>
+                <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.white} />
+              </View>
+              <View style={styles.aiAssistantInfo}>
+                <Text style={styles.aiAssistantTitle}>Need Help?</Text>
+                <Text style={styles.aiAssistantSubtext}>Ask our AI Assistant anything</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.white} />
+            </TouchableOpacity>
 
             {/* Info Cards */}
             <Card style={styles.infoCard}>
