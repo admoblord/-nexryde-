@@ -435,15 +435,18 @@ backend:
 frontend:
   - task: "Splash Screen"
     implemented: true
-    working: true
+    working: false
     file: "app/index.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
         - comment: "KODA logo and loading animation displayed"
+        - working: false
+        - agent: "testing"
+        - comment: "❌ ISSUE: Splash screen displays correctly (KODA logo, tagline 'Drive Your Way', loading indicator) but automatic navigation to login screen after 2 seconds is not working. User stays on splash screen indefinitely. Authentication state management or routing logic needs fixing."
 
   - task: "Login Screen"
     implemented: true
@@ -456,6 +459,9 @@ frontend:
         - working: true
         - agent: "main"
         - comment: "Phone input with Nigerian flag and +234 prefix"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Login screen works perfectly when accessed directly. Nigerian flag 🇳🇬 and +234 prefix displayed, phone input accepts numbers, Continue button functional, all 3 feature highlights visible (No Commission, Keep 100% Earnings, Verified Drivers). Minor: Automatic navigation from splash screen needs fixing."
 
   - task: "OTP Verification Screen"
     implemented: true
@@ -538,11 +544,14 @@ frontend:
     file: "app/assistant.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
         - comment: "NEW: Chat-style AI assistant for both riders and drivers with quick suggestions"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: AI Assistant screen loads correctly. Language toggle (English/Pidgin) working, chat interface present with quick suggestion chips, message input functional (works via Enter key), welcome messages display properly for both rider and driver modes. Minor: Visual send button needs better selector but core functionality works."
 
   - task: "Driver Leaderboard Screen"
     implemented: true
@@ -550,11 +559,14 @@ frontend:
     file: "app/driver/leaderboard.tsx"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
         - comment: "NEW: Earnings leaderboard, rating leaderboard, challenges tab, streaks & badges"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Leaderboard screen fully functional. All three tabs (Earnings, Rating, Challenges) present and clickable, period filter (Daily/Weekly/Monthly) working for earnings tab, proper empty state messages ('No data available', 'No active challenges') displayed as expected for MVP. Tab switching smooth and responsive."
 
   - task: "Home Screen Quick Actions"
     implemented: true
