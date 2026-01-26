@@ -52,7 +52,6 @@ export default function RegisterScreen() {
       setUser(response.data.user);
       setIsAuthenticated(true);
       
-      // Navigate to the appropriate app based on role
       if (role === 'driver') {
         router.replace('/(driver-tabs)/driver-home');
       } else {
@@ -84,7 +83,23 @@ export default function RegisterScreen() {
           {/* Header */}
           <View style={styles.header}>
             <Text style={styles.title}>Join KODA</Text>
-            <Text style={styles.subtitle}>Create your account to get started</Text>
+            <Text style={styles.subtitle}>Nigeria's Premium Ride Platform</Text>
+          </View>
+
+          {/* Trust Badges */}
+          <View style={styles.trustBadges}>
+            <View style={styles.trustBadge}>
+              <Ionicons name="shield-checkmark" size={14} color={COLORS.success} />
+              <Text style={styles.trustBadgeText}>Verified</Text>
+            </View>
+            <View style={styles.trustBadge}>
+              <Ionicons name="lock-closed" size={14} color={COLORS.info} />
+              <Text style={styles.trustBadgeText}>Secure</Text>
+            </View>
+            <View style={styles.trustBadge}>
+              <Ionicons name="star" size={14} color={COLORS.accent} />
+              <Text style={styles.trustBadgeText}>Trusted</Text>
+            </View>
           </View>
 
           {/* Form */}
@@ -95,7 +110,7 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your full name"
-                placeholderTextColor={COLORS.gray400}
+                placeholderTextColor={COLORS.gray500}
                 value={name}
                 onChangeText={setName}
                 autoCapitalize="words"
@@ -108,7 +123,7 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your email"
-                placeholderTextColor={COLORS.gray400}
+                placeholderTextColor={COLORS.gray500}
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -117,55 +132,73 @@ export default function RegisterScreen() {
             </View>
 
             {/* Role Selection */}
-            <Text style={styles.label}>How will you use KODA?</Text>
-            <Text style={styles.roleHint}>Choose one - this determines your app experience</Text>
+            <Text style={styles.roleLabel}>Choose Your Experience</Text>
             
             <View style={styles.roleContainer}>
               {/* Rider Option */}
               <TouchableOpacity
                 style={[
                   styles.roleCard,
-                  role === 'rider' && styles.roleCardActive
+                  role === 'rider' && styles.roleCardActiveRider
                 ]}
                 onPress={() => setRole('rider')}
                 activeOpacity={0.8}
               >
+                {role === 'rider' && (
+                  <View style={styles.selectedIndicator}>
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.info} />
+                  </View>
+                )}
+                
                 <View style={[
                   styles.roleIconWrap,
-                  role === 'rider' && styles.roleIconWrapActive
+                  role === 'rider' ? styles.roleIconWrapActiveRider : null
                 ]}>
                   <Ionicons 
                     name="person" 
-                    size={32} 
-                    color={role === 'rider' ? COLORS.primary : COLORS.gray400} 
+                    size={36} 
+                    color={role === 'rider' ? COLORS.info : COLORS.gray400} 
                   />
                 </View>
+                
                 <Text style={[
                   styles.roleTitle,
-                  role === 'rider' && styles.roleTitleActive
-                ]}>I'm a Rider</Text>
-                <Text style={styles.roleDesc}>Book rides & travel safely</Text>
+                  role === 'rider' && styles.roleTitleActiveRider
+                ]}>Rider</Text>
+                <Text style={styles.roleTagline}>Book rides & travel safely</Text>
+                
+                <View style={styles.roleDivider} />
                 
                 <View style={styles.roleFeatures}>
                   <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
-                    <Text style={styles.roleFeatureText}>Book rides instantly</Text>
+                    <View style={styles.featureCheck}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Book rides in seconds</Text>
                   </View>
                   <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
-                    <Text style={styles.roleFeatureText}>Track your trip live</Text>
+                    <View style={styles.featureCheck}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Live trip tracking</Text>
                   </View>
                   <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
-                    <Text style={styles.roleFeatureText}>Pay with cash or transfer</Text>
+                    <View style={styles.featureCheck}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Share rides with family</Text>
+                  </View>
+                  <View style={styles.roleFeature}>
+                    <View style={styles.featureCheck}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Pay cash or transfer</Text>
                   </View>
                 </View>
                 
-                {role === 'rider' && (
-                  <View style={styles.selectedBadge}>
-                    <Ionicons name="checkmark-circle" size={20} color={COLORS.accent} />
-                  </View>
-                )}
+                <View style={[styles.rolePriceTag, { backgroundColor: COLORS.infoSoft }]}>
+                  <Text style={[styles.rolePriceText, { color: COLORS.info }]}>FREE</Text>
+                </View>
               </TouchableOpacity>
 
               {/* Driver Option */}
@@ -177,51 +210,86 @@ export default function RegisterScreen() {
                 onPress={() => setRole('driver')}
                 activeOpacity={0.8}
               >
+                {role === 'driver' && (
+                  <View style={styles.selectedIndicator}>
+                    <Ionicons name="checkmark-circle" size={24} color={COLORS.accent} />
+                  </View>
+                )}
+                
+                <View style={styles.popularBadge}>
+                  <Ionicons name="trending-up" size={12} color={COLORS.primary} />
+                  <Text style={styles.popularBadgeText}>Popular</Text>
+                </View>
+                
                 <View style={[
                   styles.roleIconWrap,
-                  role === 'driver' && styles.roleIconWrapActiveDriver
+                  role === 'driver' ? styles.roleIconWrapActiveDriver : null
                 ]}>
                   <Ionicons 
                     name="car-sport" 
-                    size={32} 
-                    color={role === 'driver' ? COLORS.white : COLORS.gray400} 
+                    size={36} 
+                    color={role === 'driver' ? COLORS.primary : COLORS.gray400} 
                   />
                 </View>
+                
                 <Text style={[
                   styles.roleTitle,
                   role === 'driver' && styles.roleTitleActiveDriver
-                ]}>I'm a Driver</Text>
-                <Text style={styles.roleDesc}>Earn money on your terms</Text>
+                ]}>Driver</Text>
+                <Text style={styles.roleTagline}>Earn money, be your own boss</Text>
+                
+                <View style={styles.roleDivider} />
                 
                 <View style={styles.roleFeatures}>
                   <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
-                    <Text style={styles.roleFeatureText}>Keep 100% of earnings</Text>
+                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Keep 100% of fares</Text>
                   </View>
                   <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
-                    <Text style={styles.roleFeatureText}>₦25,000/month flat fee</Text>
-                  </View>
-                  <View style={styles.roleFeature}>
-                    <Ionicons name="checkmark" size={14} color={COLORS.success} />
+                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
                     <Text style={styles.roleFeatureText}>Zero commission forever</Text>
+                  </View>
+                  <View style={styles.roleFeature}>
+                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Flexible working hours</Text>
+                  </View>
+                  <View style={styles.roleFeature}>
+                    <View style={[styles.featureCheck, { backgroundColor: COLORS.success }]}>
+                      <Ionicons name="checkmark" size={12} color={COLORS.white} />
+                    </View>
+                    <Text style={styles.roleFeatureText}>Weekly challenges & rewards</Text>
                   </View>
                 </View>
                 
-                {role === 'driver' && (
-                  <View style={styles.selectedBadge}>
-                    <Ionicons name="checkmark-circle" size={20} color={COLORS.accent} />
-                  </View>
-                )}
+                <View style={[styles.rolePriceTag, { backgroundColor: COLORS.accentSoft }]}>
+                  <Text style={[styles.rolePriceText, { color: COLORS.accent }]}>₦25K/month</Text>
+                </View>
               </TouchableOpacity>
             </View>
+
+            {/* Driver Note */}
+            {role === 'driver' && (
+              <View style={styles.driverNote}>
+                <Ionicons name="information-circle" size={20} color={COLORS.accent} />
+                <Text style={styles.driverNoteText}>
+                  Flat ₦25,000/month subscription. No percentage cuts. You keep every naira you earn!
+                </Text>
+              </View>
+            )}
           </View>
 
           {/* Submit Button */}
           <TouchableOpacity
             style={[
               styles.submitButton,
-              (!name.trim() || !role) && styles.submitButtonDisabled
+              (!name.trim() || !role) && styles.submitButtonDisabled,
+              role === 'driver' && name.trim() && styles.submitButtonDriver
             ]}
             onPress={handleRegister}
             disabled={loading || !name.trim() || !role}
@@ -231,13 +299,22 @@ export default function RegisterScreen() {
               <Text style={styles.submitButtonText}>Creating Account...</Text>
             ) : (
               <>
-                <Text style={styles.submitButtonText}>Create Account</Text>
+                <Text style={styles.submitButtonText}>
+                  {role === 'driver' ? 'Become a Driver' : role === 'rider' ? 'Start Riding' : 'Create Account'}
+                </Text>
                 <View style={styles.submitArrow}>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+                  <Ionicons name="arrow-forward" size={20} color={role === 'driver' ? COLORS.accent : COLORS.primary} />
                 </View>
               </>
             )}
           </TouchableOpacity>
+
+          {/* Terms */}
+          <Text style={styles.termsText}>
+            By creating an account, you agree to our{' '}
+            <Text style={styles.termsLink}>Terms</Text> and{' '}
+            <Text style={styles.termsLink}>Privacy Policy</Text>
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -263,28 +340,47 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
   },
   header: {
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.md,
   },
   title: {
     fontSize: FONT_SIZE.xxxl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
-    marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
     color: COLORS.gray400,
+    marginTop: SPACING.xs,
+  },
+  trustBadges: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  trustBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.xs,
+  },
+  trustBadgeText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.gray300,
+    fontWeight: '600',
   },
   form: {
-    marginBottom: SPACING.xl,
+    marginBottom: SPACING.lg,
   },
   label: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.gray300,
     marginBottom: SPACING.sm,
   },
   inputContainer: {
@@ -293,7 +389,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.08)',
     borderRadius: BORDER_RADIUS.xl,
     paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
@@ -304,41 +400,69 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.md,
     color: COLORS.white,
   },
-  roleHint: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray500,
+  roleLabel: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.white,
+    marginTop: SPACING.md,
     marginBottom: SPACING.md,
+    textAlign: 'center',
   },
   roleContainer: {
+    flexDirection: 'row',
     gap: SPACING.md,
   },
   roleCard: {
+    flex: 1,
     backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.md,
     borderWidth: 2,
     borderColor: 'rgba(255,255,255,0.1)',
     position: 'relative',
+    alignItems: 'center',
   },
-  roleCardActive: {
+  roleCardActiveRider: {
     backgroundColor: COLORS.white,
-    borderColor: COLORS.accent,
+    borderColor: COLORS.info,
   },
   roleCardActiveDriver: {
     backgroundColor: COLORS.accent,
     borderColor: COLORS.accent,
   },
+  selectedIndicator: {
+    position: 'absolute',
+    top: SPACING.sm,
+    right: SPACING.sm,
+  },
+  popularBadge: {
+    position: 'absolute',
+    top: -10,
+    backgroundColor: COLORS.accent,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    gap: 4,
+  },
+  popularBadgeText: {
+    fontSize: FONT_SIZE.xxs,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
   roleIconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
-  roleIconWrapActive: {
-    backgroundColor: COLORS.accentSoft,
+  roleIconWrapActiveRider: {
+    backgroundColor: COLORS.infoSoft,
   },
   roleIconWrapActiveDriver: {
     backgroundColor: 'rgba(0,0,0,0.15)',
@@ -347,49 +471,88 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xl,
     fontWeight: '800',
     color: COLORS.white,
-    marginBottom: SPACING.xs,
   },
-  roleTitleActive: {
+  roleTitleActiveRider: {
     color: COLORS.primary,
   },
   roleTitleActiveDriver: {
     color: COLORS.primary,
   },
-  roleDesc: {
-    fontSize: FONT_SIZE.sm,
+  roleTagline: {
+    fontSize: FONT_SIZE.xs,
     color: COLORS.gray400,
-    marginBottom: SPACING.md,
+    marginTop: 2,
+    textAlign: 'center',
+  },
+  roleDivider: {
+    width: '80%',
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginVertical: SPACING.sm,
   },
   roleFeatures: {
-    gap: SPACING.sm,
+    width: '100%',
+    gap: SPACING.xs,
   },
   roleFeature: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
   },
-  roleFeatureText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray400,
+  featureCheck: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.info,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  selectedBadge: {
-    position: 'absolute',
-    top: SPACING.md,
-    right: SPACING.md,
+  roleFeatureText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.gray400,
+    flex: 1,
+  },
+  rolePriceTag: {
+    marginTop: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  rolePriceText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+  },
+  driverNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(255,215,0,0.1)',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    marginTop: SPACING.md,
+    gap: SPACING.sm,
+  },
+  driverNoteText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.accent,
+    lineHeight: 20,
   },
   submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.accent,
+    backgroundColor: COLORS.gray600,
     paddingVertical: SPACING.lg,
     borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.sm,
-    ...SHADOWS.gold,
+    marginBottom: SPACING.md,
   },
   submitButtonDisabled: {
-    backgroundColor: COLORS.gray600,
-    shadowOpacity: 0,
+    opacity: 0.5,
+  },
+  submitButtonDriver: {
+    backgroundColor: COLORS.accent,
+    ...SHADOWS.gold,
   },
   submitButtonText: {
     fontSize: FONT_SIZE.lg,
@@ -403,5 +566,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  termsText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.gray500,
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  termsLink: {
+    color: COLORS.accent,
+    fontWeight: '600',
   },
 });
