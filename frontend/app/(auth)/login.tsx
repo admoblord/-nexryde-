@@ -3,185 +3,192 @@ import {
   View,
   Text,
   TextInput,
-  StyleSheet,
   TouchableOpacity,
+  StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Alert,
   Dimensions,
   ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { sendOTP } from '@/src/services/api';
+import { useAppStore } from '@/src/store/appStore';
+import { FallingRoses, RosePetalsStatic } from '@/src/components/FallingRoses';
 
-const { width } = Dimensions.get('window');
+const { width, height } = Dimensions.get('window');
 
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
-  const [focused, setFocused] = useState(false);
+  const { setPhone: storePhone } = useAppStore();
 
-  const formatPhone = (text: string) => {
-    const cleaned = text.replace(/[^0-9]/g, '');
-    setPhone(cleaned);
-  };
-
-  const handleSendOTP = async () => {
-    if (phone.length < 10) {
-      Alert.alert('Invalid Phone', 'Please enter a valid phone number');
-      return;
-    }
-
+  const handleContinue = async () => {
+    if (phone.length < 10) return;
     setLoading(true);
+    storePhone(phone);
+    
     try {
-      const formattedPhone = phone.startsWith('0') ? phone : `0${phone}`;
-      const response = await sendOTP(formattedPhone);
-      
-      router.push({
-        pathname: '/(auth)/verify',
-        params: { phone: formattedPhone, otp: response.data.otp }
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: `+234${phone}` }),
       });
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to send OTP');
-    } finally {
-      setLoading(false);
+      
+      if (response.ok) {
+        router.push({ pathname: '/(auth)/verify', params: { phone } });
+      }
+    } catch (error) {
+      console.error('Error:', error);
     }
+    setLoading(false);
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardView}
-      >
-        <ScrollView 
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#1A0A0F', '#0D0508', '#1A0A0F']}
+        style={StyleSheet.absoluteFillObject}
+      />
+      
+      {/* Static Rose Background */}
+      <RosePetalsStatic count={15} />
+      
+      {/* Falling Roses - Light on login for better UX */}
+      <FallingRoses intensity="light" />
+      
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardView}
         >
-          {/* Header with Logo */}
-          <View style={styles.header}>
-            <View style={styles.logoContainer}>
-              <View style={styles.logoOuter}>
-                <Text style={styles.logoText}>K</Text>
+          <ScrollView 
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* Header Section */}
+            <View style={styles.header}>
+              {/* Logo */}
+              <View style={styles.logoContainer}>
+                <View style={styles.logoOuter}>
+                  <View style={styles.logoInner}>
+                    <Text style={styles.logoText}>K</Text>
+                  </View>
+                </View>
+              </View>
+              
+              <Text style={styles.welcomeText}>Welcome to</Text>
+              <Text style={styles.brandText}>KODA</Text>
+              <Text style={styles.subtitleText}>Nigeria's Premium Ride Experience</Text>
+              
+              {/* Rose divider */}
+              <View style={styles.roseDivider}>
+                <View style={styles.dividerLine} />
+                <View style={styles.dividerPetal} />
+                <View style={styles.dividerLine} />
               </View>
             </View>
-            <Text style={styles.welcomeText}>Welcome to</Text>
-            <Text style={styles.brandName}>KODA</Text>
-            <Text style={styles.subtitle}>Nigeria's Premium Ride Platform</Text>
-          </View>
 
-          {/* Phone Input Section */}
-          <View style={styles.formSection}>
-            <Text style={styles.inputLabel}>Enter your phone number</Text>
-            <View style={[
-              styles.phoneContainer,
-              focused && styles.phoneContainerFocused
-            ]}>
-              <View style={styles.countryCode}>
-                <Text style={styles.flagEmoji}>🇳🇬</Text>
-                <Text style={styles.codeText}>+234</Text>
-                <View style={styles.divider} />
+            {/* Login Form */}
+            <View style={styles.formSection}>
+              <Text style={styles.formTitle}>Enter your phone number</Text>
+              
+              <View style={styles.inputContainer}>
+                <View style={styles.prefixContainer}>
+                  <Text style={styles.flag}>🇳🇬</Text>
+                  <Text style={styles.prefix}>+234</Text>
+                  <View style={styles.prefixDivider} />
+                </View>
+                <TextInput
+                  style={styles.input}
+                  placeholder="801 234 5678"
+                  placeholderTextColor={COLORS.gray500}
+                  value={phone}
+                  onChangeText={(text) => setPhone(text.replace(/[^0-9]/g, ''))}
+                  keyboardType="phone-pad"
+                  maxLength={11}
+                />
               </View>
-              <TextInput
-                style={styles.phoneInput}
-                placeholder="801 234 5678"
-                placeholderTextColor={COLORS.gray400}
-                value={phone}
-                onChangeText={formatPhone}
-                keyboardType="phone-pad"
-                maxLength={11}
-                onFocus={() => setFocused(true)}
-                onBlur={() => setFocused(false)}
+
+              <TouchableOpacity
+                style={[styles.continueButton, phone.length < 10 && styles.continueButtonDisabled]}
+                onPress={handleContinue}
+                disabled={phone.length < 10 || loading}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={phone.length >= 10 ? [COLORS.accent, COLORS.accentDark] : [COLORS.gray700, COLORS.gray700]}
+                  style={styles.continueGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Text style={[styles.continueText, phone.length < 10 && styles.continueTextDisabled]}>
+                    {loading ? 'Sending...' : 'Continue'}
+                  </Text>
+                  <View style={[styles.continueArrow, phone.length < 10 && styles.continueArrowDisabled]}>
+                    <Ionicons name="arrow-forward" size={18} color={phone.length >= 10 ? COLORS.accent : COLORS.gray500} />
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <Text style={styles.termsText}>
+                By continuing, you agree to our{' '}
+                <Text style={styles.termsLink}>Terms of Service</Text>
+                {' '}and{' '}
+                <Text style={styles.termsLink}>Privacy Policy</Text>
+              </Text>
+            </View>
+
+            {/* Features Section */}
+            <View style={styles.featuresSection}>
+              <FeatureCard
+                icon="ribbon"
+                title="Zero Commission"
+                description="Drivers keep 100% of earnings"
+                color={COLORS.rosePetal2}
+              />
+              <FeatureCard
+                icon="shield-checkmark"
+                title="Premium Safety"
+                description="Verified drivers & live tracking"
+                color={COLORS.rosePetal3}
+              />
+              <FeatureCard
+                icon="diamond"
+                title="Luxury Experience"
+                description="Premium rides, exceptional service"
+                color={COLORS.rosePetal4}
               />
             </View>
-
-            {/* Continue Button */}
-            <TouchableOpacity
-              style={[
-                styles.continueButton,
-                phone.length >= 10 && styles.continueButtonActive
-              ]}
-              onPress={handleSendOTP}
-              disabled={loading || phone.length < 10}
-              activeOpacity={0.8}
-            >
-              {loading ? (
-                <Text style={styles.continueText}>Sending...</Text>
-              ) : (
-                <>
-                  <Text style={[
-                    styles.continueText,
-                    phone.length >= 10 && styles.continueTextActive
-                  ]}>Continue</Text>
-                  <View style={[
-                    styles.arrowContainer,
-                    phone.length >= 10 && styles.arrowContainerActive
-                  ]}>
-                    <Ionicons 
-                      name="arrow-forward" 
-                      size={20} 
-                      color={phone.length >= 10 ? COLORS.accent : COLORS.gray400} 
-                    />
-                  </View>
-                </>
-              )}
-            </TouchableOpacity>
-
-            <Text style={styles.termsText}>
-              By continuing, you agree to our{' '}
-              <Text style={styles.linkText}>Terms of Service</Text>
-              {' '}and{' '}
-              <Text style={styles.linkText}>Privacy Policy</Text>
-            </Text>
-          </View>
-
-          {/* Features Section */}
-          <View style={styles.featuresSection}>
-            <View style={styles.featureCard}>
-              <View style={[styles.featureIcon, { backgroundColor: COLORS.accentSoft }]}>
-                <Ionicons name="cash-outline" size={24} color={COLORS.accent} />
-              </View>
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>Zero Commission</Text>
-                <Text style={styles.featureDesc}>Drivers keep 100% of earnings</Text>
-              </View>
-            </View>
-
-            <View style={styles.featureCard}>
-              <View style={[styles.featureIcon, { backgroundColor: COLORS.successSoft }]}>
-                <Ionicons name="shield-checkmark-outline" size={24} color={COLORS.success} />
-              </View>
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>Verified Drivers</Text>
-                <Text style={styles.featureDesc}>All drivers are fully verified</Text>
-              </View>
-            </View>
-
-            <View style={styles.featureCard}>
-              <View style={[styles.featureIcon, { backgroundColor: COLORS.infoSoft }]}>
-                <Ionicons name="location-outline" size={24} color={COLORS.info} />
-              </View>
-              <View style={styles.featureContent}>
-                <Text style={styles.featureTitle}>Live Tracking</Text>
-                <Text style={styles.featureDesc}>Real-time trip monitoring</Text>
-              </View>
-            </View>
-          </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
-    </SafeAreaView>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    </View>
   );
 }
+
+const FeatureCard = ({ icon, title, description, color }: any) => (
+  <View style={styles.featureCard}>
+    <View style={[styles.featureIcon, { backgroundColor: `${color}20` }]}>
+      <Ionicons name={icon} size={22} color={color} />
+    </View>
+    <View style={styles.featureContent}>
+      <Text style={styles.featureTitle}>{title}</Text>
+      <Text style={styles.featureDesc}>{description}</Text>
+    </View>
+  </View>
+);
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.primary,
+  },
+  safeArea: {
+    flex: 1,
   },
   keyboardView: {
     flex: 1,
@@ -189,24 +196,33 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     paddingHorizontal: SPACING.xl,
-    paddingTop: SPACING.xl,
-    paddingBottom: SPACING.xxl,
   },
   header: {
     alignItems: 'center',
-    marginBottom: SPACING.xxl,
+    paddingTop: SPACING.xl,
+    marginBottom: SPACING.xl,
   },
   logoContainer: {
     marginBottom: SPACING.lg,
   },
   logoOuter: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: COLORS.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.rose,
+  },
+  logoInner: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.accentLight,
   },
   logoText: {
     fontSize: 44,
@@ -218,143 +234,168 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginBottom: SPACING.xs,
   },
-  brandName: {
+  brandText: {
     fontSize: FONT_SIZE.xxxl,
     fontWeight: '900',
-    color: COLORS.primary,
-    letterSpacing: 6,
+    color: COLORS.white,
+    letterSpacing: 10,
   },
-  subtitle: {
+  subtitleText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textTertiary,
+    color: COLORS.textMuted,
     marginTop: SPACING.xs,
+    letterSpacing: 1,
   },
-  formSection: {
-    marginBottom: SPACING.xxl,
-  },
-  inputLabel: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.md,
-  },
-  phoneContainer: {
+  roseDivider: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray50,
+    marginTop: SPACING.lg,
+    gap: SPACING.sm,
+  },
+  dividerLine: {
+    width: 40,
+    height: 1,
+    backgroundColor: COLORS.accent,
+    opacity: 0.3,
+  },
+  dividerPetal: {
+    width: 10,
+    height: 12,
+    backgroundColor: COLORS.rosePetal3,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 10,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 10,
+    transform: [{ rotate: '-45deg' }],
+    opacity: 0.6,
+  },
+  formSection: {
+    marginBottom: SPACING.xl,
+  },
+  formTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
-    borderWidth: 2,
-    borderColor: COLORS.gray100,
+    borderWidth: 1,
+    borderColor: COLORS.gray700,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
   },
-  phoneContainerFocused: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.white,
-  },
-  countryCode: {
+  prefixContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.gray100,
+    backgroundColor: COLORS.surfaceLight,
   },
-  flagEmoji: {
-    fontSize: 22,
+  flag: {
+    fontSize: 20,
     marginRight: SPACING.sm,
   },
-  codeText: {
+  prefix: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '600',
+    color: COLORS.accent,
   },
-  divider: {
+  prefixDivider: {
     width: 1,
     height: 24,
-    backgroundColor: COLORS.gray300,
+    backgroundColor: COLORS.gray600,
     marginLeft: SPACING.md,
   },
-  phoneInput: {
+  input: {
     flex: 1,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.lg,
     fontSize: FONT_SIZE.lg,
     fontWeight: '600',
-    color: COLORS.textPrimary,
-    letterSpacing: 1,
+    color: COLORS.white,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.lg,
+    letterSpacing: 2,
   },
   continueButton: {
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    marginBottom: SPACING.md,
+    ...SHADOWS.rose,
+  },
+  continueButtonDisabled: {
+    ...SHADOWS.sm,
+  },
+  continueGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.gray100,
     paddingVertical: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-  },
-  continueButtonActive: {
-    backgroundColor: COLORS.primary,
-    ...SHADOWS.lg,
   },
   continueText: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.gray400,
+    color: COLORS.primary,
     marginRight: SPACING.sm,
   },
-  continueTextActive: {
-    color: COLORS.accent,
+  continueTextDisabled: {
+    color: COLORS.gray500,
   },
-  arrowContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.gray200,
+  continueArrow: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  arrowContainerActive: {
-    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+  continueArrowDisabled: {
+    backgroundColor: COLORS.gray800,
   },
   termsText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textTertiary,
+    color: COLORS.textMuted,
     textAlign: 'center',
     lineHeight: 18,
   },
-  linkText: {
-    color: COLORS.primary,
+  termsLink: {
+    color: COLORS.accent,
     fontWeight: '600',
   },
   featuresSection: {
     gap: SPACING.md,
+    paddingBottom: SPACING.xxl,
   },
   featureCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray50,
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.gray800,
   },
   featureIcon: {
     width: 48,
     height: 48,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: SPACING.md,
   },
   featureContent: {
-    marginLeft: SPACING.md,
     flex: 1,
   },
   featureTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     marginBottom: 2,
   },
   featureDesc: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: COLORS.textMuted,
   },
 });
