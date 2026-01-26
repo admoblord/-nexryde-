@@ -1544,152 +1544,199 @@ async def get_driver_challenge_progress(user_id: str):
 
 # ==================== AI ASSISTANT ENDPOINTS ====================
 
+# AI System prompts
+RIDER_ASSISTANT_PROMPT = """You are KODA AI, a friendly and helpful ride assistant for riders in Nigeria. 
+You help riders with their trip questions, fare estimates, driver information, and safety concerns.
+
+Key information about KODA:
+- KODA is a driver-first ride-hailing platform in Nigeria
+- Drivers pay a flat monthly subscription (₦25,000) instead of per-trip commission
+- Riders pay drivers directly via cash or bank transfer (peer-to-peer)
+- All drivers are verified with NIN and documents
+- Safety features include: SOS button, trip sharing, driver face verification, route monitoring
+- Fares are calculated by the system (base fare + distance + time)
+
+Be concise, friendly, and helpful. Use Nigerian context when relevant.
+If you don't have specific trip data, provide general helpful information.
+Keep responses under 100 words."""
+
+DRIVER_ASSISTANT_PROMPT = """You are KODA AI, a supportive driving assistant for KODA drivers in Nigeria.
+You help drivers maximize their earnings, find high-demand areas, and improve their ratings.
+
+Key information about KODA:
+- Drivers keep 100% of their earnings - KODA takes no commission
+- Monthly subscription is ₦25,000 for unlimited trips
+- Riders pay drivers directly via cash or bank transfer
+- Peak hours: 7-9 AM and 5-8 PM weekdays
+- High demand areas in Lagos: Victoria Island, Lekki, Ikeja, Airport
+- Driver ratings are based on: smoothness, politeness, cleanliness, safety
+
+Be encouraging and practical. Use Nigerian context.
+Keep responses under 100 words."""
+
 @api_router.get("/ai/rider-assistant")
 async def rider_assistant(user_id: str, question: str):
     """
-    AI Ride Assistant for Riders
-    Answers common questions about trips, drivers, pricing, safety
+    AI Ride Assistant for Riders - Powered by GPT
     """
+    try:
+        # Get user's current trip context
+        current_trip = await db.trips.find_one({
+            "rider_id": user_id,
+            "status": {"$in": ["pending", "accepted", "ongoing"]}
+        })
+        
+        # Build context
+        context = ""
+        if current_trip:
+            context = f"\nRider's current trip: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
+            if current_trip.get("driver_id"):
+                driver = await db.users.find_one({"id": current_trip["driver_id"]})
+                if driver:
+                    context += f", Driver={driver.get('name', 'Assigned')}"
+        else:
+            context = "\nRider has no active trip currently."
+        
+        # Use LLM for response
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"rider-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
+                system_message=RIDER_ASSISTANT_PROMPT + context
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=question)
+            response_text = await chat.send_message(user_message)
+            
+            return {
+                "response": response_text,
+                "type": "ai",
+                "powered_by": "gpt-4o"
+            }
+        else:
+            # Fallback to rule-based responses
+            return await _rider_assistant_fallback(user_id, question, current_trip)
+            
+    except Exception as e:
+        logger.error(f"AI Assistant error: {e}")
+        return await _rider_assistant_fallback(user_id, question, None)
+
+async def _rider_assistant_fallback(user_id: str, question: str, current_trip):
+    """Fallback responses when LLM is unavailable"""
     question_lower = question.lower()
     
-    # Get user's current trip if any
-    current_trip = await db.trips.find_one({
-        "rider_id": user_id,
-        "status": {"$in": ["pending", "accepted", "ongoing"]}
-    })
-    
-    # Smart responses based on context
     if "driver" in question_lower and "where" in question_lower:
         if current_trip and current_trip.get("driver_id"):
-            driver_profile = await db.driver_profiles.find_one({"user_id": current_trip["driver_id"]})
-            if driver_profile and driver_profile.get("current_location"):
-                return {
-                    "response": f"Your driver is on the way. They should arrive shortly.",
-                    "type": "location",
-                    "data": driver_profile.get("current_location")
-                }
+            return {"response": "Your driver is on the way. They should arrive shortly.", "type": "location"}
         return {"response": "You don't have an active ride. Would you like to book one?", "type": "info"}
     
     elif "price" in question_lower or "fare" in question_lower or "cost" in question_lower:
         if current_trip:
-            return {
-                "response": f"Your trip fare is ₦{current_trip['fare']:,.0f}. This includes base fare, distance, and time charges.",
-                "type": "fare",
-                "data": {"fare": current_trip["fare"]}
-            }
-        return {
-            "response": "Fares are calculated based on distance, time, and current traffic. Get a fare estimate by entering your destination.",
-            "type": "info"
-        }
+            return {"response": f"Your trip fare is ₦{current_trip['fare']:,.0f}. This includes base fare, distance, and time charges.", "type": "fare"}
+        return {"response": "Fares are calculated based on distance, time, and current traffic. Get a fare estimate by entering your destination.", "type": "info"}
     
     elif "safe" in question_lower or "safety" in question_lower:
-        return {
-            "response": "Your safety is our priority! All drivers are verified. You can use the SOS button anytime, share your trip with family, and rate your driver after the ride.",
-            "type": "safety"
-        }
+        return {"response": "Your safety is our priority! All drivers are verified. You can use the SOS button anytime, share your trip with family, and rate your driver after the ride.", "type": "safety"}
     
     elif "cancel" in question_lower:
-        return {
-            "response": "You can cancel your ride anytime before it starts. To cancel an ongoing ride, please contact support.",
-            "type": "info"
-        }
-    
-    elif "time" in question_lower or "long" in question_lower or "eta" in question_lower:
-        if current_trip:
-            if current_trip["status"] == "ongoing":
-                return {
-                    "response": f"Estimated time to destination: {current_trip['duration_mins']} minutes.",
-                    "type": "eta",
-                    "data": {"duration_mins": current_trip["duration_mins"]}
-                }
-            elif current_trip["status"] == "accepted":
-                return {"response": "Your driver is on the way to pick you up.", "type": "info"}
-        return {"response": "Book a ride to see estimated arrival time.", "type": "info"}
+        return {"response": "You can cancel your ride anytime before it starts. To cancel an ongoing ride, please contact support.", "type": "info"}
     
     else:
-        return {
-            "response": "I'm here to help! You can ask me about your driver's location, fare details, safety features, or trip status.",
-            "type": "help"
-        }
+        return {"response": "I'm here to help! You can ask me about your driver's location, fare details, safety features, or trip status.", "type": "help"}
 
 @api_router.get("/ai/driver-assistant")
 async def driver_assistant(user_id: str, question: str):
     """
-    AI Assistant for Drivers
-    Provides insights on earnings, demand, optimal driving times
+    AI Assistant for Drivers - Powered by GPT
     """
+    try:
+        # Get driver stats for context
+        stats = await db.trips.aggregate([
+            {"$match": {"driver_id": user_id, "status": "completed"}},
+            {"$group": {
+                "_id": None,
+                "total_earnings": {"$sum": "$fare"},
+                "total_trips": {"$sum": 1},
+                "avg_fare": {"$avg": "$fare"}
+            }}
+        ]).to_list(1)
+        
+        driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}
+        
+        # Get today's stats
+        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_stats = await db.trips.aggregate([
+            {"$match": {"driver_id": user_id, "status": "completed", "completed_at": {"$gte": today_start}}},
+            {"$group": {"_id": None, "earnings": {"$sum": "$fare"}, "trips": {"$sum": 1}}}
+        ]).to_list(1)
+        
+        today = today_stats[0] if today_stats else {"earnings": 0, "trips": 0}
+        
+        # Build context
+        context = f"\nDriver stats: Today's earnings=₦{today['earnings']:,.0f}, Today's trips={today['trips']}, Total earnings=₦{driver_stats['total_earnings']:,.0f}, Total trips={driver_stats['total_trips']}"
+        
+        # Get rating
+        user = await db.users.find_one({"id": user_id})
+        if user:
+            context += f", Rating={user.get('rating', 5.0):.1f}"
+        
+        # Use LLM for response
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"driver-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
+                system_message=DRIVER_ASSISTANT_PROMPT + context
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=question)
+            response_text = await chat.send_message(user_message)
+            
+            return {
+                "response": response_text,
+                "type": "ai",
+                "powered_by": "gpt-4o",
+                "data": {
+                    "today_earnings": today["earnings"],
+                    "today_trips": today["trips"],
+                    "total_earnings": driver_stats["total_earnings"],
+                    "rating": user.get('rating', 5.0) if user else 5.0
+                }
+            }
+        else:
+            # Fallback to rule-based responses
+            return await _driver_assistant_fallback(user_id, question, driver_stats, today)
+            
+    except Exception as e:
+        logger.error(f"AI Assistant error: {e}")
+        return await _driver_assistant_fallback(user_id, question, {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}, {"earnings": 0, "trips": 0})
+
+async def _driver_assistant_fallback(user_id: str, question: str, driver_stats, today):
+    """Fallback responses when LLM is unavailable"""
     question_lower = question.lower()
-    
-    # Get driver stats
-    stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {
-            "_id": None,
-            "total_earnings": {"$sum": "$fare"},
-            "total_trips": {"$sum": 1},
-            "avg_fare": {"$avg": "$fare"}
-        }}
-    ]).to_list(1)
-    
-    driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}
-    
-    # Get today's stats
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed", "completed_at": {"$gte": today_start}}},
-        {"$group": {"_id": None, "earnings": {"$sum": "$fare"}, "trips": {"$sum": 1}}}
-    ]).to_list(1)
-    
-    today = today_stats[0] if today_stats else {"earnings": 0, "trips": 0}
     
     if "earn" in question_lower or "money" in question_lower:
         return {
-            "response": f"Today you've earned ₦{today['earnings']:,.0f} from {today['trips']} trips. Your average fare is ₦{driver_stats['avg_fare']:,.0f}.",
+            "response": f"Today you've earned ₦{today['earnings']:,.0f} from {today['trips']} trips. Your average fare is ₦{driver_stats.get('avg_fare', 0):,.0f}.",
             "type": "earnings",
-            "data": {
-                "today_earnings": today["earnings"],
-                "today_trips": today["trips"],
-                "total_earnings": driver_stats["total_earnings"],
-                "avg_fare": driver_stats["avg_fare"]
-            }
+            "data": {"today_earnings": today["earnings"], "today_trips": today["trips"]}
         }
     
     elif "best time" in question_lower or "when" in question_lower or "busy" in question_lower:
         return {
             "response": "Peak hours are typically 7-9 AM and 5-8 PM on weekdays. Weekends see more activity in evening hours. Consider positioning yourself in business districts during morning rush.",
-            "type": "insight",
-            "data": {"peak_hours": ["7-9 AM", "5-8 PM"], "hot_areas": ["Victoria Island", "Ikeja", "Lekki"]}
+            "type": "insight"
         }
     
     elif "demand" in question_lower or "area" in question_lower or "where" in question_lower:
         return {
             "response": "High demand areas right now include Victoria Island, Lekki, and Ikeja. Airport runs are also lucrative. Stay near major business hubs for consistent rides.",
-            "type": "demand",
-            "data": {"hot_spots": ["Victoria Island", "Lekki", "Ikeja", "Airport"]}
+            "type": "demand"
         }
     
     elif "tip" in question_lower or "advice" in question_lower:
         return {
             "response": "Pro tips: Keep your car clean for better ratings. Stay hydrated and take breaks every 2-3 hours. Accept rides during surge times for higher earnings.",
             "type": "tips"
-        }
-    
-    elif "rating" in question_lower:
-        profile = await db.driver_profiles.find_one({"user_id": user_id})
-        user = await db.users.find_one({"id": user_id})
-        current_rating = user.get('rating', 5.0) if user else 5.0
-        return {
-            "response": f"Your current rating is {current_rating:.1f} stars. Maintain cleanliness, politeness, and safe driving to improve your rating.",
-            "type": "rating",
-            "data": {
-                "rating": current_rating,
-                "comfort_ratings": {
-                    "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
-                    "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
-                    "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0,
-                    "safety": profile.get("safety_rating", 5.0) if profile else 5.0,
-                }
-            }
         }
     
     else:
