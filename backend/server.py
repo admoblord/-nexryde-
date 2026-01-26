@@ -6,11 +6,14 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 import uuid
 from datetime import datetime, timedelta
 import random
 import math
+import httpx
+import hashlib
+import json
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,6 +22,9 @@ load_dotenv(ROOT_DIR / '.env')
 mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'koda_db')]
+
+# Google Maps API Key
+GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 # Create the main app
 app = FastAPI(title="KODA API", version="1.0.0")
@@ -32,6 +38,47 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# ==================== FARE CONFIGURATION ====================
+# Configurable fare settings per city/service type
+FARE_CONFIG = {
+    "lagos": {
+        "economy": {
+            "base_fare": 800,
+            "per_km": 120,
+            "per_min": 20,
+            "min_fare": 1500,
+            "max_multiplier": 1.2
+        },
+        "premium": {
+            "base_fare": 1200,
+            "per_km": 180,
+            "per_min": 30,
+            "min_fare": 2500,
+            "max_multiplier": 1.2
+        }
+    },
+    "default": {
+        "economy": {
+            "base_fare": 800,
+            "per_km": 120,
+            "per_min": 20,
+            "min_fare": 1500,
+            "max_multiplier": 1.2
+        },
+        "premium": {
+            "base_fare": 1200,
+            "per_km": 180,
+            "per_min": 30,
+            "min_fare": 2500,
+            "max_multiplier": 1.2
+        }
+    }
+}
+
+# Simple in-memory cache for route results (5 minute TTL)
+route_cache: Dict[str, Dict[str, Any]] = {}
+CACHE_TTL_SECONDS = 300  # 5 minutes
 
 # ==================== MODELS ====================
 
@@ -67,6 +114,9 @@ class DriverProfile(BaseModel):
     completion_rate: float = 100.0
     cancellation_count: int = 0
     rank: str = "standard"  # standard, silver, gold, platinum
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_name: Optional[str] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 class Subscription(BaseModel):
@@ -89,15 +139,19 @@ class Trip(BaseModel):
     distance_km: float
     duration_mins: int
     base_fare: float = 800.0
-    per_km_rate: float = 120.0
-    per_min_rate: float = 20.0
+    distance_fee: float = 0.0
+    time_fee: float = 0.0
+    traffic_fee: float = 0.0
     fare: float
     surge_multiplier: float = 1.0
+    service_type: str = "economy"
     status: str = "pending"  # pending, accepted, ongoing, completed, cancelled
-    payment_method: str = "cash"  # cash, card, wallet
+    payment_method: str = "cash"  # cash, bank_transfer
     payment_status: str = "pending"  # pending, completed
     rider_rating: Optional[float] = None
     driver_rating: Optional[float] = None
+    polyline: Optional[str] = None  # Encoded route polyline
+    fare_locked_until: Optional[datetime] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
     accepted_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
@@ -116,10 +170,6 @@ class OTPRequest(BaseModel):
     phone: str
 
 class OTPVerify(BaseModel):
-    phone: str
-    otp: str
-
-class LoginRequest(BaseModel):
     phone: str
     otp: str
 
@@ -142,10 +192,21 @@ class DriverProfileUpdate(BaseModel):
     license_uploaded: Optional[bool] = None
     vehicle_docs_uploaded: Optional[bool] = None
     selfie_verified: Optional[bool] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    account_name: Optional[str] = None
 
 class LocationUpdate(BaseModel):
     latitude: float
     longitude: float
+
+class FareEstimateRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    dropoff_lat: float
+    dropoff_lng: float
+    service_type: str = "economy"  # economy, premium
+    city: str = "lagos"
 
 class TripRequest(BaseModel):
     pickup_lat: float
@@ -154,13 +215,9 @@ class TripRequest(BaseModel):
     dropoff_lat: float
     dropoff_lng: float
     dropoff_address: str
+    service_type: str = "economy"
     payment_method: str = "cash"
-
-class FareEstimateRequest(BaseModel):
-    pickup_lat: float
-    pickup_lng: float
-    dropoff_lat: float
-    dropoff_lng: float
+    fare_estimate_id: Optional[str] = None  # To verify locked price
 
 class RatingRequest(BaseModel):
     rating: float
@@ -171,8 +228,84 @@ class SubscriptionRequest(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 
-def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Calculate distance between two points using Haversine formula"""
+def get_cache_key(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> str:
+    """Generate a cache key for route data"""
+    # Round to 4 decimal places (~11m precision) for caching
+    key_str = f"{round(pickup_lat, 4)},{round(pickup_lng, 4)}-{round(dropoff_lat, 4)},{round(dropoff_lng, 4)}"
+    return hashlib.md5(key_str.encode()).hexdigest()
+
+def is_cache_valid(cache_entry: dict) -> bool:
+    """Check if cache entry is still valid"""
+    if not cache_entry:
+        return False
+    cached_at = cache_entry.get("cached_at")
+    if not cached_at:
+        return False
+    return (datetime.utcnow() - cached_at).total_seconds() < CACHE_TTL_SECONDS
+
+async def get_directions_from_google(
+    pickup_lat: float, 
+    pickup_lng: float, 
+    dropoff_lat: float, 
+    dropoff_lng: float
+) -> dict:
+    """Call Google Directions API to get route info"""
+    
+    # Check cache first
+    cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
+        logger.info(f"Using cached route for key: {cache_key}")
+        return route_cache[cache_key]["data"]
+    
+    if not GOOGLE_MAPS_API_KEY:
+        logger.warning("Google Maps API key not configured, using fallback calculation")
+        return None
+    
+    try:
+        url = "https://maps.googleapis.com/maps/api/directions/json"
+        params = {
+            "origin": f"{pickup_lat},{pickup_lng}",
+            "destination": f"{dropoff_lat},{dropoff_lng}",
+            "key": GOOGLE_MAPS_API_KEY,
+            "departure_time": "now",  # For traffic data
+            "traffic_model": "best_guess"
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=10.0)
+            data = response.json()
+        
+        if data.get("status") != "OK":
+            logger.error(f"Google Directions API error: {data.get('status')} - {data.get('error_message', '')}")
+            return None
+        
+        route = data["routes"][0]
+        leg = route["legs"][0]
+        
+        result = {
+            "distance_meters": leg["distance"]["value"],
+            "duration_seconds": leg["duration"]["value"],
+            "duration_in_traffic_seconds": leg.get("duration_in_traffic", {}).get("value", leg["duration"]["value"]),
+            "polyline": route["overview_polyline"]["points"],
+            "start_address": leg["start_address"],
+            "end_address": leg["end_address"]
+        }
+        
+        # Cache the result
+        route_cache[cache_key] = {
+            "data": result,
+            "cached_at": datetime.utcnow()
+        }
+        
+        logger.info(f"Fetched route from Google: {result['distance_meters']}m, {result['duration_seconds']}s")
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error calling Google Directions API: {e}")
+        return None
+
+def calculate_distance_haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Fallback: Calculate distance using Haversine formula"""
     R = 6371  # Earth's radius in km
     
     lat1_rad = math.radians(lat1)
@@ -185,31 +318,68 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     
     return R * c
 
-def calculate_fare(distance_km: float, duration_mins: int, base_fare: float = 800.0, per_km: float = 120.0, per_min: float = 20.0) -> dict:
-    """Calculate fare based on KODA pricing model"""
-    distance_fare = distance_km * per_km
-    time_fare = duration_mins * per_min
-    total = base_fare + distance_fare + time_fare
+def calculate_fare(
+    distance_km: float, 
+    duration_min: int, 
+    traffic_duration_min: int,
+    service_type: str = "economy",
+    city: str = "lagos"
+) -> dict:
+    """
+    Calculate fare based on KODA pricing model
     
-    # Apply surge (capped at 20%)
-    surge = 1.0
-    # In real app, this would check demand/supply ratio
+    Formula: Total = max(min_fare, base + km_fee + time_fee + traffic_fee) * multiplier
+    Multiplier: 1.0 normal, up to 1.2 peak (NEVER more than 1.2)
+    """
     
-    final_fare = total * surge
+    # Get config for city/service
+    city_config = FARE_CONFIG.get(city.lower(), FARE_CONFIG["default"])
+    config = city_config.get(service_type, city_config["economy"])
     
-    # Apply price band limits
-    min_fare = total * 0.9
-    max_fare = total * 1.2
-    final_fare = max(min_fare, min(final_fare, max_fare))
+    base_fare = config["base_fare"]
+    per_km = config["per_km"]
+    per_min = config["per_min"]
+    min_fare = config["min_fare"]
+    max_multiplier = config["max_multiplier"]
+    
+    # Calculate fees
+    distance_fee = distance_km * per_km
+    time_fee = duration_min * per_min
+    
+    # Traffic fee: extra time due to traffic (capped)
+    extra_traffic_min = max(0, traffic_duration_min - duration_min)
+    traffic_fee = min(extra_traffic_min * per_min, base_fare * 0.3)  # Cap at 30% of base
+    
+    # Calculate subtotal
+    subtotal = base_fare + distance_fee + time_fee + traffic_fee
+    
+    # Apply minimum fare
+    subtotal = max(min_fare, subtotal)
+    
+    # Determine multiplier (peak pricing)
+    # For MVP: Always 1.0, can implement time-based logic later
+    # Peak hours could be 7-9am and 5-8pm on weekdays
+    current_hour = datetime.utcnow().hour + 1  # WAT is UTC+1
+    is_peak = current_hour in [7, 8, 9, 17, 18, 19, 20]
+    
+    # Even during peak, cap at 1.2x
+    multiplier = 1.1 if is_peak else 1.0
+    multiplier = min(multiplier, max_multiplier)
+    
+    # Final fare
+    total_fare = round(subtotal * multiplier, 2)
     
     return {
         "base_fare": base_fare,
-        "distance_fare": round(distance_fare, 2),
-        "time_fare": round(time_fare, 2),
-        "surge_multiplier": surge,
-        "total_fare": round(final_fare, 2),
-        "min_fare": round(min_fare, 2),
-        "max_fare": round(max_fare, 2)
+        "distance_fee": round(distance_fee, 2),
+        "time_fee": round(time_fee, 2),
+        "traffic_fee": round(traffic_fee, 2),
+        "subtotal": round(subtotal, 2),
+        "multiplier": multiplier,
+        "total_fare": total_fare,
+        "min_fare": min_fare,
+        "is_peak": is_peak,
+        "currency": "NGN"
     }
 
 def generate_otp() -> str:
@@ -218,6 +388,102 @@ def generate_otp() -> str:
 
 # Store OTPs temporarily (in production, use Redis)
 otp_store = {}
+
+# Store fare estimates temporarily (3 minute lock)
+fare_estimate_store: Dict[str, Dict[str, Any]] = {}
+FARE_LOCK_MINUTES = 3
+
+# ==================== FARE ESTIMATE ENDPOINT ====================
+
+@api_router.post("/fare/estimate")
+async def estimate_fare(request: FareEstimateRequest):
+    """
+    Estimate fare for a trip using Google Directions API
+    
+    This endpoint:
+    1. Calls Google Directions API to get real distance and duration
+    2. Extracts distance_meters, duration_seconds, and traffic data
+    3. Computes fare using the KODA formula
+    4. Returns breakdown and locks price for 3 minutes
+    """
+    
+    # Try to get route from Google Directions
+    route_data = await get_directions_from_google(
+        request.pickup_lat,
+        request.pickup_lng,
+        request.dropoff_lat,
+        request.dropoff_lng
+    )
+    
+    if route_data:
+        # Use Google's data
+        distance_km = route_data["distance_meters"] / 1000
+        duration_min = math.ceil(route_data["duration_seconds"] / 60)
+        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
+        polyline = route_data.get("polyline")
+        pickup_address = route_data.get("start_address", "")
+        dropoff_address = route_data.get("end_address", "")
+    else:
+        # Fallback to Haversine calculation
+        distance_km = calculate_distance_haversine(
+            request.pickup_lat, request.pickup_lng,
+            request.dropoff_lat, request.dropoff_lng
+        )
+        # Estimate duration: assume 25 km/h average in Lagos traffic
+        duration_min = math.ceil((distance_km / 25) * 60)
+        traffic_duration_min = duration_min
+        polyline = None
+        pickup_address = ""
+        dropoff_address = ""
+    
+    # Ensure minimum values
+    distance_km = max(0.5, distance_km)
+    duration_min = max(5, duration_min)
+    
+    # Calculate fare
+    fare = calculate_fare(
+        distance_km=distance_km,
+        duration_min=duration_min,
+        traffic_duration_min=traffic_duration_min,
+        service_type=request.service_type,
+        city=request.city
+    )
+    
+    # Generate estimate ID and lock the price
+    estimate_id = str(uuid.uuid4())
+    fare_estimate_store[estimate_id] = {
+        "fare": fare,
+        "distance_km": round(distance_km, 2),
+        "duration_min": duration_min,
+        "polyline": polyline,
+        "service_type": request.service_type,
+        "city": request.city,
+        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": pickup_address},
+        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": dropoff_address},
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)
+    }
+    
+    return {
+        "estimate_id": estimate_id,
+        "distance_km": round(distance_km, 2),
+        "duration_min": duration_min,
+        "base_fare": fare["base_fare"],
+        "distance_fee": fare["distance_fee"],
+        "time_fee": fare["time_fee"],
+        "traffic_fee": fare["traffic_fee"],
+        "total_fare": fare["total_fare"],
+        "multiplier": fare["multiplier"],
+        "is_peak": fare["is_peak"],
+        "currency": fare["currency"],
+        "min_fare": fare["min_fare"],
+        "service_type": request.service_type,
+        "polyline": polyline,
+        "pickup_address": pickup_address,
+        "dropoff_address": dropoff_address,
+        "price_valid_until": (datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
+        "price_lock_minutes": FARE_LOCK_MINUTES
+    }
 
 # ==================== AUTH ENDPOINTS ====================
 
@@ -250,7 +516,6 @@ async def verify_otp(request: OTPVerify):
     user = await db.users.find_one({"phone": request.phone})
     
     if user:
-        # Update user verification status
         await db.users.update_one(
             {"phone": request.phone},
             {"$set": {"is_verified": True}}
@@ -266,7 +531,6 @@ async def verify_otp(request: OTPVerify):
 @api_router.post("/auth/register")
 async def register(request: RegisterRequest):
     """Register new user"""
-    # Check if user already exists
     existing = await db.users.find_one({"phone": request.phone})
     if existing:
         raise HTTPException(status_code=400, detail="User already exists")
@@ -380,7 +644,6 @@ async def update_driver_profile(user_id: str, request: DriverProfileUpdate):
     )
     
     if result.modified_count == 0:
-        # Create profile if doesn't exist
         profile = DriverProfile(user_id=user_id, **update_data)
         await db.driver_profiles.insert_one(profile.dict())
     
@@ -406,7 +669,6 @@ async def update_driver_location(user_id: str, request: LocationUpdate):
 @api_router.put("/drivers/{user_id}/online")
 async def toggle_driver_online(user_id: str, is_online: bool):
     """Toggle driver online status"""
-    # Check subscription status first
     subscription = await db.subscriptions.find_one({
         "driver_id": user_id,
         "status": {"$in": ["active", "grace_period"]}
@@ -434,13 +696,12 @@ async def get_driver_stats(user_id: str):
         "status": {"$in": ["active", "grace_period"]}
     })
     
-    # Get trip stats
     completed_trips = await db.trips.count_documents({
         "driver_id": user_id,
         "status": "completed"
     })
     
-    # Calculate earnings (sum of all completed trip fares)
+    # Calculate earnings
     pipeline = [
         {"$match": {"driver_id": user_id, "status": "completed"}},
         {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
@@ -504,7 +765,6 @@ async def get_subscription_history(driver_id: str):
 @api_router.post("/subscriptions/{driver_id}/subscribe")
 async def create_subscription(driver_id: str, request: SubscriptionRequest):
     """Create new subscription"""
-    # Check for existing active subscription
     existing = await db.subscriptions.find_one({
         "driver_id": driver_id,
         "status": "active"
@@ -515,9 +775,6 @@ async def create_subscription(driver_id: str, request: SubscriptionRequest):
             status_code=400, 
             detail="Active subscription already exists"
         )
-    
-    # In production, process payment here
-    # For MVP, we simulate successful payment
     
     subscription = Subscription(
         driver_id=driver_id,
@@ -535,38 +792,55 @@ async def create_subscription(driver_id: str, request: SubscriptionRequest):
 # ==================== TRIP ENDPOINTS ====================
 
 @api_router.post("/trips/estimate")
-async def estimate_fare(request: FareEstimateRequest):
-    """Estimate fare for a trip"""
-    distance = calculate_distance(
-        request.pickup_lat, request.pickup_lng,
-        request.dropoff_lat, request.dropoff_lng
-    )
-    
-    # Estimate duration (assuming average 30 km/h in Lagos traffic)
-    duration_mins = int((distance / 30) * 60)
-    duration_mins = max(5, duration_mins)  # Minimum 5 minutes
-    
-    fare_details = calculate_fare(distance, duration_mins)
-    
-    return {
-        "distance_km": round(distance, 2),
-        "duration_mins": duration_mins,
-        **fare_details
-    }
+async def estimate_trip_fare(request: FareEstimateRequest):
+    """Legacy endpoint - redirects to /fare/estimate"""
+    return await estimate_fare(request)
 
 @api_router.post("/trips/request")
 async def request_trip(rider_id: str, request: TripRequest):
     """Request a new trip"""
-    # Calculate distance and fare
-    distance = calculate_distance(
-        request.pickup_lat, request.pickup_lng,
-        request.dropoff_lat, request.dropoff_lng
-    )
     
-    duration_mins = int((distance / 30) * 60)
-    duration_mins = max(5, duration_mins)
+    # Check if there's a locked fare estimate
+    fare_data = None
+    if request.fare_estimate_id and request.fare_estimate_id in fare_estimate_store:
+        estimate = fare_estimate_store[request.fare_estimate_id]
+        if datetime.utcnow() < estimate["expires_at"]:
+            fare_data = estimate
+            logger.info(f"Using locked fare estimate: {request.fare_estimate_id}")
     
-    fare_details = calculate_fare(distance, duration_mins)
+    if fare_data:
+        # Use locked fare
+        distance_km = fare_data["distance_km"]
+        duration_min = fare_data["duration_min"]
+        fare = fare_data["fare"]
+        polyline = fare_data.get("polyline")
+    else:
+        # Calculate new fare
+        route_data = await get_directions_from_google(
+            request.pickup_lat, request.pickup_lng,
+            request.dropoff_lat, request.dropoff_lng
+        )
+        
+        if route_data:
+            distance_km = route_data["distance_meters"] / 1000
+            duration_min = math.ceil(route_data["duration_seconds"] / 60)
+            traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
+            polyline = route_data.get("polyline")
+        else:
+            distance_km = calculate_distance_haversine(
+                request.pickup_lat, request.pickup_lng,
+                request.dropoff_lat, request.dropoff_lng
+            )
+            duration_min = max(5, math.ceil((distance_km / 25) * 60))
+            traffic_duration_min = duration_min
+            polyline = None
+        
+        fare = calculate_fare(
+            distance_km=distance_km,
+            duration_min=duration_min,
+            traffic_duration_min=traffic_duration_min,
+            service_type=request.service_type
+        )
     
     trip = Trip(
         rider_id=rider_id,
@@ -580,11 +854,18 @@ async def request_trip(rider_id: str, request: TripRequest):
             "lng": request.dropoff_lng,
             "address": request.dropoff_address
         },
-        distance_km=round(distance, 2),
-        duration_mins=duration_mins,
-        fare=fare_details["total_fare"],
-        surge_multiplier=fare_details["surge_multiplier"],
-        payment_method=request.payment_method
+        distance_km=round(distance_km, 2),
+        duration_mins=duration_min,
+        base_fare=fare["base_fare"],
+        distance_fee=fare["distance_fee"],
+        time_fee=fare["time_fee"],
+        traffic_fee=fare["traffic_fee"],
+        fare=fare["total_fare"],
+        surge_multiplier=fare["multiplier"],
+        service_type=request.service_type,
+        payment_method=request.payment_method,
+        polyline=polyline,
+        fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)
     )
     
     await db.trips.insert_one(trip.dict())
@@ -597,14 +878,12 @@ async def request_trip(rider_id: str, request: TripRequest):
 @api_router.get("/trips/pending")
 async def get_pending_trips(driver_lat: float, driver_lng: float):
     """Get pending trips near driver"""
-    # Get all pending trips
     trips = await db.trips.find({"status": "pending"}).to_list(50)
     
-    # Filter and sort by distance from driver
     nearby_trips = []
     for trip in trips:
         pickup = trip["pickup_location"]
-        distance = calculate_distance(
+        distance = calculate_distance_haversine(
             driver_lat, driver_lng,
             pickup["lat"], pickup["lng"]
         )
@@ -613,15 +892,12 @@ async def get_pending_trips(driver_lat: float, driver_lng: float):
             trip["distance_to_pickup"] = round(distance, 2)
             nearby_trips.append(trip)
     
-    # Sort by distance
     nearby_trips.sort(key=lambda x: x["distance_to_pickup"])
-    
-    return nearby_trips[:10]  # Return top 10
+    return nearby_trips[:10]
 
 @api_router.put("/trips/{trip_id}/accept")
 async def accept_trip(trip_id: str, driver_id: str):
     """Driver accepts a trip"""
-    # Check driver subscription
     subscription = await db.subscriptions.find_one({
         "driver_id": driver_id,
         "status": {"$in": ["active", "grace_period"]}
@@ -684,14 +960,12 @@ async def complete_trip(trip_id: str):
     
     trip = await db.trips.find_one({"id": trip_id})
     
-    # Update driver stats
     if trip.get("driver_id"):
         await db.users.update_one(
             {"id": trip["driver_id"]},
             {"$inc": {"total_trips": 1}}
         )
     
-    # Update rider stats
     await db.users.update_one(
         {"id": trip["rider_id"]},
         {"$inc": {"total_trips": 1}}
@@ -719,7 +993,6 @@ async def cancel_trip(trip_id: str, cancelled_by: str):
         }}
     )
     
-    # Update driver cancellation count if driver cancelled
     if cancelled_by == trip.get("driver_id"):
         await db.driver_profiles.update_one(
             {"user_id": cancelled_by},
@@ -738,7 +1011,6 @@ async def rate_trip(trip_id: str, rater_id: str, request: RatingRequest):
     if trip["status"] != "completed":
         raise HTTPException(status_code=400, detail="Can only rate completed trips")
     
-    # Determine if rater is rider or driver
     update_field = "driver_rating" if rater_id == trip["rider_id"] else "rider_rating"
     rated_user_id = trip["driver_id"] if rater_id == trip["rider_id"] else trip["rider_id"]
     
@@ -747,9 +1019,7 @@ async def rate_trip(trip_id: str, rater_id: str, request: RatingRequest):
         {"$set": {update_field: request.rating}}
     )
     
-    # Update user's average rating
     if rated_user_id:
-        # Get all ratings for this user
         if update_field == "driver_rating":
             ratings = await db.trips.find(
                 {"driver_id": rated_user_id, "driver_rating": {"$exists": True}}
@@ -796,7 +1066,6 @@ async def get_wallet(user_id: str):
     """Get user's wallet"""
     wallet = await db.wallets.find_one({"user_id": user_id})
     if not wallet:
-        # Create wallet if doesn't exist
         wallet = Wallet(user_id=user_id)
         await db.wallets.insert_one(wallet.dict())
     wallet["_id"] = str(wallet["_id"])
@@ -811,7 +1080,6 @@ async def topup_wallet(user_id: str, amount: float):
     )
     
     if result.modified_count == 0:
-        # Create wallet if doesn't exist
         wallet = Wallet(user_id=user_id, balance=amount)
         await db.wallets.insert_one(wallet.dict())
     
