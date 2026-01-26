@@ -593,8 +593,25 @@ test_plan:
   test_all: false
   test_priority: "high_first"
 
+  - task: "Family Mode Screen"
+    implemented: true
+    working: false
+    file: "app/rider/family.tsx"
+    stuck_count: 1
+    priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Family creation and management with Safety Circle explanation"
+        - working: false
+        - agent: "testing"
+        - comment: "❌ ISSUE: Family Mode screen shows 'Loading family...' indefinitely and doesn't complete loading. Likely requires user authentication or backend family data. Screen structure exists but data loading fails."
+
 agent_communication:
     - agent: "main"
     - message: "Major feature update complete. Added all Core Safety Features, AI Assistants, Gamification (Streaks, Badges, Challenges, Leaderboard), Driver Welfare (Fatigue Monitoring, Grace Period), Rider Welfare (Family Mode, Trip Sharing, Insurance). Frontend screens created for Safety Center, AI Assistant, and Leaderboard. Backend APIs tested with curl - all returning expected data."
     - agent: "testing"
     - message: "✅ BACKEND TESTING COMPLETE: All 12 priority APIs tested successfully. Core Safety APIs (AI assistants, emergency contacts, SOS) working correctly. Gamification APIs (leaderboards, challenges, fatigue monitoring) returning proper data structures. Driver welfare and trip insurance APIs functioning as expected. Minor fix applied to AI driver assistant for non-existent users. All APIs return appropriate responses and handle edge cases properly."
+    - agent: "testing"
+    - message: "✅ FRONTEND TESTING COMPLETE: Tested all 6 key screens on mobile viewport (390x844). WORKING: Safety Center (SOS, emergency contacts, safety features), AI Assistant (language toggle, chat interface), Driver Leaderboard (all tabs functional), Login screen (when accessed directly). ISSUES: Splash screen navigation to login broken, Family Mode screen stuck on loading. Fixed syntax error in family.tsx. Core UI elements and mobile responsiveness confirmed working."
