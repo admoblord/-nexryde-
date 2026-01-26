@@ -144,4 +144,107 @@ export const getWallet = (userId: string) =>
 export const topupWallet = (userId: string, amount: number) => 
   api.post(`/wallet/${userId}/topup?amount=${amount}`);
 
+// Emergency Contacts
+export const addEmergencyContact = (userId: string, data: { name: string; phone: string; relationship: string }) =>
+  api.post(`/users/${userId}/emergency-contacts`, data);
+
+export const getEmergencyContacts = (userId: string) =>
+  api.get(`/users/${userId}/emergency-contacts`);
+
+export const removeEmergencyContact = (userId: string, phone: string) =>
+  api.delete(`/users/${userId}/emergency-contacts/${phone}`);
+
+// Favorite/Blocked Drivers
+export const addFavoriteDriver = (userId: string, driverId: string) =>
+  api.post(`/users/${userId}/favorite-drivers`, { driver_id: driverId });
+
+export const removeFavoriteDriver = (userId: string, driverId: string) =>
+  api.delete(`/users/${userId}/favorite-drivers/${driverId}`);
+
+export const getFavoriteDrivers = (userId: string) =>
+  api.get(`/users/${userId}/favorite-drivers`);
+
+export const blockDriver = (userId: string, driverId: string) =>
+  api.post(`/users/${userId}/blocked-drivers`, { driver_id: driverId });
+
+export const unblockDriver = (userId: string, driverId: string) =>
+  api.delete(`/users/${userId}/blocked-drivers/${driverId}`);
+
+// SOS & Safety
+export const triggerSOS = (data: { trip_id: string; location_lat: number; location_lng: number; auto_triggered?: boolean }) =>
+  api.post('/sos/trigger', data);
+
+export const resolveSOS = (sosId: string, resolution: string) =>
+  api.post(`/sos/${sosId}/resolve?resolution=${resolution}`);
+
+export const respondToSafetyCheck = (checkId: string, response: string) =>
+  api.post('/safety/respond', { check_id: checkId, response });
+
+export const triggerRiskAlert = (tripId: string, userId: string, reason?: string) =>
+  api.post(`/trips/${tripId}/risk-alert?user_id=${userId}`, { trip_id: tripId, reason });
+
+// AI Assistant
+export const askRiderAssistant = (userId: string, question: string) =>
+  api.get(`/ai/rider-assistant?user_id=${userId}&question=${encodeURIComponent(question)}`);
+
+export const askDriverAssistant = (userId: string, question: string) =>
+  api.get(`/ai/driver-assistant?user_id=${userId}&question=${encodeURIComponent(question)}`);
+
+// Fatigue Monitoring
+export const getFatigueStatus = (userId: string) =>
+  api.get(`/drivers/${userId}/fatigue-status`);
+
+export const logBreak = (userId: string) =>
+  api.post(`/drivers/${userId}/log-break`);
+
+// Leaderboard
+export const getDriverLeaderboard = (city?: string, period?: string) =>
+  api.get(`/leaderboard/drivers?city=${city || 'lagos'}&period=${period || 'weekly'}`);
+
+export const getTopRatedDrivers = (limit?: number) =>
+  api.get(`/leaderboard/top-rated?limit=${limit || 20}`);
+
+// Streaks & Badges
+export const getDriverStreaks = (userId: string) =>
+  api.get(`/drivers/${userId}/streaks`);
+
+export const checkStreak = (userId: string) =>
+  api.post(`/drivers/${userId}/check-streak`);
+
+// Trip Sharing (Family & Friends)
+export const shareTrip = (tripId: string, recipientPhone: string, recipientName?: string) =>
+  api.post(`/trips/${tripId}/share?recipient_phone=${recipientPhone}&recipient_name=${recipientName || ''}`);
+
+export const trackSharedTrip = (shareToken: string) =>
+  api.get(`/trips/track/${shareToken}`);
+
+// Trip Recording
+export const startRecording = (tripId: string) =>
+  api.post(`/trips/${tripId}/start-recording`);
+
+export const stopRecording = (tripId: string) =>
+  api.post(`/trips/${tripId}/stop-recording`);
+
+// Insurance
+export const getTripInsurance = (tripId: string) =>
+  api.get(`/trips/${tripId}/insurance`);
+
+// Challenges
+export const getActiveChallenges = () =>
+  api.get('/challenges/active');
+
+export const getDriverChallengeProgress = (userId: string) =>
+  api.get(`/drivers/${userId}/challenges`);
+
+// Grace Period
+export const requestGracePeriod = (driverId: string, reason: string, days: number = 3) =>
+  api.post(`/subscriptions/${driverId}/grace-period`, { reason, days_requested: days });
+
+// Face Verification
+export const verifyFace = (userId: string, faceImage: string) =>
+  api.post(`/users/${userId}/verify-face`, { face_image: faceImage });
+
+export const verifyFaceAtRideStart = (userId: string, faceImage: string) =>
+  api.post(`/drivers/${userId}/verify-face-at-start`, { face_image: faceImage });
+
 export default api;
