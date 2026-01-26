@@ -414,7 +414,7 @@ index d878ad6..e69de29 100644
 --+import requests
 --+import json
 --+
---+BASE_URL = "https://nigerian-rides.preview.emergentagent.com/api"
+--+BASE_URL = "https://rosy-rideshare.preview.emergentagent.com/api"
 --+
 --+def test_ai_assistants():
 --+    print("🤖 Testing AI Assistant Responses")
