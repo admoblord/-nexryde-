@@ -37,7 +37,7 @@ export default function EarningsDashboardScreen() {
     } catch (error) {
       // Demo data
       setEarnings({
-        tier: { name: 'KODA Basic', earning_potential: { min: 200, max: 300 }, monthly_fee: 25000 },
+        tier: { name: 'NEXRYDE Basic', earning_potential: { min: 200, max: 300 }, monthly_fee: 25000 },
         summary: {
           total_earnings: period === 'today' ? 15600 : period === 'week' ? 98500 : 385000,
           total_trips: period === 'today' ? 8 : period === 'week' ? 52 : 198,
@@ -222,7 +222,7 @@ export default function EarningsDashboardScreen() {
                 <Ionicons name="diamond" size={20} color={COLORS.gold} />
               </View>
               <View style={styles.subscriptionContent}>
-                <Text style={styles.subscriptionTitle}>{earnings?.tier?.name || 'KODA Basic'}</Text>
+                <Text style={styles.subscriptionTitle}>{earnings?.tier?.name || 'NEXRYDE Basic'}</Text>
                 <Text style={styles.subscriptionFee}>Monthly fee: {CURRENCY}25,000</Text>
               </View>
               <TouchableOpacity 
@@ -251,7 +251,7 @@ export default function EarningsDashboardScreen() {
           <View style={styles.fairPricingCard}>
             <View style={styles.fairPricingHeader}>
               <View style={styles.fairPricingPetal} />
-              <Text style={styles.fairPricingTitle}>KODA Fair Pricing</Text>
+              <Text style={styles.fairPricingTitle}>NEXRYDE Fair Pricing</Text>
               <View style={styles.fairPricingPetal} />
             </View>
             <Text style={styles.fairPricingText}>

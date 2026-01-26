@@ -230,7 +230,7 @@ export const FareBreakdownContent: React.FC<FareBreakdownProps> = ({
       <View style={styles.fairPricingCard}>
         <View style={styles.fairPricingHeader}>
           <View style={styles.fairPricingPetal} />
-          <Text style={styles.fairPricingTitle}>KODA Fair Pricing</Text>
+          <Text style={styles.fairPricingTitle}>NEXRYDE Fair Pricing</Text>
           <View style={styles.fairPricingPetal} />
         </View>
         <View style={styles.fairPricingList}>

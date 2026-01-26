@@ -75,7 +75,7 @@ export default function DriverTierScreen() {
               <FloatingRoseBloom />
             </View>
             <Text style={styles.currentTierLabel}>Your Current Tier</Text>
-            <Text style={styles.currentTierName}>KODA Basic</Text>
+            <Text style={styles.currentTierName}>NEXRYDE Basic</Text>
             <View style={styles.feeHighlight}>
               <Text style={styles.feeText}>{CURRENCY}25,000/month</Text>
               <View style={styles.feePetal} />
@@ -115,7 +115,7 @@ export default function DriverTierScreen() {
                   )}
                 </View>
                 
-                <Text style={styles.tierName}>KODA Basic</Text>
+                <Text style={styles.tierName}>NEXRYDE Basic</Text>
                 <Text style={styles.tierFee}>{CURRENCY}25,000/month</Text>
                 
                 <View style={styles.earningsBox}>
@@ -148,7 +148,7 @@ export default function DriverTierScreen() {
                   </View>
                 </View>
                 
-                <Text style={[styles.tierName, { color: COLORS.white }]}>KODA Premium</Text>
+                <Text style={[styles.tierName, { color: COLORS.white }]}>NEXRYDE Premium</Text>
                 <Text style={[styles.tierFee, { color: 'rgba(255,255,255,0.9)' }]}>{CURRENCY}25,000/month</Text>
                 <Text style={styles.sameFeeNote}>Same fee, higher earnings!</Text>
                 
