@@ -1671,11 +1671,12 @@ async def driver_assistant(user_id: str, question: str):
     elif "rating" in question_lower:
         profile = await db.driver_profiles.find_one({"user_id": user_id})
         user = await db.users.find_one({"id": user_id})
+        current_rating = user.get('rating', 5.0) if user else 5.0
         return {
-            "response": f"Your current rating is {user.get('rating', 5.0):.1f} stars. Maintain cleanliness, politeness, and safe driving to improve your rating.",
+            "response": f"Your current rating is {current_rating:.1f} stars. Maintain cleanliness, politeness, and safe driving to improve your rating.",
             "type": "rating",
             "data": {
-                "rating": user.get("rating", 5.0) if user else 5.0,
+                "rating": current_rating,
                 "comfort_ratings": {
                     "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
                     "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
