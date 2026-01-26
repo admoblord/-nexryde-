@@ -5,7 +5,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   Platform,
-  TouchableOpacity,
   Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -19,14 +18,17 @@ export default function SplashScreen() {
   const navigateNext = useCallback(() => {
     const destination = isAuthenticated && user ? '/(tabs)/home' : '/(auth)/login';
     
+    // On web, use direct URL navigation as a reliable fallback
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.href = destination;
+      return;
+    }
+    
+    // On native, use router
     try {
       router.replace(destination);
     } catch (error) {
       console.log('Router error:', error);
-      // Fallback for web
-      if (Platform.OS === 'web' && typeof window !== 'undefined') {
-        window.location.href = destination;
-      }
     }
   }, [isAuthenticated, user, router]);
 
