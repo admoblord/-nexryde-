@@ -112,7 +112,7 @@ export default function SplashScreen() {
         {/* Elegant Footer */}
         <View style={styles.footerContainer}>
           <View style={styles.footerLine} />
-          <Text style={styles.footerText}>WHERE LUXURY MEETS THE ROAD</Text>
+          <Text style={styles.footerText}>RIDE SMART • RIDE SAFE</Text>
           <View style={styles.footerLine} />
         </View>
       </View>
