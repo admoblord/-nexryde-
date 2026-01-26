@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
@@ -13,30 +14,45 @@ import { useAppStore } from '@/src/store/appStore';
 export default function SplashScreen() {
   const router = useRouter();
   const { isAuthenticated, user } = useAppStore();
-  const [mounted, setMounted] = useState(false);
+  const [showButton, setShowButton] = useState(false);
 
   useEffect(() => {
-    // Mark as mounted after a brief delay
+    // Show button after delay
     const timer = setTimeout(() => {
-      setMounted(true);
-    }, 100);
+      setShowButton(true);
+    }, 2000);
     return () => clearTimeout(timer);
   }, []);
 
-  useEffect(() => {
-    if (!mounted) return;
-    
-    // Navigate after splash duration
-    const navigationTimer = setTimeout(() => {
-      if (isAuthenticated && user) {
-        router.replace('/(tabs)/home');
-      } else {
-        router.replace('/(auth)/login');
+  const navigateToLogin = () => {
+    try {
+      // Try router first
+      router.push('/(auth)/login');
+    } catch (e) {
+      // Fallback for web
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/(auth)/login';
       }
-    }, 1500);
+    }
+  };
 
-    return () => clearTimeout(navigationTimer);
-  }, [mounted, isAuthenticated, user, router]);
+  const navigateToHome = () => {
+    try {
+      router.push('/(tabs)/home');
+    } catch (e) {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.location.href = '/(tabs)/home';
+      }
+    }
+  };
+
+  const handleContinue = () => {
+    if (isAuthenticated && user) {
+      navigateToHome();
+    } else {
+      navigateToLogin();
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -49,16 +65,19 @@ export default function SplashScreen() {
       </View>
       
       <View style={styles.footer}>
-        <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={styles.loadingText}>Loading...</Text>
-        
-        {/* Manual navigation fallback */}
-        <TouchableOpacity 
-          style={styles.skipButton}
-          onPress={() => router.push('/(auth)/login')}
-        >
-          <Text style={styles.skipText}>Tap to continue</Text>
-        </TouchableOpacity>
+        {!showButton ? (
+          <>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Loading...</Text>
+          </>
+        ) : (
+          <TouchableOpacity 
+            style={styles.continueButton}
+            onPress={handleContinue}
+          >
+            <Text style={styles.continueText}>Get Started</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -110,13 +129,15 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md,
     fontSize: FONT_SIZE.md,
   },
-  skipButton: {
-    marginTop: SPACING.xl,
-    padding: SPACING.md,
+  continueButton: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl * 2,
+    paddingVertical: SPACING.md,
+    borderRadius: 30,
   },
-  skipText: {
-    color: COLORS.primary,
-    fontSize: FONT_SIZE.sm,
-    textDecorationLine: 'underline',
+  continueText: {
+    color: COLORS.white,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
   },
 });
