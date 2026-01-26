@@ -1,4 +1,4 @@
-// KODA Premium Theme - Luxury Rose Collection
+// NEXRYDE Premium Theme - Luxury Rose Collection
 // A unique, never-before-seen color palette for Nigeria's premium ride platform
 
 export const COLORS = {

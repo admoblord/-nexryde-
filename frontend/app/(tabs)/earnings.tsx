@@ -204,7 +204,7 @@ export default function EarningsScreen() {
                 <Text style={styles.paymentInfoTitle}>How Payments Work</Text>
               </View>
               <Text style={styles.paymentInfoText}>
-                Riders pay you directly via cash or bank transfer. KODA doesn't deduct any commission from your rides.
+                Riders pay you directly via cash or bank transfer. NEXRYDE doesn't deduct any commission from your rides.
               </Text>
               <View style={styles.paymentMethods}>
                 <View style={styles.paymentMethod}>

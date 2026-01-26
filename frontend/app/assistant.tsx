@@ -50,11 +50,11 @@ export default function AIAssistantScreen() {
       id: '0',
       text: language === 'pidgin' 
         ? (isDriver 
-            ? "How far! Na KODA AI be dis. Ask me about your money, when to drive, where demand high, or how to get beta rating!"
-            : "How far! Na KODA AI be dis. Ask me about your trip, where your driver dey, price matter, or safety wahala!")
+            ? "How far! Na NEXRYDE AI be dis. Ask me about your money, when to drive, where demand high, or how to get beta rating!"
+            : "How far! Na NEXRYDE AI be dis. Ask me about your trip, where your driver dey, price matter, or safety wahala!")
         : (isDriver 
-            ? "Hi! I'm your KODA driving assistant. Ask me about earnings, best times to drive, high-demand areas, or tips to improve your ratings!"
-            : "Hi! I'm your KODA ride assistant. Ask me about your trip, driver location, fare details, or safety features!"),
+            ? "Hi! I'm your NEXRYDE driving assistant. Ask me about earnings, best times to drive, high-demand areas, or tips to improve your ratings!"
+            : "Hi! I'm your NEXRYDE ride assistant. Ask me about your trip, driver location, fare details, or safety features!"),
       isUser: false,
       type: 'welcome',
       timestamp: new Date(),

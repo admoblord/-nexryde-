@@ -53,7 +53,7 @@ class NotificationService {
       // Configure for Android
       if (Platform.OS === 'android') {
         await Notifications.setNotificationChannelAsync('default', {
-          name: 'KODA Notifications',
+          name: 'NEXRYDE Notifications',
           importance: Notifications.AndroidImportance.MAX,
           vibrationPattern: [0, 250, 250, 250],
           lightColor: '#FFD700',
