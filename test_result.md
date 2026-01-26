@@ -189,6 +189,30 @@ backend:
         - agent: "main"
         - comment: "Request, accept, start, complete, cancel, rate trips working"
 
+  - task: "NEW: Fare Estimation API with Google Directions"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/fare/estimate - Uses Google Routes/Directions API with fallback to Haversine. Returns distance_km, duration_min, fare breakdown, price locked for 3 minutes."
+
+  - task: "Fare Calculation Formula"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Total = max(min_fare, base + km_fee + time_fee + traffic_fee) * multiplier. Peak multiplier capped at 1.2x. Configurable per city/service."
+
 frontend:
   - task: "Splash Screen"
     implemented: true
