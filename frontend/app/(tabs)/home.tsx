@@ -8,6 +8,7 @@ import {
   RefreshControl,
   Alert,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,6 +18,8 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/
 import { Card, Badge, Button } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
 import { getDriverStats, toggleDriverOnline, switchRole, getSubscription } from '@/src/services/api';
+
+const { width } = Dimensions.get('window');
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -78,7 +81,6 @@ export default function HomeScreen() {
   const handleToggleOnline = async () => {
     if (!user?.id) return;
     
-    // Check subscription first
     if (!isOnline && !driverStats?.subscription_active) {
       Alert.alert(
         'Subscription Required',
@@ -118,7 +120,6 @@ export default function HomeScreen() {
               const response = await switchRole(user.id);
               setUser(response.data);
               if (!isDriver) {
-                // Switching to driver
                 await loadDriverData();
               }
             } catch (error: any) {
@@ -141,346 +142,552 @@ export default function HomeScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
-      >
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.greeting}>Hello, {user?.name?.split(' ')[0] || 'User'}</Text>
-            <View style={styles.roleContainer}>
-              <Badge
-                text={isDriver ? 'Driver Mode' : 'Rider Mode'}
-                variant={isDriver ? 'success' : 'info'}
-              />
+    <View style={styles.container}>
+      {/* Premium Dark Header */}
+      <View style={styles.headerContainer}>
+        <SafeAreaView edges={['top']} style={styles.headerSafe}>
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>Hello,</Text>
+              <Text style={styles.userName}>{user?.name?.split(' ')[0] || 'User'}</Text>
+            </View>
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.switchModeBtn} onPress={handleSwitchRole}>
+                <Ionicons name="swap-horizontal" size={18} color={COLORS.accent} />
+                <Text style={styles.switchModeText}>{isDriver ? 'Rider' : 'Driver'}</Text>
+              </TouchableOpacity>
             </View>
           </View>
-          <TouchableOpacity style={styles.switchButton} onPress={handleSwitchRole}>
-            <Ionicons name="swap-horizontal" size={20} color={COLORS.primary} />
-            <Text style={styles.switchText}>Switch</Text>
-          </TouchableOpacity>
-        </View>
+          
+          {/* Role Badge */}
+          <View style={styles.roleBadgeContainer}>
+            <View style={[
+              styles.roleBadge,
+              { backgroundColor: isDriver ? COLORS.successSoft : COLORS.infoSoft }
+            ]}>
+              <View style={[
+                styles.roleDot,
+                { backgroundColor: isDriver ? COLORS.success : COLORS.info }
+              ]} />
+              <Text style={[
+                styles.roleBadgeText,
+                { color: isDriver ? COLORS.success : COLORS.info }
+              ]}>
+                {isDriver ? 'Driver Mode' : 'Rider Mode'}
+              </Text>
+            </View>
+          </View>
+        </SafeAreaView>
+      </View>
 
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
+        }
+        showsVerticalScrollIndicator={false}
+      >
         {isDriver ? (
-          // Driver View
+          // DRIVER VIEW
           <>
-            {/* Online Toggle */}
-            <Card style={styles.onlineCard}>
-              <View style={styles.onlineHeader}>
-                <View style={[
-                  styles.statusDot,
-                  { backgroundColor: isOnline ? COLORS.online : COLORS.offline }
-                ]} />
-                <Text style={styles.onlineStatus}>
-                  {isOnline ? 'You are Online' : 'You are Offline'}
+            {/* Online Status Card */}
+            <View style={styles.onlineCardWrapper}>
+              <View style={[
+                styles.onlineCard,
+                { backgroundColor: isOnline ? COLORS.primary : COLORS.white }
+              ]}>
+                <View style={styles.onlineCardInner}>
+                  <View style={[
+                    styles.statusIndicator,
+                    { backgroundColor: isOnline ? COLORS.success : COLORS.gray300 }
+                  ]}>
+                    <View style={[
+                      styles.statusDotInner,
+                      isOnline && styles.statusDotPulse
+                    ]} />
+                  </View>
+                  <View style={styles.onlineInfo}>
+                    <Text style={[
+                      styles.onlineTitle,
+                      { color: isOnline ? COLORS.white : COLORS.textPrimary }
+                    ]}>
+                      {isOnline ? "You're Online" : "You're Offline"}
+                    </Text>
+                    <Text style={[
+                      styles.onlineSubtext,
+                      { color: isOnline ? COLORS.gray400 : COLORS.textSecondary }
+                    ]}>
+                      {isOnline ? 'Ready to accept rides' : 'Go online to start earning'}
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[
+                    styles.onlineToggle,
+                    { backgroundColor: isOnline ? 'rgba(255,59,48,0.15)' : COLORS.accent }
+                  ]}
+                  onPress={handleToggleOnline}
+                  disabled={loading}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons 
+                    name={isOnline ? 'pause' : 'play'} 
+                    size={20} 
+                    color={isOnline ? COLORS.error : COLORS.primary} 
+                  />
+                  <Text style={[
+                    styles.onlineToggleText,
+                    { color: isOnline ? COLORS.error : COLORS.primary }
+                  ]}>
+                    {loading ? '...' : (isOnline ? 'Stop' : 'Start')}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Stats Grid */}
+            <View style={styles.statsGrid}>
+              <View style={[styles.statBox, styles.statBoxLarge]}>
+                <View style={styles.statIconWrap}>
+                  <Ionicons name="cash" size={22} color={COLORS.accent} />
+                </View>
+                <Text style={styles.statLabel}>Today's Earnings</Text>
+                <Text style={styles.statValueLarge}>
+                  {CURRENCY}{driverStats?.today_earnings?.toLocaleString() || '0'}
                 </Text>
               </View>
-              <Text style={styles.onlineSubtext}>
-                {isOnline 
-                  ? 'Ready to accept ride requests' 
-                  : 'Go online to start accepting rides'
-                }
-              </Text>
-              <Button
-                title={loading ? 'Updating...' : (isOnline ? 'Go Offline' : 'Go Online')}
-                onPress={handleToggleOnline}
-                variant={isOnline ? 'outline' : 'primary'}
-                loading={loading}
-                icon={isOnline ? 'pause-circle' : 'play-circle'}
-                style={styles.onlineButton}
-              />
-            </Card>
-
-            {/* Stats */}
-            {driverStats && (
-              <View style={styles.statsContainer}>
-                <Card style={styles.statCard}>
-                  <Ionicons name="cash" size={24} color={COLORS.primary} />
-                  <Text style={styles.statValue}>{CURRENCY}{driverStats.today_earnings?.toLocaleString() || 0}</Text>
-                  <Text style={styles.statLabel}>Today's Earnings</Text>
-                </Card>
-                <Card style={styles.statCard}>
-                  <Ionicons name="car" size={24} color={COLORS.info} />
-                  <Text style={styles.statValue}>{driverStats.total_trips || 0}</Text>
-                  <Text style={styles.statLabel}>Total Trips</Text>
-                </Card>
-                <Card style={styles.statCard}>
-                  <Ionicons name="star" size={24} color={COLORS.accent} />
-                  <Text style={styles.statValue}>{driverStats.rating?.toFixed(1) || '5.0'}</Text>
-                  <Text style={styles.statLabel}>Rating</Text>
-                </Card>
+              <View style={styles.statBoxRow}>
+                <View style={styles.statBoxSmall}>
+                  <Ionicons name="car" size={20} color={COLORS.info} />
+                  <Text style={styles.statValueSmall}>{driverStats?.total_trips || 0}</Text>
+                  <Text style={styles.statLabelSmall}>Trips</Text>
+                </View>
+                <View style={styles.statBoxSmall}>
+                  <Ionicons name="star" size={20} color={COLORS.accent} />
+                  <Text style={styles.statValueSmall}>{driverStats?.rating?.toFixed(1) || '5.0'}</Text>
+                  <Text style={styles.statLabelSmall}>Rating</Text>
+                </View>
               </View>
-            )}
+            </View>
 
             {/* Subscription Status */}
-            <Card style={styles.subscriptionCard}>
-              <View style={styles.subscriptionHeader}>
-                <Ionicons 
-                  name={driverStats?.subscription_active ? 'checkmark-circle' : 'alert-circle'} 
-                  size={24} 
-                  color={driverStats?.subscription_active ? COLORS.success : COLORS.warning} 
-                />
-                <View style={styles.subscriptionInfo}>
+            <TouchableOpacity 
+              style={styles.subscriptionCard}
+              onPress={() => router.push('/driver/subscription')}
+              activeOpacity={0.8}
+            >
+              <View style={styles.subscriptionLeft}>
+                <View style={[
+                  styles.subscriptionIcon,
+                  { backgroundColor: driverStats?.subscription_active ? COLORS.successSoft : COLORS.warningSoft }
+                ]}>
+                  <Ionicons 
+                    name={driverStats?.subscription_active ? 'checkmark-circle' : 'alert-circle'} 
+                    size={24} 
+                    color={driverStats?.subscription_active ? COLORS.success : COLORS.warning} 
+                  />
+                </View>
+                <View>
                   <Text style={styles.subscriptionTitle}>
-                    {driverStats?.subscription_active ? 'Subscription Active' : 'No Active Subscription'}
+                    {driverStats?.subscription_active ? 'Subscription Active' : 'No Subscription'}
                   </Text>
-                  {driverStats?.subscription_active && (
-                    <Text style={styles.subscriptionDays}>
-                      {driverStats.subscription_days_remaining} days remaining
-                    </Text>
-                  )}
+                  <Text style={styles.subscriptionDays}>
+                    {driverStats?.subscription_active 
+                      ? `${driverStats.subscription_days_remaining} days remaining`
+                      : 'Subscribe to go online'
+                    }
+                  </Text>
                 </View>
               </View>
-              <TouchableOpacity 
-                style={styles.subscriptionButton}
-                onPress={() => router.push('/driver/subscription')}
-              >
-                <Text style={styles.subscriptionButtonText}>
-                  {driverStats?.subscription_active ? 'Manage' : 'Subscribe Now'}
-                </Text>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.primary} />
-              </TouchableOpacity>
-            </Card>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+            </TouchableOpacity>
 
-            {/* Quick Actions for Driver */}
-            <View style={styles.driverQuickActions}>
+            {/* Quick Actions */}
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickActionsGrid}>
               <TouchableOpacity 
-                style={styles.driverQuickAction}
+                style={styles.quickActionCard}
                 onPress={() => router.push('/assistant')}
+                activeOpacity={0.8}
               >
-                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.info + '20' }]}>
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.infoSoft }]}>
                   <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.info} />
                 </View>
-                <Text style={styles.driverQuickText}>AI Assistant</Text>
+                <Text style={styles.quickActionText}>AI Assistant</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={styles.driverQuickAction}
+                style={styles.quickActionCard}
                 onPress={() => router.push('/driver/leaderboard')}
+                activeOpacity={0.8}
               >
-                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.accent + '20' }]}>
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentSoft }]}>
                   <Ionicons name="trophy" size={24} color={COLORS.accent} />
                 </View>
-                <Text style={styles.driverQuickText}>Leaderboard</Text>
+                <Text style={styles.quickActionText}>Leaderboard</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={styles.driverQuickAction}
+                style={styles.quickActionCard}
                 onPress={() => router.push('/(tabs)/safety')}
+                activeOpacity={0.8}
               >
-                <View style={[styles.driverQuickIcon, { backgroundColor: COLORS.success + '20' }]}>
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.successSoft }]}>
                   <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
                 </View>
-                <Text style={styles.driverQuickText}>Safety</Text>
+                <Text style={styles.quickActionText}>Safety</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.quickActionCard}
+                onPress={handleViewTrips}
+                activeOpacity={0.8}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.errorSoft }]}>
+                  <Ionicons name="list" size={24} color={COLORS.error} />
+                </View>
+                <Text style={styles.quickActionText}>Requests</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Pending Trips */}
+            {/* Ride Requests CTA */}
             {isOnline && (
               <TouchableOpacity 
-                style={styles.tripRequestsCard}
+                style={styles.rideRequestsCta}
                 onPress={handleViewTrips}
+                activeOpacity={0.8}
               >
-                <View style={styles.tripRequestsIcon}>
-                  <Ionicons name="notifications" size={28} color={COLORS.white} />
+                <View style={styles.rideRequestsLeft}>
+                  <View style={styles.rideRequestsIcon}>
+                    <Ionicons name="notifications" size={24} color={COLORS.primary} />
+                  </View>
+                  <View>
+                    <Text style={styles.rideRequestsTitle}>View Ride Requests</Text>
+                    <Text style={styles.rideRequestsSubtext}>Tap to see available rides</Text>
+                  </View>
                 </View>
-                <View style={styles.tripRequestsInfo}>
-                  <Text style={styles.tripRequestsTitle}>View Ride Requests</Text>
-                  <Text style={styles.tripRequestsSubtext}>Tap to see available rides nearby</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color={COLORS.gray400} />
+                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
               </TouchableOpacity>
             )}
           </>
         ) : (
-          // Rider View
+          // RIDER VIEW
           <>
             {/* Book Ride Card */}
-            <Card style={styles.bookCard}>
-              <Text style={styles.bookTitle}>Where are you going?</Text>
-              <TouchableOpacity style={styles.searchBar} onPress={handleBookRide}>
-                <Ionicons name="search" size={20} color={COLORS.gray400} />
-                <Text style={styles.searchPlaceholder}>Enter destination</Text>
+            <View style={styles.bookRideCard}>
+              <Text style={styles.bookRideTitle}>Where to?</Text>
+              <TouchableOpacity 
+                style={styles.searchBar}
+                onPress={handleBookRide}
+                activeOpacity={0.8}
+              >
+                <View style={styles.searchIconWrap}>
+                  <Ionicons name="search" size={20} color={COLORS.accent} />
+                </View>
+                <Text style={styles.searchPlaceholder}>Enter your destination</Text>
               </TouchableOpacity>
               
-              <View style={styles.quickActions}>
-                <TouchableOpacity style={styles.quickAction} onPress={handleBookRide}>
-                  <View style={[styles.quickActionIcon, { backgroundColor: COLORS.primary + '20' }]}>
-                    <Ionicons name="location" size={20} color={COLORS.primary} />
+              <View style={styles.savedLocations}>
+                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.infoSoft }]}>
+                    <Ionicons name="home" size={18} color={COLORS.info} />
                   </View>
-                  <Text style={styles.quickActionText}>Set on Map</Text>
+                  <Text style={styles.savedLocationText}>Home</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.quickAction} onPress={handleBookRide}>
-                  <View style={[styles.quickActionIcon, { backgroundColor: COLORS.info + '20' }]}>
-                    <Ionicons name="home" size={20} color={COLORS.info} />
+                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentSoft }]}>
+                    <Ionicons name="briefcase" size={18} color={COLORS.accent} />
                   </View>
-                  <Text style={styles.quickActionText}>Home</Text>
+                  <Text style={styles.savedLocationText}>Work</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.quickAction} onPress={handleBookRide}>
-                  <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accent + '20' }]}>
-                    <Ionicons name="briefcase" size={20} color={COLORS.accent} />
+                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.successSoft }]}>
+                    <Ionicons name="location" size={18} color={COLORS.success} />
                   </View>
-                  <Text style={styles.quickActionText}>Work</Text>
+                  <Text style={styles.savedLocationText}>Map</Text>
                 </TouchableOpacity>
               </View>
-            </Card>
+            </View>
 
-            {/* AI Assistant for Riders */}
+            {/* AI Assistant Banner */}
             <TouchableOpacity 
-              style={styles.aiAssistantCard}
+              style={styles.aiAssistantBanner}
               onPress={() => router.push('/assistant')}
+              activeOpacity={0.85}
             >
-              <View style={styles.aiAssistantIcon}>
-                <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.white} />
+              <View style={styles.aiAssistantLeft}>
+                <View style={styles.aiAssistantIcon}>
+                  <Ionicons name="sparkles" size={22} color={COLORS.accent} />
+                </View>
+                <View>
+                  <Text style={styles.aiAssistantTitle}>AI Assistant</Text>
+                  <Text style={styles.aiAssistantSubtext}>Get help with anything</Text>
+                </View>
               </View>
-              <View style={styles.aiAssistantInfo}>
-                <Text style={styles.aiAssistantTitle}>Need Help?</Text>
-                <Text style={styles.aiAssistantSubtext}>Ask our AI Assistant anything</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.white} />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
             </TouchableOpacity>
 
-            {/* Info Cards */}
-            <Card style={styles.infoCard}>
-              <View style={styles.infoIcon}>
-                <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
+            {/* Features */}
+            <Text style={styles.sectionTitle}>Why KODA?</Text>
+            <View style={styles.featuresGrid}>
+              <View style={styles.featureCard}>
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentSoft }]}>
+                  <Ionicons name="shield-checkmark" size={24} color={COLORS.accent} />
+                </View>
+                <Text style={styles.featureTitle}>Verified Drivers</Text>
+                <Text style={styles.featureDesc}>All drivers verified with NIN</Text>
               </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoTitle}>Verified Drivers</Text>
-                <Text style={styles.infoText}>All drivers are verified with NIN and documents</Text>
+              
+              <View style={styles.featureCard}>
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.successSoft }]}>
+                  <Ionicons name="cash" size={24} color={COLORS.success} />
+                </View>
+                <Text style={styles.featureTitle}>Fair Pricing</Text>
+                <Text style={styles.featureDesc}>No hidden charges</Text>
               </View>
-            </Card>
-
-            <Card style={styles.infoCard}>
-              <View style={styles.infoIcon}>
-                <Ionicons name="cash" size={24} color={COLORS.primary} />
+              
+              <View style={styles.featureCard}>
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.infoSoft }]}>
+                  <Ionicons name="location" size={24} color={COLORS.info} />
+                </View>
+                <Text style={styles.featureTitle}>Live Tracking</Text>
+                <Text style={styles.featureDesc}>Real-time trip monitoring</Text>
               </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoTitle}>Fair Pricing</Text>
-                <Text style={styles.infoText}>System-calculated fares with no hidden charges</Text>
+              
+              <View style={styles.featureCard}>
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.errorSoft }]}>
+                  <Ionicons name="heart" size={24} color={COLORS.error} />
+                </View>
+                <Text style={styles.featureTitle}>Driver Welfare</Text>
+                <Text style={styles.featureDesc}>100% earnings to drivers</Text>
               </View>
-            </Card>
-
-            <Card style={styles.infoCard}>
-              <View style={styles.infoIcon}>
-                <Ionicons name="card" size={24} color={COLORS.info} />
-              </View>
-              <View style={styles.infoContent}>
-                <Text style={styles.infoTitle}>Flexible Payment</Text>
-                <Text style={styles.infoText}>Pay with cash or bank transfer to driver</Text>
-              </View>
-            </Card>
+            </View>
           </>
         )}
+        
+        {/* Bottom Spacer */}
+        <View style={styles.bottomSpacer} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.gray50,
   },
-  content: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+  headerContainer: {
+    backgroundColor: COLORS.primary,
+    paddingBottom: SPACING.lg,
+    borderBottomLeftRadius: BORDER_RADIUS.xxxl,
+    borderBottomRightRadius: BORDER_RADIUS.xxxl,
+    ...SHADOWS.lg,
+  },
+  headerSafe: {
+    paddingHorizontal: SPACING.lg,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.lg,
+    alignItems: 'flex-start',
+    paddingTop: SPACING.md,
   },
+  headerLeft: {},
   greeting: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.gray400,
+  },
+  userName: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.xs,
+    fontWeight: '800',
+    color: COLORS.white,
   },
-  roleContainer: {
-    flexDirection: 'row',
-  },
-  switchButton: {
+  headerRight: {},
+  switchModeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primary + '20',
+    backgroundColor: 'rgba(255,215,0,0.12)',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.xs,
   },
-  switchText: {
-    marginLeft: SPACING.xs,
-    color: COLORS.primary,
+  switchModeText: {
+    color: COLORS.accent,
+    fontWeight: '600',
+    fontSize: FONT_SIZE.sm,
+  },
+  roleBadgeContainer: {
+    marginTop: SPACING.md,
+  },
+  roleBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.sm,
+  },
+  roleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  roleBadgeText: {
+    fontSize: FONT_SIZE.sm,
     fontWeight: '600',
   },
-  onlineCard: {
-    marginBottom: SPACING.md,
-    alignItems: 'center',
-    padding: SPACING.lg,
+  scrollView: {
+    flex: 1,
   },
-  onlineHeader: {
+  content: {
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.lg,
+  },
+  
+  // Driver Styles
+  onlineCardWrapper: {
+    marginBottom: SPACING.lg,
+  },
+  onlineCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.xs,
+    justifyContent: 'space-between',
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xxl,
+    ...SHADOWS.md,
   },
-  statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginRight: SPACING.sm,
+  onlineCardInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
   },
-  onlineStatus: {
-    fontSize: FONT_SIZE.xl,
+  statusIndicator: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
+  },
+  statusDotInner: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: COLORS.white,
+  },
+  statusDotPulse: {
+    backgroundColor: COLORS.white,
+  },
+  onlineInfo: {
+    flex: 1,
+  },
+  onlineTitle: {
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.textPrimary,
   },
   onlineSubtext: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.md,
+    fontSize: FONT_SIZE.sm,
+    marginTop: 2,
   },
-  onlineButton: {
-    width: '100%',
-  },
-  statsContainer: {
+  onlineToggle: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  statCard: {
-    flex: 1,
     alignItems: 'center',
-    padding: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm + 2,
+    borderRadius: BORDER_RADIUS.full,
+    gap: SPACING.xs,
   },
-  statValue: {
-    fontSize: FONT_SIZE.xl,
+  onlineToggleText: {
     fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginTop: SPACING.xs,
+    fontSize: FONT_SIZE.sm,
+  },
+  
+  statsGrid: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  statBox: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  statBoxLarge: {
+    flex: 1.2,
+    padding: SPACING.lg,
+  },
+  statBoxRow: {
+    flex: 1,
+    gap: SPACING.md,
+  },
+  statBoxSmall: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    alignItems: 'center',
+    ...SHADOWS.sm,
+  },
+  statIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
   },
   statLabel: {
     fontSize: FONT_SIZE.xs,
     color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  statValueLarge: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  statValueSmall: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
     marginTop: SPACING.xs,
   },
-  subscriptionCard: {
-    marginBottom: SPACING.md,
+  statLabelSmall: {
+    fontSize: FONT_SIZE.xxs,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
-  subscriptionHeader: {
+  
+  subscriptionCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.md,
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.white,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.sm,
   },
-  subscriptionInfo: {
-    marginLeft: SPACING.md,
+  subscriptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  subscriptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   subscriptionTitle: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
     color: COLORS.textPrimary,
   },
@@ -488,167 +695,199 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
   },
-  subscriptionButton: {
+  
+  sectionTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.md,
+  },
+  
+  quickActionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  quickActionCard: {
+    width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    alignItems: 'center',
+    ...SHADOWS.sm,
+  },
+  quickActionIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
+  },
+  quickActionText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  
+  rideRequestsCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.gray200,
+    backgroundColor: COLORS.accent,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.gold,
   },
-  subscriptionButtonText: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  tripRequestsCard: {
+  rideRequestsLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    ...SHADOWS.md,
+    gap: SPACING.md,
   },
-  tripRequestsIcon: {
+  rideRequestsIcon: {
     width: 48,
     height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  tripRequestsInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  tripRequestsTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
-    color: COLORS.white,
-  },
-  tripRequestsSubtext: {
-    fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  bookCard: {
-    marginBottom: SPACING.md,
-    padding: SPACING.lg,
-  },
-  bookTitle: {
-    fontSize: FONT_SIZE.xl,
+  rideRequestsTitle: {
+    fontSize: FONT_SIZE.md,
     fontWeight: '700',
+    color: COLORS.primary,
+  },
+  rideRequestsSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.primary,
+    opacity: 0.7,
+  },
+  
+  // Rider Styles
+  bookRideCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.md,
+  },
+  bookRideTitle: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray100,
-    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.gray100,
+  },
+  searchIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accentSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
   },
   searchPlaceholder: {
-    marginLeft: SPACING.sm,
     fontSize: FONT_SIZE.md,
-    color: COLORS.gray400,
+    color: COLORS.textTertiary,
   },
-  quickActions: {
+  savedLocations: {
     flexDirection: 'row',
     justifyContent: 'space-around',
   },
-  quickAction: {
+  savedLocation: {
     alignItems: 'center',
+    gap: SPACING.sm,
   },
-  quickActionIcon: {
+  savedLocationIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.xs,
   },
-  quickActionText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-  },
-  infoCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  infoIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: COLORS.gray100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  infoContent: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  infoTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  infoText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-  },
-  driverQuickActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginBottom: SPACING.md,
-    paddingHorizontal: SPACING.sm,
-  },
-  driverQuickAction: {
-    alignItems: 'center',
-  },
-  driverQuickIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.xs,
-    ...SHADOWS.sm,
-  },
-  driverQuickText: {
+  savedLocationText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
     fontWeight: '500',
   },
-  aiAssistantCard: {
+  
+  aiAssistantBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.info,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    ...SHADOWS.md,
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.primary,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.lg,
+  },
+  aiAssistantLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
   },
   aiAssistantIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,215,0,0.15)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  aiAssistantInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
   aiAssistantTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.white,
   },
   aiAssistantSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
+    color: COLORS.gray400,
+  },
+  
+  featuresGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.md,
+  },
+  featureCard: {
+    width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  featureIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
+  },
+  featureTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  featureDesc: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textSecondary,
+  },
+  
+  bottomSpacer: {
+    height: SPACING.xxl,
   },
 });
