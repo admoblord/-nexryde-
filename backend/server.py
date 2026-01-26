@@ -58,6 +58,42 @@ FARE_CONFIG = {
     }
 }
 
+# Driver Certification Levels
+DRIVER_CERTIFICATION_LEVELS = {
+    "bronze": {
+        "name": "Bronze",
+        "min_trips": 0,
+        "min_rating": 0,
+        "min_months": 0,
+        "perks": ["Basic support", "Standard matching"],
+        "badge_color": "#CD7F32"
+    },
+    "silver": {
+        "name": "Silver", 
+        "min_trips": 50,
+        "min_rating": 4.5,
+        "min_months": 3,
+        "perks": ["Priority support", "Early features", "5% subscription discount"],
+        "badge_color": "#C0C0C0"
+    },
+    "gold": {
+        "name": "Gold",
+        "min_trips": 200,
+        "min_rating": 4.7,
+        "min_months": 6,
+        "perks": ["Premium support", "Fee waiver days", "Premium matching", "10% subscription discount"],
+        "badge_color": "#FFD700"
+    },
+    "platinum": {
+        "name": "Platinum",
+        "min_trips": 500,
+        "min_rating": 4.9,
+        "min_months": 12,
+        "perks": ["Dedicated support", "Profit sharing", "First access to new features", "15% subscription discount", "Free subscription month yearly"],
+        "badge_color": "#E5E4E2"
+    }
+}
+
 # Route deviation threshold in km
 ROUTE_DEVIATION_THRESHOLD = 0.5
 # Abnormal stop duration in seconds
@@ -80,6 +116,7 @@ class User(BaseModel):
     name: Optional[str] = None
     email: Optional[str] = None
     role: str = "rider"
+    gender: Optional[str] = None  # For women-only mode
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_verified: bool = False
     face_verified: bool = False
@@ -94,6 +131,12 @@ class User(BaseModel):
     blocked_riders: List[str] = []  # List of rider IDs (for drivers)
     streaks: dict = Field(default_factory=lambda: {"current": 0, "best": 0, "last_date": None})
     badges: List[str] = []
+    # KODA Family
+    family_id: Optional[str] = None  # Family group ID
+    family_role: Optional[str] = None  # "owner" or "member"
+    trust_score: float = 100.0  # Trust score (inheritable)
+    # Women-only mode preference
+    women_only_mode: bool = False
     
 class DriverProfile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
