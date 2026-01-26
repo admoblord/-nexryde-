@@ -199,6 +199,25 @@ export default function ProfileScreen() {
             </>
           )}
 
+          {/* Rider-specific menu items */}
+          {!isDriver && (
+            <>
+              <TouchableOpacity 
+                style={styles.menuItem}
+                onPress={() => router.push('/rider/family')}
+              >
+                <View style={[styles.menuIcon, { backgroundColor: COLORS.info + '20' }]}>
+                  <Ionicons name="people" size={20} color={COLORS.info} />
+                </View>
+                <View style={styles.menuContent}>
+                  <Text style={styles.menuTitle}>Family & Friends</Text>
+                  <Text style={styles.menuSubtitle}>Book rides for loved ones</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+              </TouchableOpacity>
+            </>
+          )}
+
           <TouchableOpacity style={styles.menuItem}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.warning + '20' }]}>
               <Ionicons name="help-circle" size={20} color={COLORS.warning} />
