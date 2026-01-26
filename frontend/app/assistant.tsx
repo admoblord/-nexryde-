@@ -78,9 +78,16 @@ export default function AIAssistantScreen() {
     setLoading(true);
     
     try {
-      const response = isDriver 
-        ? await askDriverAssistant(user.id, question)
-        : await askRiderAssistant(user.id, question);
+      let response;
+      if (language === 'pidgin') {
+        response = isDriver 
+          ? await askDriverAssistantPidgin(user.id, question)
+          : await askRiderAssistantPidgin(user.id, question);
+      } else {
+        response = isDriver 
+          ? await askDriverAssistant(user.id, question)
+          : await askRiderAssistant(user.id, question);
+      }
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -95,7 +102,9 @@ export default function AIAssistantScreen() {
     } catch (error: any) {
       const errorMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: "Sorry, I couldn't process your request. Please try again.",
+        text: language === 'pidgin' 
+          ? "E get wahala. Abeg try again."
+          : "Sorry, I couldn't process your request. Please try again.",
         isUser: false,
         type: 'error',
         timestamp: new Date(),
