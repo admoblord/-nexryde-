@@ -369,74 +369,13 @@ export default function FamilyModeScreen() {
         {/* How It Works */}
         <Card style={styles.howItWorksCard}>
           <Text style={styles.howItWorksTitle}>How Safety Circle Works</Text>
-          </View>
-        </Card>
-
-        {/* Add Member Button */}
-        <Button
-          title="Add Family Member"
-          onPress={() => setShowAddModal(true)}
-          icon="person-add"
-          style={styles.addButton}
-        />
-
-        {/* Family Members List */}
-        <View style={styles.membersSection}>
-          <Text style={styles.sectionTitle}>Your Family Members</Text>
-          
-          {familyMembers.length === 0 ? (
-            <Card style={styles.emptyCard}>
-              <Ionicons name="people-outline" size={48} color={COLORS.gray400} />
-              <Text style={styles.emptyTitle}>No family members yet</Text>
-              <Text style={styles.emptyText}>
-                Add your family members to book and track rides for them
-              </Text>
-            </Card>
-          ) : (
-            familyMembers.map((member) => (
-              <Card key={member.id} style={styles.memberCard}>
-                <View style={styles.memberInfo}>
-                  <View style={styles.memberAvatar}>
-                    <Text style={styles.memberInitial}>
-                      {member.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.memberDetails}>
-                    <Text style={styles.memberName}>{member.name}</Text>
-                    <Text style={styles.memberPhone}>{member.phone}</Text>
-                    <Badge text={member.relationship} variant="info" />
-                  </View>
-                </View>
-                <View style={styles.memberActions}>
-                  <TouchableOpacity
-                    style={styles.bookButton}
-                    onPress={() => handleBookForMember(member)}
-                  >
-                    <Ionicons name="car" size={20} color={COLORS.primary} />
-                    <Text style={styles.bookButtonText}>Book Ride</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.removeButton}
-                    onPress={() => handleRemoveMember(member.id)}
-                  >
-                    <Ionicons name="trash-outline" size={20} color={COLORS.error} />
-                  </TouchableOpacity>
-                </View>
-              </Card>
-            ))
-          )}
-        </View>
-
-        {/* How It Works */}
-        <Card style={styles.howItWorksCard}>
-          <Text style={styles.howItWorksTitle}>How It Works</Text>
           <View style={styles.step}>
             <View style={styles.stepNumber}>
               <Text style={styles.stepNumberText}>1</Text>
             </View>
             <View style={styles.stepInfo}>
-              <Text style={styles.stepTitle}>Add family member</Text>
-              <Text style={styles.stepText}>Enter their name, phone, and relationship</Text>
+              <Text style={styles.stepTitle}>Any member triggers alert</Text>
+              <Text style={styles.stepText}>Press the Safety Alert button during emergency</Text>
             </View>
           </View>
           <View style={styles.step}>
@@ -444,8 +383,8 @@ export default function FamilyModeScreen() {
               <Text style={styles.stepNumberText}>2</Text>
             </View>
             <View style={styles.stepInfo}>
-              <Text style={styles.stepTitle}>Book a ride for them</Text>
-              <Text style={styles.stepText}>Enter pickup and dropoff locations</Text>
+              <Text style={styles.stepTitle}>Everyone gets notified</Text>
+              <Text style={styles.stepText}>All family members receive instant push notification</Text>
             </View>
           </View>
           <View style={styles.step}>
@@ -453,12 +392,47 @@ export default function FamilyModeScreen() {
               <Text style={styles.stepNumberText}>3</Text>
             </View>
             <View style={styles.stepInfo}>
-              <Text style={styles.stepTitle}>Track their trip</Text>
-              <Text style={styles.stepText}>Follow their ride in real-time and pay for them</Text>
+              <Text style={styles.stepTitle}>Location is shared</Text>
+              <Text style={styles.stepText}>Family can see exact location and track in real-time</Text>
             </View>
           </View>
         </Card>
       </ScrollView>
+
+      {/* Create Family Modal */}
+      <Modal
+        visible={showCreateModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCreateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create Your Family</Text>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <Ionicons name="close" size={24} color={COLORS.gray500} />
+              </TouchableOpacity>
+            </View>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Family Name (e.g., Adeyemi Family)"
+              placeholderTextColor={COLORS.gray400}
+              value={newFamilyName}
+              onChangeText={setNewFamilyName}
+            />
+            
+            <Button
+              title={loading ? 'Creating...' : 'Create Family'}
+              onPress={handleCreateFamily}
+              loading={loading}
+              icon="people"
+              style={styles.modalButton}
+            />
+          </View>
+        </View>
+      </Modal>
 
       {/* Add Member Modal */}
       <Modal
@@ -495,9 +469,382 @@ export default function FamilyModeScreen() {
             
             <Text style={styles.relationshipLabel}>Relationship</Text>
             <View style={styles.relationshipOptions}>
-              {['Parent', 'Child', 'Spouse', 'Friend', 'Other'].map((rel) => (
+              {['Parent', 'Child', 'Spouse', 'Sibling', 'Friend'].map((rel) => (
                 <TouchableOpacity
                   key={rel}
+                  style={[
+                    styles.relationshipOption,
+                    newMember.relationship === rel && styles.relationshipOptionSelected
+                  ]}
+                  onPress={() => setNewMember({ ...newMember, relationship: rel })}
+                >
+                  <Text
+                    style={[
+                      styles.relationshipOptionText,
+                      newMember.relationship === rel && styles.relationshipOptionTextSelected
+                    ]}
+                  >
+                    {rel}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            
+            <Button
+              title={loading ? 'Adding...' : 'Add Member'}
+              onPress={handleAddMember}
+              loading={loading}
+              icon="person-add"
+              style={styles.modalButton}
+            />
+          </View>
+        </View>
+      </Modal>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.textSecondary,
+  },
+  content: {
+    padding: SPACING.md,
+    paddingBottom: SPACING.xxl,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
+    ...SHADOWS.sm,
+  },
+  title: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  infoCard: {
+    marginBottom: SPACING.md,
+  },
+  infoHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.md,
+  },
+  infoContent: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  infoTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.xs,
+  },
+  infoText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+  },
+  features: {
+    backgroundColor: COLORS.gray100,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  featureText: {
+    marginLeft: SPACING.sm,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textPrimary,
+  },
+  createButton: {
+    marginBottom: SPACING.lg,
+  },
+  familyHeaderCard: {
+    marginBottom: SPACING.md,
+    backgroundColor: COLORS.primary,
+  },
+  familyHeaderContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  familyIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  familyHeaderInfo: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  familyName: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  familyMemberCount: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  trustScoreBadge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+  },
+  trustScoreText: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  trustScoreLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: 'rgba(255,255,255,0.8)',
+  },
+  safetyCircleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    padding: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    marginTop: SPACING.md,
+  },
+  safetyCircleText: {
+    marginLeft: SPACING.sm,
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  addButton: {
+    marginBottom: SPACING.md,
+  },
+  membersSection: {
+    marginBottom: SPACING.lg,
+  },
+  sectionTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.md,
+  },
+  memberCard: {
+    marginBottom: SPACING.sm,
+  },
+  memberInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  memberAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.primary + '20',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ownerAvatar: {
+    backgroundColor: COLORS.success + '20',
+  },
+  ownerBadge: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: COLORS.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: COLORS.white,
+  },
+  memberInitial: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  memberDetails: {
+    marginLeft: SPACING.md,
+    flex: 1,
+  },
+  memberNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    flexWrap: 'wrap',
+  },
+  memberName: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  memberPhone: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.xs,
+  },
+  memberActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray200,
+    gap: SPACING.sm,
+  },
+  bookButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary + '15',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  bookButtonText: {
+    marginLeft: SPACING.xs,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  removeButton: {
+    padding: SPACING.sm,
+  },
+  howItWorksCard: {
+    backgroundColor: COLORS.info + '10',
+    borderWidth: 1,
+    borderColor: COLORS.info + '30',
+  },
+  howItWorksTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
+    color: COLORS.info,
+    marginBottom: SPACING.md,
+  },
+  step: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.md,
+  },
+  stepNumber: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.info,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  stepInfo: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  stepTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  stepText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xl,
+    borderTopRightRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  modalTitle: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+  },
+  input: {
+    backgroundColor: COLORS.gray100,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    marginBottom: SPACING.md,
+    color: COLORS.textPrimary,
+  },
+  relationshipLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+  },
+  relationshipOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  relationshipOption: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.gray300,
+  },
+  relationshipOptionSelected: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  relationshipOptionText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  relationshipOptionTextSelected: {
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  modalButton: {
+    marginTop: SPACING.md,
+  },
+});
                   style={[
                     styles.relationshipOption,
                     newMember.relationship === rel && styles.relationshipOptionSelected
