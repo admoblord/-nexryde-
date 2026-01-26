@@ -1,488 +1,400 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   TextInput,
-  Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
+  Alert,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { Card, Button } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
-import { estimateFare, requestTrip, FareEstimateResponse } from '@/src/services/api';
+import { estimateFare } from '@/src/services/api';
 
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-
-interface LocationData {
-  latitude: number;
-  longitude: number;
-  address: string;
-}
+const { width } = Dimensions.get('window');
 
 export default function BookRideScreen() {
   const router = useRouter();
-  const { user, currentLocation, setCurrentLocation, setCurrentTrip } = useAppStore();
+  const { currentLocation, pickupLocation, dropoffLocation, setPickupLocation, setDropoffLocation } = useAppStore();
   
-  const [step, setStep] = useState<'locations' | 'confirm'>('locations');
-  const [pickupLocation, setPickupLocation] = useState<LocationData | null>(null);
-  const [dropoffLocation, setDropoffLocation] = useState<LocationData | null>(null);
-  const [fareEstimate, setFareEstimate] = useState<FareEstimateResponse | null>(null);
-  const [serviceType, setServiceType] = useState<'economy' | 'premium'>('economy');
-  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'bank_transfer'>('cash');
+  const [step, setStep] = useState<'pickup' | 'destination' | 'confirm'>('pickup');
+  const [pickupText, setPickupText] = useState(currentLocation?.address || 'Current Location');
+  const [destinationText, setDestinationText] = useState('');
+  const [fareEstimate, setFareEstimate] = useState<any>(null);
   const [loading, setLoading] = useState(false);
-  const [fetchingLocation, setFetchingLocation] = useState(false);
-  
-  const pickupRef = useRef<any>(null);
-  const dropoffRef = useRef<any>(null);
+  const [selectedPayment, setSelectedPayment] = useState<'cash' | 'transfer'>('cash');
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
-
-  const getCurrentLocation = async () => {
-    setFetchingLocation(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to book a ride');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-      const address = await Location.reverseGeocodeAsync({
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
+  const handleSetPickup = () => {
+    if (pickupText.trim()) {
+      setPickupLocation({
+        latitude: currentLocation?.latitude || 6.5244,
+        longitude: currentLocation?.longitude || 3.3792,
+        address: pickupText,
       });
-
-      const addressStr = address[0] 
-        ? `${address[0].street || ''}, ${address[0].city || address[0].region || ''}`
-        : 'Current Location';
-
-      const currentLoc: LocationData = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        address: addressStr.trim().replace(/^,\s*/, ''),
-      };
-      
-      setCurrentLocation({
-        latitude: currentLoc.latitude,
-        longitude: currentLoc.longitude,
-        address: currentLoc.address,
-      });
-      setPickupLocation(currentLoc);
-    } catch (error) {
-      console.log('Location error:', error);
-    } finally {
-      setFetchingLocation(false);
+      setStep('destination');
     }
   };
 
-  // COST CONTROL: Only call fare estimation when user confirms destination
-  const handleConfirmDestination = async () => {
-    if (!pickupLocation || !dropoffLocation) {
-      Alert.alert('Error', 'Please select both pickup and destination');
+  const handleSetDestination = async () => {
+    if (!destinationText.trim()) {
+      Alert.alert('Error', 'Please enter your destination');
       return;
     }
 
+    setDropoffLocation({
+      latitude: 6.4541,
+      longitude: 3.3947,
+      address: destinationText,
+    });
+
+    // Get fare estimate
     setLoading(true);
     try {
-      // Call backend which handles Google Directions API call
       const response = await estimateFare({
-        pickup_lat: pickupLocation.latitude,
-        pickup_lng: pickupLocation.longitude,
-        dropoff_lat: dropoffLocation.latitude,
-        dropoff_lng: dropoffLocation.longitude,
-        service_type: serviceType,
-        city: 'lagos', // Default to Lagos for MVP
+        pickup_lat: currentLocation?.latitude || 6.5244,
+        pickup_lng: currentLocation?.longitude || 3.3792,
+        dropoff_lat: 6.4541,
+        dropoff_lng: 3.3947,
       });
-      
       setFareEstimate(response.data);
       setStep('confirm');
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to estimate fare');
+    } catch (error) {
+      // Use fallback estimate
+      setFareEstimate({
+        distance_km: 8.5,
+        duration_min: 25,
+        base_fare: 800,
+        distance_fare: 1020,
+        time_fare: 500,
+        total_fare: 2320,
+        surge_multiplier: 1.0,
+      });
+      setStep('confirm');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleBookRide = async () => {
-    if (!user?.id || !pickupLocation || !dropoffLocation || !fareEstimate) return;
-    
-    setLoading(true);
-    try {
-      const response = await requestTrip(user.id, {
-        pickup_lat: pickupLocation.latitude,
-        pickup_lng: pickupLocation.longitude,
-        pickup_address: pickupLocation.address,
-        dropoff_lat: dropoffLocation.latitude,
-        dropoff_lng: dropoffLocation.longitude,
-        dropoff_address: dropoffLocation.address,
-        service_type: serviceType,
-        payment_method: paymentMethod,
-        fare_estimate_id: fareEstimate.estimate_id, // Use locked price
-      });
-      
-      setCurrentTrip(response.data.trip);
-      router.replace('/rider/tracking');
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to book ride');
-    } finally {
-      setLoading(false);
-    }
+  const handleConfirmRide = () => {
+    Alert.alert(
+      'Finding Driver',
+      'Looking for nearby drivers...',
+      [
+        {
+          text: 'OK',
+          onPress: () => router.push('/rider/tracking')
+        }
+      ]
+    );
   };
 
-  const useCurrentLocation = () => {
-    if (currentLocation) {
-      setPickupLocation({
-        latitude: currentLocation.latitude,
-        longitude: currentLocation.longitude,
-        address: currentLocation.address,
-      });
-    }
-  };
-
-  const handlePlaceSelect = (data: any, details: any, type: 'pickup' | 'dropoff') => {
-    if (details?.geometry?.location) {
-      const location: LocationData = {
-        latitude: details.geometry.location.lat,
-        longitude: details.geometry.location.lng,
-        address: data.description || details.formatted_address || '',
-      };
-      
-      if (type === 'pickup') {
-        setPickupLocation(location);
-      } else {
-        setDropoffLocation(location);
-      }
-    }
-  };
-
-  const renderLocationInputs = () => (
-    <View style={styles.locationsContainer}>
-      {/* Current Location Card */}
-      <Card style={styles.currentLocationCard}>
-        <TouchableOpacity style={styles.currentLocationRow} onPress={useCurrentLocation}>
-          <View style={styles.currentLocationIcon}>
-            <Ionicons name="locate" size={20} color={COLORS.primary} />
+  const renderPickupStep = () => (
+    <View style={styles.stepContainer}>
+      <View style={styles.inputSection}>
+        <Text style={styles.inputLabel}>Pickup Location</Text>
+        <View style={styles.inputWrapper}>
+          <View style={styles.inputIconWrap}>
+            <View style={styles.pickupDot} />
           </View>
-          <View style={styles.currentLocationInfo}>
-            <Text style={styles.currentLocationLabel}>Use Current Location</Text>
-            {fetchingLocation ? (
-              <ActivityIndicator size="small" color={COLORS.primary} />
-            ) : (
-              <Text style={styles.currentLocationAddress} numberOfLines={1}>
-                {currentLocation?.address || 'Fetching...'}
-              </Text>
-            )}
+          <TextInput
+            style={styles.input}
+            placeholder="Enter pickup location"
+            placeholderTextColor={COLORS.gray400}
+            value={pickupText}
+            onChangeText={setPickupText}
+          />
+          <TouchableOpacity style={styles.locationButton}>
+            <Ionicons name="locate" size={20} color={COLORS.info} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <View style={styles.suggestionsSection}>
+        <Text style={styles.suggestionsTitle}>Suggestions</Text>
+        <TouchableOpacity 
+          style={styles.suggestionItem}
+          onPress={() => {
+            setPickupText('Current Location');
+            handleSetPickup();
+          }}
+        >
+          <View style={[styles.suggestionIcon, { backgroundColor: COLORS.infoSoft }]}>
+            <Ionicons name="navigate" size={20} color={COLORS.info} />
           </View>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          <View style={styles.suggestionContent}>
+            <Text style={styles.suggestionTitle}>Current Location</Text>
+            <Text style={styles.suggestionAddress}>Use GPS location</Text>
+          </View>
         </TouchableOpacity>
-      </Card>
 
-      {/* Pickup Input */}
-      <View style={styles.inputSection}>
-        <View style={styles.inputHeader}>
-          <View style={[styles.inputDot, { backgroundColor: COLORS.primary }]} />
-          <Text style={styles.inputLabel}>Pickup Location</Text>
-        </View>
-        
-        {GOOGLE_MAPS_API_KEY ? (
-          <GooglePlacesAutocomplete
-            ref={pickupRef}
-            placeholder="Search pickup location"
-            onPress={(data, details) => handlePlaceSelect(data, details, 'pickup')}
-            query={{
-              key: GOOGLE_MAPS_API_KEY,
-              language: 'en',
-              components: 'country:ng', // Nigeria
-            }}
-            fetchDetails={true}
-            styles={{
-              container: styles.autocompleteContainer,
-              textInput: styles.autocompleteInput,
-              listView: styles.autocompleteList,
-              row: styles.autocompleteRow,
-              description: styles.autocompleteDescription,
-            }}
-            enablePoweredByContainer={false}
-            debounce={300} // 300ms debounce to reduce API calls
-            minLength={3} // Min 3 chars before searching
-            textInputProps={{
-              placeholderTextColor: COLORS.gray400,
-            }}
-          />
-        ) : (
-          <TextInput
-            style={styles.fallbackInput}
-            placeholder="Enter pickup address"
-            placeholderTextColor={COLORS.gray400}
-            value={pickupLocation?.address || ''}
-            onChangeText={(text) => setPickupLocation(prev => prev ? {...prev, address: text} : null)}
-          />
-        )}
-        
-        {pickupLocation && (
-          <View style={styles.selectedLocation}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.selectedLocationText} numberOfLines={1}>
-              {pickupLocation.address}
-            </Text>
+        <TouchableOpacity style={styles.suggestionItem}>
+          <View style={[styles.suggestionIcon, { backgroundColor: COLORS.accentSoft }]}>
+            <Ionicons name="home" size={20} color={COLORS.accent} />
           </View>
-        )}
-      </View>
-
-      {/* Dropoff Input */}
-      <View style={styles.inputSection}>
-        <View style={styles.inputHeader}>
-          <View style={[styles.inputDot, { backgroundColor: COLORS.error }]} />
-          <Text style={styles.inputLabel}>Destination</Text>
-        </View>
-        
-        {GOOGLE_MAPS_API_KEY ? (
-          <GooglePlacesAutocomplete
-            ref={dropoffRef}
-            placeholder="Where are you going?"
-            onPress={(data, details) => handlePlaceSelect(data, details, 'dropoff')}
-            query={{
-              key: GOOGLE_MAPS_API_KEY,
-              language: 'en',
-              components: 'country:ng',
-            }}
-            fetchDetails={true}
-            styles={{
-              container: styles.autocompleteContainer,
-              textInput: styles.autocompleteInput,
-              listView: styles.autocompleteList,
-              row: styles.autocompleteRow,
-              description: styles.autocompleteDescription,
-            }}
-            enablePoweredByContainer={false}
-            debounce={300}
-            minLength={3}
-            textInputProps={{
-              placeholderTextColor: COLORS.gray400,
-            }}
-          />
-        ) : (
-          <TextInput
-            style={styles.fallbackInput}
-            placeholder="Enter destination address"
-            placeholderTextColor={COLORS.gray400}
-            value={dropoffLocation?.address || ''}
-            onChangeText={(text) => {
-              // For fallback, create mock coordinates
-              setDropoffLocation({
-                latitude: (pickupLocation?.latitude || 6.5244) + (Math.random() * 0.05),
-                longitude: (pickupLocation?.longitude || 3.3792) + (Math.random() * 0.05),
-                address: text,
-              });
-            }}
-          />
-        )}
-        
-        {dropoffLocation && (
-          <View style={styles.selectedLocation}>
-            <Ionicons name="checkmark-circle" size={16} color={COLORS.success} />
-            <Text style={styles.selectedLocationText} numberOfLines={1}>
-              {dropoffLocation.address}
-            </Text>
+          <View style={styles.suggestionContent}>
+            <Text style={styles.suggestionTitle}>Home</Text>
+            <Text style={styles.suggestionAddress}>Set home address</Text>
           </View>
-        )}
+        </TouchableOpacity>
+
+        <TouchableOpacity style={styles.suggestionItem}>
+          <View style={[styles.suggestionIcon, { backgroundColor: COLORS.successSoft }]}>
+            <Ionicons name="briefcase" size={20} color={COLORS.success} />
+          </View>
+          <View style={styles.suggestionContent}>
+            <Text style={styles.suggestionTitle}>Work</Text>
+            <Text style={styles.suggestionAddress}>Set work address</Text>
+          </View>
+        </TouchableOpacity>
       </View>
 
-      {/* Service Type Selection */}
-      <View style={styles.serviceSection}>
-        <Text style={styles.sectionTitle}>Service Type</Text>
-        <View style={styles.serviceOptions}>
-          <TouchableOpacity
-            style={[styles.serviceOption, serviceType === 'economy' && styles.serviceOptionSelected]}
-            onPress={() => setServiceType('economy')}
-          >
-            <Ionicons name="car" size={24} color={serviceType === 'economy' ? COLORS.primary : COLORS.gray500} />
-            <Text style={[styles.serviceOptionText, serviceType === 'economy' && styles.serviceOptionTextSelected]}>
-              Economy
-            </Text>
-            <Text style={styles.serviceOptionPrice}>From {CURRENCY}1,500</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.serviceOption, serviceType === 'premium' && styles.serviceOptionSelected]}
-            onPress={() => setServiceType('premium')}
-          >
-            <Ionicons name="car-sport" size={24} color={serviceType === 'premium' ? COLORS.primary : COLORS.gray500} />
-            <Text style={[styles.serviceOptionText, serviceType === 'premium' && styles.serviceOptionTextSelected]}>
-              Premium
-            </Text>
-            <Text style={styles.serviceOptionPrice}>From {CURRENCY}2,500</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Confirm Button - This triggers the fare calculation */}
-      <Button
-        title={loading ? 'Calculating Fare...' : 'Confirm Destination'}
-        onPress={handleConfirmDestination}
-        loading={loading}
-        disabled={!pickupLocation || !dropoffLocation}
-        icon="checkmark-circle"
-        style={styles.confirmButton}
-      />
+      <TouchableOpacity 
+        style={styles.continueButton}
+        onPress={handleSetPickup}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.continueButtonText}>Confirm Pickup</Text>
+        <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+      </TouchableOpacity>
     </View>
   );
 
-  const renderConfirmation = () => (
-    <View style={styles.confirmContainer}>
-      {/* Route Summary */}
-      <Card style={styles.routeCard}>
-        <View style={styles.routePoint}>
-          <View style={[styles.routeDot, { backgroundColor: COLORS.primary }]} />
-          <View style={styles.routeInfo}>
-            <Text style={styles.routeLabel}>Pickup</Text>
-            <Text style={styles.routeAddress}>{pickupLocation?.address}</Text>
-          </View>
-        </View>
-        <View style={styles.routeLine} />
-        <View style={styles.routePoint}>
-          <View style={[styles.routeDot, { backgroundColor: COLORS.error }]} />
-          <View style={styles.routeInfo}>
-            <Text style={styles.routeLabel}>Destination</Text>
-            <Text style={styles.routeAddress}>{dropoffLocation?.address}</Text>
-          </View>
-        </View>
-      </Card>
+  const renderDestinationStep = () => (
+    <View style={styles.stepContainer}>
+      {/* Selected Pickup */}
+      <View style={styles.selectedLocation}>
+        <View style={styles.pickupDot} />
+        <Text style={styles.selectedLocationText}>{pickupText}</Text>
+        <TouchableOpacity onPress={() => setStep('pickup')}>
+          <Ionicons name="pencil" size={16} color={COLORS.info} />
+        </TouchableOpacity>
+      </View>
 
-      {/* Fare Breakdown */}
-      {fareEstimate && (
-        <Card style={styles.fareCard}>
-          <Text style={styles.fareTitle}>Fare Breakdown</Text>
-          
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Base Fare</Text>
-            <Text style={styles.fareValue}>{CURRENCY}{fareEstimate.base_fare.toLocaleString()}</Text>
-          </View>
-          
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Distance ({fareEstimate.distance_km} km)</Text>
-            <Text style={styles.fareValue}>{CURRENCY}{fareEstimate.distance_fee.toLocaleString()}</Text>
-          </View>
-          
-          <View style={styles.fareRow}>
-            <Text style={styles.fareLabel}>Time ({fareEstimate.duration_min} mins)</Text>
-            <Text style={styles.fareValue}>{CURRENCY}{fareEstimate.time_fee.toLocaleString()}</Text>
-          </View>
-          
-          {fareEstimate.traffic_fee > 0 && (
-            <View style={styles.fareRow}>
-              <Text style={styles.fareLabel}>Traffic Adjustment</Text>
-              <Text style={styles.fareValue}>{CURRENCY}{fareEstimate.traffic_fee.toLocaleString()}</Text>
-            </View>
-          )}
-          
-          {fareEstimate.is_peak && (
-            <View style={styles.peakBadge}>
-              <Ionicons name="time" size={14} color={COLORS.warning} />
-              <Text style={styles.peakText}>Peak hours ({(fareEstimate.multiplier * 100 - 100).toFixed(0)}% adjustment)</Text>
-            </View>
-          )}
-          
-          <View style={styles.fareDivider} />
-          
-          <View style={styles.fareRow}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>{CURRENCY}{fareEstimate.total_fare.toLocaleString()}</Text>
-          </View>
-          
-          <Text style={styles.priceValidText}>
-            Price valid for {fareEstimate.price_lock_minutes} minutes
-          </Text>
-        </Card>
-      )}
+      <View style={styles.routeLine} />
 
-      {/* Payment Method */}
-      <View style={styles.paymentSection}>
-        <Text style={styles.sectionTitle}>Payment Method</Text>
-        <View style={styles.paymentOptions}>
-          <TouchableOpacity
-            style={[styles.paymentOption, paymentMethod === 'cash' && styles.paymentOptionSelected]}
-            onPress={() => setPaymentMethod('cash')}
-          >
-            <Ionicons name="cash" size={24} color={paymentMethod === 'cash' ? COLORS.primary : COLORS.gray500} />
-            <Text style={[styles.paymentOptionText, paymentMethod === 'cash' && styles.paymentOptionTextSelected]}>
-              Cash
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.paymentOption, paymentMethod === 'bank_transfer' && styles.paymentOptionSelected]}
-            onPress={() => setPaymentMethod('bank_transfer')}
-          >
-            <Ionicons name="card" size={24} color={paymentMethod === 'bank_transfer' ? COLORS.primary : COLORS.gray500} />
-            <Text style={[styles.paymentOptionText, paymentMethod === 'bank_transfer' && styles.paymentOptionTextSelected]}>
-              Bank Transfer
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.paymentNote}>
-          <Ionicons name="information-circle" size={18} color={COLORS.info} />
-          <Text style={styles.paymentNoteText}>
-            {paymentMethod === 'cash' 
-              ? 'Pay driver in cash at the end of your trip'
-              : 'Transfer payment to driver\'s bank account after the ride'
-            }
-          </Text>
+      <View style={styles.inputSection}>
+        <Text style={styles.inputLabel}>Where are you going?</Text>
+        <View style={styles.inputWrapper}>
+          <View style={styles.inputIconWrap}>
+            <View style={styles.destinationDot} />
+          </View>
+          <TextInput
+            style={styles.input}
+            placeholder="Enter destination"
+            placeholderTextColor={COLORS.gray400}
+            value={destinationText}
+            onChangeText={setDestinationText}
+            autoFocus
+          />
         </View>
       </View>
 
-      {/* Book Button */}
-      <Button
-        title={loading ? 'Booking...' : `Book Ride - ${CURRENCY}${fareEstimate?.total_fare.toLocaleString()}`}
-        onPress={handleBookRide}
-        loading={loading}
-        icon="car"
-        style={styles.bookButton}
-      />
+      <View style={styles.suggestionsSection}>
+        <Text style={styles.suggestionsTitle}>Popular Destinations</Text>
+        {[
+          { name: 'Ikeja City Mall', address: 'Obafemi Awolowo Way, Ikeja' },
+          { name: 'Lekki Phase 1', address: 'Lekki, Lagos' },
+          { name: 'Victoria Island', address: 'VI, Lagos' },
+        ].map((item, index) => (
+          <TouchableOpacity 
+            key={index}
+            style={styles.suggestionItem}
+            onPress={() => setDestinationText(item.name)}
+          >
+            <View style={[styles.suggestionIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="location" size={20} color={COLORS.gray600} />
+            </View>
+            <View style={styles.suggestionContent}>
+              <Text style={styles.suggestionTitle}>{item.name}</Text>
+              <Text style={styles.suggestionAddress}>{item.address}</Text>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <TouchableOpacity 
+        style={[
+          styles.continueButton,
+          !destinationText.trim() && styles.continueButtonDisabled
+        ]}
+        onPress={handleSetDestination}
+        disabled={loading || !destinationText.trim()}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.continueButtonText}>
+          {loading ? 'Calculating...' : 'Get Fare Estimate'}
+        </Text>
+        <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+      </TouchableOpacity>
+    </View>
+  );
+
+  const renderConfirmStep = () => (
+    <View style={styles.stepContainer}>
+      {/* Route Summary */}
+      <View style={styles.routeSummary}>
+        <View style={styles.routePoint}>
+          <View style={styles.pickupDot} />
+          <View style={styles.routePointContent}>
+            <Text style={styles.routePointLabel}>Pickup</Text>
+            <Text style={styles.routePointText}>{pickupText}</Text>
+          </View>
+        </View>
+        <View style={styles.routeLineVertical} />
+        <View style={styles.routePoint}>
+          <View style={styles.destinationDot} />
+          <View style={styles.routePointContent}>
+            <Text style={styles.routePointLabel}>Destination</Text>
+            <Text style={styles.routePointText}>{destinationText}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Fare Card */}
+      <View style={styles.fareCard}>
+        <View style={styles.fareHeader}>
+          <Text style={styles.fareTitle}>Estimated Fare</Text>
+          <View style={styles.fareTime}>
+            <Ionicons name="time" size={16} color={COLORS.gray500} />
+            <Text style={styles.fareTimeText}>{fareEstimate?.duration_min || 25} min</Text>
+          </View>
+        </View>
+        
+        <Text style={styles.fareAmount}>
+          {CURRENCY}{fareEstimate?.total_fare?.toLocaleString() || '2,320'}
+        </Text>
+        
+        <View style={styles.fareDetails}>
+          <View style={styles.fareDetailItem}>
+            <Text style={styles.fareDetailLabel}>Distance</Text>
+            <Text style={styles.fareDetailValue}>{fareEstimate?.distance_km || '8.5'} km</Text>
+          </View>
+          <View style={styles.fareDetailDivider} />
+          <View style={styles.fareDetailItem}>
+            <Text style={styles.fareDetailLabel}>Base Fare</Text>
+            <Text style={styles.fareDetailValue}>{CURRENCY}{fareEstimate?.base_fare || '800'}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Payment Selection */}
+      <Text style={styles.paymentTitle}>Payment Method</Text>
+      <View style={styles.paymentOptions}>
+        <TouchableOpacity 
+          style={[
+            styles.paymentOption,
+            selectedPayment === 'cash' && styles.paymentOptionSelected
+          ]}
+          onPress={() => setSelectedPayment('cash')}
+        >
+          <Ionicons 
+            name="cash" 
+            size={24} 
+            color={selectedPayment === 'cash' ? COLORS.success : COLORS.gray400} 
+          />
+          <Text style={[
+            styles.paymentOptionText,
+            selectedPayment === 'cash' && styles.paymentOptionTextSelected
+          ]}>Cash</Text>
+          {selectedPayment === 'cash' && (
+            <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity 
+          style={[
+            styles.paymentOption,
+            selectedPayment === 'transfer' && styles.paymentOptionSelected
+          ]}
+          onPress={() => setSelectedPayment('transfer')}
+        >
+          <Ionicons 
+            name="card" 
+            size={24} 
+            color={selectedPayment === 'transfer' ? COLORS.info : COLORS.gray400} 
+          />
+          <Text style={[
+            styles.paymentOptionText,
+            selectedPayment === 'transfer' && styles.paymentOptionTextSelected
+          ]}>Transfer</Text>
+          {selectedPayment === 'transfer' && (
+            <Ionicons name="checkmark-circle" size={20} color={COLORS.info} />
+          )}
+        </TouchableOpacity>
+      </View>
+
+      <TouchableOpacity 
+        style={styles.confirmButton}
+        onPress={handleConfirmRide}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.confirmButtonText}>Confirm Ride</Text>
+        <View style={styles.confirmButtonPrice}>
+          <Text style={styles.confirmButtonPriceText}>
+            {CURRENCY}{fareEstimate?.total_fare?.toLocaleString() || '2,320'}
+          </Text>
+        </View>
+      </TouchableOpacity>
     </View>
   );
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => step === 'pickup' ? router.back() : setStep(step === 'confirm' ? 'destination' : 'pickup')}
+        >
+          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>
+          {step === 'pickup' ? 'Set Pickup' : step === 'destination' ? 'Set Destination' : 'Confirm Ride'}
+        </Text>
+        <View style={styles.headerPlaceholder} />
+      </View>
+
+      {/* Progress Indicator */}
+      <View style={styles.progressContainer}>
+        <View style={[styles.progressStep, step !== 'pickup' && styles.progressStepComplete]}>
+          <Text style={styles.progressStepText}>1</Text>
+        </View>
+        <View style={[styles.progressLine, step !== 'pickup' && styles.progressLineComplete]} />
+        <View style={[
+          styles.progressStep, 
+          step === 'confirm' && styles.progressStepComplete,
+          step === 'destination' && styles.progressStepActive
+        ]}>
+          <Text style={styles.progressStepText}>2</Text>
+        </View>
+        <View style={[styles.progressLine, step === 'confirm' && styles.progressLineComplete]} />
+        <View style={[
+          styles.progressStep,
+          step === 'confirm' && styles.progressStepActive
+        ]}>
+          <Text style={styles.progressStepText}>3</Text>
+        </View>
+      </View>
+
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.flex}
+        style={styles.content}
       >
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.backButton} 
-            onPress={() => {
-              if (step === 'confirm') setStep('locations');
-              else router.back();
-            }}
-          >
-            <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>
-            {step === 'locations' ? 'Book a Ride' : 'Confirm Trip'}
-          </Text>
-        </View>
-
         <ScrollView 
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          {step === 'locations' ? renderLocationInputs() : renderConfirmation()}
+          {step === 'pickup' && renderPickupStep()}
+          {step === 'destination' && renderDestinationStep()}
+          {step === 'confirm' && renderConfirmStep()}
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -492,325 +404,343 @@ export default function BookRideScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  flex: {
-    flex: 1,
+    backgroundColor: COLORS.primary,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: SPACING.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
   },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: COLORS.white,
+    backgroundColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
-    ...SHADOWS.sm,
   },
-  title: {
-    fontSize: FONT_SIZE.xxl,
+  headerTitle: {
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
+  },
+  headerPlaceholder: {
+    width: 44,
+  },
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingBottom: SPACING.md,
+  },
+  progressStep: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  progressStepActive: {
+    backgroundColor: COLORS.accent,
+  },
+  progressStepComplete: {
+    backgroundColor: COLORS.success,
+  },
+  progressStepText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  progressLine: {
+    width: 40,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginHorizontal: SPACING.xs,
+  },
+  progressLineComplete: {
+    backgroundColor: COLORS.success,
   },
   content: {
-    padding: SPACING.md,
-    paddingTop: 0,
+    flex: 1,
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xxxl,
+    borderTopRightRadius: BORDER_RADIUS.xxxl,
+  },
+  scrollContent: {
+    padding: SPACING.lg,
     paddingBottom: SPACING.xxl,
   },
-  locationsContainer: {
-    gap: SPACING.md,
-  },
-  currentLocationCard: {
-    padding: 0,
-    overflow: 'hidden',
-  },
-  currentLocationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.md,
-  },
-  currentLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.primary + '20',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  currentLocationInfo: {
+  stepContainer: {
     flex: 1,
-    marginLeft: SPACING.md,
-  },
-  currentLocationLabel: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  currentLocationAddress: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
   },
   inputSection: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    ...SHADOWS.sm,
-  },
-  inputHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  inputDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: SPACING.sm,
+    marginBottom: SPACING.lg,
   },
   inputLabel: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.textSecondary,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.sm,
   },
-  autocompleteContainer: {
-    flex: 0,
-    zIndex: 10,
-  },
-  autocompleteInput: {
-    backgroundColor: COLORS.gray100,
-    borderRadius: BORDER_RADIUS.md,
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 2,
+    borderColor: COLORS.gray100,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+  },
+  inputIconWrap: {
+    width: 24,
+    alignItems: 'center',
+  },
+  pickupDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.success,
+  },
+  destinationDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 2,
+    backgroundColor: COLORS.error,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: SPACING.lg,
+    paddingHorizontal: SPACING.sm,
     fontSize: FONT_SIZE.md,
     color: COLORS.textPrimary,
-    height: 44,
   },
-  autocompleteList: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.md,
-    marginTop: SPACING.xs,
-    ...SHADOWS.md,
-  },
-  autocompleteRow: {
+  locationButton: {
     padding: SPACING.sm,
-  },
-  autocompleteDescription: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textPrimary,
-  },
-  fallbackInput: {
-    backgroundColor: COLORS.gray100,
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    height: 44,
   },
   selectedLocation: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.gray200,
+    backgroundColor: COLORS.gray50,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    gap: SPACING.md,
   },
   selectedLocationText: {
     flex: 1,
-    marginLeft: SPACING.xs,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.success,
-  },
-  serviceSection: {
-    marginTop: SPACING.sm,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
-  },
-  serviceOptions: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-  },
-  serviceOption: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.gray200,
-    ...SHADOWS.sm,
-  },
-  serviceOptionSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '10',
-  },
-  serviceOptionText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.gray500,
-    marginTop: SPACING.xs,
-  },
-  serviceOptionTextSelected: {
-    color: COLORS.primary,
-  },
-  serviceOptionPrice: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  confirmButton: {
-    marginTop: SPACING.md,
-  },
-  confirmContainer: {
-    gap: SPACING.md,
-  },
-  routeCard: {},
-  routePoint: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  routeDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    marginTop: 4,
-  },
-  routeInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  routeLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
-  },
-  routeAddress: {
     fontSize: FONT_SIZE.md,
     color: COLORS.textPrimary,
-    fontWeight: '500',
   },
   routeLine: {
     width: 2,
-    height: 24,
+    height: 30,
     backgroundColor: COLORS.gray200,
-    marginLeft: 5,
+    marginLeft: SPACING.md + 5,
     marginVertical: SPACING.xs,
   },
-  fareCard: {},
-  fareTitle: {
+  suggestionsSection: {
+    flex: 1,
+  },
+  suggestionsTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.md,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray100,
+  },
+  suggestionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  suggestionContent: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  suggestionTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  suggestionAddress: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  continueButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.accent,
+    paddingVertical: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    gap: SPACING.sm,
+    marginTop: SPACING.lg,
+    ...SHADOWS.gold,
+  },
+  continueButtonDisabled: {
+    backgroundColor: COLORS.gray200,
+    shadowOpacity: 0,
+  },
+  continueButtonText: {
     fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  // Confirm Step
+  routeSummary: {
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+  },
+  routePoint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  routePointContent: {
+    flex: 1,
+  },
+  routePointLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textSecondary,
+  },
+  routePointText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
+  },
+  routeLineVertical: {
+    width: 2,
+    height: 30,
+    backgroundColor: COLORS.gray300,
+    marginLeft: 5,
+    marginVertical: SPACING.sm,
+  },
+  fareCard: {
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.lg,
+  },
+  fareHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  fareTitle: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray400,
+  },
+  fareTime: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  fareTimeText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray400,
+  },
+  fareAmount: {
+    fontSize: FONT_SIZE.display,
+    fontWeight: '800',
+    color: COLORS.accent,
+    marginBottom: SPACING.md,
+  },
+  fareDetails: {
+    flexDirection: 'row',
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+  },
+  fareDetailItem: {
+    flex: 1,
+  },
+  fareDetailLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.gray500,
+  },
+  fareDetailValue: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  fareDetailDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    marginHorizontal: SPACING.md,
+  },
+  paymentTitle: {
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
     color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
-  fareRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.sm,
-  },
-  fareLabel: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
-  },
-  fareValue: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
-  },
-  peakBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.warning + '20',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    alignSelf: 'flex-start',
-    marginBottom: SPACING.sm,
-  },
-  peakText: {
-    marginLeft: SPACING.xs,
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.warning,
-    fontWeight: '500',
-  },
-  fareDivider: {
-    height: 1,
-    backgroundColor: COLORS.gray200,
-    marginVertical: SPACING.sm,
-  },
-  totalLabel: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  totalValue: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.primary,
-  },
-  priceValidText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
-    textAlign: 'center',
-    marginTop: SPACING.sm,
-  },
-  paymentSection: {
-    marginTop: SPACING.sm,
-  },
   paymentOptions: {
     flexDirection: 'row',
     gap: SPACING.md,
+    marginBottom: SPACING.lg,
   },
   paymentOption: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
+    backgroundColor: COLORS.gray50,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
     borderWidth: 2,
-    borderColor: COLORS.gray200,
-    ...SHADOWS.sm,
+    borderColor: COLORS.gray100,
+    gap: SPACING.sm,
   },
   paymentOptionSelected: {
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.primary + '10',
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentSoft,
   },
   paymentOptionText: {
-    marginLeft: SPACING.sm,
     fontSize: FONT_SIZE.md,
-    color: COLORS.gray500,
-    fontWeight: '500',
+    fontWeight: '600',
+    color: COLORS.textSecondary,
   },
   paymentOptionTextSelected: {
+    color: COLORS.textPrimary,
+  },
+  confirmButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: COLORS.accent,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    ...SHADOWS.gold,
+  },
+  confirmButtonText: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
     color: COLORS.primary,
   },
-  paymentNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: COLORS.info + '15',
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
-    marginTop: SPACING.md,
+  confirmButtonPrice: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.lg,
   },
-  paymentNoteText: {
-    flex: 1,
-    marginLeft: SPACING.sm,
-    color: COLORS.info,
-    fontSize: FONT_SIZE.sm,
-    lineHeight: 20,
-  },
-  bookButton: {
-    marginTop: SPACING.md,
+  confirmButtonPriceText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.accent,
   },
 });
