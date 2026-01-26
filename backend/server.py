@@ -1471,6 +1471,42 @@ async def get_active_challenges():
         "end_date": {"$gte": now}
     }).to_list(20)
     
+    # If no challenges, return default ones
+    if not challenges:
+        default_challenges = [
+            {
+                "id": "weekly_trips_30",
+                "title": "Weekly Warrior",
+                "description": "Complete 30 trips this week",
+                "target_type": "trips",
+                "target_value": 30,
+                "reward_type": "badge",
+                "reward_value": "Priority Boost + Badge",
+                "is_active": True
+            },
+            {
+                "id": "five_star_week",
+                "title": "5-Star Week",
+                "description": "Maintain 5.0 rating for all rides this week",
+                "target_type": "rating",
+                "target_value": 5.0,
+                "reward_type": "badge",
+                "reward_value": "Gold Badge + 10% Ride Priority",
+                "is_active": True
+            },
+            {
+                "id": "no_cancel_week",
+                "title": "Commitment Champion",
+                "description": "Complete all accepted rides with zero cancellations",
+                "target_type": "cancellation_free",
+                "target_value": 0,
+                "reward_type": "badge",
+                "reward_value": "Reliability Badge",
+                "is_active": True
+            }
+        ]
+        return {"challenges": default_challenges}
+    
     for c in challenges:
         c["_id"] = str(c["_id"])
     return {"challenges": challenges}
