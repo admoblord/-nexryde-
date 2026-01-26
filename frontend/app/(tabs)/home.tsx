@@ -598,4 +598,57 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
   },
+  driverQuickActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: SPACING.md,
+    paddingHorizontal: SPACING.sm,
+  },
+  driverQuickAction: {
+    alignItems: 'center',
+  },
+  driverQuickIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.xs,
+    ...SHADOWS.sm,
+  },
+  driverQuickText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
+  aiAssistantCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.info,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+    ...SHADOWS.md,
+  },
+  aiAssistantIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiAssistantInfo: {
+    flex: 1,
+    marginLeft: SPACING.md,
+  },
+  aiAssistantTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.white,
+  },
+  aiAssistantSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.8)',
+  },
 });
