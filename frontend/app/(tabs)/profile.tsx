@@ -224,7 +224,7 @@ export default function ProfileScreen() {
             </View>
             <View style={styles.menuContent}>
               <Text style={styles.menuTitle}>Help & Support</Text>
-              <Text style={styles.menuSubtitle}>Get help with KODA</Text>
+              <Text style={styles.menuSubtitle}>Get help with NEXRYDE</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
@@ -247,7 +247,7 @@ export default function ProfileScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
 
-        <Text style={styles.version}>KODA v1.0.0</Text>
+        <Text style={styles.version}>NEXRYDE v1.0.0</Text>
       </ScrollView>
     </SafeAreaView>
   );

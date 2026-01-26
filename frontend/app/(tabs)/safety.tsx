@@ -138,7 +138,7 @@ export default function SafetyScreen() {
       
       Alert.alert(
         'SOS Sent',
-        'Your emergency contacts and KODA support have been alerted. Help is on the way.',
+        'Your emergency contacts and NEXRYDE support have been alerted. Help is on the way.',
         [{ text: 'OK' }]
       );
     } catch (error: any) {
@@ -190,7 +190,7 @@ export default function SafetyScreen() {
         <Card style={styles.sosCard}>
           <Text style={styles.sosTitle}>Emergency SOS</Text>
           <Text style={styles.sosDescription}>
-            Press and hold during a ride to alert your emergency contacts and KODA support.
+            Press and hold during a ride to alert your emergency contacts and NEXRYDE support.
           </Text>
           <TouchableOpacity
             style={[styles.sosButton, !currentTrip && styles.sosButtonDisabled]}
@@ -425,7 +425,7 @@ export default function SafetyScreen() {
             <Ionicons name="warning" size={60} color={COLORS.error} />
             <Text style={styles.sosModalTitle}>Confirm SOS Alert</Text>
             <Text style={styles.sosModalText}>
-              This will alert your emergency contacts and KODA support team with your location.
+              This will alert your emergency contacts and NEXRYDE support team with your location.
             </Text>
             <View style={styles.sosModalButtons}>
               <Button

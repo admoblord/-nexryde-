@@ -429,7 +429,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
 
             {/* Features */}
-            <Text style={styles.sectionTitle}>Why KODA?</Text>
+            <Text style={styles.sectionTitle}>Why NEXRYDE?</Text>
             <View style={styles.featuresGrid}>
               <View style={styles.featureCard}>
                 <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentSoft }]}>
