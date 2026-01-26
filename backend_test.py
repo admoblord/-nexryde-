@@ -78,6 +78,45 @@ def main():
     print(f"Driver ID: {test_driver_id}")
     print(f"Trip ID: {test_trip_id}")
     
+    # First, let's create a test user to ensure emergency contacts work properly
+    print(f"\n{'🔧 SETUP - Creating Test User':=^80}")
+    
+    # Send OTP first
+    test_api_endpoint(
+        "POST",
+        "/auth/send-otp",
+        data={"phone": "+2348123456789"}
+    )
+    
+    # Verify OTP (using the mock OTP from response)
+    test_api_endpoint(
+        "POST", 
+        "/auth/verify-otp",
+        data={"phone": "+2348123456789", "otp": "123456"}
+    )
+    
+    # Register user
+    register_success, register_response = test_api_endpoint(
+        "POST",
+        "/auth/register", 
+        data={
+            "phone": "+2348123456789",
+            "name": "Kemi Adebayo",
+            "email": "kemi.adebayo@example.com",
+            "role": "rider"
+        }
+    )
+    
+    # Use the registered user ID for emergency contacts test
+    if register_success and register_response:
+        try:
+            user_data = register_response.json()
+            if "user" in user_data and "id" in user_data["user"]:
+                test_user_id = user_data["user"]["id"]
+                print(f"✅ Created test user with ID: {test_user_id}")
+        except:
+            print("⚠️ Could not extract user ID from registration response")
+    
     # =================================================================
     # PRIORITY 1 - CORE SAFETY APIs
     # =================================================================
