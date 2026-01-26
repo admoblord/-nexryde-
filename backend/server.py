@@ -1788,16 +1788,525 @@ async def _driver_assistant_fallback(user_id: str, question: str, driver_stats, 
             "type": "help"
         }
 
-# ==================== FATIGUE MONITORING ====================
+# ==================== PIDGIN ENGLISH AI SUPPORT ====================
 
-@api_router.post("/drivers/{user_id}/log-break")
-async def log_driver_break(user_id: str):
-    """Log driver taking a break for fatigue monitoring"""
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"last_break_at": datetime.utcnow(), "fatigue_warning": False}}
+PIDGIN_RIDER_PROMPT = """You be KODA AI assistant for riders wey dey Nigeria. 
+You go help riders with their trip wahala, price matter, driver info, and safety concern.
+
+Wetin KODA be:
+- KODA na driver-first ride app for Naija
+- Drivers dey pay flat monthly sub (₦25,000) instead of per-trip commission
+- Riders dey pay drivers direct via cash or bank transfer (person to person)
+- All drivers don verify with NIN and documents
+- Safety features include: SOS button, trip sharing, driver face verification, route monitoring
+
+Make you dey friendly and helpful. Use pidgin well well.
+Keep response under 100 words."""
+
+PIDGIN_DRIVER_PROMPT = """You be KODA AI assistant for drivers wey dey Naija.
+You go help drivers maximize their earnings, find high-demand areas, and improve their ratings.
+
+Wetin KODA be:
+- Drivers keep 100% of their money - KODA no take commission
+- Monthly subscription na ₦25,000 for unlimited trips  
+- Riders dey pay drivers direct via cash or bank transfer
+- Peak hours: 7-9 AM and 5-8 PM for weekdays
+- Hot areas for Lagos: Victoria Island, Lekki, Ikeja, Airport
+
+Make you dey encouraging and practical. Na Naija context you go use.
+Keep response under 100 words."""
+
+@api_router.get("/ai/rider-assistant-pidgin")
+async def rider_assistant_pidgin(user_id: str, question: str):
+    """AI Ride Assistant in Pidgin English"""
+    try:
+        current_trip = await db.trips.find_one({
+            "rider_id": user_id,
+            "status": {"$in": ["pending", "accepted", "ongoing"]}
+        })
+        
+        context = ""
+        if current_trip:
+            context = f"\nRider trip wey dey ground: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
+        else:
+            context = "\nRider no get active trip now."
+        
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"rider-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
+                system_message=PIDGIN_RIDER_PROMPT + context
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=question)
+            response_text = await chat.send_message(user_message)
+            
+            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
+        else:
+            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
+            
+    except Exception as e:
+        logger.error(f"Pidgin AI error: {e}")
+        return {"response": "E get wahala. Abeg try again.", "type": "error"}
+
+@api_router.get("/ai/driver-assistant-pidgin")
+async def driver_assistant_pidgin(user_id: str, question: str):
+    """AI Driver Assistant in Pidgin English"""
+    try:
+        stats = await db.trips.aggregate([
+            {"$match": {"driver_id": user_id, "status": "completed"}},
+            {"$group": {"_id": None, "total_earnings": {"$sum": "$fare"}, "total_trips": {"$sum": 1}}}
+        ]).to_list(1)
+        
+        driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0}
+        context = f"\nDriver stats: Total earnings=₦{driver_stats['total_earnings']:,.0f}, Total trips={driver_stats['total_trips']}"
+        
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"driver-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
+                system_message=PIDGIN_DRIVER_PROMPT + context
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=question)
+            response_text = await chat.send_message(user_message)
+            
+            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
+        else:
+            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
+            
+    except Exception as e:
+        logger.error(f"Pidgin AI error: {e}")
+        return {"response": "E get wahala. Abeg try again.", "type": "error"}
+
+# ==================== KODA FAMILY ====================
+
+@api_router.post("/family/create")
+async def create_family(owner_id: str, family_name: str):
+    """Create a new KODA Family group"""
+    user = await db.users.find_one({"id": owner_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get("family_id"):
+        raise HTTPException(status_code=400, detail="User already belongs to a family")
+    
+    family_id = str(uuid.uuid4())
+    
+    # Create family group
+    family = {
+        "id": family_id,
+        "name": family_name,
+        "owner_id": owner_id,
+        "members": [{"user_id": owner_id, "role": "owner", "joined_at": datetime.utcnow()}],
+        "shared_payment_method": None,
+        "created_at": datetime.utcnow(),
+        "trust_score": user.get("trust_score", 100.0),
+        "max_members": 10
+    }
+    
+    await db.families.insert_one(family)
+    
+    # Update user
+    await db.users.update_one(
+        {"id": owner_id},
+        {"$set": {"family_id": family_id, "family_role": "owner"}}
     )
-    return {"message": "Break logged successfully"}
+    
+    return {"message": "Family created successfully", "family_id": family_id, "family_name": family_name}
+
+@api_router.post("/family/{family_id}/add-member")
+async def add_family_member(family_id: str, phone: str, name: str, relationship: str):
+    """Add a member to KODA Family (up to 10 members)"""
+    family = await db.families.find_one({"id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+    
+    if len(family["members"]) >= 10:
+        raise HTTPException(status_code=400, detail="Family has reached maximum 10 members")
+    
+    # Check if user exists
+    member_user = await db.users.find_one({"phone": phone})
+    
+    if member_user:
+        if member_user.get("family_id"):
+            raise HTTPException(status_code=400, detail="User already belongs to a family")
+        member_id = member_user["id"]
+    else:
+        # Create pending invitation
+        member_id = f"pending-{phone}"
+    
+    # Add to family
+    new_member = {
+        "user_id": member_id,
+        "phone": phone,
+        "name": name,
+        "relationship": relationship,
+        "role": "member",
+        "joined_at": datetime.utcnow(),
+        "is_pending": member_user is None
+    }
+    
+    await db.families.update_one(
+        {"id": family_id},
+        {"$push": {"members": new_member}}
+    )
+    
+    # Update user if exists
+    if member_user:
+        # Inherit trust score from family
+        inherited_trust = min(family.get("trust_score", 100.0), member_user.get("trust_score", 100.0))
+        await db.users.update_one(
+            {"id": member_id},
+            {"$set": {"family_id": family_id, "family_role": "member", "trust_score": inherited_trust}}
+        )
+    
+    return {"message": f"{name} added to family", "is_pending": member_user is None}
+
+@api_router.get("/family/{family_id}")
+async def get_family(family_id: str):
+    """Get family details"""
+    family = await db.families.find_one({"id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+    
+    family["_id"] = str(family["_id"])
+    
+    # Enrich member data
+    enriched_members = []
+    for member in family["members"]:
+        if not member.get("is_pending"):
+            user = await db.users.find_one({"id": member["user_id"]})
+            if user:
+                member["rating"] = user.get("rating", 5.0)
+                member["total_trips"] = user.get("total_trips", 0)
+        enriched_members.append(member)
+    
+    family["members"] = enriched_members
+    return family
+
+@api_router.delete("/family/{family_id}/member/{member_phone}")
+async def remove_family_member(family_id: str, member_phone: str):
+    """Remove a member from family"""
+    family = await db.families.find_one({"id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+    
+    # Find member
+    member_to_remove = None
+    for m in family["members"]:
+        if m.get("phone") == member_phone:
+            member_to_remove = m
+            break
+    
+    if not member_to_remove:
+        raise HTTPException(status_code=404, detail="Member not found")
+    
+    if member_to_remove.get("role") == "owner":
+        raise HTTPException(status_code=400, detail="Cannot remove family owner")
+    
+    # Remove from family
+    await db.families.update_one(
+        {"id": family_id},
+        {"$pull": {"members": {"phone": member_phone}}}
+    )
+    
+    # Update user if exists
+    if not member_to_remove.get("is_pending"):
+        await db.users.update_one(
+            {"id": member_to_remove["user_id"]},
+            {"$unset": {"family_id": "", "family_role": ""}}
+        )
+    
+    return {"message": "Member removed from family"}
+
+@api_router.post("/family/{family_id}/book-for-member")
+async def book_for_family_member(
+    family_id: str,
+    booker_id: str,
+    member_phone: str,
+    pickup_lat: float,
+    pickup_lng: float,
+    pickup_address: str,
+    dropoff_lat: float,
+    dropoff_lng: float,
+    dropoff_address: str
+):
+    """Book a ride for a family member"""
+    family = await db.families.find_one({"id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+    
+    # Verify booker is in family
+    booker_in_family = any(m["user_id"] == booker_id for m in family["members"])
+    if not booker_in_family:
+        raise HTTPException(status_code=403, detail="Not authorized to book for this family")
+    
+    # Find member
+    member = None
+    for m in family["members"]:
+        if m.get("phone") == member_phone:
+            member = m
+            break
+    
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found in family")
+    
+    # Create trip
+    trip_id = str(uuid.uuid4())
+    trip = {
+        "id": trip_id,
+        "rider_id": member.get("user_id", f"family-{member_phone}"),
+        "rider_phone": member_phone,
+        "rider_name": member.get("name"),
+        "booked_by": booker_id,
+        "family_id": family_id,
+        "is_family_booking": True,
+        "pickup_location": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address},
+        "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address},
+        "status": "pending",
+        "created_at": datetime.utcnow(),
+        "fare": 0  # Will be calculated
+    }
+    
+    await db.trips.insert_one(trip)
+    
+    # Notify all family members (Safety Circle)
+    for m in family["members"]:
+        if m["user_id"] != booker_id:
+            await db.notifications.insert_one({
+                "user_id": m["user_id"],
+                "type": "family_trip_booked",
+                "title": f"Family Trip Alert",
+                "message": f"{member.get('name')} has a ride booked",
+                "data": {"trip_id": trip_id, "member_name": member.get("name")},
+                "created_at": datetime.utcnow(),
+                "read": False
+            })
+    
+    return {"message": "Trip booked for family member", "trip_id": trip_id}
+
+@api_router.post("/family/{family_id}/safety-alert")
+async def trigger_family_safety_alert(family_id: str, member_id: str, location_lat: float, location_lng: float):
+    """Trigger Safety Circle alert to all family members"""
+    family = await db.families.find_one({"id": family_id})
+    if not family:
+        raise HTTPException(status_code=404, detail="Family not found")
+    
+    member_name = "Family member"
+    for m in family["members"]:
+        if m["user_id"] == member_id:
+            member_name = m.get("name", "Family member")
+            break
+    
+    # Notify all family members
+    for m in family["members"]:
+        if m["user_id"] != member_id:
+            await db.notifications.insert_one({
+                "user_id": m["user_id"],
+                "type": "safety_circle_alert",
+                "title": "⚠️ SAFETY ALERT",
+                "message": f"{member_name} needs help! Check their location.",
+                "data": {"member_id": member_id, "location": {"lat": location_lat, "lng": location_lng}},
+                "created_at": datetime.utcnow(),
+                "read": False,
+                "urgent": True
+            })
+    
+    return {"message": "Safety alert sent to all family members", "notified_count": len(family["members"]) - 1}
+
+# ==================== DRIVER CERTIFICATION LEVELS ====================
+
+@api_router.get("/drivers/{user_id}/certification")
+async def get_driver_certification(user_id: str):
+    """Get driver's certification level and progress"""
+    user = await db.users.find_one({"id": user_id})
+    if not user or user.get("role") != "driver":
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    
+    # Calculate metrics
+    total_trips = user.get("total_trips", 0)
+    rating = user.get("rating", 5.0)
+    created_at = user.get("created_at", datetime.utcnow())
+    months_active = (datetime.utcnow() - created_at).days // 30
+    
+    # Determine current level
+    current_level = "bronze"
+    for level, requirements in DRIVER_CERTIFICATION_LEVELS.items():
+        if (total_trips >= requirements["min_trips"] and 
+            rating >= requirements["min_rating"] and 
+            months_active >= requirements["min_months"]):
+            current_level = level
+    
+    level_info = DRIVER_CERTIFICATION_LEVELS[current_level]
+    
+    # Calculate progress to next level
+    next_level = None
+    progress = {}
+    levels_order = ["bronze", "silver", "gold", "platinum"]
+    current_index = levels_order.index(current_level)
+    
+    if current_index < len(levels_order) - 1:
+        next_level = levels_order[current_index + 1]
+        next_req = DRIVER_CERTIFICATION_LEVELS[next_level]
+        progress = {
+            "trips": {"current": total_trips, "required": next_req["min_trips"], "percent": min(100, (total_trips / next_req["min_trips"]) * 100)},
+            "rating": {"current": rating, "required": next_req["min_rating"], "percent": min(100, (rating / next_req["min_rating"]) * 100)},
+            "months": {"current": months_active, "required": next_req["min_months"], "percent": min(100, (months_active / next_req["min_months"]) * 100)}
+        }
+    
+    return {
+        "current_level": current_level,
+        "level_name": level_info["name"],
+        "badge_color": level_info["badge_color"],
+        "perks": level_info["perks"],
+        "next_level": next_level,
+        "progress_to_next": progress,
+        "stats": {
+            "total_trips": total_trips,
+            "rating": rating,
+            "months_active": months_active
+        }
+    }
+
+# ==================== WOMEN-ONLY MODE ====================
+
+@api_router.post("/users/{user_id}/women-only-mode")
+async def toggle_women_only_mode(user_id: str, enabled: bool):
+    """Enable/disable women-only mode for female riders"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.get("gender") != "female" and enabled:
+        raise HTTPException(status_code=400, detail="Women-only mode is only available for verified female riders")
+    
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"women_only_mode": enabled}}
+    )
+    
+    return {"message": f"Women-only mode {'enabled' if enabled else 'disabled'}", "women_only_mode": enabled}
+
+@api_router.post("/users/{user_id}/verify-gender")
+async def verify_gender(user_id: str, gender: str):
+    """Verify user gender for women-only mode"""
+    if gender not in ["male", "female", "other"]:
+        raise HTTPException(status_code=400, detail="Invalid gender")
+    
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"gender": gender}}
+    )
+    
+    return {"message": "Gender verified", "gender": gender}
+
+@api_router.get("/drivers/available-female")
+async def get_available_female_drivers(lat: float, lng: float, radius_km: float = 5.0):
+    """Get available female drivers for women-only rides"""
+    # In production, this would use geospatial queries
+    female_drivers = await db.users.find({
+        "role": "driver",
+        "gender": "female",
+        "is_verified": True
+    }).to_list(20)
+    
+    available = []
+    for driver in female_drivers:
+        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
+        if profile and profile.get("is_online"):
+            available.append({
+                "driver_id": driver["id"],
+                "name": driver.get("name", "Driver"),
+                "rating": driver.get("rating", 5.0),
+                "total_trips": driver.get("total_trips", 0),
+                "vehicle": profile.get("vehicle_model"),
+                "plate": profile.get("plate_number")
+            })
+    
+    return {"female_drivers": available, "count": len(available)}
+
+# ==================== EARNINGS PREDICTOR AI ====================
+
+@api_router.get("/ai/earnings-predictor/{user_id}")
+async def predict_earnings(user_id: str, hours_to_drive: int = 8):
+    """AI-powered earnings prediction for drivers"""
+    # Get historical data
+    stats = await db.trips.aggregate([
+        {"$match": {"driver_id": user_id, "status": "completed"}},
+        {"$group": {
+            "_id": None,
+            "total_earnings": {"$sum": "$fare"},
+            "total_trips": {"$sum": 1},
+            "avg_fare": {"$avg": "$fare"},
+            "avg_duration": {"$avg": "$duration_mins"}
+        }}
+    ]).to_list(1)
+    
+    driver_stats = stats[0] if stats else None
+    
+    # Get hourly pattern
+    hourly_stats = await db.trips.aggregate([
+        {"$match": {"driver_id": user_id, "status": "completed"}},
+        {"$group": {
+            "_id": {"$hour": "$created_at"},
+            "avg_fare": {"$avg": "$fare"},
+            "count": {"$sum": 1}
+        }},
+        {"$sort": {"avg_fare": -1}}
+    ]).to_list(24)
+    
+    # Calculate predictions
+    if driver_stats and driver_stats["total_trips"] > 0:
+        avg_trips_per_hour = driver_stats["total_trips"] / max(1, driver_stats["total_trips"] / 8)  # Assuming 8hr average day
+        avg_fare = driver_stats["avg_fare"]
+        
+        # Base prediction
+        predicted_trips = int(hours_to_drive * 2.5)  # Average 2.5 trips/hour in Lagos
+        predicted_earnings = predicted_trips * avg_fare
+        
+        # Find best hours
+        best_hours = [h["_id"] for h in hourly_stats[:3]] if hourly_stats else [7, 8, 17, 18]
+    else:
+        # Default for new drivers (Lagos averages)
+        avg_fare = 2500
+        predicted_trips = int(hours_to_drive * 2)
+        predicted_earnings = predicted_trips * avg_fare
+        best_hours = [7, 8, 17, 18]
+    
+    # Conservative, realistic, optimistic
+    predictions = {
+        "conservative": int(predicted_earnings * 0.7),
+        "realistic": int(predicted_earnings),
+        "optimistic": int(predicted_earnings * 1.3)
+    }
+    
+    # Use AI for personalized tips
+    ai_tip = "Focus on peak hours and high-demand areas for best results."
+    if EMERGENT_LLM_KEY:
+        try:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=f"predictor-{user_id}",
+                system_message="You are KODA's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=f"Driver average fare: ₦{avg_fare:.0f}, planning to drive {hours_to_drive} hours. One tip?")
+            ai_tip = await chat.send_message(user_message)
+        except:
+            pass
+    
+    return {
+        "predicted_earnings": predictions,
+        "predicted_trips": predicted_trips,
+        "hours_planned": hours_to_drive,
+        "best_hours": best_hours,
+        "avg_fare": avg_fare,
+        "tip": ai_tip,
+        "disclaimer": "Predictions based on historical data. Actual earnings may vary."
+    }
 
 @api_router.get("/drivers/{user_id}/fatigue-status")
 async def get_fatigue_status(user_id: str):
