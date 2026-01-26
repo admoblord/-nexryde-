@@ -1,334 +1,275 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
   TouchableOpacity,
-  RefreshControl,
+  ScrollView,
   Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { FallingRoses, RosePetalsStatic, RoseGlow, FloatingRoseBloom } from '@/src/components/FallingRoses';
 
 const { width } = Dimensions.get('window');
 
-interface Challenge {
-  id: string;
-  type: 'daily' | 'weekly' | 'special';
-  title: string;
-  description: string;
-  target: number;
-  current: number;
-  reward: string;
-  rewardAmount?: number;
-  expiresAt: string;
-  icon: string;
-  color: string;
-  completed: boolean;
-}
-
 export default function ChallengesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedTab, setSelectedTab] = useState<'active' | 'completed'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
 
-  // Mock challenges data
-  const challenges: Challenge[] = [
-    {
-      id: '1',
-      type: 'daily',
-      title: 'Early Bird',
-      description: 'Complete 5 rides before 9 AM',
-      target: 5,
-      current: 3,
-      reward: '+₦2,000 bonus',
-      rewardAmount: 2000,
-      expiresAt: 'Today 11:59 PM',
-      icon: 'sunny',
-      color: COLORS.warning,
-      completed: false,
-    },
-    {
-      id: '2',
-      type: 'daily',
-      title: 'Trip Master',
-      description: 'Complete 10 rides today',
-      target: 10,
-      current: 6,
-      reward: '+₦3,500 bonus',
-      rewardAmount: 3500,
-      expiresAt: 'Today 11:59 PM',
-      icon: 'car',
-      color: COLORS.info,
-      completed: false,
-    },
-    {
-      id: '3',
-      type: 'weekly',
-      title: 'Century Club',
-      description: 'Complete 100 trips this week',
-      target: 100,
-      current: 45,
-      reward: '+₦25,000 bonus',
-      rewardAmount: 25000,
-      expiresAt: 'Sunday 11:59 PM',
-      icon: 'trophy',
-      color: COLORS.accent,
-      completed: false,
-    },
-    {
-      id: '4',
-      type: 'weekly',
-      title: 'High Earner',
-      description: 'Earn ₦200,000 this week',
-      target: 200000,
-      current: 117000,
-      reward: '+₦15,000 bonus',
-      rewardAmount: 15000,
-      expiresAt: 'Sunday 11:59 PM',
-      icon: 'cash',
-      color: COLORS.success,
-      completed: false,
-    },
-    {
-      id: '5',
-      type: 'special',
-      title: '5-Star Streak',
-      description: 'Get 10 consecutive 5-star ratings',
-      target: 10,
-      current: 7,
-      reward: 'Gold Badge + ₦10,000',
-      rewardAmount: 10000,
-      expiresAt: 'No expiry',
-      icon: 'star',
-      color: '#FFD700',
-      completed: false,
-    },
-    {
-      id: '6',
-      type: 'special',
-      title: 'Peak Hours Hero',
-      description: 'Complete 20 trips during peak hours',
-      target: 20,
-      current: 12,
-      reward: 'Priority Badge + ₦5,000',
-      rewardAmount: 5000,
-      expiresAt: 'This month',
-      icon: 'time',
-      color: COLORS.error,
-      completed: false,
-    },
-  ];
-
-  const completedChallenges: Challenge[] = [
-    {
-      id: '7',
-      type: 'daily',
-      title: 'First Ride',
-      description: 'Complete your first ride of the day',
-      target: 1,
-      current: 1,
-      reward: '+₦500 bonus',
-      expiresAt: 'Completed',
-      icon: 'flag',
-      color: COLORS.success,
-      completed: true,
-    },
-    {
-      id: '8',
-      type: 'weekly',
-      title: 'Weekend Warrior',
-      description: 'Complete 30 trips over the weekend',
-      target: 30,
-      current: 30,
-      reward: '+₦8,000 bonus',
-      expiresAt: 'Completed',
-      icon: 'calendar',
-      color: COLORS.info,
-      completed: true,
-    },
-  ];
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    // Refresh challenges from API
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    setRefreshing(false);
+  const challenges = {
+    active: [
+      {
+        id: 1,
+        title: 'Early Bird',
+        description: 'Complete 5 trips before 9 AM',
+        progress: 3,
+        total: 5,
+        reward: 5000,
+        type: 'daily',
+        icon: 'sunny',
+        color: COLORS.gold,
+      },
+      {
+        id: 2,
+        title: 'Rose Rider',
+        description: 'Complete 10 trips today',
+        progress: 7,
+        total: 10,
+        reward: 8000,
+        type: 'daily',
+        icon: 'flower',
+        color: COLORS.rosePetal3,
+      },
+      {
+        id: 3,
+        title: 'Weekly Warrior',
+        description: 'Complete 50 trips this week',
+        progress: 32,
+        total: 50,
+        reward: 25000,
+        type: 'weekly',
+        icon: 'trophy',
+        color: COLORS.accent,
+      },
+      {
+        id: 4,
+        title: '5-Star Excellence',
+        description: 'Maintain 5.0 rating for 20 trips',
+        progress: 15,
+        total: 20,
+        reward: 15000,
+        type: 'weekly',
+        icon: 'star',
+        color: COLORS.gold,
+      },
+    ],
+    completed: [
+      {
+        id: 5,
+        title: 'First Ride',
+        description: 'Complete your first trip',
+        progress: 1,
+        total: 1,
+        reward: 2000,
+        type: 'milestone',
+        icon: 'rocket',
+        color: COLORS.success,
+      },
+      {
+        id: 6,
+        title: 'Peak Hours Pro',
+        description: 'Complete 3 trips during peak hours',
+        progress: 3,
+        total: 3,
+        reward: 6000,
+        type: 'daily',
+        icon: 'time',
+        color: COLORS.info,
+      },
+    ],
   };
 
-  const getProgress = (current: number, target: number) => {
-    return Math.min((current / target) * 100, 100);
-  };
+  const totalEarned = challenges.completed.reduce((sum, c) => sum + c.reward, 0);
+  const currentChallenges = activeTab === 'active' ? challenges.active : challenges.completed;
 
-  const formatTarget = (value: number) => {
-    if (value >= 1000) {
-      return `${CURRENCY}${(value / 1000).toFixed(0)}K`;
-    }
-    return value.toString();
-  };
-
-  const renderChallengeCard = (challenge: Challenge) => (
-    <View key={challenge.id} style={styles.challengeCard}>
-      <View style={styles.challengeHeader}>
-        <View style={[styles.challengeIcon, { backgroundColor: challenge.color + '20' }]}>
-          <Ionicons name={challenge.icon as any} size={24} color={challenge.color} />
+  return (
+    <View style={styles.container}>
+      <LinearGradient
+        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        style={StyleSheet.absoluteFillObject}
+      />
+      
+      {/* Background Effects */}
+      <RosePetalsStatic count={15} />
+      <FallingRoses intensity="light" />
+      <RoseGlow size={250} style={styles.glowTopLeft} />
+      <RoseGlow size={200} color={COLORS.gold} style={styles.glowBottomRight} />
+      
+      <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Challenges</Text>
+          <View style={styles.headerRight} />
         </View>
-        <View style={styles.challengeInfo}>
-          <View style={styles.challengeTitleRow}>
-            <Text style={styles.challengeTitle}>{challenge.title}</Text>
-            <View style={[styles.typeBadge, { backgroundColor: 
-              challenge.type === 'daily' ? COLORS.infoSoft :
-              challenge.type === 'weekly' ? COLORS.accentSoft :
-              COLORS.errorSoft
-            }]}>
-              <Text style={[styles.typeBadgeText, { color:
-                challenge.type === 'daily' ? COLORS.info :
-                challenge.type === 'weekly' ? COLORS.accent :
-                COLORS.error
-              }]}>
-                {challenge.type.charAt(0).toUpperCase() + challenge.type.slice(1)}
+
+        <ScrollView showsVerticalScrollIndicator={false}>
+          {/* Hero Stats Card */}
+          <View style={styles.heroCard}>
+            <LinearGradient
+              colors={[COLORS.rosePetal4, COLORS.rosePetal5]}
+              style={styles.heroGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              {/* Floating Rose Bloom */}
+              <View style={styles.heroBloom}>
+                <FloatingRoseBloom />
+              </View>
+              
+              <View style={styles.heroContent}>
+                <Text style={styles.heroLabel}>Total Rewards Earned</Text>
+                <Text style={styles.heroValue}>{CURRENCY}{totalEarned.toLocaleString()}</Text>
+              </View>
+              
+              <View style={styles.heroStats}>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{challenges.active.length}</Text>
+                  <Text style={styles.heroStatLabel}>Active</Text>
+                </View>
+                <View style={styles.heroStatDivider} />
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{challenges.completed.length}</Text>
+                  <Text style={styles.heroStatLabel}>Completed</Text>
+                </View>
+                <View style={styles.heroStatDivider} />
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{CURRENCY}58.5K</Text>
+                  <Text style={styles.heroStatLabel}>Potential</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </View>
+
+          {/* Tab Selector */}
+          <View style={styles.tabContainer}>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'active' && styles.tabActive]}
+              onPress={() => setActiveTab('active')}
+            >
+              <Text style={[styles.tabText, activeTab === 'active' && styles.tabTextActive]}>
+                Active ({challenges.active.length})
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.tab, activeTab === 'completed' && styles.tabActive]}
+              onPress={() => setActiveTab('completed')}
+            >
+              <Text style={[styles.tabText, activeTab === 'completed' && styles.tabTextActive]}>
+                Completed ({challenges.completed.length})
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {/* Challenges List */}
+          <View style={styles.challengesList}>
+            {currentChallenges.map((challenge) => (
+              <View key={challenge.id} style={styles.challengeCard}>
+                <LinearGradient
+                  colors={[COLORS.surface, COLORS.surfaceLight]}
+                  style={styles.challengeGradient}
+                >
+                  {/* Type Badge */}
+                  <View style={[styles.typeBadge, { backgroundColor: `${challenge.color}20` }]}>
+                    <Text style={[styles.typeBadgeText, { color: challenge.color }]}>
+                      {challenge.type.toUpperCase()}
+                    </Text>
+                  </View>
+
+                  <View style={styles.challengeContent}>
+                    {/* Icon */}
+                    <View style={[styles.challengeIcon, { backgroundColor: `${challenge.color}20` }]}>
+                      <Ionicons name={challenge.icon as any} size={26} color={challenge.color} />
+                    </View>
+
+                    {/* Info */}
+                    <View style={styles.challengeInfo}>
+                      <Text style={styles.challengeTitle}>{challenge.title}</Text>
+                      <Text style={styles.challengeDesc}>{challenge.description}</Text>
+                      
+                      {/* Progress Bar */}
+                      <View style={styles.progressContainer}>
+                        <View style={styles.progressBar}>
+                          <View 
+                            style={[
+                              styles.progressFill, 
+                              { 
+                                width: `${(challenge.progress / challenge.total) * 100}%`,
+                                backgroundColor: challenge.color,
+                              }
+                            ]} 
+                          />
+                        </View>
+                        <Text style={styles.progressText}>
+                          {challenge.progress}/{challenge.total}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Reward */}
+                    <View style={styles.rewardContainer}>
+                      <View style={styles.rewardBadge}>
+                        <Text style={styles.rewardAmount}>{CURRENCY}{challenge.reward.toLocaleString()}</Text>
+                      </View>
+                      {activeTab === 'completed' && (
+                        <View style={styles.completedBadge}>
+                          <Ionicons name="checkmark-circle" size={20} color={COLORS.success} />
+                        </View>
+                      )}
+                    </View>
+                  </View>
+                </LinearGradient>
+              </View>
+            ))}
+          </View>
+
+          {/* Rose Motivation Section */}
+          <View style={styles.motivationCard}>
+            <View style={styles.motivationRose}>
+              <View style={styles.roseCenter}>
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.motivationPetal,
+                      {
+                        transform: [{ rotate: `${i * 72}deg` }, { translateY: -15 }],
+                        backgroundColor: COLORS.rosePetal3,
+                        opacity: 0.7 + i * 0.06,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+            <View style={styles.motivationContent}>
+              <Text style={styles.motivationTitle}>Keep Blooming! 🌹</Text>
+              <Text style={styles.motivationText}>
+                Complete more challenges to unlock exclusive rewards and climb the leaderboard
               </Text>
             </View>
           </View>
-          <Text style={styles.challengeDesc}>{challenge.description}</Text>
-        </View>
-      </View>
 
-      {/* Progress Bar */}
-      <View style={styles.progressContainer}>
-        <View style={styles.progressBar}>
-          <View 
-            style={[
-              styles.progressFill, 
-              { 
-                width: `${getProgress(challenge.current, challenge.target)}%`,
-                backgroundColor: challenge.completed ? COLORS.success : challenge.color
-              }
-            ]} 
-          />
-        </View>
-        <View style={styles.progressLabels}>
-          <Text style={styles.progressText}>
-            {challenge.target >= 1000 
-              ? `${CURRENCY}${(challenge.current / 1000).toFixed(0)}K / ${formatTarget(challenge.target)}`
-              : `${challenge.current} / ${challenge.target}`
-            }
-          </Text>
-          <Text style={styles.progressPercent}>{Math.round(getProgress(challenge.current, challenge.target))}%</Text>
-        </View>
-      </View>
-
-      {/* Reward & Expiry */}
-      <View style={styles.challengeFooter}>
-        <View style={styles.rewardContainer}>
-          <Ionicons name="gift" size={16} color={COLORS.success} />
-          <Text style={styles.rewardText}>{challenge.reward}</Text>
-        </View>
-        <View style={styles.expiryContainer}>
-          <Ionicons name="time" size={14} color={COLORS.gray400} />
-          <Text style={styles.expiryText}>{challenge.expiresAt}</Text>
-        </View>
-      </View>
-
-      {challenge.completed && (
-        <View style={styles.completedOverlay}>
-          <View style={styles.completedBadge}>
-            <Ionicons name="checkmark-circle" size={32} color={COLORS.success} />
-            <Text style={styles.completedText}>Completed!</Text>
-          </View>
-        </View>
-      )}
+          <View style={styles.bottomSpacer} />
+        </ScrollView>
+      </SafeAreaView>
     </View>
-  );
-
-  const activeChallenges = challenges.filter(c => !c.completed);
-
-  return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Challenges</Text>
-        <View style={styles.headerPlaceholder} />
-      </View>
-
-      {/* Stats Banner */}
-      <View style={styles.statsBanner}>
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>{activeChallenges.length}</Text>
-          <Text style={styles.statLabel}>Active</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={styles.statValue}>{completedChallenges.length}</Text>
-          <Text style={styles.statLabel}>Completed</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Text style={[styles.statValue, { color: COLORS.accent }]}>₦58.5K</Text>
-          <Text style={styles.statLabel}>Earned</Text>
-        </View>
-      </View>
-
-      {/* Tabs */}
-      <View style={styles.tabContainer}>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'active' && styles.tabActive]}
-          onPress={() => setSelectedTab('active')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'active' && styles.tabTextActive]}>
-            Active ({activeChallenges.length})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, selectedTab === 'completed' && styles.tabActive]}
-          onPress={() => setSelectedTab('completed')}
-        >
-          <Text style={[styles.tabText, selectedTab === 'completed' && styles.tabTextActive]}>
-            Completed ({completedChallenges.length})
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
-        }
-        showsVerticalScrollIndicator={false}
-      >
-        {selectedTab === 'active' ? (
-          <>
-            {/* Daily Challenges */}
-            <Text style={styles.sectionTitle}>🌟 Daily Challenges</Text>
-            {activeChallenges.filter(c => c.type === 'daily').map(renderChallengeCard)}
-
-            {/* Weekly Challenges */}
-            <Text style={styles.sectionTitle}>📅 Weekly Challenges</Text>
-            {activeChallenges.filter(c => c.type === 'weekly').map(renderChallengeCard)}
-
-            {/* Special Challenges */}
-            <Text style={styles.sectionTitle}>✨ Special Challenges</Text>
-            {activeChallenges.filter(c => c.type === 'special').map(renderChallengeCard)}
-          </>
-        ) : (
-          <>
-            <Text style={styles.sectionTitle}>✅ Completed Challenges</Text>
-            {completedChallenges.map(renderChallengeCard)}
-          </>
-        )}
-
-        <View style={styles.bottomSpacer} />
-      </ScrollView>
-    </SafeAreaView>
   );
 }
 
@@ -337,18 +278,31 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.primary,
   },
+  glowTopLeft: {
+    position: 'absolute',
+    top: -80,
+    left: -80,
+  },
+  glowBottomRight: {
+    position: 'absolute',
+    bottom: 100,
+    right: -80,
+  },
+  safeArea: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
   },
   backButton: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: COLORS.surface,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -357,32 +311,61 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.white,
   },
-  headerPlaceholder: {
+  headerRight: {
     width: 44,
   },
-  statsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  heroCard: {
     marginHorizontal: SPACING.lg,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.md,
+    borderRadius: BORDER_RADIUS.xxl,
+    overflow: 'hidden',
+    ...SHADOWS.rose,
   },
-  statItem: {
+  heroGradient: {
+    padding: SPACING.xl,
+    position: 'relative',
+  },
+  heroBloom: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    opacity: 0.4,
+  },
+  heroContent: {
     alignItems: 'center',
+    marginBottom: SPACING.lg,
   },
-  statValue: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
+  heroLabel: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: SPACING.xs,
+  },
+  heroValue: {
+    fontSize: FONT_SIZE.hero,
+    fontWeight: '900',
     color: COLORS.white,
   },
-  statLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
+  heroStats: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
   },
-  statDivider: {
+  heroStat: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  heroStatValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  heroStatLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: 'rgba(255,255,255,0.7)',
+  },
+  heroStatDivider: {
     width: 1,
     height: 30,
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -390,163 +373,162 @@ const styles = StyleSheet.create({
   tabContainer: {
     flexDirection: 'row',
     marginHorizontal: SPACING.lg,
-    marginBottom: SPACING.md,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: BORDER_RADIUS.full,
-    padding: 4,
+    marginTop: SPACING.xl,
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.xs,
   },
   tab: {
     flex: 1,
-    paddingVertical: SPACING.sm,
+    paddingVertical: SPACING.md,
     alignItems: 'center',
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: BORDER_RADIUS.lg,
   },
   tabActive: {
     backgroundColor: COLORS.accent,
   },
   tabText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.gray400,
+    color: COLORS.textMuted,
   },
   tabTextActive: {
     color: COLORS.primary,
   },
-  scrollView: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-    borderTopLeftRadius: BORDER_RADIUS.xxxl,
-    borderTopRightRadius: BORDER_RADIUS.xxxl,
-  },
-  content: {
-    padding: SPACING.lg,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.md,
+  challengesList: {
+    paddingHorizontal: SPACING.lg,
+    marginTop: SPACING.lg,
+    gap: SPACING.md,
   },
   challengeCard: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    ...SHADOWS.sm,
-    position: 'relative',
     overflow: 'hidden',
+    ...SHADOWS.md,
   },
-  challengeHeader: {
+  challengeGradient: {
+    padding: SPACING.md,
+  },
+  typeBadge: {
+    position: 'absolute',
+    top: SPACING.md,
+    right: SPACING.md,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 2,
+    borderRadius: BORDER_RADIUS.sm,
+  },
+  typeBadgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  challengeContent: {
     flexDirection: 'row',
-    marginBottom: SPACING.md,
+    alignItems: 'center',
   },
   challengeIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.lg,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: SPACING.md,
   },
   challengeInfo: {
     flex: 1,
-    marginLeft: SPACING.md,
-  },
-  challengeTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   challengeTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  typeBadge: {
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  typeBadgeText: {
-    fontSize: FONT_SIZE.xxs,
-    fontWeight: '600',
+    color: COLORS.white,
   },
   challengeDesc: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-    marginTop: 2,
+    color: COLORS.textMuted,
+    marginBottom: SPACING.sm,
   },
   progressContainer: {
-    marginBottom: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
   },
   progressBar: {
-    height: 8,
-    backgroundColor: COLORS.gray100,
-    borderRadius: 4,
+    flex: 1,
+    height: 6,
+    backgroundColor: COLORS.gray700,
+    borderRadius: 3,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
-    borderRadius: 4,
-  },
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: SPACING.xs,
+    borderRadius: 3,
   },
   progressText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-  },
-  progressPercent: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: FONT_SIZE.xs,
     fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  challengeFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    color: COLORS.textSecondary,
+    minWidth: 35,
   },
   rewardContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.successSoft,
+    marginLeft: SPACING.sm,
+  },
+  rewardBadge: {
+    backgroundColor: COLORS.goldSoft,
     paddingHorizontal: SPACING.sm,
     paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    gap: SPACING.xs,
+    borderRadius: BORDER_RADIUS.md,
   },
-  rewardText: {
+  rewardAmount: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.success,
+    fontWeight: '800',
+    color: COLORS.gold,
   },
-  expiryContainer: {
+  completedBadge: {
+    marginTop: SPACING.xs,
+  },
+  motivationCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.xs,
+    backgroundColor: COLORS.surface,
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.xl,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 1,
+    borderColor: COLORS.accentSoft,
   },
-  expiryText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
+  motivationRose: {
+    marginRight: SPACING.md,
   },
-  completedOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.9)',
+  roseCenter: {
+    width: 50,
+    height: 50,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completedBadge: {
-    alignItems: 'center',
+  motivationPetal: {
+    position: 'absolute',
+    width: 14,
+    height: 18,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 14,
   },
-  completedText: {
+  motivationContent: {
+    flex: 1,
+  },
+  motivationTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.success,
-    marginTop: SPACING.xs,
+    color: COLORS.white,
+    marginBottom: 2,
+  },
+  motivationText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textMuted,
+    lineHeight: 18,
   },
   bottomSpacer: {
-    height: SPACING.xxl,
+    height: 40,
   },
 });
