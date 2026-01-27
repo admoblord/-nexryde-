@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,12 +16,37 @@ import { useAppStore } from '@/src/store/appStore';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, logout } = useAppStore();
+  const { user, logout, setIsAuthenticated } = useAppStore();
   const isDriver = user?.role === 'driver';
 
   const handleLogout = () => {
-    logout();
-    router.replace('/login');
+    Alert.alert(
+      'Logout',
+      'Are you sure you want to logout?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Logout', 
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Call backend logout endpoint
+              await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/logout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+              });
+            } catch (error) {
+              console.log('Logout API error:', error);
+            }
+            
+            // Clear local state
+            logout();
+            setIsAuthenticated(false);
+            router.replace('/login');
+          }
+        }
+      ]
+    );
   };
 
   return (
@@ -39,7 +65,7 @@ export default function ProfileScreen() {
               <View style={styles.onlineDot} />
             </View>
             <Text style={styles.userName}>{user?.name || 'User'}</Text>
-            <Text style={styles.userPhone}>{user?.phone || '+234 XXX XXX XXXX'}</Text>
+            <Text style={styles.userPhone}>{user?.phone || user?.email || 'No contact info'}</Text>
             <View style={styles.roleBadge}>
               <View style={[styles.roleDot, { backgroundColor: COLORS.accentGreen }]} />
               <Text style={styles.roleText}>{isDriver ? 'Driver' : 'Rider'}</Text>
@@ -49,39 +75,51 @@ export default function ProfileScreen() {
           {/* Menu Items */}
           <View style={styles.menuSection}>
             <MenuItem 
-              icon="person-outline" 
+              icon="person" 
               label="Edit Profile" 
+              subtitle="Update your personal information"
               onPress={() => {}}
               color={COLORS.accentGreen}
             />
             <MenuItem 
-              icon="shield-checkmark-outline" 
+              icon="shield-checkmark" 
               label="Safety Center" 
+              subtitle="Emergency contacts & safety features"
               onPress={() => router.push('/safety')}
               color={COLORS.accentBlue}
             />
             <MenuItem 
-              icon="wallet-outline" 
+              icon="wallet" 
               label="Wallet" 
+              subtitle="Payment methods & balance"
               onPress={() => {}}
               color={COLORS.gold}
             />
             <MenuItem 
-              icon="help-circle-outline" 
-              label="Help & Support" 
-              subtitle="Get help with NEXRYDE"
+              icon="time" 
+              label="Ride History" 
+              subtitle="View your past trips"
               onPress={() => {}}
               color={COLORS.info}
             />
             <MenuItem 
-              icon="document-text-outline" 
+              icon="help-circle" 
+              label="Help & Support" 
+              subtitle="Get help with NEXRYDE"
+              onPress={() => {}}
+              color={COLORS.accentGreen}
+            />
+            <MenuItem 
+              icon="document-text" 
               label="Terms & Privacy" 
+              subtitle="Read our policies"
               onPress={() => {}}
               color={COLORS.lightTextSecondary}
             />
             <MenuItem 
-              icon="settings-outline" 
+              icon="settings" 
               label="Settings" 
+              subtitle="App preferences & notifications"
               onPress={() => {}}
               color={COLORS.lightTextSecondary}
             />
@@ -89,16 +127,16 @@ export default function ProfileScreen() {
 
           {/* Logout Button */}
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <LinearGradient
-              colors={[COLORS.error, '#FF6B6B']}
-              style={styles.logoutGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Ionicons name="log-out-outline" size={20} color={COLORS.white} />
+            <View style={styles.logoutContent}>
+              <View style={styles.logoutIcon}>
+                <Ionicons name="log-out" size={22} color={COLORS.error} />
+              </View>
               <Text style={styles.logoutText}>Log Out</Text>
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
+
+          {/* App Version */}
+          <Text style={styles.versionText}>NEXRYDE v1.0.0</Text>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -126,7 +164,7 @@ const MenuItem = ({
       <Text style={styles.menuLabel}>{label}</Text>
       {subtitle && <Text style={styles.menuSubtitle}>{subtitle}</Text>}
     </View>
-    <Ionicons name="chevron-forward" size={20} color={COLORS.lightTextMuted} />
+    <Ionicons name="chevron-forward" size={22} color={COLORS.lightTextMuted} />
   </TouchableOpacity>
 );
 
@@ -163,8 +201,8 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   avatarText: {
-    fontSize: FONT_SIZE.xxxl,
-    fontWeight: '700',
+    fontSize: 40,
+    fontWeight: '800',
     color: COLORS.white,
   },
   onlineDot: {
@@ -186,6 +224,7 @@ const styles = StyleSheet.create({
   },
   userPhone: {
     fontSize: FONT_SIZE.md,
+    fontWeight: '500',
     color: COLORS.lightTextSecondary,
     marginBottom: SPACING.sm,
   },
@@ -205,7 +244,7 @@ const styles = StyleSheet.create({
   },
   roleText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   menuSection: {
@@ -242,33 +281,46 @@ const styles = StyleSheet.create({
   },
   menuLabel: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.lightTextPrimary,
   },
   menuSubtitle: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
     color: COLORS.lightTextSecondary,
     marginTop: 2,
   },
   logoutButton: {
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-    shadowColor: COLORS.error,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
+    borderWidth: 2,
+    borderColor: COLORS.errorSoft,
+    marginBottom: SPACING.lg,
   },
-  logoutGradient: {
+  logoutContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: SPACING.lg,
     gap: SPACING.sm,
   },
+  logoutIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.errorSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   logoutText: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.error,
+  },
+  versionText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
+    color: COLORS.lightTextMuted,
+    textAlign: 'center',
   },
 });
