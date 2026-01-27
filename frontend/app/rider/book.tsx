@@ -18,18 +18,6 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 
-// Only import MapView on native platforms
-let MapView: any = null;
-let Marker: any = null;
-let PROVIDER_GOOGLE: any = null;
-
-if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-}
-
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
@@ -60,7 +48,6 @@ const DEFAULT_REGION = {
 
 export default function BookScreen() {
   const router = useRouter();
-  const mapRef = useRef<MapView>(null);
   
   const [stops, setStops] = useState<RouteStop[]>([
     { id: '1', type: 'pickup', address: '', isEditing: false },
@@ -70,12 +57,6 @@ export default function BookScreen() {
   
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [showMapPicker, setShowMapPicker] = useState(false);
-  const [mapRegion, setMapRegion] = useState(DEFAULT_REGION);
-  const [selectedLocation, setSelectedLocation] = useState<{
-    latitude: number;
-    longitude: number;
-    address: string;
-  } | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -104,11 +85,6 @@ export default function BookScreen() {
         longitude: location.coords.longitude,
       };
       setCurrentLocation(coords);
-      setMapRegion({
-        ...coords,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
     } catch (error) {
       console.error('Error getting location:', error);
     }
@@ -187,59 +163,26 @@ export default function BookScreen() {
     setIsLoadingLocation(true);
     
     const details = await getPlaceDetails(prediction.place_id);
-    if (details) {
-      setSelectedLocation(details);
-      setMapRegion({
-        latitude: details.latitude,
-        longitude: details.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-      mapRef.current?.animateToRegion({
-        latitude: details.latitude,
-        longitude: details.longitude,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-    }
-    
-    setSearchQuery(prediction.structured_formatting.main_text);
-    setPredictions([]);
-    setIsLoadingLocation(false);
-  };
-
-  // Handle map press
-  const handleMapPress = async (event: any) => {
-    const { latitude, longitude } = event.nativeEvent.coordinate;
-    setIsLoadingLocation(true);
-    
-    const address = await reverseGeocode(latitude, longitude);
-    setSelectedLocation({ latitude, longitude, address });
-    setSearchQuery(address.split(',')[0]);
-    setIsLoadingLocation(false);
-  };
-
-  // Confirm location selection
-  const confirmLocationSelection = () => {
-    if (selectedLocation && activeStopId) {
+    if (details && activeStopId) {
       setStops(stops.map(stop =>
         stop.id === activeStopId
           ? {
               ...stop,
-              address: selectedLocation.address,
+              address: details.address,
               coordinates: {
-                latitude: selectedLocation.latitude,
-                longitude: selectedLocation.longitude,
+                latitude: details.latitude,
+                longitude: details.longitude,
               },
             }
           : stop
       ));
-      setShowMapPicker(false);
-      setSelectedLocation(null);
-      setSearchQuery('');
-      setPredictions([]);
-      setActiveStopId(null);
     }
+    
+    setSearchQuery('');
+    setPredictions([]);
+    setShowMapPicker(false);
+    setActiveStopId(null);
+    setIsLoadingLocation(false);
   };
 
   // Use current location
@@ -268,30 +211,10 @@ export default function BookScreen() {
     }
   };
 
-  // Open map picker for a specific stop
-  const openMapPicker = (stopId: string) => {
+  // Open location picker for a specific stop
+  const openLocationPicker = (stopId: string) => {
     setActiveStopId(stopId);
     setShowMapPicker(true);
-    
-    // If stop already has coordinates, center map there
-    const stop = stops.find(s => s.id === stopId);
-    if (stop?.coordinates) {
-      setMapRegion({
-        ...stop.coordinates,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-      setSelectedLocation({
-        ...stop.coordinates,
-        address: stop.address,
-      });
-    } else if (currentLocation) {
-      setMapRegion({
-        ...currentLocation,
-        latitudeDelta: 0.01,
-        longitudeDelta: 0.01,
-      });
-    }
   };
 
   // Add a new stop
@@ -317,7 +240,6 @@ export default function BookScreen() {
   // Select from saved/recent locations
   const selectSavedLocation = async (address: string, name: string) => {
     if (!activeStopId) {
-      // Set active stop to first empty one
       const emptyStop = stops.find(s => !s.address);
       if (emptyStop) {
         setActiveStopId(emptyStop.id);
@@ -326,7 +248,6 @@ export default function BookScreen() {
       }
     }
     
-    // For demo, use mock coordinates based on location name
     const mockCoords: { [key: string]: { latitude: number; longitude: number } } = {
       'Home': { latitude: 6.4281, longitude: 3.4219 },
       'Work': { latitude: 6.4355, longitude: 3.4567 },
@@ -348,13 +269,11 @@ export default function BookScreen() {
     setActiveStopId(null);
   };
 
-  // Sample saved locations
   const savedLocations = [
     { id: 'home', name: 'Home', address: '123 Victoria Island, Lagos', icon: 'home' },
     { id: 'work', name: 'Work', address: '456 Lekki Phase 1, Lagos', icon: 'briefcase' },
   ];
 
-  // Sample recent locations
   const recentLocations = [
     { id: 'recent1', name: 'Shoprite Mall', address: 'Lekki, Lagos' },
     { id: 'recent2', name: 'Murtala Mohammed Airport', address: 'Ikeja, Lagos' },
@@ -434,9 +353,7 @@ export default function BookScreen() {
                     styles.stopInputContainer,
                     activeStopId === stop.id && styles.stopInputActive
                   ]}
-                  onPress={() => {
-                    setActiveStopId(stop.id);
-                  }}
+                  onPress={() => openLocationPicker(stop.id)}
                   activeOpacity={0.8}
                 >
                   <Text 
@@ -452,7 +369,7 @@ export default function BookScreen() {
                   {stop.type === 'stop' && (
                     <TouchableOpacity 
                       style={styles.mapButton}
-                      onPress={() => openMapPicker(stop.id)}
+                      onPress={() => openLocationPicker(stop.id)}
                     >
                       <Text style={styles.mapButtonText}>Map</Text>
                       <View style={styles.mapIconContainer}>
@@ -463,7 +380,7 @@ export default function BookScreen() {
                   
                   <TouchableOpacity 
                     style={styles.dragHandle}
-                    onPress={() => openMapPicker(stop.id)}
+                    onPress={() => openLocationPicker(stop.id)}
                   >
                     <Ionicons name="reorder-three" size={20} color={COLORS.lightTextMuted} />
                   </TouchableOpacity>
@@ -582,176 +499,127 @@ export default function BookScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Map Picker Modal */}
+        {/* Location Search Modal */}
         <Modal
           visible={showMapPicker}
           animationType="slide"
-          presentationStyle="fullScreen"
+          presentationStyle="pageSheet"
         >
-          <View style={styles.modalContainer}>
+          <SafeAreaView style={styles.modalContainer}>
             {/* Modal Header */}
-            <SafeAreaView style={styles.modalSafeArea}>
-              <View style={styles.modalHeader}>
-                <TouchableOpacity 
-                  style={styles.modalCloseButton}
-                  onPress={() => {
-                    setShowMapPicker(false);
-                    setSelectedLocation(null);
-                    setSearchQuery('');
-                    setPredictions([]);
-                  }}
-                >
-                  <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
-                </TouchableOpacity>
-                <Text style={styles.modalTitle}>Select Location</Text>
-                <View style={{ width: 40 }} />
-              </View>
-
-              {/* Search Bar */}
-              <View style={styles.searchContainer}>
-                <View style={styles.searchInputContainer}>
-                  <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Search for a place"
-                    placeholderTextColor={COLORS.lightTextMuted}
-                    value={searchQuery}
-                    onChangeText={(text) => {
-                      setSearchQuery(text);
-                      searchPlaces(text);
-                    }}
-                    autoFocus={false}
-                  />
-                  {searchQuery.length > 0 && (
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setSearchQuery('');
-                        setPredictions([]);
-                      }}
-                    >
-                      <Ionicons name="close-circle" size={20} color={COLORS.lightTextMuted} />
-                    </TouchableOpacity>
-                  )}
-                </View>
-              </View>
-
-              {/* Search Predictions */}
-              {predictions.length > 0 && (
-                <View style={styles.predictionsContainer}>
-                  <ScrollView 
-                    style={styles.predictionsList}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {predictions.map((prediction) => (
-                      <TouchableOpacity
-                        key={prediction.place_id}
-                        style={styles.predictionItem}
-                        onPress={() => handleSelectPrediction(prediction)}
-                      >
-                        <Ionicons name="location-outline" size={20} color={COLORS.lightTextSecondary} />
-                        <View style={styles.predictionContent}>
-                          <Text style={styles.predictionMain}>
-                            {prediction.structured_formatting.main_text}
-                          </Text>
-                          <Text style={styles.predictionSecondary}>
-                            {prediction.structured_formatting.secondary_text}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    ))}
-                  </ScrollView>
-                </View>
-              )}
-            </SafeAreaView>
-
-            {/* Map */}
-            <View style={styles.mapContainer}>
-              <MapView
-                ref={mapRef}
-                style={styles.map}
-                provider={Platform.OS === 'android' ? PROVIDER_GOOGLE : undefined}
-                initialRegion={mapRegion}
-                region={mapRegion}
-                onRegionChangeComplete={setMapRegion}
-                onPress={handleMapPress}
-                showsUserLocation
-                showsMyLocationButton={false}
-              >
-                {selectedLocation && (
-                  <Marker
-                    coordinate={{
-                      latitude: selectedLocation.latitude,
-                      longitude: selectedLocation.longitude,
-                    }}
-                    pinColor={COLORS.accentGreen}
-                  />
-                )}
-              </MapView>
-
-              {/* Center Pin (always visible) */}
-              {!selectedLocation && (
-                <View style={styles.centerPinContainer}>
-                  <Ionicons name="location" size={40} color={COLORS.accentGreen} />
-                </View>
-              )}
-
-              {/* My Location Button */}
+            <View style={styles.modalHeader}>
               <TouchableOpacity 
-                style={styles.myLocationButton}
+                style={styles.modalCloseButton}
                 onPress={() => {
-                  if (currentLocation) {
-                    mapRef.current?.animateToRegion({
-                      ...currentLocation,
-                      latitudeDelta: 0.01,
-                      longitudeDelta: 0.01,
-                    });
-                  }
+                  setShowMapPicker(false);
+                  setSearchQuery('');
+                  setPredictions([]);
                 }}
               >
-                <Ionicons name="locate" size={24} color={COLORS.accentBlue} />
+                <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
               </TouchableOpacity>
-
-              {/* Loading Overlay */}
-              {isLoadingLocation && (
-                <View style={styles.loadingOverlay}>
-                  <ActivityIndicator size="large" color={COLORS.accentGreen} />
-                </View>
-              )}
+              <Text style={styles.modalTitle}>Search Location</Text>
+              <View style={{ width: 40 }} />
             </View>
 
-            {/* Selected Location Info & Confirm Button */}
-            <SafeAreaView style={styles.modalBottomContainer}>
-              {selectedLocation && (
-                <View style={styles.selectedLocationInfo}>
-                  <View style={styles.selectedLocationIcon}>
-                    <Ionicons name="location" size={24} color={COLORS.accentGreen} />
+            {/* Search Bar */}
+            <View style={styles.searchContainer}>
+              <View style={styles.searchInputContainer}>
+                <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search for a place"
+                  placeholderTextColor={COLORS.lightTextMuted}
+                  value={searchQuery}
+                  onChangeText={(text) => {
+                    setSearchQuery(text);
+                    searchPlaces(text);
+                  }}
+                  autoFocus
+                />
+                {searchQuery.length > 0 && (
+                  <TouchableOpacity 
+                    onPress={() => {
+                      setSearchQuery('');
+                      setPredictions([]);
+                    }}
+                  >
+                    <Ionicons name="close-circle" size={20} color={COLORS.lightTextMuted} />
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Loading */}
+            {isSearching && (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="small" color={COLORS.accentGreen} />
+              </View>
+            )}
+
+            {/* Search Results */}
+            <ScrollView 
+              style={styles.resultsList}
+              keyboardShouldPersistTaps="handled"
+            >
+              {predictions.map((prediction) => (
+                <TouchableOpacity
+                  key={prediction.place_id}
+                  style={styles.resultItem}
+                  onPress={() => handleSelectPrediction(prediction)}
+                >
+                  <View style={styles.resultIcon}>
+                    <Ionicons name="location-outline" size={20} color={COLORS.lightTextSecondary} />
                   </View>
-                  <View style={styles.selectedLocationContent}>
-                    <Text style={styles.selectedLocationTitle}>Selected Location</Text>
-                    <Text style={styles.selectedLocationAddress} numberOfLines={2}>
-                      {selectedLocation.address}
+                  <View style={styles.resultContent}>
+                    <Text style={styles.resultMain}>
+                      {prediction.structured_formatting.main_text}
+                    </Text>
+                    <Text style={styles.resultSecondary}>
+                      {prediction.structured_formatting.secondary_text}
                     </Text>
                   </View>
+                </TouchableOpacity>
+              ))}
+
+              {/* Quick Actions */}
+              {predictions.length === 0 && !isSearching && (
+                <View style={styles.quickActions}>
+                  <TouchableOpacity 
+                    style={styles.quickActionItem}
+                    onPress={() => {
+                      useCurrentLocation();
+                      setShowMapPicker(false);
+                    }}
+                  >
+                    <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+                      <Ionicons name="navigate" size={20} color={COLORS.accentBlue} />
+                    </View>
+                    <Text style={styles.quickActionText}>Use current location</Text>
+                  </TouchableOpacity>
+
+                  {savedLocations.map((location) => (
+                    <TouchableOpacity 
+                      key={location.id}
+                      style={styles.quickActionItem}
+                      onPress={() => {
+                        selectSavedLocation(location.address, location.name);
+                        setShowMapPicker(false);
+                      }}
+                    >
+                      <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                        <Ionicons name={location.icon as any} size={20} color={COLORS.accentGreen} />
+                      </View>
+                      <View>
+                        <Text style={styles.quickActionText}>{location.name}</Text>
+                        <Text style={styles.quickActionSubtext}>{location.address}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
                 </View>
               )}
-              
-              <TouchableOpacity 
-                style={[
-                  styles.confirmLocationButton,
-                  !selectedLocation && styles.confirmLocationButtonDisabled
-                ]}
-                onPress={confirmLocationSelection}
-                disabled={!selectedLocation}
-              >
-                <Text style={[
-                  styles.confirmLocationText,
-                  !selectedLocation && styles.confirmLocationTextDisabled
-                ]}>
-                  Confirm Location
-                </Text>
-              </TouchableOpacity>
-            </SafeAreaView>
-          </View>
+            </ScrollView>
+          </SafeAreaView>
         </Modal>
       </SafeAreaView>
     </View>
@@ -1010,10 +878,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.lightBackground,
   },
-  modalSafeArea: {
-    backgroundColor: COLORS.white,
-    zIndex: 10,
-  },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1022,6 +886,7 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.lightBorder,
+    backgroundColor: COLORS.white,
   },
   modalCloseButton: {
     width: 40,
@@ -1036,7 +901,7 @@ const styles = StyleSheet.create({
   },
   searchContainer: {
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+    paddingVertical: SPACING.md,
     backgroundColor: COLORS.white,
   },
   searchInputContainer: {
@@ -1054,144 +919,73 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextPrimary,
     paddingVertical: SPACING.xs,
   },
-  predictionsContainer: {
-    position: 'absolute',
-    top: 110,
-    left: 0,
-    right: 0,
-    backgroundColor: COLORS.white,
-    maxHeight: 300,
-    zIndex: 100,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    elevation: 5,
+  loadingContainer: {
+    padding: SPACING.lg,
+    alignItems: 'center',
   },
-  predictionsList: {
-    maxHeight: 300,
+  resultsList: {
+    flex: 1,
   },
-  predictionItem: {
+  resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.lightBorder,
-    gap: SPACING.md,
-  },
-  predictionContent: {
-    flex: 1,
-  },
-  predictionMain: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-  },
-  predictionSecondary: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    marginTop: 2,
-  },
-  mapContainer: {
-    flex: 1,
-    position: 'relative',
-  },
-  map: {
-    flex: 1,
-  },
-  centerPinContainer: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    marginLeft: -20,
-    marginTop: -40,
-  },
-  myLocationButton: {
-    position: 'absolute',
-    right: SPACING.lg,
-    bottom: SPACING.lg,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
     backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 8,
-    elevation: 4,
   },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(255,255,255,0.7)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalBottomContainer: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.lg,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
-  },
-  selectedLocationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-    padding: SPACING.md,
+  resultIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  selectedLocationIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
   },
-  selectedLocationContent: {
+  resultContent: {
     flex: 1,
   },
-  selectedLocationTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    marginBottom: 2,
-  },
-  selectedLocationAddress: {
+  resultMain: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '500',
+    fontWeight: '600',
     color: COLORS.lightTextPrimary,
   },
-  confirmLocationButton: {
-    backgroundColor: COLORS.accentGreen,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingVertical: SPACING.lg,
+  resultSecondary: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    marginTop: 2,
+  },
+  quickActions: {
+    padding: SPACING.lg,
+  },
+  quickActionItem: {
+    flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
   },
-  confirmLocationButtonDisabled: {
-    backgroundColor: COLORS.lightBorder,
-    shadowOpacity: 0,
-    elevation: 0,
+  quickActionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
   },
-  confirmLocationText: {
+  quickActionText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
   },
-  confirmLocationTextDisabled: {
-    color: COLORS.lightTextMuted,
+  quickActionSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    marginTop: 2,
   },
 });
