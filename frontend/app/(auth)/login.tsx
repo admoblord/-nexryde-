@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
-import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
@@ -46,23 +45,11 @@ const COLORS = {
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
-// Get backend URL - works on both web and mobile
-const getBackendUrl = (): string => {
-  // Try environment variable first
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (envUrl && envUrl.length > 0) {
-    return envUrl;
-  }
-  
-  // Try Constants for Expo Go
-  const constantsUrl = Constants.expoConfig?.extra?.backendUrl;
-  if (constantsUrl && constantsUrl.length > 0) {
-    return constantsUrl;
-  }
-  
-  // Fallback to the known preview URL
-  return 'https://nexryde-rebrand.preview.emergentagent.com';
-};
+// Backend URL - hardcoded for reliability
+const BACKEND_URL = 'https://nexryde-rebrand.preview.emergentagent.com';
+
+// Warm up WebBrowser for faster auth
+WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -70,6 +57,10 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
+  
+  // CRITICAL: Ref to prevent double processing of session_id
+  const isProcessingSession = useRef(false);
+  const processedSessionIds = useRef<Set<string>>(new Set());
 
   const handleContinue = async () => {
     if (phone.length < 10) return;
@@ -77,10 +68,7 @@ export default function LoginScreen() {
     storePhone(phone);
     
     try {
-      const backendUrl = getBackendUrl();
-      console.log('Using backend URL for OTP:', backendUrl);
-      
-      const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
+      const response = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: `+234${phone}` }),
@@ -98,139 +86,115 @@ export default function LoginScreen() {
             mock_otp: data.otp || ''
           } 
         });
+      } else {
+        Alert.alert('Error', data.detail || 'Failed to send OTP');
       }
     } catch (error) {
-      console.error('Error:', error);
+      console.error('OTP Error:', error);
       Alert.alert('Error', 'Failed to send OTP. Please try again.');
     }
     setLoading(false);
   };
 
-  const handleGoogleSignIn = async () => {
-    setGoogleLoading(true);
-    
-    try {
-      // Create redirect URL based on platform
-      // IMPORTANT: Mobile needs deep link URL (exp:// or custom scheme)
-      let redirectUrl: string;
-      if (Platform.OS === 'web') {
-        // Web: Use HTTP URL for same-origin
-        redirectUrl = `${window.location.origin}/`;
-      } else {
-        // Mobile: Use deep link - this creates exp://... URL
-        redirectUrl = Linking.createURL('/');
-      }
-      
-      console.log('Redirect URL:', redirectUrl);
-      
-      // Build auth URL
-      const authUrl = `${EMERGENT_AUTH_BASE}/?redirect=${encodeURIComponent(redirectUrl)}`;
-      console.log('Auth URL:', authUrl);
-      
-      if (Platform.OS === 'web') {
-        // Web: redirect directly
-        window.location.href = authUrl;
-      } else {
-        // Mobile: use WebBrowser with prefetch for better UX
-        await WebBrowser.warmUpAsync();
-        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-        await WebBrowser.coolDownAsync();
-        
-        console.log('WebBrowser result:', result.type);
-        
-        if (result.type === 'success' && result.url) {
-          console.log('Callback URL:', result.url);
-          // Extract session_id from URL - MUST use result.url, not Linking events
-          const sessionId = extractSessionId(result.url);
-          console.log('Extracted session_id:', sessionId ? sessionId.substring(0, 10) + '...' : null);
-          
-          if (sessionId) {
-            await processGoogleAuth(sessionId);
-          } else {
-            console.log('No session_id found in callback URL');
-            Alert.alert('Error', 'Failed to get session from Google. Please try again.');
-          }
-        } else if (result.type === 'cancel') {
-          // User cancelled - no error needed
-          console.log('User cancelled Google sign-in');
-        } else if (result.type === 'dismiss') {
-          // Browser dismissed - no error needed
-          console.log('Google sign-in dismissed');
-        }
-      }
-    } catch (error: any) {
-      console.error('Google sign-in error:', error);
-      Alert.alert('Error', error.message || 'Google sign-in failed. Please try again.');
-    }
-    
-    setGoogleLoading(false);
-  };
-
-  // Extract session_id from URL (hash or query)
+  // Extract session_id from URL (supports both hash and query params)
   const extractSessionId = (url: string): string | null => {
     try {
-      // Try hash first
-      if (url.includes('#session_id=')) {
-        const hash = url.split('#')[1];
-        const params = new URLSearchParams(hash);
-        return params.get('session_id');
+      console.log('Extracting session_id from URL:', url);
+      
+      // Method 1: Check hash fragment (#session_id=...)
+      if (url.includes('#')) {
+        const hashPart = url.split('#')[1];
+        if (hashPart && hashPart.includes('session_id')) {
+          const params = new URLSearchParams(hashPart);
+          const sessionId = params.get('session_id');
+          if (sessionId) {
+            console.log('Found session_id in hash');
+            return decodeURIComponent(sessionId);
+          }
+        }
       }
-      // Try query
-      if (url.includes('?session_id=') || url.includes('&session_id=')) {
-        const urlObj = new URL(url);
-        return urlObj.searchParams.get('session_id');
+      
+      // Method 2: Check query params (?session_id=... or &session_id=...)
+      if (url.includes('session_id=')) {
+        // Handle URLs like exp://...?session_id=xxx or exp://...&session_id=xxx
+        const match = url.match(/[?&]session_id=([^&#]+)/);
+        if (match && match[1]) {
+          console.log('Found session_id in query params');
+          return decodeURIComponent(match[1]);
+        }
       }
+      
+      console.log('No session_id found in URL');
       return null;
-    } catch {
+    } catch (error) {
+      console.error('Error extracting session_id:', error);
       return null;
     }
   };
 
-  // Process Google auth with session_id
-  const processGoogleAuth = async (sessionId: string) => {
+  // Process Google auth with session_id - with duplicate protection
+  const processGoogleAuth = async (sessionId: string): Promise<boolean> => {
+    // CRITICAL: Check if we've already processed this session_id
+    if (processedSessionIds.current.has(sessionId)) {
+      console.log('Session already processed, skipping');
+      return false;
+    }
+    
+    // CRITICAL: Check if we're currently processing a session
+    if (isProcessingSession.current) {
+      console.log('Already processing a session, skipping');
+      return false;
+    }
+    
+    // Mark as processing
+    isProcessingSession.current = true;
+    processedSessionIds.current.add(sessionId);
+    
     try {
-      const backendUrl = getBackendUrl();
-      console.log('Processing Google auth with session:', sessionId.substring(0, 10) + '...');
-      console.log('Backend URL:', backendUrl);
+      console.log('Processing Google auth with session_id:', sessionId.substring(0, 15) + '...');
       
-      const response = await fetch(`${backendUrl}/api/auth/google/exchange`, {
+      const response = await fetch(`${BACKEND_URL}/api/auth/google/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
       });
       
-      // Get raw text first to handle non-JSON responses
       const responseText = await response.text();
-      console.log('Response status:', response.status);
-      console.log('Response text:', responseText.substring(0, 200));
+      console.log('Backend response status:', response.status);
+      console.log('Backend response:', responseText.substring(0, 100));
       
-      // Try to parse as JSON
       let data;
       try {
         data = JSON.parse(responseText);
       } catch (parseError) {
-        console.error('Failed to parse response as JSON:', responseText.substring(0, 100));
-        throw new Error('Server returned invalid response. Please try again.');
+        console.error('JSON parse error:', parseError);
+        Alert.alert('Error', 'Server returned invalid response. Please try again.');
+        return false;
       }
       
       if (!response.ok) {
-        throw new Error(data.detail || 'Authentication failed');
+        const errorMessage = data.detail || 'Authentication failed';
+        console.error('Auth error:', errorMessage);
+        Alert.alert('Sign In Failed', errorMessage);
+        return false;
       }
       
       if (data.is_new_user) {
         // New user - go to registration with Google data
+        console.log('New user, redirecting to register');
         router.push({
           pathname: '/(auth)/register',
           params: {
-            email: data.google_data.email,
-            name: data.google_data.name || '',
-            picture: data.google_data.picture || '',
-            google_id: data.google_data.google_id || '',
+            email: data.google_data?.email || '',
+            name: data.google_data?.name || '',
+            picture: data.google_data?.picture || '',
+            google_id: data.google_data?.google_id || '',
             auth_type: 'google'
           }
         });
       } else {
         // Existing user - log them in
+        console.log('Existing user, logging in');
         setUser(data.user);
         setIsAuthenticated(true);
         
@@ -240,38 +204,98 @@ export default function LoginScreen() {
           router.replace('/(rider-tabs)/rider-home');
         }
       }
+      
+      return true;
     } catch (error: any) {
-      console.error('Google auth processing error:', error);
-      Alert.alert('Error', error.message || 'Failed to process Google sign-in');
+      console.error('Google auth error:', error);
+      Alert.alert('Error', error.message || 'Failed to complete sign in');
+      return false;
+    } finally {
+      isProcessingSession.current = false;
     }
   };
 
-  // Handle deep link / URL on web
+  const handleGoogleSignIn = async () => {
+    if (googleLoading) return;
+    
+    setGoogleLoading(true);
+    
+    try {
+      // Create redirect URL based on platform
+      let redirectUrl: string;
+      if (Platform.OS === 'web') {
+        redirectUrl = `${window.location.origin}/`;
+      } else {
+        // Mobile: Use deep link scheme
+        redirectUrl = Linking.createURL('/');
+      }
+      
+      console.log('=== Google Sign-In Started ===');
+      console.log('Platform:', Platform.OS);
+      console.log('Redirect URL:', redirectUrl);
+      
+      const authUrl = `${EMERGENT_AUTH_BASE}/?redirect=${encodeURIComponent(redirectUrl)}`;
+      console.log('Auth URL:', authUrl);
+      
+      if (Platform.OS === 'web') {
+        // Web: Direct redirect
+        window.location.href = authUrl;
+        return; // Don't reset loading on web redirect
+      }
+      
+      // Mobile: Use WebBrowser
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+      
+      console.log('WebBrowser result type:', result.type);
+      
+      if (result.type === 'success' && result.url) {
+        console.log('Success! Callback URL:', result.url);
+        
+        const sessionId = extractSessionId(result.url);
+        
+        if (sessionId) {
+          const success = await processGoogleAuth(sessionId);
+          if (!success) {
+            console.log('Session processing failed or was duplicate');
+          }
+        } else {
+          console.error('No session_id found in callback URL');
+          Alert.alert('Error', 'Could not get session from Google. Please try again.');
+        }
+      } else if (result.type === 'cancel') {
+        console.log('User cancelled sign-in');
+      } else if (result.type === 'dismiss') {
+        console.log('Sign-in dismissed');
+      }
+    } catch (error: any) {
+      console.error('Google sign-in error:', error);
+      Alert.alert('Error', error.message || 'Google sign-in failed. Please try again.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  };
+
+  // Handle web platform only - check for session_id on page load
   useEffect(() => {
     if (Platform.OS === 'web') {
-      // Check for session_id in URL hash on page load
-      const hash = window.location.hash;
-      if (hash && hash.includes('session_id=')) {
-        const sessionId = extractSessionId(window.location.href);
-        if (sessionId) {
-          // Clean URL
-          window.history.replaceState(null, '', window.location.pathname);
-          setGoogleLoading(true);
-          processGoogleAuth(sessionId).finally(() => setGoogleLoading(false));
-        }
-      }
-    } else {
-      // Mobile: Check initial URL
-      Linking.getInitialURL().then((url) => {
-        if (url) {
-          const sessionId = extractSessionId(url);
+      const checkWebSession = async () => {
+        const hash = window.location.hash;
+        if (hash && hash.includes('session_id=')) {
+          const sessionId = extractSessionId(window.location.href);
           if (sessionId) {
+            // Clean URL immediately
+            window.history.replaceState(null, '', window.location.pathname);
             setGoogleLoading(true);
-            processGoogleAuth(sessionId).finally(() => setGoogleLoading(false));
+            await processGoogleAuth(sessionId);
+            setGoogleLoading(false);
           }
         }
-      });
+      };
+      checkWebSession();
     }
+    // NOTE: We do NOT check Linking.getInitialURL() on mobile here
+    // because WebBrowser.openAuthSessionAsync handles the callback directly
+    // Adding that check would cause DOUBLE processing of the session_id!
   }, []);
 
   return (
