@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
@@ -143,68 +144,87 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Premium Dark Header */}
-      <View style={styles.headerContainer}>
+      {/* Gradient Header */}
+      <LinearGradient
+        colors={[COLORS.primary, COLORS.primaryDark]}
+        style={styles.headerContainer}
+      >
         <SafeAreaView edges={['top']} style={styles.headerSafe}>
           <View style={styles.header}>
             <View style={styles.headerLeft}>
-              <Text style={styles.greeting}>Hello,</Text>
-              <Text style={styles.userName}>{user?.name?.split(' ')[0] || 'User'}</Text>
+              <Text style={styles.greeting}>Welcome back,</Text>
+              <Text style={styles.userName}>{user?.name || 'Guest'}</Text>
             </View>
             <View style={styles.headerRight}>
-              <TouchableOpacity style={styles.switchModeBtn} onPress={handleSwitchRole}>
-                <Ionicons name="swap-horizontal" size={18} color={COLORS.accent} />
-                <Text style={styles.switchModeText}>{isDriver ? 'Rider' : 'Driver'}</Text>
+              <TouchableOpacity 
+                style={styles.switchModeBtn}
+                onPress={handleSwitchRole}
+              >
+                <Ionicons 
+                  name={isDriver ? 'car' : 'person'} 
+                  size={18} 
+                  color={COLORS.accentGreen} 
+                />
+                <Text style={styles.switchModeText}>
+                  {isDriver ? 'Rider' : 'Driver'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
           
           {/* Role Badge */}
           <View style={styles.roleBadgeContainer}>
-            <View style={[
-              styles.roleBadge,
-              { backgroundColor: isDriver ? COLORS.successSoft : COLORS.infoSoft }
-            ]}>
-              <View style={[
-                styles.roleDot,
-                { backgroundColor: isDriver ? COLORS.success : COLORS.info }
-              ]} />
-              <Text style={[
-                styles.roleBadgeText,
-                { color: isDriver ? COLORS.success : COLORS.info }
-              ]}>
+            <LinearGradient
+              colors={isDriver 
+                ? [COLORS.accentGreen + '30', COLORS.accentBlue + '30']
+                : [COLORS.accentBlue + '30', COLORS.accentGreen + '30']
+              }
+              style={styles.roleBadge}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <View style={[styles.roleDot, { backgroundColor: isDriver ? COLORS.accentGreen : COLORS.accentBlue }]} />
+              <Text style={[styles.roleBadgeText, { color: isDriver ? COLORS.accentGreen : COLORS.accentBlue }]}>
                 {isDriver ? 'Driver Mode' : 'Rider Mode'}
               </Text>
-            </View>
+            </LinearGradient>
           </View>
         </SafeAreaView>
-      </View>
+      </LinearGradient>
 
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.accent} />
+          <RefreshControl 
+            refreshing={refreshing} 
+            onRefresh={onRefresh}
+            tintColor={COLORS.accentGreen}
+          />
         }
-        showsVerticalScrollIndicator={false}
       >
         {isDriver ? (
           // DRIVER VIEW
           <>
             {/* Online Status Card */}
             <View style={styles.onlineCardWrapper}>
-              <View style={[
-                styles.onlineCard,
-                { backgroundColor: isOnline ? COLORS.primary : COLORS.white }
-              ]}>
+              <LinearGradient
+                colors={isOnline 
+                  ? [COLORS.accentGreen, COLORS.accentGreenDark]
+                  : [COLORS.surface, COLORS.surfaceLight]
+                }
+                style={styles.onlineCard}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
                 <View style={styles.onlineCardInner}>
                   <View style={[
                     styles.statusIndicator,
-                    { backgroundColor: isOnline ? COLORS.success : COLORS.gray300 }
+                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.3)' : COLORS.surfaceLight }
                   ]}>
                     <View style={[
                       styles.statusDotInner,
-                      isOnline && styles.statusDotPulse
+                      { backgroundColor: isOnline ? COLORS.white : COLORS.textMuted }
                     ]} />
                   </View>
                   <View style={styles.onlineInfo}>
@@ -216,41 +236,40 @@ export default function HomeScreen() {
                     </Text>
                     <Text style={[
                       styles.onlineSubtext,
-                      { color: isOnline ? COLORS.gray400 : COLORS.textSecondary }
+                      { color: isOnline ? 'rgba(255,255,255,0.8)' : COLORS.textSecondary }
                     ]}>
-                      {isOnline ? 'Ready to accept rides' : 'Go online to start earning'}
+                      {isOnline ? 'Accepting ride requests' : 'Go online to start earning'}
                     </Text>
                   </View>
                 </View>
                 <TouchableOpacity
                   style={[
                     styles.onlineToggle,
-                    { backgroundColor: isOnline ? 'rgba(255,59,48,0.15)' : COLORS.accent }
+                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.25)' : COLORS.accentGreen }
                   ]}
                   onPress={handleToggleOnline}
                   disabled={loading}
-                  activeOpacity={0.8}
                 >
                   <Ionicons 
                     name={isOnline ? 'pause' : 'play'} 
-                    size={20} 
-                    color={isOnline ? COLORS.error : COLORS.primary} 
+                    size={18} 
+                    color={isOnline ? COLORS.white : COLORS.primary} 
                   />
                   <Text style={[
                     styles.onlineToggleText,
-                    { color: isOnline ? COLORS.error : COLORS.primary }
+                    { color: isOnline ? COLORS.white : COLORS.primary }
                   ]}>
-                    {loading ? '...' : (isOnline ? 'Stop' : 'Start')}
+                    {loading ? '...' : isOnline ? 'Stop' : 'Start'}
                   </Text>
                 </TouchableOpacity>
-              </View>
+              </LinearGradient>
             </View>
 
             {/* Stats Grid */}
             <View style={styles.statsGrid}>
               <View style={[styles.statBox, styles.statBoxLarge]}>
-                <View style={styles.statIconWrap}>
-                  <Ionicons name="cash" size={22} color={COLORS.accent} />
+                <View style={[styles.statIconWrap, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="wallet" size={24} color={COLORS.accentGreen} />
                 </View>
                 <Text style={styles.statLabel}>Today's Earnings</Text>
                 <Text style={styles.statValueLarge}>
@@ -259,12 +278,12 @@ export default function HomeScreen() {
               </View>
               <View style={styles.statBoxRow}>
                 <View style={styles.statBoxSmall}>
-                  <Ionicons name="car" size={20} color={COLORS.info} />
-                  <Text style={styles.statValueSmall}>{driverStats?.total_trips || 0}</Text>
+                  <Ionicons name="car" size={22} color={COLORS.accentBlue} />
+                  <Text style={styles.statValueSmall}>{driverStats?.today_trips || 0}</Text>
                   <Text style={styles.statLabelSmall}>Trips</Text>
                 </View>
                 <View style={styles.statBoxSmall}>
-                  <Ionicons name="star" size={20} color={COLORS.accent} />
+                  <Ionicons name="star" size={22} color={COLORS.gold} />
                   <Text style={styles.statValueSmall}>{driverStats?.rating?.toFixed(1) || '5.0'}</Text>
                   <Text style={styles.statLabelSmall}>Rating</Text>
                 </View>
@@ -280,27 +299,26 @@ export default function HomeScreen() {
               <View style={styles.subscriptionLeft}>
                 <View style={[
                   styles.subscriptionIcon,
-                  { backgroundColor: driverStats?.subscription_active ? COLORS.successSoft : COLORS.warningSoft }
+                  { backgroundColor: driverStats?.subscription_active ? COLORS.accentGreenSoft : COLORS.errorSoft }
                 ]}>
                   <Ionicons 
-                    name={driverStats?.subscription_active ? 'checkmark-circle' : 'alert-circle'} 
-                    size={24} 
-                    color={driverStats?.subscription_active ? COLORS.success : COLORS.warning} 
+                    name="card" 
+                    size={22} 
+                    color={driverStats?.subscription_active ? COLORS.accentGreen : COLORS.error} 
                   />
                 </View>
                 <View>
                   <Text style={styles.subscriptionTitle}>
-                    {driverStats?.subscription_active ? 'Subscription Active' : 'No Subscription'}
+                    {driverStats?.subscription_active ? 'Subscription Active' : 'Subscribe Now'}
                   </Text>
                   <Text style={styles.subscriptionDays}>
-                    {driverStats?.subscription_active 
-                      ? `${driverStats.subscription_days_remaining} days remaining`
-                      : 'Subscribe to go online'
-                    }
+                    {driverStats?.subscription_days_left 
+                      ? `${driverStats.subscription_days_left} days remaining`
+                      : 'Unlock unlimited earnings'}
                   </Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
 
             {/* Quick Actions */}
@@ -308,66 +326,69 @@ export default function HomeScreen() {
             <View style={styles.quickActionsGrid}>
               <TouchableOpacity 
                 style={styles.quickActionCard}
-                onPress={() => router.push('/assistant')}
-                activeOpacity={0.8}
+                onPress={() => router.push('/driver/challenges')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+                  <Ionicons name="trophy" size={24} color={COLORS.accentBlue} />
+                </View>
+                <Text style={styles.quickActionText}>Challenges</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.quickActionCard}
+                onPress={() => router.push('/driver/earnings-dashboard')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="stats-chart" size={24} color={COLORS.accentGreen} />
+                </View>
+                <Text style={styles.quickActionText}>Earnings</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.quickActionCard}
+                onPress={() => router.push('/driver/tiers')}
+              >
+                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.goldSoft }]}>
+                  <Ionicons name="ribbon" size={24} color={COLORS.gold} />
+                </View>
+                <Text style={styles.quickActionText}>Driver Tier</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.quickActionCard}
+                onPress={() => router.push('/lost-found')}
               >
                 <View style={[styles.quickActionIcon, { backgroundColor: COLORS.infoSoft }]}>
-                  <Ionicons name="chatbubble-ellipses" size={24} color={COLORS.info} />
+                  <Ionicons name="search" size={24} color={COLORS.info} />
                 </View>
-                <Text style={styles.quickActionText}>AI Assistant</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.quickActionCard}
-                onPress={() => router.push('/driver/leaderboard')}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentSoft }]}>
-                  <Ionicons name="trophy" size={24} color={COLORS.accent} />
-                </View>
-                <Text style={styles.quickActionText}>Leaderboard</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.quickActionCard}
-                onPress={() => router.push('/(tabs)/safety')}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.successSoft }]}>
-                  <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
-                </View>
-                <Text style={styles.quickActionText}>Safety</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.quickActionCard}
-                onPress={handleViewTrips}
-                activeOpacity={0.8}
-              >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.errorSoft }]}>
-                  <Ionicons name="list" size={24} color={COLORS.error} />
-                </View>
-                <Text style={styles.quickActionText}>Requests</Text>
+                <Text style={styles.quickActionText}>Lost & Found</Text>
               </TouchableOpacity>
             </View>
 
-            {/* Ride Requests CTA */}
+            {/* View Requests CTA */}
             {isOnline && (
               <TouchableOpacity 
                 style={styles.rideRequestsCta}
                 onPress={handleViewTrips}
                 activeOpacity={0.8}
               >
-                <View style={styles.rideRequestsLeft}>
-                  <View style={styles.rideRequestsIcon}>
-                    <Ionicons name="notifications" size={24} color={COLORS.primary} />
+                <LinearGradient
+                  colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                  style={styles.rideRequestsGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                >
+                  <View style={styles.rideRequestsLeft}>
+                    <View style={styles.rideRequestsIcon}>
+                      <Ionicons name="notifications" size={24} color={COLORS.primary} />
+                    </View>
+                    <View>
+                      <Text style={styles.rideRequestsTitle}>View Ride Requests</Text>
+                      <Text style={styles.rideRequestsSubtext}>Tap to see available rides</Text>
+                    </View>
                   </View>
-                  <View>
-                    <Text style={styles.rideRequestsTitle}>View Ride Requests</Text>
-                    <Text style={styles.rideRequestsSubtext}>Tap to see available rides</Text>
-                  </View>
-                </View>
-                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+                  <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
+                </LinearGradient>
               </TouchableOpacity>
             )}
           </>
@@ -383,27 +404,27 @@ export default function HomeScreen() {
                 activeOpacity={0.8}
               >
                 <View style={styles.searchIconWrap}>
-                  <Ionicons name="search" size={20} color={COLORS.accent} />
+                  <Ionicons name="search" size={20} color={COLORS.accentGreen} />
                 </View>
                 <Text style={styles.searchPlaceholder}>Enter your destination</Text>
               </TouchableOpacity>
               
               <View style={styles.savedLocations}>
                 <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.infoSoft }]}>
-                    <Ionicons name="home" size={18} color={COLORS.info} />
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+                    <Ionicons name="home" size={18} color={COLORS.accentBlue} />
                   </View>
                   <Text style={styles.savedLocationText}>Home</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentSoft }]}>
-                    <Ionicons name="briefcase" size={18} color={COLORS.accent} />
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                    <Ionicons name="briefcase" size={18} color={COLORS.accentGreen} />
                   </View>
                   <Text style={styles.savedLocationText}>Work</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.successSoft }]}>
-                    <Ionicons name="location" size={18} color={COLORS.success} />
+                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.goldSoft }]}>
+                    <Ionicons name="location" size={18} color={COLORS.gold} />
                   </View>
                   <Text style={styles.savedLocationText}>Map</Text>
                 </TouchableOpacity>
@@ -416,32 +437,37 @@ export default function HomeScreen() {
               onPress={() => router.push('/assistant')}
               activeOpacity={0.85}
             >
-              <View style={styles.aiAssistantLeft}>
-                <View style={styles.aiAssistantIcon}>
-                  <Ionicons name="sparkles" size={22} color={COLORS.accent} />
+              <LinearGradient
+                colors={[COLORS.primary, COLORS.primaryLight]}
+                style={styles.aiAssistantGradient}
+              >
+                <View style={styles.aiAssistantLeft}>
+                  <View style={styles.aiAssistantIcon}>
+                    <Ionicons name="sparkles" size={22} color={COLORS.accentGreen} />
+                  </View>
+                  <View>
+                    <Text style={styles.aiAssistantTitle}>AI Assistant</Text>
+                    <Text style={styles.aiAssistantSubtext}>Get help with anything</Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.aiAssistantTitle}>AI Assistant</Text>
-                  <Text style={styles.aiAssistantSubtext}>Get help with anything</Text>
-                </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
+                <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
+              </LinearGradient>
             </TouchableOpacity>
 
             {/* Features */}
             <Text style={styles.sectionTitle}>Why NEXRYDE?</Text>
             <View style={styles.featuresGrid}>
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentSoft }]}>
-                  <Ionicons name="shield-checkmark" size={24} color={COLORS.accent} />
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="shield-checkmark" size={24} color={COLORS.accentGreen} />
                 </View>
                 <Text style={styles.featureTitle}>Verified Drivers</Text>
                 <Text style={styles.featureDesc}>All drivers verified with NIN</Text>
               </View>
               
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.successSoft }]}>
-                  <Ionicons name="cash" size={24} color={COLORS.success} />
+                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentBlueSoft }]}>
+                  <Ionicons name="cash" size={24} color={COLORS.accentBlue} />
                 </View>
                 <Text style={styles.featureTitle}>Fair Pricing</Text>
                 <Text style={styles.featureDesc}>No hidden charges</Text>
@@ -476,14 +502,12 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: COLORS.background,
   },
   headerContainer: {
-    backgroundColor: COLORS.primary,
     paddingBottom: SPACING.lg,
     borderBottomLeftRadius: BORDER_RADIUS.xxxl,
     borderBottomRightRadius: BORDER_RADIUS.xxxl,
-    ...SHADOWS.lg,
   },
   headerSafe: {
     paddingHorizontal: SPACING.lg,
@@ -497,7 +521,7 @@ const styles = StyleSheet.create({
   headerLeft: {},
   greeting: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.gray400,
+    color: COLORS.textSecondary,
   },
   userName: {
     fontSize: FONT_SIZE.xxl,
@@ -508,14 +532,14 @@ const styles = StyleSheet.create({
   switchModeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,215,0,0.12)',
+    backgroundColor: COLORS.accentGreenSoft,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
     gap: SPACING.xs,
   },
   switchModeText: {
-    color: COLORS.accent,
+    color: COLORS.accentGreen,
     fontWeight: '600',
     fontSize: FONT_SIZE.sm,
   },
@@ -577,10 +601,6 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 10,
-    backgroundColor: COLORS.white,
-  },
-  statusDotPulse: {
-    backgroundColor: COLORS.white,
   },
   onlineInfo: {
     flex: 1,
@@ -612,10 +632,11 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   statBox: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   statBoxLarge: {
     flex: 1.2,
@@ -627,17 +648,17 @@ const styles = StyleSheet.create({
   },
   statBoxSmall: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     alignItems: 'center',
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   statIconWrap: {
     width: 44,
     height: 44,
     borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
@@ -650,12 +671,12 @@ const styles = StyleSheet.create({
   statValueLarge: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
   },
   statValueSmall: {
     fontSize: FONT_SIZE.xl,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     marginTop: SPACING.xs,
   },
   statLabelSmall: {
@@ -668,11 +689,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
     marginBottom: SPACING.lg,
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   subscriptionLeft: {
     flexDirection: 'row',
@@ -689,7 +711,7 @@ const styles = StyleSheet.create({
   subscriptionTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
   },
   subscriptionDays: {
     fontSize: FONT_SIZE.sm,
@@ -699,7 +721,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     marginBottom: SPACING.md,
   },
   
@@ -711,11 +733,12 @@ const styles = StyleSheet.create({
   },
   quickActionCard: {
     width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.lg,
     alignItems: 'center',
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   quickActionIcon: {
     width: 52,
@@ -728,18 +751,20 @@ const styles = StyleSheet.create({
   quickActionText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
   },
   
   rideRequestsCta: {
+    marginBottom: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    ...SHADOWS.glow,
+  },
+  rideRequestsGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.accent,
     padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.gold,
   },
   rideRequestsLeft: {
     flexDirection: 'row',
@@ -757,50 +782,50 @@ const styles = StyleSheet.create({
   rideRequestsTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.white,
   },
   rideRequestsSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.primary,
-    opacity: 0.7,
+    color: 'rgba(255,255,255,0.8)',
   },
   
   // Rider Styles
   bookRideCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xxl,
     padding: SPACING.lg,
     marginBottom: SPACING.lg,
-    ...SHADOWS.md,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   bookRideTitle: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     marginBottom: SPACING.md,
   },
   searchBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray50,
+    backgroundColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.gray100,
+    borderColor: COLORS.primary,
   },
   searchIconWrap: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
   },
   searchPlaceholder: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textTertiary,
+    color: COLORS.textMuted,
   },
   savedLocations: {
     flexDirection: 'row',
@@ -824,14 +849,18 @@ const styles = StyleSheet.create({
   },
   
   aiAssistantBanner: {
+    marginBottom: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+  },
+  aiAssistantGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: COLORS.primary,
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.lg,
   },
   aiAssistantLeft: {
     flexDirection: 'row',
@@ -842,7 +871,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,215,0,0.15)',
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -853,7 +882,7 @@ const styles = StyleSheet.create({
   },
   aiAssistantSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.gray400,
+    color: COLORS.textSecondary,
   },
   
   featuresGrid: {
@@ -863,10 +892,11 @@ const styles = StyleSheet.create({
   },
   featureCard: {
     width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
-    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
   },
   featureIconWrap: {
     width: 44,
@@ -879,7 +909,7 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     marginBottom: 2,
   },
   featureDesc: {
