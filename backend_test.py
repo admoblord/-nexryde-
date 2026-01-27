@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-KODA Backend API Testing Script
-Tests the newly implemented safety, AI assistant, and gamification features
+NEXRYDE Backend Authentication API Testing Script
+Tests SMS OTP flow, Google OAuth, and Logout functionality
 """
 
 import requests
 import json
 import uuid
+import time
 from datetime import datetime
 
 # API Base URL from frontend .env
