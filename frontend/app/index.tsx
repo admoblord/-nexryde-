@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -12,13 +12,11 @@ import Animated, {
   Easing,
   interpolate,
 } from 'react-native-reanimated';
-import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { RisingParticles, StaticOrbs } from '@/src/components/FallingRoses';
 
 const { width, height } = Dimensions.get('window');
-
-// Logo URL from user's asset
-const LOGO_URL = 'https://customer-assets.emergentagent.com/job_affd49f8-f851-4509-aa94-b5f7631db9ce/artifacts/k4t25xoz_%20NEXRYDE.jpeg';
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -32,13 +30,13 @@ export default function SplashScreen() {
 
   useEffect(() => {
     // Animate in sequence
-    logoOpacity.value = withDelay(500, withTiming(1, { duration: 800 }));
-    logoScale.value = withDelay(500, withTiming(1, { duration: 1000, easing: Easing.out(Easing.back(1.2)) }));
-    contentOpacity.value = withDelay(1200, withTiming(1, { duration: 600 }));
-    buttonOpacity.value = withDelay(1800, withTiming(1, { duration: 600 }));
+    logoOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
+    logoScale.value = withDelay(300, withTiming(1, { duration: 1000, easing: Easing.out(Easing.back(1.2)) }));
+    contentOpacity.value = withDelay(1000, withTiming(1, { duration: 600 }));
+    buttonOpacity.value = withDelay(1600, withTiming(1, { duration: 600 }));
     
     // Continuous glow
-    glowPulse.value = withDelay(2000, withRepeat(
+    glowPulse.value = withDelay(1800, withRepeat(
       withSequence(
         withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
         withTiming(0, { duration: 2000, easing: Easing.inOut(Easing.ease) })
@@ -64,8 +62,7 @@ export default function SplashScreen() {
   }));
 
   const glowStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(glowPulse.value, [0, 1], [0.2, 0.5]),
-    transform: [{ scale: interpolate(glowPulse.value, [0, 1], [1, 1.2]) }],
+    opacity: interpolate(glowPulse.value, [0, 1], [0.2, 0.4]),
   }));
 
   const handleBeginJourney = () => {
@@ -85,26 +82,38 @@ export default function SplashScreen() {
       {/* Background Effects */}
       <StaticOrbs count={8} />
       <RisingParticles intensity="medium" showStreaks={false} />
-      
-      {/* Glow behind logo */}
-      <Animated.View style={[styles.glowContainer, glowStyle]}>
-        <LinearGradient
-          colors={['transparent', COLORS.accentGreen + '20', COLORS.accentBlue + '20', 'transparent']}
-          style={styles.glowGradient}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-        />
-      </Animated.View>
 
       {/* Main Content */}
       <View style={styles.mainContent}>
-        {/* Logo */}
-        <Animated.View style={[styles.logoContainer, logoStyle]}>
-          <Image
-            source={{ uri: LOGO_URL }}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+        {/* Logo Section */}
+        <Animated.View style={[styles.logoSection, logoStyle]}>
+          {/* Stylized N Logo with Road */}
+          <View style={styles.logoContainer}>
+            <LinearGradient
+              colors={[COLORS.accentGreenLight, COLORS.accentGreen]}
+              style={styles.logoLeftPart}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+            <LinearGradient
+              colors={[COLORS.accentBlue, COLORS.accentBlueDark]}
+              style={styles.logoRightPart}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            />
+            {/* Road Line */}
+            <View style={styles.roadLine}>
+              <View style={styles.roadDash} />
+              <View style={styles.roadDash} />
+              <View style={styles.roadDash} />
+            </View>
+          </View>
+          
+          {/* Brand Name */}
+          <View style={styles.brandContainer}>
+            <Text style={styles.brandNex}>NEX</Text>
+            <Text style={styles.brandRyde}>RYDE</Text>
+          </View>
         </Animated.View>
 
         {/* Tagline */}
@@ -137,7 +146,7 @@ export default function SplashScreen() {
             >
               <Text style={styles.ctaText}>Begin Your Journey</Text>
               <View style={styles.arrowCircle}>
-                <Text style={styles.arrow}>→</Text>
+                <Ionicons name="arrow-forward" size={18} color={COLORS.primary} />
               </View>
             </LinearGradient>
           </TouchableOpacity>
@@ -164,31 +173,73 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  glowContainer: {
-    position: 'absolute',
-    top: height * 0.1,
-    left: 0,
-    right: 0,
-    height: 300,
-  },
-  glowGradient: {
-    flex: 1,
-    borderRadius: 150,
-  },
   mainContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
   },
-  logoContainer: {
-    width: width * 0.75,
-    height: 100,
+  logoSection: {
+    alignItems: 'center',
     marginBottom: SPACING.xl,
   },
-  logo: {
-    width: '100%',
-    height: '100%',
+  logoContainer: {
+    width: 80,
+    height: 80,
+    position: 'relative',
+    marginBottom: SPACING.md,
+  },
+  logoLeftPart: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: 35,
+    height: 80,
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    transform: [{ skewX: '-10deg' }],
+  },
+  logoRightPart: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 35,
+    height: 80,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    transform: [{ skewX: '10deg' }],
+  },
+  roadLine: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -2,
+    top: 10,
+    bottom: 10,
+    width: 4,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  roadDash: {
+    width: 4,
+    height: 12,
+    backgroundColor: COLORS.white,
+    borderRadius: 2,
+  },
+  brandContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  brandNex: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: COLORS.white,
+    letterSpacing: 2,
+  },
+  brandRyde: {
+    fontSize: 42,
+    fontWeight: '800',
+    color: COLORS.accentGreen,
+    letterSpacing: 2,
   },
   taglineContainer: {
     alignItems: 'center',
@@ -280,11 +331,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(25, 37, 63, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  arrow: {
-    color: COLORS.primary,
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
   },
   bottomContainer: {
     position: 'absolute',
