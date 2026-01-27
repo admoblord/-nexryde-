@@ -812,18 +812,19 @@ async def send_otp(request: OTPRequest):
         
         # Check if Termii is configured
         if TERMII_API_KEY:
-            # Use Termii plain SMS API with approved sender "OEalert"
+            # Use Termii DND route with Default ID "OEalert"
             async with httpx.AsyncClient() as client:
                 payload = {
                     "api_key": TERMII_API_KEY,
                     "to": normalized_phone,
-                    "from": "OEalert",  # Approved sender ID
-                    "channel": "dnd",   # DND route for reliable delivery
+                    "from": "OEalert",
+                    "channel": "dnd",
                     "type": "plain",
                     "sms": f"Your NexRyde verification code is {otp_code}. This code expires in 10 minutes."
                 }
                 
-                logger.info(f"Sending OTP to {normalized_phone} via Termii SMS (sender: OEalert, channel: dnd)")
+                logger.info(f"Sending OTP to {normalized_phone} via Termii DND (from: OEalert)")
+                logger.info(f"Payload: {payload}")
                 
                 response = await client.post(
                     f"{TERMII_BASE_URL}/api/sms/send",
@@ -855,7 +856,6 @@ async def send_otp(request: OTPRequest):
                     }
                 else:
                     logger.error(f"Termii API error: {response.status_code} - {response.text}")
-                    # Fallback to mock mode
                     raise Exception(f"Termii API failed: {response.text}")
         
         # Fallback: Mock OTP (for testing)
