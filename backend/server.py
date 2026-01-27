@@ -807,27 +807,26 @@ async def send_otp(request: OTPRequest):
     try:
         normalized_phone = normalize_phone(request.phone)
         
+        # Generate OTP first
+        otp_code = generate_otp()
+        
         # Check if Termii is configured
         if TERMII_API_KEY:
-            # Use Termii SMS API with approved sender "OEalert"
+            # Use Termii plain SMS API with approved sender "OEalert"
             async with httpx.AsyncClient() as client:
                 payload = {
                     "api_key": TERMII_API_KEY,
-                    "pin_type": "NUMERIC",
                     "to": normalized_phone,
                     "from": "OEalert",  # Approved sender ID
                     "channel": "dnd",   # DND route for reliable delivery
-                    "pin_attempts": 3,
-                    "pin_time_to_live": 10,
-                    "pin_length": 6,
-                    "pin_placeholder": "< 1234 >",
-                    "message_text": "Your NexRyde verification code is < 1234 >. This code expires in 10 minutes."
+                    "type": "plain",
+                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in 10 minutes."
                 }
                 
-                logger.info(f"Sending OTP to {normalized_phone} via Termii (sender: OEalert, channel: dnd)")
+                logger.info(f"Sending OTP to {normalized_phone} via Termii SMS (sender: OEalert, channel: dnd)")
                 
                 response = await client.post(
-                    f"{TERMII_BASE_URL}/api/sms/otp/send",
+                    f"{TERMII_BASE_URL}/api/sms/send",
                     json=payload,
                     timeout=30.0
                 )
@@ -837,20 +836,20 @@ async def send_otp(request: OTPRequest):
                 
                 if response.status_code == 200:
                     data = response.json()
-                    pin_id = data.get('pinId')
+                    message_id = data.get('message_id')
                     
-                    # Store pin_id for verification
+                    # Store OTP for verification
                     otp_store[request.phone] = {
-                        "pin_id": pin_id,
+                        "otp": otp_code,
+                        "message_id": message_id,
                         "normalized_phone": normalized_phone,
                         "expires": datetime.utcnow() + timedelta(minutes=10),
                         "provider": "termii"
                     }
                     
-                    logger.info(f"Termii OTP sent successfully to {normalized_phone}, pin_id: {pin_id}")
+                    logger.info(f"Termii SMS sent successfully to {normalized_phone}, message_id: {message_id}")
                     return {
                         "message": "OTP sent successfully via SMS",
-                        "pin_id": pin_id,
                         "expires_in_minutes": 10,
                         "provider": "termii"
                     }
