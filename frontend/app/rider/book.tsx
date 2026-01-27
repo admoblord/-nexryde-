@@ -28,7 +28,8 @@ export default function BookScreen() {
   const router = useRouter();
   const [stops, setStops] = useState<RouteStop[]>([
     { id: '1', type: 'pickup', address: '', isEditing: false },
-    { id: '2', type: 'dropoff', address: '', isEditing: false },
+    { id: '2', type: 'stop', address: '', isEditing: false }, // Default "Add stop" row
+    { id: '3', type: 'dropoff', address: '', isEditing: false },
   ]);
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
