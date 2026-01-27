@@ -32,8 +32,13 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 # Emergent LLM Key for AI Assistants
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
+# Termii SMS OTP Configuration
+TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
+TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://api.ng.termii.com')
+TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
+
 # Create the main app
-app = FastAPI(title="KODA API", version="2.0.0")
+app = FastAPI(title="NEXRYDE API", version="2.0.0")
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
