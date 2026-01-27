@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 
 # API Base URL from frontend .env
-BASE_URL = "https://rosy-rideshare.preview.emergentagent.com/api"
+BASE_URL = "https://nexryde-ui.preview.emergentagent.com/api"
 
 def test_api_endpoint(method, endpoint, data=None, params=None, expected_status=200):
     """Helper function to test API endpoints"""
