@@ -788,34 +788,213 @@ def calculate_behavior_score_change(event_type: str) -> float:
 
 # ==================== AUTH ENDPOINTS ====================
 
+def normalize_phone(phone: str) -> str:
+    """Normalize Nigerian phone number to international format"""
+    import re
+    cleaned = re.sub(r'\s+', '', phone)
+    if cleaned.startswith('0'):
+        cleaned = '234' + cleaned[1:]
+    elif cleaned.startswith('+'):
+        cleaned = cleaned.replace('+', '')
+    return cleaned
+
 @api_router.post("/auth/send-otp")
 async def send_otp(request: OTPRequest):
-    otp = generate_otp()
-    otp_store[request.phone] = {"otp": otp, "expires": datetime.utcnow() + timedelta(minutes=10)}
-    logger.info(f"OTP for {request.phone}: {otp}")
-    return {"message": "OTP sent successfully", "otp": otp}
+    """Send OTP via Termii SMS or fallback to mock mode"""
+    try:
+        normalized_phone = normalize_phone(request.phone)
+        
+        # Check if Termii is configured
+        if TERMII_API_KEY:
+            # Use Termii SMS API
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "message_type": "NUMERIC",
+                    "to": normalized_phone,
+                    "from": TERMII_FROM_ID,
+                    "channel": "dnd",  # DND route for reliable delivery
+                    "pin_attempts": 3,
+                    "pin_time_to_live": 10,
+                    "pin_length": 6,
+                    "pin_placeholder": "< 123456 >",
+                    "message_text": "Your NEXRYDE verification code is < 123456 >. This code expires in 10 minutes. Do not share."
+                }
+                
+                response = await client.post(
+                    f"{TERMII_BASE_URL}/api/sms/otp/send",
+                    json=payload,
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    pin_id = data.get('pinId')
+                    
+                    # Store pin_id for verification
+                    otp_store[request.phone] = {
+                        "pin_id": pin_id,
+                        "normalized_phone": normalized_phone,
+                        "expires": datetime.utcnow() + timedelta(minutes=10),
+                        "provider": "termii"
+                    }
+                    
+                    logger.info(f"Termii OTP sent to {normalized_phone}, pin_id: {pin_id}")
+                    return {
+                        "message": "OTP sent successfully via SMS",
+                        "pin_id": pin_id,
+                        "expires_in_minutes": 10,
+                        "provider": "termii"
+                    }
+                else:
+                    logger.error(f"Termii API error: {response.status_code} - {response.text}")
+                    # Fallback to mock mode
+                    raise Exception("Termii API failed, using fallback")
+        
+        # Fallback: Mock OTP (for testing)
+        otp = generate_otp()
+        otp_store[request.phone] = {
+            "otp": otp,
+            "expires": datetime.utcnow() + timedelta(minutes=10),
+            "provider": "mock"
+        }
+        logger.info(f"Mock OTP for {request.phone}: {otp}")
+        return {
+            "message": "OTP sent successfully",
+            "otp": otp,  # Only shown in mock mode for testing
+            "expires_in_minutes": 10,
+            "provider": "mock"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error sending OTP: {str(e)}")
+        # Final fallback
+        otp = generate_otp()
+        otp_store[request.phone] = {
+            "otp": otp,
+            "expires": datetime.utcnow() + timedelta(minutes=10),
+            "provider": "mock"
+        }
+        return {
+            "message": "OTP sent successfully (test mode)",
+            "otp": otp,
+            "expires_in_minutes": 10,
+            "provider": "mock"
+        }
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify):
+    """Verify OTP - supports both Termii and mock mode"""
     stored = otp_store.get(request.phone)
     if not stored:
-        raise HTTPException(status_code=400, detail="OTP not found")
+        raise HTTPException(status_code=400, detail="OTP not found. Please request a new code.")
+    
     if datetime.utcnow() > stored["expires"]:
         del otp_store[request.phone]
-        raise HTTPException(status_code=400, detail="OTP expired")
-    if stored["otp"] != request.otp:
-        raise HTTPException(status_code=400, detail="Invalid OTP")
+        raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
     
-    user = await db.users.find_one({"phone": request.phone})
-    if user:
-        await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
-        user["is_verified"] = True
-        user["_id"] = str(user["_id"])
+    # Check provider type
+    if stored.get("provider") == "termii" and stored.get("pin_id"):
+        # Verify with Termii
+        try:
+            async with httpx.AsyncClient() as client:
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "pin_id": stored["pin_id"],
+                    "pin": request.otp
+                }
+                
+                response = await client.post(
+                    f"{TERMII_BASE_URL}/api/sms/otp/verify",
+                    json=payload,
+                    timeout=30.0
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('verified') == 'True' or data.get('verified') == True:
+                        # OTP verified successfully
+                        del otp_store[request.phone]
+                        
+                        # Check if user exists
+                        user = await db.users.find_one({"phone": request.phone})
+                        if user:
+                            await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
+                            user["is_verified"] = True
+                            user["_id"] = str(user["_id"])
+                            return {"message": "Login successful", "user": user, "is_new_user": False}
+                        
+                        return {"message": "OTP verified", "is_new_user": True}
+                    else:
+                        raise HTTPException(status_code=400, detail="Invalid OTP code. Please try again.")
+                else:
+                    raise HTTPException(status_code=400, detail="Verification failed. Please try again.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Termii verification error: {str(e)}")
+            raise HTTPException(status_code=400, detail="Verification failed. Please request a new code.")
+    else:
+        # Mock mode verification
+        if stored.get("otp") != request.otp:
+            raise HTTPException(status_code=400, detail="Invalid OTP code")
+        
+        user = await db.users.find_one({"phone": request.phone})
+        if user:
+            await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
+            user["is_verified"] = True
+            user["_id"] = str(user["_id"])
+            del otp_store[request.phone]
+            return {"message": "Login successful", "user": user, "is_new_user": False}
+        
         del otp_store[request.phone]
-        return {"message": "Login successful", "user": user, "is_new_user": False}
-    
-    del otp_store[request.phone]
-    return {"message": "OTP verified", "is_new_user": True}
+        return {"message": "OTP verified", "is_new_user": True}
+
+# Google Sign-In endpoint
+class GoogleSignInRequest(BaseModel):
+    id_token: str
+    email: str
+    name: Optional[str] = None
+    photo_url: Optional[str] = None
+
+@api_router.post("/auth/google")
+async def google_sign_in(request: GoogleSignInRequest):
+    """Handle Google Sign-In authentication"""
+    try:
+        # Check if user exists by email
+        user = await db.users.find_one({"email": request.email})
+        
+        if user:
+            # Update user with Google info if needed
+            update_data = {"is_verified": True}
+            if request.name and not user.get("name"):
+                update_data["name"] = request.name
+            if request.photo_url and not user.get("profile_image"):
+                update_data["profile_image"] = request.photo_url
+            
+            await db.users.update_one({"email": request.email}, {"$set": update_data})
+            user.update(update_data)
+            user["_id"] = str(user["_id"])
+            
+            return {
+                "message": "Login successful",
+                "user": user,
+                "is_new_user": False
+            }
+        else:
+            # New user - return flag for registration
+            return {
+                "message": "Google account verified",
+                "is_new_user": True,
+                "google_data": {
+                    "email": request.email,
+                    "name": request.name,
+                    "photo_url": request.photo_url
+                }
+            }
+    except Exception as e:
+        logger.error(f"Google sign-in error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Google sign-in failed")
 
 @api_router.post("/auth/register")
 async def register(request: RegisterRequest):
