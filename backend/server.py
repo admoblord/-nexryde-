@@ -809,26 +809,31 @@ async def send_otp(request: OTPRequest):
         
         # Check if Termii is configured
         if TERMII_API_KEY:
-            # Use Termii SMS API
+            # Use Termii SMS API with approved sender "OEalert"
             async with httpx.AsyncClient() as client:
                 payload = {
                     "api_key": TERMII_API_KEY,
                     "message_type": "NUMERIC",
                     "to": normalized_phone,
-                    "from": TERMII_FROM_ID,
-                    "channel": "dnd",  # DND route for reliable delivery
+                    "from": "OEalert",  # Approved sender ID
+                    "channel": "dnd",   # DND route for reliable delivery
                     "pin_attempts": 3,
                     "pin_time_to_live": 10,
                     "pin_length": 6,
-                    "pin_placeholder": "< 123456 >",
-                    "message_text": "Your NEXRYDE verification code is < 123456 >. This code expires in 10 minutes. Do not share."
+                    "pin_placeholder": "{{code}}",
+                    "message_text": "Your NexRyde verification code is {{code}}. This code expires in 10 minutes."
                 }
+                
+                logger.info(f"Sending OTP to {normalized_phone} via Termii (sender: OEalert, channel: dnd)")
                 
                 response = await client.post(
                     f"{TERMII_BASE_URL}/api/sms/otp/send",
                     json=payload,
                     timeout=30.0
                 )
+                
+                logger.info(f"Termii response status: {response.status_code}")
+                logger.info(f"Termii response: {response.text}")
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -842,7 +847,7 @@ async def send_otp(request: OTPRequest):
                         "provider": "termii"
                     }
                     
-                    logger.info(f"Termii OTP sent to {normalized_phone}, pin_id: {pin_id}")
+                    logger.info(f"Termii OTP sent successfully to {normalized_phone}, pin_id: {pin_id}")
                     return {
                         "message": "OTP sent successfully via SMS",
                         "pin_id": pin_id,
@@ -852,7 +857,7 @@ async def send_otp(request: OTPRequest):
                 else:
                     logger.error(f"Termii API error: {response.status_code} - {response.text}")
                     # Fallback to mock mode
-                    raise Exception("Termii API failed, using fallback")
+                    raise Exception(f"Termii API failed: {response.text}")
         
         # Fallback: Mock OTP (for testing)
         otp = generate_otp()
