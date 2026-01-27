@@ -82,11 +82,25 @@ export default function ProfileScreen() {
               color={COLORS.accentGreen}
             />
             <MenuItem 
+              icon="time" 
+              label="Ride History" 
+              subtitle="View your past trips"
+              onPress={() => router.push('/ride-history')}
+              color={COLORS.accentBlue}
+            />
+            <MenuItem 
+              icon="chatbubbles" 
+              label="Messages" 
+              subtitle="Chat with your driver"
+              onPress={() => router.push('/chat')}
+              color={COLORS.info}
+            />
+            <MenuItem 
               icon="shield-checkmark" 
               label="Safety Center" 
               subtitle="Emergency contacts & safety features"
               onPress={() => router.push('/safety')}
-              color={COLORS.accentBlue}
+              color={COLORS.accentGreen}
             />
             <MenuItem 
               icon="wallet" 
@@ -94,13 +108,6 @@ export default function ProfileScreen() {
               subtitle="Payment methods & balance"
               onPress={() => {}}
               color={COLORS.gold}
-            />
-            <MenuItem 
-              icon="time" 
-              label="Ride History" 
-              subtitle="View your past trips"
-              onPress={() => {}}
-              color={COLORS.info}
             />
             <MenuItem 
               icon="help-circle" 
