@@ -1,5 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Dimensions } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Dimensions,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,60 +18,57 @@ const { width } = Dimensions.get('window');
 export default function EarningsDashboardScreen() {
   const router = useRouter();
 
-  const stats = {
-    today: 15200,
-    week: 87500,
-    month: 342000,
-    trips: 156,
-    hours: 48,
-    rating: 4.92,
-  };
-
   const weeklyData = [
-    { day: 'Mon', amount: 12500, trips: 8 },
-    { day: 'Tue', amount: 15200, trips: 10 },
-    { day: 'Wed', amount: 8900, trips: 6 },
-    { day: 'Thu', amount: 18400, trips: 12 },
-    { day: 'Fri', amount: 21000, trips: 14 },
-    { day: 'Sat', amount: 11500, trips: 7 },
-    { day: 'Sun', amount: 0, trips: 0 },
+    { day: 'Mon', amount: 13000, height: 0.4 },
+    { day: 'Tue', amount: 15000, height: 0.5 },
+    { day: 'Wed', amount: 0, height: 0 },
+    { day: 'Thu', amount: 18000, height: 0.6 },
+    { day: 'Fri', amount: 21000, height: 0.7 },
+    { day: 'Sat', amount: 12000, height: 0.4 },
+    { day: 'Sun', amount: 0, height: 0 },
   ];
 
-  const maxAmount = Math.max(...weeklyData.map(d => d.amount));
+  const recentEarnings = [
+    { id: 1, date: 'Today', trips: 10, amount: 15200 },
+    { id: 2, date: 'Yesterday', trips: 14, amount: 21000 },
+    { id: 3, date: 'Monday', trips: 8, amount: 12500 },
+  ];
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={[COLORS.background, COLORS.primary, COLORS.background]} style={StyleSheet.absoluteFillObject} />
-      <View style={[styles.glow, { top: 80, left: 30, backgroundColor: COLORS.accentGreen }]} />
-      <View style={[styles.glow, { bottom: 200, right: 20, backgroundColor: COLORS.gold, width: 60 }]} />
-      
       <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Earnings Dashboard</Text>
-          <View style={{ width: 44 }} />
+          <View style={styles.placeholder} />
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          {/* Total Earnings */}
-          <View style={styles.totalCard}>
-            <LinearGradient colors={[COLORS.accentGreen, COLORS.accentBlue]} style={styles.totalGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-              <Text style={styles.totalLabel}>This Month</Text>
-              <Text style={styles.totalAmount}>{CURRENCY}{stats.month.toLocaleString()}</Text>
-              <View style={styles.totalStats}>
-                <View style={styles.totalStat}>
-                  <Ionicons name="car" size={16} color={COLORS.white} />
-                  <Text style={styles.totalStatText}>{stats.trips} trips</Text>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {/* Main Earnings Card */}
+          <View style={styles.mainCard}>
+            <LinearGradient
+              colors={[COLORS.accentGreen, COLORS.accentBlue]}
+              style={styles.mainGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <Text style={styles.mainLabel}>This Month</Text>
+              <Text style={styles.mainAmount}>{CURRENCY}342,000</Text>
+              <View style={styles.mainStats}>
+                <View style={styles.mainStat}>
+                  <Text style={styles.mainStatValue}>156 trips</Text>
                 </View>
-                <View style={styles.totalStat}>
-                  <Ionicons name="time" size={16} color={COLORS.white} />
-                  <Text style={styles.totalStatText}>{stats.hours} hours</Text>
+                <View style={styles.mainStat}>
+                  <Text style={styles.mainStatValue}>48 hours</Text>
                 </View>
-                <View style={styles.totalStat}>
-                  <Ionicons name="star" size={16} color={COLORS.white} />
-                  <Text style={styles.totalStatText}>{stats.rating}</Text>
+                <View style={styles.mainStat}>
+                  <Text style={styles.mainStatValue}>4.92</Text>
                 </View>
               </View>
             </LinearGradient>
@@ -73,56 +77,52 @@ export default function EarningsDashboardScreen() {
           {/* Quick Stats */}
           <View style={styles.quickStats}>
             <View style={styles.quickStatCard}>
-              <LinearGradient colors={[COLORS.surface, COLORS.surfaceLight]} style={styles.quickStatGradient}>
-                <Text style={styles.quickStatLabel}>Today</Text>
-                <Text style={styles.quickStatValue}>{CURRENCY}{stats.today.toLocaleString()}</Text>
-              </LinearGradient>
+              <Text style={styles.quickStatLabel}>Today</Text>
+              <Text style={styles.quickStatValue}>{CURRENCY}15,200</Text>
             </View>
             <View style={styles.quickStatCard}>
-              <LinearGradient colors={[COLORS.surface, COLORS.surfaceLight]} style={styles.quickStatGradient}>
-                <Text style={styles.quickStatLabel}>This Week</Text>
-                <Text style={styles.quickStatValue}>{CURRENCY}{stats.week.toLocaleString()}</Text>
-              </LinearGradient>
+              <Text style={styles.quickStatLabel}>This Week</Text>
+              <Text style={styles.quickStatValue}>{CURRENCY}87,500</Text>
             </View>
           </View>
 
           {/* Weekly Chart */}
-          <Text style={styles.sectionTitle}>Weekly Overview</Text>
-          <View style={styles.chartCard}>
-            <LinearGradient colors={[COLORS.surface, COLORS.surfaceLight]} style={styles.chartGradient}>
-              <View style={styles.chartBars}>
-                {weeklyData.map((day, i) => (
-                  <View key={i} style={styles.barContainer}>
-                    <View style={styles.barWrapper}>
+          <View style={styles.chartSection}>
+            <Text style={styles.sectionTitle}>Weekly Overview</Text>
+            <View style={styles.chartCard}>
+              <View style={styles.chartContainer}>
+                {weeklyData.map((item, index) => (
+                  <View key={index} style={styles.chartBar}>
+                    <View style={styles.barContainer}>
                       <LinearGradient
-                        colors={day.amount > 0 ? [COLORS.accentGreen, COLORS.accentBlue] : [COLORS.surfaceLight, COLORS.surfaceLight]}
-                        style={[styles.bar, { height: day.amount > 0 ? (day.amount / maxAmount) * 100 : 8 }]}
+                        colors={item.height > 0 ? [COLORS.accentGreen, COLORS.accentBlue] : [COLORS.lightBorder, COLORS.lightBorder]}
+                        style={[styles.bar, { height: `${Math.max(item.height * 100, 5)}%` }]}
                       />
                     </View>
-                    <Text style={styles.barLabel}>{day.day}</Text>
-                    <Text style={styles.barAmount}>{day.amount > 0 ? `${CURRENCY}${(day.amount/1000).toFixed(0)}k` : '-'}</Text>
+                    <Text style={styles.barLabel}>{item.day}</Text>
+                    <Text style={styles.barAmount}>{item.amount > 0 ? `${CURRENCY}${(item.amount/1000).toFixed(0)}k` : '-'}</Text>
                   </View>
                 ))}
               </View>
-            </LinearGradient>
+            </View>
           </View>
 
           {/* Recent Earnings */}
-          <Text style={styles.sectionTitle}>Recent Earnings</Text>
-          {[{ date: 'Today', amount: 15200, trips: 10 }, { date: 'Yesterday', amount: 21000, trips: 14 }, { date: 'Wed', amount: 8900, trips: 6 }].map((item, i) => (
-            <View key={i} style={styles.recentCard}>
-              <View style={styles.recentLeft}>
-                <View style={styles.recentIcon}>
-                  <Ionicons name="calendar" size={20} color={COLORS.accentGreen} />
+          <View style={styles.recentSection}>
+            <Text style={styles.sectionTitle}>Recent Earnings</Text>
+            {recentEarnings.map(earning => (
+              <View key={earning.id} style={styles.earningCard}>
+                <View style={[styles.earningIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="car" size={20} color={COLORS.accentGreen} />
                 </View>
-                <View>
-                  <Text style={styles.recentDate}>{item.date}</Text>
-                  <Text style={styles.recentTrips}>{item.trips} trips completed</Text>
+                <View style={styles.earningInfo}>
+                  <Text style={styles.earningDate}>{earning.date}</Text>
+                  <Text style={styles.earningTrips}>{earning.trips} trips completed</Text>
                 </View>
+                <Text style={styles.earningAmount}>{CURRENCY}{earning.amount.toLocaleString()}</Text>
               </View>
-              <Text style={styles.recentAmount}>{CURRENCY}{item.amount.toLocaleString()}</Text>
-            </View>
-          ))}
+            ))}
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -130,38 +130,185 @@ export default function EarningsDashboardScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  glow: { position: 'absolute', width: 80, height: 80, borderRadius: 40, opacity: 0.12 },
-  safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md },
-  backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '700', color: COLORS.white },
-  content: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
-  totalCard: { marginBottom: SPACING.lg, borderRadius: BORDER_RADIUS.xxl, overflow: 'hidden' },
-  totalGradient: { padding: SPACING.xl, alignItems: 'center' },
-  totalLabel: { fontSize: FONT_SIZE.md, color: 'rgba(255,255,255,0.8)', marginBottom: SPACING.xs },
-  totalAmount: { fontSize: 48, fontWeight: '900', color: COLORS.white, marginBottom: SPACING.md },
-  totalStats: { flexDirection: 'row', gap: SPACING.xl },
-  totalStat: { flexDirection: 'row', alignItems: 'center', gap: SPACING.xs },
-  totalStatText: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.9)' },
-  quickStats: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
-  quickStatCard: { flex: 1, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden' },
-  quickStatGradient: { padding: SPACING.lg, alignItems: 'center', borderWidth: 1, borderColor: COLORS.surfaceLight, borderRadius: BORDER_RADIUS.xl },
-  quickStatLabel: { fontSize: FONT_SIZE.sm, color: COLORS.textMuted, marginBottom: SPACING.xs },
-  quickStatValue: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: COLORS.white },
-  sectionTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.white, marginBottom: SPACING.md },
-  chartCard: { marginBottom: SPACING.lg, borderRadius: BORDER_RADIUS.xxl, overflow: 'hidden' },
-  chartGradient: { padding: SPACING.lg, borderWidth: 1, borderColor: COLORS.surfaceLight, borderRadius: BORDER_RADIUS.xxl },
-  chartBars: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', height: 140 },
-  barContainer: { alignItems: 'center', flex: 1 },
-  barWrapper: { height: 100, justifyContent: 'flex-end' },
-  bar: { width: 24, borderRadius: 12, minHeight: 8 },
-  barLabel: { fontSize: FONT_SIZE.xs, color: COLORS.textMuted, marginTop: SPACING.sm },
-  barAmount: { fontSize: 9, color: COLORS.textSecondary, marginTop: 2 },
-  recentCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.xl, padding: SPACING.md, marginBottom: SPACING.sm, borderWidth: 1, borderColor: COLORS.surfaceLight },
-  recentLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  recentIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.accentGreenSoft, alignItems: 'center', justifyContent: 'center' },
-  recentDate: { fontSize: FONT_SIZE.md, fontWeight: '600', color: COLORS.white },
-  recentTrips: { fontSize: FONT_SIZE.sm, color: COLORS.textMuted },
-  recentAmount: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.accentGreen },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.lightBackground,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  headerTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  placeholder: {
+    width: 44,
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxl,
+  },
+  mainCard: {
+    borderRadius: BORDER_RADIUS.xxl,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  mainGradient: {
+    padding: SPACING.xl,
+    alignItems: 'center',
+  },
+  mainLabel: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: SPACING.xs,
+  },
+  mainAmount: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
+  },
+  mainStats: {
+    flexDirection: 'row',
+    gap: SPACING.xl,
+  },
+  mainStat: {
+    alignItems: 'center',
+  },
+  mainStatValue: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.9)',
+    fontWeight: '600',
+  },
+  quickStats: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  quickStatCard: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  quickStatLabel: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    marginBottom: 4,
+  },
+  quickStatValue: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  chartSection: {
+    marginBottom: SPACING.lg,
+  },
+  sectionTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.md,
+  },
+  chartCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  chartContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    height: 160,
+    alignItems: 'flex-end',
+  },
+  chartBar: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  barContainer: {
+    height: 100,
+    width: 24,
+    justifyContent: 'flex-end',
+    marginBottom: SPACING.xs,
+  },
+  bar: {
+    width: '100%',
+    borderRadius: 12,
+    minHeight: 4,
+  },
+  barLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextSecondary,
+    marginBottom: 2,
+  },
+  barAmount: {
+    fontSize: FONT_SIZE.xxs,
+    color: COLORS.lightTextMuted,
+  },
+  recentSection: {
+    marginBottom: SPACING.lg,
+  },
+  earningCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  earningIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
+  },
+  earningInfo: {
+    flex: 1,
+  },
+  earningDate: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
+  },
+  earningTrips: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+  },
+  earningAmount: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.accentGreen,
+  },
 });
