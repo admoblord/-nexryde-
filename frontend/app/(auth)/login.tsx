@@ -9,18 +9,32 @@ import {
   Platform,
   Dimensions,
   ScrollView,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { RisingParticles, StaticOrbs } from '@/src/components/FallingRoses';
 
 const { width, height } = Dimensions.get('window');
-const LOGO_URL = 'https://customer-assets.emergentagent.com/job_affd49f8-f851-4509-aa94-b5f7631db9ce/artifacts/k4t25xoz_%20NEXRYDE.jpeg';
+
+// Colors based on NEXRYDE logo
+const COLORS = {
+  background: '#0D1420',
+  primary: '#19253F',
+  surface: '#19253F',
+  surfaceLight: '#243654',
+  green: '#3AD173',
+  greenLight: '#80EE50',
+  greenSoft: 'rgba(58, 209, 115, 0.15)',
+  blue: '#3A8CD1',
+  blueDark: '#1A5AA6',
+  blueSoft: 'rgba(58, 140, 209, 0.15)',
+  white: '#FFFFFF',
+  textSecondary: '#A8B8D0',
+  textMuted: '#6B7A94',
+  gray700: '#2D3748',
+};
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -52,13 +66,13 @@ export default function LoginScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['#0D1420', '#19253F', '#0D1420']}
+        colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Background Effects */}
-      <StaticOrbs count={8} />
-      <RisingParticles intensity="light" />
+      {/* Decorative Glows */}
+      <View style={[styles.glow, { top: 80, left: 30, backgroundColor: COLORS.green }]} />
+      <View style={[styles.glow, { top: 200, right: 40, backgroundColor: COLORS.blue, width: 60, height: 60 }]} />
       
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView 
@@ -73,21 +87,31 @@ export default function LoginScreen() {
             <View style={styles.header}>
               {/* Logo */}
               <View style={styles.logoContainer}>
-                <Image
-                  source={{ uri: LOGO_URL }}
-                  style={styles.logoImage}
-                  resizeMode="contain"
+                <LinearGradient
+                  colors={[COLORS.greenLight, COLORS.green]}
+                  style={styles.logoLeft}
                 />
+                <LinearGradient
+                  colors={[COLORS.blue, COLORS.blueDark]}
+                  style={styles.logoRight}
+                />
+                <View style={styles.roadLine}>
+                  <View style={styles.roadDash} />
+                  <View style={styles.roadDash} />
+                </View>
               </View>
               
               <Text style={styles.welcomeText}>Welcome to</Text>
-              <Text style={styles.brandText}>NEXRYDE</Text>
+              <View style={styles.brandRow}>
+                <Text style={styles.brandNex}>NEX</Text>
+                <Text style={styles.brandRyde}>RYDE</Text>
+              </View>
               <Text style={styles.subtitleText}>Nigeria's Premium Ride Experience</Text>
               
               {/* Divider */}
               <View style={styles.divider}>
                 <View style={styles.dividerLine} />
-                <View style={[styles.dividerDot, { backgroundColor: COLORS.accentGreen }]} />
+                <View style={[styles.dividerDot, { backgroundColor: COLORS.green }]} />
                 <View style={styles.dividerLine} />
               </View>
             </View>
@@ -123,7 +147,7 @@ export default function LoginScreen() {
               >
                 <LinearGradient
                   colors={phone.length >= 10 
-                    ? [COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]
+                    ? [COLORS.greenLight, COLORS.green, COLORS.blue]
                     : [COLORS.gray700, COLORS.gray700]
                   }
                   style={styles.buttonGradient}
@@ -137,7 +161,9 @@ export default function LoginScreen() {
                     {loading ? 'Sending OTP...' : 'Continue'}
                   </Text>
                   {phone.length >= 10 && (
-                    <View style={styles.buttonOrb} />
+                    <View style={styles.buttonOrb}>
+                      <Ionicons name="arrow-forward" size={16} color={COLORS.primary} />
+                    </View>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
@@ -155,19 +181,22 @@ export default function LoginScreen() {
                 icon="shield-checkmark"
                 title="Zero Commission"
                 subtitle="Drivers keep 100% of earnings"
-                color={COLORS.accentGreen}
+                color={COLORS.green}
+                bgColor={COLORS.greenSoft}
               />
               <FeatureCard
                 icon="location"
                 title="Premium Safety"
                 subtitle="Verified drivers & live tracking"
-                color={COLORS.accentBlue}
+                color={COLORS.blue}
+                bgColor={COLORS.blueSoft}
               />
               <FeatureCard
                 icon="star"
                 title="Luxury Experience"
                 subtitle="Premium rides, exceptional service"
-                color={COLORS.accentGreenLight}
+                color={COLORS.greenLight}
+                bgColor={COLORS.greenSoft}
               />
             </View>
           </ScrollView>
@@ -181,15 +210,17 @@ const FeatureCard = ({
   icon, 
   title, 
   subtitle, 
-  color 
+  color,
+  bgColor,
 }: { 
   icon: string; 
   title: string; 
   subtitle: string;
   color: string;
+  bgColor: string;
 }) => (
   <View style={styles.featureCard}>
-    <View style={[styles.featureIconContainer, { backgroundColor: color + '20' }]}>
+    <View style={[styles.featureIconContainer, { backgroundColor: bgColor }]}>
       <Ionicons name={icon as any} size={24} color={color} />
     </View>
     <View style={styles.featureContent}>
@@ -204,6 +235,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
+  glow: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    opacity: 0.15,
+  },
   safeArea: {
     flex: 1,
   },
@@ -212,45 +250,88 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xxl,
+    paddingHorizontal: 24,
+    paddingBottom: 48,
   },
   header: {
     alignItems: 'center',
-    paddingTop: SPACING.xl,
-    marginBottom: SPACING.xl,
+    paddingTop: 32,
+    marginBottom: 32,
   },
   logoContainer: {
-    width: width * 0.5,
-    height: 80,
-    marginBottom: SPACING.md,
+    width: 60,
+    height: 60,
+    position: 'relative',
+    marginBottom: 16,
   },
-  logoImage: {
-    width: '100%',
-    height: '100%',
+  logoLeft: {
+    position: 'absolute',
+    left: 3,
+    top: 0,
+    width: 24,
+    height: 60,
+    borderTopLeftRadius: 6,
+    borderBottomLeftRadius: 6,
+    transform: [{ skewX: '-8deg' }],
+  },
+  logoRight: {
+    position: 'absolute',
+    right: 3,
+    top: 0,
+    width: 24,
+    height: 60,
+    borderTopRightRadius: 6,
+    borderBottomRightRadius: 6,
+    transform: [{ skewX: '8deg' }],
+  },
+  roadLine: {
+    position: 'absolute',
+    left: '50%',
+    marginLeft: -2,
+    top: 10,
+    bottom: 10,
+    width: 3,
+    alignItems: 'center',
+    justifyContent: 'space-around',
+  },
+  roadDash: {
+    width: 3,
+    height: 8,
+    backgroundColor: COLORS.white,
+    borderRadius: 1,
   },
   welcomeText: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     color: COLORS.textSecondary,
-    marginBottom: SPACING.xs,
+    marginBottom: 4,
   },
-  brandText: {
-    fontSize: FONT_SIZE.xxxl,
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  brandNex: {
+    fontSize: 32,
     fontWeight: '800',
     color: COLORS.white,
-    letterSpacing: 4,
-    marginBottom: SPACING.xs,
+    letterSpacing: 2,
+  },
+  brandRyde: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: COLORS.green,
+    letterSpacing: 2,
   },
   subtitleText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     color: COLORS.textMuted,
-    marginBottom: SPACING.md,
+    marginTop: 4,
+    marginBottom: 16,
   },
   divider: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '60%',
-    marginTop: SPACING.sm,
+    marginTop: 8,
   },
   dividerLine: {
     flex: 1,
@@ -261,60 +342,60 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    marginHorizontal: SPACING.md,
+    marginHorizontal: 16,
   },
   formSection: {
-    marginBottom: SPACING.xl,
+    marginBottom: 32,
   },
   formTitle: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: 17,
     fontWeight: '600',
     color: COLORS.white,
-    marginBottom: SPACING.md,
+    marginBottom: 16,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.surfaceLight,
-    marginBottom: SPACING.lg,
+    marginBottom: 24,
     overflow: 'hidden',
   },
   prefixContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
     backgroundColor: COLORS.surfaceLight,
     borderRightWidth: 1,
     borderRightColor: COLORS.surface,
   },
   flag: {
     fontSize: 24,
-    marginRight: SPACING.sm,
+    marginRight: 8,
   },
   prefixText: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '600',
     color: COLORS.textSecondary,
   },
   input: {
     flex: 1,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.lg,
-    fontSize: FONT_SIZE.lg,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    fontSize: 17,
     color: COLORS.white,
     letterSpacing: 1,
   },
   continueButton: {
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: SPACING.md,
+    marginBottom: 16,
   },
   continueButtonActive: {
-    shadowColor: COLORS.accentGreen,
+    shadowColor: COLORS.green,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,
@@ -324,11 +405,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.lg + 2,
-    paddingHorizontal: SPACING.xl,
+    paddingVertical: 18,
+    paddingHorizontal: 32,
   },
   continueButtonText: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: 17,
     fontWeight: '700',
     color: COLORS.textMuted,
   },
@@ -336,53 +417,55 @@ const styles = StyleSheet.create({
     color: COLORS.primary,
   },
   buttonOrb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.3)',
-    marginLeft: SPACING.md,
+    marginLeft: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   termsText: {
     textAlign: 'center',
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     color: COLORS.textMuted,
     lineHeight: 20,
   },
   linkText: {
-    color: COLORS.accentGreen,
+    color: COLORS.green,
     fontWeight: '600',
   },
   features: {
-    gap: SPACING.md,
+    gap: 16,
   },
   featureCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
+    borderRadius: 16,
+    padding: 16,
     borderWidth: 1,
     borderColor: COLORS.surfaceLight,
   },
   featureIconContainer: {
     width: 48,
     height: 48,
-    borderRadius: BORDER_RADIUS.md,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
+    marginRight: 16,
   },
   featureContent: {
     flex: 1,
   },
   featureTitle: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '600',
     color: COLORS.white,
     marginBottom: 2,
   },
   featureSubtitle: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     color: COLORS.textMuted,
   },
 });
