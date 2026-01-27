@@ -1,335 +1,363 @@
-import React from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  Dimensions,
-  TouchableOpacity,
-} from 'react-native';
-import { Link } from 'expo-router';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, Dimensions, Image, Platform } from 'react-native';
+import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
-import { FallingRoses, RosePetalsStatic } from '@/src/components/FallingRoses';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withDelay,
+  withRepeat,
+  withSequence,
+  Easing,
+  interpolate,
+} from 'react-native-reanimated';
+import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
+import { RisingParticles, StaticOrbs, RoadLines } from '@/src/components/FallingRoses';
+import { TouchableOpacity } from 'react-native';
 
 const { width, height } = Dimensions.get('window');
 
+// Logo URL from user's asset
+const LOGO_URL = 'https://customer-assets.emergentagent.com/job_affd49f8-f851-4509-aa94-b5f7631db9ce/artifacts/k4t25xoz_%20NEXRYDE.jpeg';
+
 export default function SplashScreen() {
-  const { isAuthenticated, user } = useAppStore();
+  const router = useRouter();
   
-  let destination = '/(auth)/login';
-  if (isAuthenticated && user) {
-    destination = user.role === 'driver' ? '/(driver-tabs)/driver-home' : '/(rider-tabs)/rider-home';
-  }
+  // Animation values
+  const logoScale = useSharedValue(0.5);
+  const logoOpacity = useSharedValue(0);
+  const textOpacity = useSharedValue(0);
+  const sloganOpacity = useSharedValue(0);
+  const featuresOpacity = useSharedValue(0);
+  const buttonOpacity = useSharedValue(0);
+  const buttonScale = useSharedValue(0.9);
+  const pulseGlow = useSharedValue(0);
+
+  useEffect(() => {
+    // Logo animation
+    logoOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
+    logoScale.value = withDelay(300, withTiming(1, { duration: 1000, easing: Easing.out(Easing.back(1.5)) }));
+    
+    // Text animations
+    textOpacity.value = withDelay(800, withTiming(1, { duration: 600 }));
+    sloganOpacity.value = withDelay(1200, withTiming(1, { duration: 600 }));
+    featuresOpacity.value = withDelay(1600, withTiming(1, { duration: 600 }));
+    
+    // Button animation
+    buttonOpacity.value = withDelay(2000, withTiming(1, { duration: 600 }));
+    buttonScale.value = withDelay(2000, withTiming(1, { duration: 500, easing: Easing.out(Easing.back(1.2)) }));
+    
+    // Continuous pulse glow
+    pulseGlow.value = withDelay(2500, withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) })
+      ),
+      -1,
+      false
+    ));
+  }, []);
+
+  const logoAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: logoOpacity.value,
+    transform: [{ scale: logoScale.value }],
+  }));
+
+  const textAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: textOpacity.value,
+    transform: [{ translateY: interpolate(textOpacity.value, [0, 1], [20, 0]) }],
+  }));
+
+  const sloganAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: sloganOpacity.value,
+    transform: [{ translateY: interpolate(sloganOpacity.value, [0, 1], [15, 0]) }],
+  }));
+
+  const featuresAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: featuresOpacity.value,
+    transform: [{ translateY: interpolate(featuresOpacity.value, [0, 1], [20, 0]) }],
+  }));
+
+  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: buttonOpacity.value,
+    transform: [{ scale: buttonScale.value }],
+  }));
+
+  const glowAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(pulseGlow.value, [0, 1], [0.3, 0.7]),
+    transform: [{ scale: interpolate(pulseGlow.value, [0, 1], [1, 1.1]) }],
+  }));
+
+  const handleBeginJourney = () => {
+    router.push('/(auth)/login');
+  };
 
   return (
     <View style={styles.container}>
       {/* Gradient Background */}
       <LinearGradient
-        colors={['#1A0A0F', '#0D0508', '#1A0A0F']}
+        colors={['#0D1420', '#19253F', '#0D1420']}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       />
       
-      {/* Static Rose Petals Background */}
-      <RosePetalsStatic count={20} />
+      {/* Background Orbs */}
+      <StaticOrbs count={10} />
       
-      {/* Falling Rose Petals Animation */}
-      <FallingRoses intensity="medium" />
+      {/* Rising Particles */}
+      <RisingParticles intensity="medium" showStreaks={true} />
       
-      {/* Decorative Lines */}
-      <View style={styles.decorativeLines}>
-        <View style={styles.line1} />
-        <View style={styles.line2} />
-        <View style={styles.line3} />
-      </View>
+      {/* Glow effect behind logo */}
+      <Animated.View style={[styles.logoGlow, glowAnimatedStyle]}>
+        <LinearGradient
+          colors={['transparent', COLORS.accentGreen + '30', COLORS.accentBlue + '30', 'transparent']}
+          style={styles.glowGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        />
+      </Animated.View>
 
       {/* Main Content */}
       <View style={styles.content}>
         {/* Logo Section */}
-        <View style={styles.logoSection}>
-          {/* Outer Glow Ring */}
-          <View style={styles.logoGlow}>
-            <View style={styles.logoOuter}>
-              <View style={styles.logoInner}>
-                <Text style={styles.logoLetter}>N</Text>
-              </View>
-            </View>
+        <Animated.View style={[styles.logoSection, logoAnimatedStyle]}>
+          <View style={styles.logoContainer}>
+            <Image
+              source={{ uri: LOGO_URL }}
+              style={styles.logoImage}
+              resizeMode="contain"
+            />
           </View>
-          
-          {/* Brand Name */}
-          <Text style={styles.brandName}>NEXRYDE</Text>
-          
-          {/* Elegant Tagline */}
-          <View style={styles.taglineContainer}>
-            <View style={styles.taglineRose} />
-            <Text style={styles.tagline}>RIDE SMART. RIDE SAFE.</Text>
-            <View style={styles.taglineRose} />
-          </View>
-          
-          {/* Subtitle */}
-          <Text style={styles.subtitle}>Nigeria's Smartest Ride Platform</Text>
-        </View>
+        </Animated.View>
 
-        {/* Features with Rose Accents */}
-        <View style={styles.featuresSection}>
-          <View style={styles.featureItem}>
-            <View style={styles.featurePetal} />
-            <Text style={styles.featureText}>Zero Commission</Text>
+        {/* Tagline */}
+        <Animated.View style={[styles.taglineSection, sloganAnimatedStyle]}>
+          <View style={styles.taglineBadge}>
+            <View style={[styles.taglineDot, { backgroundColor: COLORS.accentGreen }]} />
+            <Text style={styles.taglineText}>RIDE SMART. RIDE SAFE.</Text>
+            <View style={[styles.taglineDot, { backgroundColor: COLORS.accentBlue }]} />
           </View>
-          <View style={styles.featureDivider} />
-          <View style={styles.featureItem}>
-            <View style={styles.featurePetal} />
-            <Text style={styles.featureText}>100% Earnings</Text>
-          </View>
-          <View style={styles.featureDivider} />
-          <View style={styles.featureItem}>
-            <View style={styles.featurePetal} />
-            <Text style={styles.featureText}>Premium Safety</Text>
-          </View>
-        </View>
-      </View>
+          <Text style={styles.subtitleText}>Nigeria's Smartest Ride Platform</Text>
+        </Animated.View>
 
-      {/* Bottom Section */}
-      <View style={styles.bottomSection}>
-        <Link href={destination} asChild>
-          <TouchableOpacity style={styles.ctaButton} activeOpacity={0.85}>
+        {/* Features */}
+        <Animated.View style={[styles.featuresSection, featuresAnimatedStyle]}>
+          <View style={styles.featureRow}>
+            <FeatureBadge 
+              icon="●" 
+              text="Zero Commission" 
+              color={COLORS.accentGreen}
+            />
+            <View style={styles.featureDivider} />
+            <FeatureBadge 
+              icon="●" 
+              text="100% Earnings" 
+              color={COLORS.accentBlue}
+            />
+            <View style={styles.featureDivider} />
+            <FeatureBadge 
+              icon="●" 
+              text="Premium Safety" 
+              color={COLORS.accentGreenLight}
+            />
+          </View>
+        </Animated.View>
+
+        {/* CTA Button */}
+        <Animated.View style={[styles.buttonSection, buttonAnimatedStyle]}>
+          <TouchableOpacity 
+            style={styles.ctaButton}
+            onPress={handleBeginJourney}
+            activeOpacity={0.9}
+          >
             <LinearGradient
-              colors={[COLORS.accent, COLORS.accentDark]}
-              style={styles.ctaGradient}
+              colors={[COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]}
+              style={styles.buttonGradient}
               start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              end={{ x: 1, y: 0 }}
             >
-              <Text style={styles.ctaText}>Begin Your Journey</Text>
-              <View style={styles.ctaArrow}>
-                <Text style={styles.ctaArrowText}>→</Text>
+              <Text style={styles.ctaButtonText}>Begin Your Journey</Text>
+              <View style={styles.arrowContainer}>
+                <Text style={styles.arrowText}>→</Text>
               </View>
             </LinearGradient>
           </TouchableOpacity>
-        </Link>
-        
-        {/* Elegant Footer */}
-        <View style={styles.footerContainer}>
-          <View style={styles.footerLine} />
-          <Text style={styles.footerText}>RIDE SMART • RIDE SAFE</Text>
-          <View style={styles.footerLine} />
+        </Animated.View>
+
+        {/* Bottom Text */}
+        <View style={styles.bottomSection}>
+          <Text style={styles.bottomText}>RIDE SMART • RIDE SAFE</Text>
         </View>
       </View>
     </View>
   );
 }
 
+// Feature badge component
+const FeatureBadge = ({ 
+  icon, 
+  text, 
+  color 
+}: { 
+  icon: string; 
+  text: string; 
+  color: string;
+}) => (
+  <View style={styles.featureBadge}>
+    <Text style={[styles.featureIcon, { color }]}>{icon}</Text>
+    <Text style={styles.featureText}>{text}</Text>
+  </View>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
-  },
-  decorativeLines: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  line1: {
-    position: 'absolute',
-    top: height * 0.15,
-    left: -100,
-    width: width * 2,
-    height: 1,
-    backgroundColor: COLORS.accent,
-    opacity: 0.06,
-    transform: [{ rotate: '-20deg' }],
-  },
-  line2: {
-    position: 'absolute',
-    top: height * 0.4,
-    left: -100,
-    width: width * 2,
-    height: 1,
-    backgroundColor: COLORS.gold,
-    opacity: 0.04,
-    transform: [{ rotate: '-20deg' }],
-  },
-  line3: {
-    position: 'absolute',
-    bottom: height * 0.3,
-    left: -100,
-    width: width * 2,
-    height: 1,
-    backgroundColor: COLORS.accent,
-    opacity: 0.06,
-    transform: [{ rotate: '15deg' }],
+    backgroundColor: COLORS.background,
   },
   content: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
-    zIndex: 10,
+    paddingHorizontal: SPACING.lg,
+  },
+  logoGlow: {
+    position: 'absolute',
+    top: height * 0.15,
+    left: width * 0.1,
+    right: width * 0.1,
+    height: 300,
+    borderRadius: 150,
+    overflow: 'hidden',
+  },
+  glowGradient: {
+    flex: 1,
   },
   logoSection: {
     alignItems: 'center',
+    marginBottom: SPACING.xl,
+  },
+  logoContainer: {
+    width: width * 0.7,
+    height: 120,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
+  },
+  taglineSection: {
+    alignItems: 'center',
     marginBottom: SPACING.xxl,
   },
-  logoGlow: {
-    width: 170,
-    height: 170,
-    borderRadius: 85,
-    backgroundColor: 'rgba(201, 169, 166, 0.08)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoOuter: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.rose,
-  },
-  logoInner: {
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.accentLight,
-  },
-  logoLetter: {
-    fontSize: 80,
-    fontWeight: '900',
-    color: COLORS.accent,
-    letterSpacing: -3,
-  },
-  brandName: {
-    fontSize: FONT_SIZE.hero,
-    fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: 8,
-    marginTop: SPACING.xl,
-    textShadowColor: 'rgba(201, 169, 166, 0.3)',
-    textShadowOffset: { width: 0, height: 4 },
-    textShadowRadius: 20,
-  },
-  taglineContainer: {
+  taglineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.lg,
-    gap: SPACING.md,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: 30,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginBottom: SPACING.md,
   },
-  taglineRose: {
+  taglineDot: {
     width: 8,
-    height: 10,
-    backgroundColor: COLORS.rosePetal3,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 8,
-    transform: [{ rotate: '-45deg' }],
-    opacity: 0.8,
+    height: 8,
+    borderRadius: 4,
   },
-  tagline: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.accent,
-    letterSpacing: 6,
+  taglineText: {
+    color: COLORS.white,
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    letterSpacing: 3,
+    marginHorizontal: SPACING.md,
   },
-  subtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textMuted,
-    marginTop: SPACING.md,
-    letterSpacing: 2,
+  subtitleText: {
+    color: COLORS.textSecondary,
+    fontSize: FONT_SIZE.md,
+    fontWeight: '400',
   },
   featuresSection: {
+    marginBottom: SPACING.xxl,
+  },
+  featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.xxl,
-    paddingHorizontal: SPACING.md,
+    justifyContent: 'center',
+    flexWrap: 'wrap',
   },
-  featureItem: {
+  featureBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
   },
-  featurePetal: {
-    width: 10,
-    height: 12,
-    backgroundColor: COLORS.rosePetal2,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 10,
-    transform: [{ rotate: '-45deg' }],
+  featureIcon: {
+    fontSize: 8,
+    marginRight: SPACING.xs,
   },
   featureText: {
-    fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
+    fontSize: FONT_SIZE.sm,
     fontWeight: '500',
   },
   featureDivider: {
     width: 1,
-    height: 20,
-    backgroundColor: COLORS.accent,
-    opacity: 0.3,
-    marginHorizontal: SPACING.md,
+    height: 16,
+    backgroundColor: COLORS.textMuted,
+    marginHorizontal: SPACING.sm,
   },
-  bottomSection: {
-    paddingHorizontal: SPACING.xl,
-    paddingBottom: SPACING.xxl + SPACING.md,
-    alignItems: 'center',
-    zIndex: 10,
+  buttonSection: {
+    width: '100%',
+    paddingHorizontal: SPACING.md,
+    marginBottom: SPACING.xl,
   },
   ctaButton: {
-    width: '100%',
-    maxWidth: 320,
-    borderRadius: BORDER_RADIUS.full,
+    borderRadius: 30,
     overflow: 'hidden',
-    ...SHADOWS.rose,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
   },
-  ctaGradient: {
+  buttonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.lg + 2,
-    paddingHorizontal: SPACING.xxl,
+    paddingVertical: SPACING.lg,
+    paddingHorizontal: SPACING.xl,
   },
-  ctaText: {
+  ctaButtonText: {
+    color: COLORS.primary,
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.primary,
     marginRight: SPACING.md,
-    letterSpacing: 1,
   },
-  ctaArrow: {
+  arrowContainer: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'rgba(25, 37, 63, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ctaArrowText: {
-    color: COLORS.accent,
+  arrowText: {
+    color: COLORS.primary,
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
   },
-  footerContainer: {
-    flexDirection: 'row',
+  bottomSection: {
+    position: 'absolute',
+    bottom: SPACING.xxl,
     alignItems: 'center',
-    marginTop: SPACING.xl,
-    gap: SPACING.md,
   },
-  footerLine: {
-    width: 30,
-    height: 1,
-    backgroundColor: COLORS.accent,
-    opacity: 0.3,
-  },
-  footerText: {
-    fontSize: 9,
+  bottomText: {
     color: COLORS.textMuted,
-    letterSpacing: 3,
+    fontSize: FONT_SIZE.xs,
+    letterSpacing: 2,
+    fontWeight: '500',
   },
 });
