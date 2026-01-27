@@ -14,9 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { FallingRoses, RosePetalsStatic, RoseGlow, FloatingRoseBloom } from '@/src/components/FallingRoses';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -81,14 +80,13 @@ export default function RegisterScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Background Effects */}
-      <RosePetalsStatic count={12} />
-      <FallingRoses intensity="light" />
-      <RoseGlow size={280} style={styles.glowTop} />
+      {/* Decorative Glows */}
+      <View style={[styles.glow, { top: 60, right: 30, backgroundColor: COLORS.accentGreen }]} />
+      <View style={[styles.glow, { bottom: 200, left: 20, backgroundColor: COLORS.accentBlue, width: 60, height: 60 }]} />
       
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
@@ -108,8 +106,15 @@ export default function RegisterScreen() {
 
             {/* Title Section */}
             <View style={styles.titleSection}>
-              <View style={styles.titleRose}>
-                <FloatingRoseBloom />
+              <View style={styles.titleIcon}>
+                <LinearGradient
+                  colors={[COLORS.accentGreenLight, COLORS.accentGreen]}
+                  style={styles.titleIconLeft}
+                />
+                <LinearGradient
+                  colors={[COLORS.accentBlue, COLORS.accentBlueDark]}
+                  style={styles.titleIconRight}
+                />
               </View>
               <Text style={styles.title}>Join NEXRYDE</Text>
               <Text style={styles.subtitle}>Choose how you want to use NEXRYDE</Text>
@@ -125,7 +130,7 @@ export default function RegisterScreen() {
               >
                 <LinearGradient
                   colors={selectedRole === 'rider' 
-                    ? [COLORS.accent, COLORS.accentDark]
+                    ? [COLORS.accentGreen, COLORS.accentGreenDark]
                     : [COLORS.surface, COLORS.surfaceLight]}
                   style={styles.roleGradient}
                 >
@@ -134,7 +139,7 @@ export default function RegisterScreen() {
                       <Ionicons 
                         name="person" 
                         size={28} 
-                        color={selectedRole === 'rider' ? COLORS.primary : COLORS.accent} 
+                        color={selectedRole === 'rider' ? COLORS.primary : COLORS.accentGreen} 
                       />
                     </View>
                     <View style={[styles.radioOuter, selectedRole === 'rider' && styles.radioOuterActive]}>
@@ -145,26 +150,14 @@ export default function RegisterScreen() {
                   <Text style={[styles.roleName, selectedRole === 'rider' && styles.roleNameActive]}>
                     Rider
                   </Text>
-                  <View style={styles.rolePriceRow}>
-                    <Text style={[styles.rolePrice, selectedRole === 'rider' && styles.rolePriceActive]}>
-                      FREE
-                    </Text>
-                    <View style={styles.rolePetal} />
-                  </View>
+                  <Text style={[styles.rolePrice, selectedRole === 'rider' && styles.rolePriceActive]}>
+                    FREE
+                  </Text>
                   
                   <View style={styles.roleFeatures}>
-                    <RoleFeature 
-                      text="Book rides instantly" 
-                      active={selectedRole === 'rider'} 
-                    />
-                    <RoleFeature 
-                      text="Live trip tracking" 
-                      active={selectedRole === 'rider'} 
-                    />
-                    <RoleFeature 
-                      text="AI-powered assistance" 
-                      active={selectedRole === 'rider'} 
-                    />
+                    <RoleFeature text="Book rides instantly" active={selectedRole === 'rider'} />
+                    <RoleFeature text="Live trip tracking" active={selectedRole === 'rider'} />
+                    <RoleFeature text="AI-powered assistance" active={selectedRole === 'rider'} />
                   </View>
                 </LinearGradient>
               </TouchableOpacity>
@@ -177,7 +170,7 @@ export default function RegisterScreen() {
               >
                 <LinearGradient
                   colors={selectedRole === 'driver' 
-                    ? [COLORS.rosePetal4, COLORS.rosePetal5]
+                    ? [COLORS.accentBlue, COLORS.accentBlueDark]
                     : [COLORS.surface, COLORS.surfaceLight]}
                   style={styles.roleGradient}
                 >
@@ -192,7 +185,7 @@ export default function RegisterScreen() {
                       <Ionicons 
                         name="car-sport" 
                         size={28} 
-                        color={selectedRole === 'driver' ? COLORS.white : COLORS.rosePetal3} 
+                        color={selectedRole === 'driver' ? COLORS.white : COLORS.accentBlue} 
                       />
                     </View>
                     <View style={[styles.radioOuter, selectedRole === 'driver' && styles.radioOuterDriver]}>
@@ -203,26 +196,14 @@ export default function RegisterScreen() {
                   <Text style={[styles.roleName, selectedRole === 'driver' && styles.roleNameActive]}>
                     Driver
                   </Text>
-                  <View style={styles.rolePriceRow}>
-                    <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceActive]}>
-                      {CURRENCY}25K/month
-                    </Text>
-                    <View style={[styles.rolePetal, { backgroundColor: COLORS.rosePetal4 }]} />
-                  </View>
+                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceActive]}>
+                    {CURRENCY}25K/month
+                  </Text>
                   
                   <View style={styles.roleFeatures}>
-                    <RoleFeature 
-                      text="Keep 100% earnings" 
-                      active={selectedRole === 'driver'} 
-                    />
-                    <RoleFeature 
-                      text="Zero commission" 
-                      active={selectedRole === 'driver'} 
-                    />
-                    <RoleFeature 
-                      text="Daily challenges & rewards" 
-                      active={selectedRole === 'driver'} 
-                    />
+                    <RoleFeature text="Keep 100% earnings" active={selectedRole === 'driver'} />
+                    <RoleFeature text="Zero commission" active={selectedRole === 'driver'} />
+                    <RoleFeature text="Daily challenges & rewards" active={selectedRole === 'driver'} />
                   </View>
                 </LinearGradient>
               </TouchableOpacity>
@@ -270,9 +251,13 @@ export default function RegisterScreen() {
             >
               <LinearGradient
                 colors={name.trim() 
-                  ? (selectedRole === 'driver' ? [COLORS.rosePetal3, COLORS.rosePetal5] : [COLORS.accent, COLORS.accentDark])
+                  ? (selectedRole === 'driver' 
+                    ? [COLORS.accentBlue, COLORS.accentBlueDark] 
+                    : [COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue])
                   : [COLORS.gray700, COLORS.gray700]}
                 style={styles.registerGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
               >
                 <Text style={[styles.registerText, !name.trim() && styles.registerTextDisabled]}>
                   {loading ? 'Creating Account...' : `Continue as ${selectedRole === 'driver' ? 'Driver' : 'Rider'}`}
@@ -281,7 +266,7 @@ export default function RegisterScreen() {
                   <Ionicons 
                     name="arrow-forward" 
                     size={20} 
-                    color={name.trim() ? (selectedRole === 'driver' ? COLORS.rosePetal3 : COLORS.accent) : COLORS.gray500} 
+                    color={name.trim() ? COLORS.primary : COLORS.gray500} 
                   />
                 </View>
               </LinearGradient>
@@ -306,7 +291,7 @@ const RoleFeature = ({ text, active }: { text: string; active: boolean }) => (
     <Ionicons 
       name="checkmark-circle" 
       size={16} 
-      color={active ? (active ? 'rgba(255,255,255,0.9)' : COLORS.success) : COLORS.textMuted} 
+      color={active ? 'rgba(255,255,255,0.9)' : COLORS.textMuted} 
     />
     <Text style={[styles.featureText, active && styles.featureTextActive]}>{text}</Text>
   </View>
@@ -315,12 +300,14 @@ const RoleFeature = ({ text, active }: { text: string; active: boolean }) => (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.background,
   },
-  glowTop: {
+  glow: {
     position: 'absolute',
-    top: -100,
-    right: -80,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    opacity: 0.15,
   },
   safeArea: {
     flex: 1,
@@ -349,9 +336,31 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xl,
   },
-  titleRose: {
+  titleIcon: {
+    width: 50,
+    height: 50,
+    position: 'relative',
     marginBottom: SPACING.md,
-    opacity: 0.8,
+  },
+  titleIconLeft: {
+    position: 'absolute',
+    left: 3,
+    top: 0,
+    width: 20,
+    height: 50,
+    borderTopLeftRadius: 5,
+    borderBottomLeftRadius: 5,
+    transform: [{ skewX: '-8deg' }],
+  },
+  titleIconRight: {
+    position: 'absolute',
+    right: 3,
+    top: 0,
+    width: 20,
+    height: 50,
+    borderTopRightRadius: 5,
+    borderBottomRightRadius: 5,
+    transform: [{ skewX: '8deg' }],
   },
   title: {
     fontSize: FONT_SIZE.xxxl,
@@ -376,7 +385,11 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
   },
   roleCardActive: {
-    ...SHADOWS.rose,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   roleGradient: {
     padding: SPACING.md,
@@ -409,7 +422,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -455,30 +468,14 @@ const styles = StyleSheet.create({
   roleNameActive: {
     color: COLORS.white,
   },
-  rolePriceRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
   rolePrice: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
     color: COLORS.textMuted,
+    marginBottom: SPACING.md,
   },
   rolePriceActive: {
     color: COLORS.white,
-  },
-  rolePetal: {
-    width: 8,
-    height: 10,
-    backgroundColor: COLORS.accent,
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 8,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 8,
-    transform: [{ rotate: '-45deg' }],
-    opacity: 0.7,
   },
   roleFeatures: {
     gap: SPACING.xs,
@@ -513,7 +510,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     paddingHorizontal: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.gray700,
+    borderColor: COLORS.surfaceLight,
     gap: SPACING.sm,
   },
   input: {
@@ -526,7 +523,11 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
-    ...SHADOWS.rose,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   registerGradient: {
     flexDirection: 'row',
@@ -547,7 +548,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -561,7 +562,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   termsLink: {
-    color: COLORS.accent,
+    color: COLORS.accentGreen,
     fontWeight: '600',
   },
 });
