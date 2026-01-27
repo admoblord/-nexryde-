@@ -446,7 +446,7 @@ frontend:
         - comment: "KODA logo and loading animation displayed"
         - working: false
         - agent: "testing"
-        - comment: "❌ ISSUE: Splash screen displays correctly (KODA logo, tagline 'Drive Your Way', loading indicator) but automatic navigation to login screen after 2 seconds is not working. User stays on splash screen indefinitely. Authentication state management or routing logic needs fixing."
+        - comment: "❌ ISSUE: Splash screen displays correctly (NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', Begin Your Journey button) but navigation to login screen is not working. Button clicks but doesn't navigate to /(auth)/login. User stays on splash screen indefinitely. Routing logic needs fixing."
 
   - task: "Login Screen"
     implemented: true
@@ -619,6 +619,8 @@ agent_communication:
     - message: "NEW SESSION: Full app rebranding to NEXRYDE completed. Added SMS OTP with Termii integration, Google OAuth with Emergent Auth, improved text contrast and boldness on white background screens, and logout functionality. Need to test: 1) Full login → OTP verify → register → home flow, 2) Logout from profile screen, 3) New Chat screen, 4) New Ride History screen. Testing priority: Login/Logout flow first."
     - agent: "testing"
     - message: "✅ AUTHENTICATION TESTING COMPLETE: All 3 authentication APIs tested successfully. SMS OTP flow working perfectly with Termii integration (fallback to mock mode), complete registration flow tested with Nigerian phone number. Google OAuth endpoint properly validates sessions and returns appropriate responses. Logout API functioning correctly with session cleanup. All authentication endpoints accessible and working as expected."
+    - agent: "testing"
+    - message: "❌ GOOGLE SIGN-IN FLOW TESTING: Tested Google Sign-In flow on mobile viewport (390x844). LOGIN SCREEN: Perfect UI with NEXRYDE branding, both SMS and Google buttons present, phone input working. ISSUES: 1) Splash screen 'Begin Your Journey' button doesn't navigate to login, 2) Google Sign-In button clicks but doesn't trigger network requests, navigation, or popup to Emergent Auth. ExpoWebBrowser not available in web environment. SMS authentication works correctly. Backend Google OAuth API is functional but frontend integration broken."
 
   - task: "SMS OTP Authentication"
     implemented: true
@@ -667,15 +669,18 @@ agent_communication:
 
   - task: "Login Screen with SMS and Google"
     implemented: true
-    working: "NA"
+    working: false
     file: "app/(auth)/login.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
         - agent: "main"
         - comment: "Updated login screen with Continue with SMS and Continue with Google buttons."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ ISSUE: Login screen UI is perfect - displays correctly with NEXRYDE branding, both SMS and Google buttons present, phone input working with Nigerian flag and +234 prefix. However, Google Sign-In button is not functional. Button clicks but does not trigger any network requests, navigation, or popup to Emergent Auth. ExpoWebBrowser not available in web environment. SMS flow works correctly. Mobile responsive design confirmed (390x844)."
 
   - task: "Profile Screen with Logout"
     implemented: true
@@ -688,3 +693,6 @@ agent_communication:
         - working: "NA"
         - agent: "main"
         - comment: "Profile screen now has logout button with confirmation dialog."
+        - working: "NA"
+        - agent: "testing"
+        - comment: "Not tested - requires authentication to access profile screen. Google Sign-In must be fixed first."
