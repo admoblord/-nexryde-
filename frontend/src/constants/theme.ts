@@ -37,9 +37,9 @@ export const COLORS = {
   lightSurface: '#F5F7FA',      // Light gray cards
   lightSurfaceAlt: '#EDF1F7',   // Slightly darker cards
   lightBorder: '#E2E8F0',       // Border color
-  lightTextPrimary: '#1A1A1A',  // Dark text
-  lightTextSecondary: '#4A5568', // Medium gray text
-  lightTextMuted: '#718096',    // Light gray text
+  lightTextPrimary: '#111827',  // Very dark text (improved contrast)
+  lightTextSecondary: '#374151', // Darker gray text (improved contrast)
+  lightTextMuted: '#6B7280',    // Medium gray text (improved contrast)
   
   // Text Colors
   white: '#FFFFFF',
