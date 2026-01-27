@@ -22,15 +22,6 @@ export default function RiderHomeScreen() {
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.background, COLORS.primary, COLORS.background]}
-        style={StyleSheet.absoluteFillObject}
-      />
-      
-      {/* Decorative Glows */}
-      <View style={[styles.glow, { top: 80, left: 30, backgroundColor: COLORS.accentGreen }]} />
-      <View style={[styles.glow, { top: 150, right: 40, backgroundColor: COLORS.accentBlue, width: 50, height: 50 }]} />
-      
       <SafeAreaView style={styles.safeArea}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Header */}
@@ -39,7 +30,10 @@ export default function RiderHomeScreen() {
               <Text style={styles.greeting}>Hello,</Text>
               <Text style={styles.userName}>{user?.name || 'Rider'}</Text>
             </View>
-            <TouchableOpacity style={styles.profileButton}>
+            <TouchableOpacity 
+              style={styles.profileButton}
+              onPress={() => router.push('/profile')}
+            >
               <LinearGradient
                 colors={[COLORS.accentGreen, COLORS.accentBlue]}
                 style={styles.profileGradient}
@@ -51,8 +45,8 @@ export default function RiderHomeScreen() {
 
           {/* Rider Mode Badge */}
           <View style={styles.modeBadge}>
-            <View style={[styles.modeDot, { backgroundColor: COLORS.accentBlue }]} />
-            <Text style={[styles.modeText, { color: COLORS.accentBlue }]}>Rider Mode</Text>
+            <View style={[styles.modeDot, { backgroundColor: COLORS.accentGreen }]} />
+            <Text style={styles.modeText}>Rider Mode</Text>
           </View>
 
           {/* Where To Card */}
@@ -62,7 +56,7 @@ export default function RiderHomeScreen() {
             activeOpacity={0.9}
           >
             <LinearGradient
-              colors={[COLORS.surface, COLORS.surfaceLight]}
+              colors={[COLORS.accentGreen, COLORS.accentBlue]}
               style={styles.whereToGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
@@ -72,16 +66,14 @@ export default function RiderHomeScreen() {
               </View>
               
               <View style={styles.whereToInput}>
-                <View style={styles.whereToIcon}>
-                  <Ionicons name="search" size={20} color={COLORS.accentGreen} />
-                </View>
+                <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
                 <Text style={styles.whereToPlaceholder}>Enter your destination</Text>
               </View>
               
               <View style={styles.quickLocations}>
-                <QuickLocation icon="home" label="Home" color={COLORS.accentBlue} />
-                <QuickLocation icon="briefcase" label="Work" color={COLORS.accentGreen} />
-                <QuickLocation icon="location" label="Map" color={COLORS.gold} />
+                <QuickLocation icon="home" label="Home" />
+                <QuickLocation icon="briefcase" label="Work" />
+                <QuickLocation icon="location" label="Map" />
               </View>
             </LinearGradient>
           </TouchableOpacity>
@@ -111,10 +103,7 @@ export default function RiderHomeScreen() {
             onPress={() => router.push('/assistant')}
             activeOpacity={0.9}
           >
-            <LinearGradient
-              colors={[COLORS.primary, COLORS.primaryLight]}
-              style={styles.aiGradient}
-            >
+            <View style={styles.aiContent}>
               <View style={styles.aiLeft}>
                 <View style={styles.aiIcon}>
                   <Ionicons name="sparkles" size={24} color={COLORS.accentGreen} />
@@ -125,7 +114,7 @@ export default function RiderHomeScreen() {
                 </View>
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
-            </LinearGradient>
+            </View>
           </TouchableOpacity>
 
           {/* Why NEXRYDE */}
@@ -162,10 +151,10 @@ export default function RiderHomeScreen() {
   );
 }
 
-const QuickLocation = ({ icon, label, color }: { icon: string; label: string; color: string }) => (
+const QuickLocation = ({ icon, label }: { icon: string; label: string }) => (
   <TouchableOpacity style={styles.quickLocation}>
-    <View style={[styles.quickLocationIcon, { backgroundColor: color + '20' }]}>
-      <Ionicons name={icon as any} size={18} color={color} />
+    <View style={styles.quickLocationIcon}>
+      <Ionicons name={icon as any} size={18} color={COLORS.white} />
     </View>
     <Text style={styles.quickLocationLabel}>{label}</Text>
   </TouchableOpacity>
@@ -173,16 +162,11 @@ const QuickLocation = ({ icon, label, color }: { icon: string; label: string; co
 
 const ServiceCard = ({ icon, title, desc, color }: { icon: string; title: string; desc: string; color: string }) => (
   <TouchableOpacity style={styles.serviceCard}>
-    <LinearGradient
-      colors={[COLORS.surface, COLORS.surfaceLight]}
-      style={styles.serviceGradient}
-    >
-      <View style={[styles.serviceIcon, { backgroundColor: color + '20' }]}>
-        <Ionicons name={icon as any} size={24} color={color} />
-      </View>
-      <Text style={styles.serviceTitle}>{title}</Text>
-      <Text style={styles.serviceDesc}>{desc}</Text>
-    </LinearGradient>
+    <View style={[styles.serviceIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon as any} size={24} color={color} />
+    </View>
+    <Text style={styles.serviceTitle}>{title}</Text>
+    <Text style={styles.serviceDesc}>{desc}</Text>
   </TouchableOpacity>
 );
 
@@ -198,14 +182,7 @@ const WhyCard = ({ icon, title, color }: { icon: string; title: string; color: s
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  glow: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    opacity: 0.12,
+    backgroundColor: COLORS.lightBackground,
   },
   safeArea: {
     flex: 1,
@@ -223,16 +200,21 @@ const styles = StyleSheet.create({
   },
   greeting: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: COLORS.lightTextSecondary,
   },
   userName: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.white,
+    color: COLORS.lightTextPrimary,
   },
   profileButton: {
     borderRadius: 24,
     overflow: 'hidden',
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   profileGradient: {
     width: 48,
@@ -249,7 +231,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: COLORS.accentBlueSoft,
+    backgroundColor: COLORS.accentGreenSoft,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.full,
@@ -264,12 +246,13 @@ const styles = StyleSheet.create({
   modeText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
+    color: COLORS.accentGreen,
   },
   whereToCard: {
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
-    shadowColor: COLORS.accentGreen,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 12,
@@ -277,8 +260,6 @@ const styles = StyleSheet.create({
   },
   whereToGradient: {
     padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.xxl,
   },
   whereToHeader: {
@@ -292,25 +273,15 @@ const styles = StyleSheet.create({
   whereToInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surfaceLight,
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  whereToIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.accentGreenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
+    gap: SPACING.sm,
   },
   whereToPlaceholder: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textMuted,
+    color: COLORS.lightTextMuted,
   },
   quickLocations: {
     flexDirection: 'row',
@@ -326,10 +297,11 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.25)',
   },
   quickLocationLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: COLORS.white,
     fontWeight: '500',
   },
   servicesSection: {
@@ -338,7 +310,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.lightTextPrimary,
     marginBottom: SPACING.md,
   },
   servicesGrid: {
@@ -347,15 +319,17 @@ const styles = StyleSheet.create({
   },
   serviceCard: {
     flex: 1,
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-  },
-  serviceGradient: {
     padding: SPACING.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
-    borderRadius: BORDER_RADIUS.xl,
+    borderColor: COLORS.lightBorder,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
   serviceIcon: {
     width: 52,
@@ -368,26 +342,30 @@ const styles = StyleSheet.create({
   serviceTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.lightTextPrimary,
   },
   serviceDesc: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
+    color: COLORS.lightTextMuted,
     marginTop: 2,
   },
   aiCard: {
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
     marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  aiGradient: {
+  aiContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
-    borderRadius: BORDER_RADIUS.xl,
   },
   aiLeft: {
     flexDirection: 'row',
@@ -405,11 +383,11 @@ const styles = StyleSheet.create({
   aiTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.white,
+    color: COLORS.lightTextPrimary,
   },
   aiDesc: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: COLORS.lightTextSecondary,
   },
   whySection: {
     marginBottom: SPACING.lg,
@@ -421,11 +399,11 @@ const styles = StyleSheet.create({
   },
   whyCard: {
     width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
+    borderColor: COLORS.lightBorder,
   },
   whyIcon: {
     width: 40,
@@ -438,7 +416,7 @@ const styles = StyleSheet.create({
   whyTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.white,
+    color: COLORS.lightTextPrimary,
   },
   bottomSpacer: {
     height: SPACING.xl,
