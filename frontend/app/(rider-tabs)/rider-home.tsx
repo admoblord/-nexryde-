@@ -113,7 +113,7 @@ export default function RiderHomeScreen() {
                   <Text style={styles.aiDesc}>Get help with your rides</Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
+              <Ionicons name="chevron-forward" size={22} color={COLORS.accentGreen} />
             </View>
           </TouchableOpacity>
 
@@ -162,8 +162,8 @@ const QuickLocation = ({ icon, label }: { icon: string; label: string }) => (
 
 const ServiceCard = ({ icon, title, desc, color }: { icon: string; title: string; desc: string; color: string }) => (
   <TouchableOpacity style={styles.serviceCard}>
-    <View style={[styles.serviceIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon as any} size={24} color={color} />
+    <View style={[styles.serviceIcon, { backgroundColor: color + '20' }]}>
+      <Ionicons name={icon as any} size={26} color={color} />
     </View>
     <Text style={styles.serviceTitle}>{title}</Text>
     <Text style={styles.serviceDesc}>{desc}</Text>
@@ -172,8 +172,8 @@ const ServiceCard = ({ icon, title, desc, color }: { icon: string; title: string
 
 const WhyCard = ({ icon, title, color }: { icon: string; title: string; color: string }) => (
   <View style={styles.whyCard}>
-    <View style={[styles.whyIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon as any} size={20} color={color} />
+    <View style={[styles.whyIcon, { backgroundColor: color + '20' }]}>
+      <Ionicons name={icon as any} size={22} color={color} />
     </View>
     <Text style={styles.whyTitle}>{title}</Text>
   </View>
@@ -199,7 +199,8 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   greeting: {
-    fontSize: FONT_SIZE.md,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
     color: COLORS.lightTextSecondary,
   },
   userName: {
@@ -217,14 +218,14 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   profileGradient: {
-    width: 48,
-    height: 48,
+    width: 50,
+    height: 50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileInitial: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '800',
     color: COLORS.white,
   },
   modeBadge: {
@@ -233,19 +234,19 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: COLORS.accentGreenSoft,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingVertical: SPACING.xs + 2,
     borderRadius: BORDER_RADIUS.full,
     marginBottom: SPACING.lg,
     gap: SPACING.xs,
   },
   modeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   modeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   whereToCard: {
@@ -281,6 +282,7 @@ const styles = StyleSheet.create({
   },
   whereToPlaceholder: {
     fontSize: FONT_SIZE.md,
+    fontWeight: '500',
     color: COLORS.lightTextMuted,
   },
   quickLocations: {
@@ -292,9 +294,9 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   quickLocationIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.25)',
@@ -302,14 +304,14 @@ const styles = StyleSheet.create({
   quickLocationLabel: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.white,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   servicesSection: {
     marginBottom: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.lightTextPrimary,
     marginBottom: SPACING.md,
   },
@@ -321,7 +323,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    padding: SPACING.lg,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
@@ -332,8 +334,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   serviceIcon: {
-    width: 52,
-    height: 52,
+    width: 56,
+    height: 56,
     borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
@@ -341,13 +343,14 @@ const styles = StyleSheet.create({
   },
   serviceTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.lightTextPrimary,
   },
   serviceDesc: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
-    marginTop: 2,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
+    color: COLORS.lightTextSecondary,
+    marginTop: 4,
   },
   aiCard: {
     backgroundColor: COLORS.white,
@@ -373,9 +376,9 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
   },
   aiIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
@@ -387,6 +390,7 @@ const styles = StyleSheet.create({
   },
   aiDesc: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
     color: COLORS.lightTextSecondary,
   },
   whySection: {
@@ -406,8 +410,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.lightBorder,
   },
   whyIcon: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     borderRadius: BORDER_RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
@@ -415,7 +419,7 @@ const styles = StyleSheet.create({
   },
   whyTitle: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.lightTextPrimary,
   },
   bottomSpacer: {
