@@ -77,7 +77,10 @@ export default function LoginScreen() {
     storePhone(phone);
     
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/send-otp`, {
+      const backendUrl = getBackendUrl();
+      console.log('Using backend URL for OTP:', backendUrl);
+      
+      const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: `+234${phone}` }),
