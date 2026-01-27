@@ -38,7 +38,7 @@ TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://api.ng.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 
 # Emergent Auth URL
-EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', 'https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data')
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
