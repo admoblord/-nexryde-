@@ -9,6 +9,7 @@ import {
   Platform,
   Dimensions,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -34,12 +35,15 @@ const COLORS = {
   textSecondary: '#A8B8D0',
   textMuted: '#6B7A94',
   gray700: '#2D3748',
+  google: '#4285F4',
+  googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const { setPhone: storePhone } = useAppStore();
 
   const handleContinue = async () => {
@@ -54,13 +58,35 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: `+234${phone}` }),
       });
       
+      const data = await response.json();
+      
       if (response.ok) {
-        router.push({ pathname: '/(auth)/verify', params: { phone } });
+        // Pass pin_id if using Termii, or otp for mock mode
+        router.push({ 
+          pathname: '/(auth)/verify', 
+          params: { 
+            phone,
+            pin_id: data.pin_id || '',
+            provider: data.provider || 'mock',
+            mock_otp: data.otp || '' // Only for testing
+          } 
+        });
       }
     } catch (error) {
       console.error('Error:', error);
     }
     setLoading(false);
+  };
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    // Note: Full Google Sign-In requires expo-auth-session setup
+    // For now, we'll show a message that it's being set up
+    setTimeout(() => {
+      setGoogleLoading(false);
+      // Navigate to a placeholder or show setup instructions
+      alert('Google Sign-In coming soon! Please use phone number for now.');
+    }, 1000);
   };
 
   return (
@@ -107,13 +133,6 @@ export default function LoginScreen() {
                 <Text style={styles.brandRyde}>RYDE</Text>
               </View>
               <Text style={styles.subtitleText}>Nigeria's Premium Ride Experience</Text>
-              
-              {/* Divider */}
-              <View style={styles.divider}>
-                <View style={styles.dividerLine} />
-                <View style={[styles.dividerDot, { backgroundColor: COLORS.green }]} />
-                <View style={styles.dividerLine} />
-              </View>
             </View>
 
             {/* Login Form */}
@@ -154,18 +173,48 @@ export default function LoginScreen() {
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                 >
-                  <Text style={[
-                    styles.continueButtonText,
-                    phone.length >= 10 && styles.continueButtonTextActive
-                  ]}>
-                    {loading ? 'Sending OTP...' : 'Continue'}
-                  </Text>
-                  {phone.length >= 10 && (
-                    <View style={styles.buttonOrb}>
-                      <Ionicons name="arrow-forward" size={16} color={COLORS.primary} />
-                    </View>
+                  {loading ? (
+                    <ActivityIndicator color={COLORS.primary} />
+                  ) : (
+                    <>
+                      <Ionicons name="chatbubble" size={20} color={phone.length >= 10 ? COLORS.primary : COLORS.textMuted} style={{ marginRight: 8 }} />
+                      <Text style={[
+                        styles.continueButtonText,
+                        phone.length >= 10 && styles.continueButtonTextActive
+                      ]}>
+                        Continue with SMS
+                      </Text>
+                    </>
                   )}
                 </LinearGradient>
+              </TouchableOpacity>
+
+              {/* OR Divider */}
+              <View style={styles.orDivider}>
+                <View style={styles.orLine} />
+                <Text style={styles.orText}>OR</Text>
+                <View style={styles.orLine} />
+              </View>
+
+              {/* Google Sign-In Button */}
+              <TouchableOpacity
+                style={styles.googleButton}
+                onPress={handleGoogleSignIn}
+                disabled={googleLoading}
+                activeOpacity={0.9}
+              >
+                <View style={styles.googleButtonContent}>
+                  {googleLoading ? (
+                    <ActivityIndicator color={COLORS.google} />
+                  ) : (
+                    <>
+                      <View style={styles.googleIconContainer}>
+                        <Ionicons name="logo-google" size={20} color={COLORS.google} />
+                      </View>
+                      <Text style={styles.googleButtonText}>Continue with Google</Text>
+                    </>
+                  )}
+                </View>
               </TouchableOpacity>
 
               <Text style={styles.termsText}>
@@ -190,13 +239,6 @@ export default function LoginScreen() {
                 subtitle="Verified drivers & live tracking"
                 color={COLORS.blue}
                 bgColor={COLORS.blueSoft}
-              />
-              <FeatureCard
-                icon="star"
-                title="Luxury Experience"
-                subtitle="Premium rides, exceptional service"
-                color={COLORS.greenLight}
-                bgColor={COLORS.greenSoft}
               />
             </View>
           </ScrollView>
@@ -256,7 +298,7 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     paddingTop: 32,
-    marginBottom: 32,
+    marginBottom: 24,
   },
   logoContainer: {
     width: 60,
@@ -325,27 +367,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: COLORS.textMuted,
     marginTop: 4,
-    marginBottom: 16,
-  },
-  divider: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '60%',
-    marginTop: 8,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: COLORS.surfaceLight,
-  },
-  dividerDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginHorizontal: 16,
   },
   formSection: {
-    marginBottom: 32,
+    marginBottom: 24,
   },
   formTitle: {
     fontSize: 17,
@@ -360,7 +384,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: COLORS.surfaceLight,
-    marginBottom: 24,
+    marginBottom: 16,
     overflow: 'hidden',
   },
   prefixContainer: {
@@ -416,14 +440,49 @@ const styles = StyleSheet.create({
   continueButtonTextActive: {
     color: COLORS.primary,
   },
-  buttonOrb: {
+  orDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+  },
+  orLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: COLORS.surfaceLight,
+  },
+  orText: {
+    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    marginHorizontal: 16,
+  },
+  googleButton: {
+    backgroundColor: COLORS.surface,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    marginBottom: 16,
+  },
+  googleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 18,
+    paddingHorizontal: 32,
+  },
+  googleIconContainer: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    marginLeft: 16,
+    backgroundColor: COLORS.googleSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
+  },
+  googleButtonText: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: COLORS.white,
   },
   termsText: {
     textAlign: 'center',
@@ -436,7 +495,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   features: {
-    gap: 16,
+    gap: 12,
   },
   featureCard: {
     flexDirection: 'row',
