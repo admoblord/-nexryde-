@@ -6,15 +6,13 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
-  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { FallingRoses } from '@/src/components/FallingRoses';
 
 const { width } = Dimensions.get('window');
 
@@ -26,15 +24,16 @@ export default function DriverHomeScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Subtle Falling Roses */}
-      <FallingRoses intensity="light" />
+      {/* Decorative Glows */}
+      <View style={[styles.glow, { top: 80, right: 30, backgroundColor: COLORS.accentGreen }]} />
+      <View style={[styles.glow, { top: 200, left: 20, backgroundColor: COLORS.accentBlue, width: 60, height: 60 }]} />
       
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Header */}
           <View style={styles.header}>
             <View>
@@ -43,7 +42,7 @@ export default function DriverHomeScreen() {
             </View>
             <TouchableOpacity style={styles.profileButton}>
               <LinearGradient
-                colors={[COLORS.accent, COLORS.accentDark]}
+                colors={[COLORS.accentGreen, COLORS.accentBlue]}
                 style={styles.profileGradient}
               >
                 <Text style={styles.profileInitial}>{user?.name?.charAt(0) || 'D'}</Text>
@@ -53,14 +52,14 @@ export default function DriverHomeScreen() {
 
           {/* Driver Mode Badge */}
           <View style={styles.modeBadge}>
-            <View style={styles.modeDot} />
-            <Text style={styles.modeText}>Driver Mode</Text>
+            <View style={[styles.modeDot, { backgroundColor: COLORS.accentGreen }]} />
+            <Text style={[styles.modeText, { color: COLORS.accentGreen }]}>Driver Mode</Text>
           </View>
 
           {/* Online Toggle Card */}
           <View style={styles.onlineCard}>
             <LinearGradient
-              colors={isOnline ? [COLORS.success, '#5A9B7C'] : [COLORS.surface, COLORS.surfaceLight]}
+              colors={isOnline ? [COLORS.accentGreen, COLORS.accentGreenDark] : [COLORS.surface, COLORS.surfaceLight]}
               style={styles.onlineGradient}
             >
               <View style={styles.onlineLeft}>
@@ -68,7 +67,7 @@ export default function DriverHomeScreen() {
                   <Ionicons 
                     name={isOnline ? 'radio-button-on' : 'radio-button-off'} 
                     size={24} 
-                    color={isOnline ? COLORS.success : COLORS.textMuted} 
+                    color={isOnline ? COLORS.white : COLORS.textMuted} 
                   />
                 </View>
                 <View>
@@ -98,117 +97,109 @@ export default function DriverHomeScreen() {
                 colors={[COLORS.surface, COLORS.surfaceLight]}
                 style={styles.statGradient}
               >
-                <Text style={styles.statLabel}>Today's Earnings</Text>
-                <Text style={styles.statValue}>{CURRENCY}0</Text>
-                <View style={styles.statBadge}>
-                  <Text style={styles.statBadgeText}>Keep 100% - Zero commission</Text>
+                <View style={[styles.statIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="wallet" size={24} color={COLORS.accentGreen} />
                 </View>
+                <Text style={styles.statLabel}>Today</Text>
+                <Text style={styles.statValue}>{CURRENCY}0</Text>
               </LinearGradient>
             </View>
-            
             <View style={styles.statCard}>
               <LinearGradient
                 colors={[COLORS.surface, COLORS.surfaceLight]}
                 style={styles.statGradient}
               >
-                <View style={styles.statRow}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statItemValue}>0</Text>
-                    <Text style={styles.statItemLabel}>Total Trips</Text>
-                  </View>
-                  <View style={styles.statDivider} />
-                  <View style={styles.statItem}>
-                    <Text style={styles.statItemValue}>5.0</Text>
-                    <Text style={styles.statItemLabel}>Rating</Text>
-                  </View>
+                <View style={[styles.statIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+                  <Ionicons name="car" size={24} color={COLORS.accentBlue} />
                 </View>
+                <Text style={styles.statLabel}>Trips</Text>
+                <Text style={styles.statValue}>0</Text>
               </LinearGradient>
             </View>
           </View>
 
-          {/* Subscription Card */}
+          {/* Quick Actions */}
+          <View style={styles.actionsSection}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.actionsGrid}>
+              <ActionCard
+                icon="trophy"
+                title="Challenges"
+                color={COLORS.gold}
+                onPress={() => router.push('/driver/challenges')}
+              />
+              <ActionCard
+                icon="stats-chart"
+                title="Earnings"
+                color={COLORS.accentGreen}
+                onPress={() => router.push('/driver/earnings-dashboard')}
+              />
+              <ActionCard
+                icon="ribbon"
+                title="Tiers"
+                color={COLORS.accentBlue}
+                onPress={() => router.push('/driver/tiers')}
+              />
+              <ActionCard
+                icon="card"
+                title="Subscribe"
+                color={COLORS.info}
+                onPress={() => router.push('/driver/subscription')}
+              />
+            </View>
+          </View>
+
+          {/* Subscription Banner */}
           <TouchableOpacity 
-            style={styles.subscriptionCard}
+            style={styles.subscriptionBanner}
             onPress={() => router.push('/driver/subscription')}
             activeOpacity={0.9}
           >
             <LinearGradient
-              colors={[COLORS.rosePetal4, COLORS.rosePetal5]}
+              colors={[COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]}
               style={styles.subscriptionGradient}
               start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              end={{ x: 1, y: 0 }}
             >
-              <View style={styles.subscriptionIcon}>
-                <Ionicons name="diamond" size={24} color={COLORS.white} />
+              <View style={styles.subscriptionLeft}>
+                <View style={styles.subscriptionIcon}>
+                  <Ionicons name="diamond" size={24} color={COLORS.primary} />
+                </View>
+                <View>
+                  <Text style={styles.subscriptionTitle}>Subscribe & Earn</Text>
+                  <Text style={styles.subscriptionDesc}>Keep 100% of your earnings</Text>
+                </View>
               </View>
-              <View style={styles.subscriptionContent}>
-                <Text style={styles.subscriptionTitle}>No Active Subscription</Text>
-                <Text style={styles.subscriptionSubtitle}>Subscribe to go online</Text>
+              <View style={styles.subscriptionPrice}>
+                <Text style={styles.subscriptionPriceText}>{CURRENCY}25K</Text>
+                <Text style={styles.subscriptionPeriod}>/month</Text>
               </View>
-              <Ionicons name="chevron-forward" size={24} color={COLORS.white} />
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Challenges Banner */}
+          {/* AI Assistant */}
           <TouchableOpacity 
-            style={styles.challengeBanner}
-            onPress={() => router.push('/driver/challenges')}
+            style={styles.aiCard}
+            onPress={() => router.push('/assistant')}
             activeOpacity={0.9}
           >
-            <View style={styles.challengeRose}>
-              <View style={styles.rosePetal} />
-              <View style={[styles.rosePetal, { transform: [{ rotate: '72deg' }] }]} />
-              <View style={[styles.rosePetal, { transform: [{ rotate: '144deg' }] }]} />
-              <View style={[styles.rosePetal, { transform: [{ rotate: '216deg' }] }]} />
-              <View style={[styles.rosePetal, { transform: [{ rotate: '288deg' }] }]} />
-            </View>
-            <View style={styles.challengeContent}>
-              <Text style={styles.challengeTitle}>Daily Challenges</Text>
-              <Text style={styles.challengeSubtitle}>3 active • Earn up to {CURRENCY}30K extra</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.primaryLight]}
+              style={styles.aiGradient}
+            >
+              <View style={styles.aiLeft}>
+                <View style={styles.aiIcon}>
+                  <Ionicons name="sparkles" size={24} color={COLORS.accentGreen} />
+                </View>
+                <View>
+                  <Text style={styles.aiTitle}>AI Assistant</Text>
+                  <Text style={styles.aiDesc}>Get driving tips & support</Text>
+                </View>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
+            </LinearGradient>
           </TouchableOpacity>
-
-          {/* Quick Actions */}
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
-          <View style={styles.actionsGrid}>
-            <ActionCard
-              icon="trophy"
-              title="Challenges"
-              color={COLORS.gold}
-              onPress={() => router.push('/driver/challenges')}
-            />
-            <ActionCard
-              icon="podium"
-              title="Leaderboard"
-              color={COLORS.rosePetal3}
-              onPress={() => router.push('/driver/leaderboard')}
-            />
-            <ActionCard
-              icon="car"
-              title="Vehicle"
-              color={COLORS.info}
-              onPress={() => router.push('/driver/vehicle')}
-            />
-            <ActionCard
-              icon="card"
-              title="Bank"
-              color={COLORS.success}
-              onPress={() => router.push('/driver/bank')}
-            />
-          </View>
-
-          {/* Driver Benefits */}
-          <View style={styles.benefitsSection}>
-            <Text style={styles.sectionTitle}>Your Benefits</Text>
-            <View style={styles.benefitsList}>
-              <BenefitItem icon="cash" text="Keep 100% of your earnings" color={COLORS.success} />
-              <BenefitItem icon="time" text="Flexible working hours" color={COLORS.info} />
-              <BenefitItem icon="shield" text="Driver protection program" color={COLORS.rosePetal3} />
-              <BenefitItem icon="medal" text="Weekly challenges & rewards" color={COLORS.gold} />
-            </View>
-          </View>
-
+          
           <View style={styles.bottomSpacer} />
         </ScrollView>
       </SafeAreaView>
@@ -216,39 +207,45 @@ export default function DriverHomeScreen() {
   );
 }
 
-const ActionCard = ({ icon, title, color, onPress }: any) => (
+const ActionCard = ({ icon, title, color, onPress }: { icon: string; title: string; color: string; onPress: () => void }) => (
   <TouchableOpacity style={styles.actionCard} onPress={onPress} activeOpacity={0.8}>
-    <View style={[styles.actionIcon, { backgroundColor: `${color}20` }]}>
-      <Ionicons name={icon} size={24} color={color} />
-    </View>
-    <Text style={styles.actionTitle}>{title}</Text>
+    <LinearGradient
+      colors={[COLORS.surface, COLORS.surfaceLight]}
+      style={styles.actionGradient}
+    >
+      <View style={[styles.actionIcon, { backgroundColor: color + '20' }]}>
+        <Ionicons name={icon as any} size={24} color={color} />
+      </View>
+      <Text style={styles.actionTitle}>{title}</Text>
+    </LinearGradient>
   </TouchableOpacity>
-);
-
-const BenefitItem = ({ icon, text, color }: any) => (
-  <View style={styles.benefitItem}>
-    <View style={[styles.benefitIcon, { backgroundColor: `${color}15` }]}>
-      <Ionicons name={icon} size={18} color={color} />
-    </View>
-    <Text style={styles.benefitText}>{text}</Text>
-  </View>
 );
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.background,
+  },
+  glow: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    opacity: 0.12,
   },
   safeArea: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxl,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
     paddingTop: SPACING.md,
-    paddingBottom: SPACING.sm,
+    marginBottom: SPACING.sm,
   },
   greeting: {
     fontSize: FONT_SIZE.md,
@@ -260,68 +257,67 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   profileButton: {
-    borderRadius: 25,
-    ...SHADOWS.rose,
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   profileGradient: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileInitial: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.white,
   },
   modeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: COLORS.successSoft,
+    backgroundColor: COLORS.accentGreenSoft,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.xs,
     borderRadius: BORDER_RADIUS.full,
-    marginHorizontal: SPACING.xl,
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.lg,
+    gap: SPACING.xs,
   },
   modeDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: COLORS.success,
-    marginRight: SPACING.sm,
   },
   modeText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.success,
   },
   onlineCard: {
-    marginHorizontal: SPACING.lg,
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
-    ...SHADOWS.lg,
+    marginBottom: SPACING.lg,
   },
   onlineGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xxl,
   },
   onlineLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: SPACING.md,
+    flex: 1,
   },
   onlineIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.gray800,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
   },
   onlineIconActive: {
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -336,19 +332,20 @@ const styles = StyleSheet.create({
   },
   onlineSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
+    marginTop: 2,
   },
   onlineSubtitleActive: {
     color: 'rgba(255,255,255,0.8)',
   },
   onlineButton: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.accentGreen,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm + 2,
     borderRadius: BORDER_RADIUS.full,
   },
   onlineButtonActive: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.25)',
   },
   onlineButtonText: {
     fontSize: FONT_SIZE.md,
@@ -361,8 +358,7 @@ const styles = StyleSheet.create({
   statsGrid: {
     flexDirection: 'row',
     gap: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
+    marginBottom: SPACING.lg,
   },
   statCard: {
     flex: 1,
@@ -370,194 +366,157 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   statGradient: {
-    padding: SPACING.md,
+    padding: SPACING.lg,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
+  },
+  statIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
   },
   statLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
-    marginBottom: SPACING.xs,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    marginBottom: 2,
   },
   statValue: {
-    fontSize: FONT_SIZE.xxxl,
+    fontSize: FONT_SIZE.xl,
     fontWeight: '800',
     color: COLORS.white,
   },
-  statBadge: {
-    backgroundColor: COLORS.successSoft,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.sm,
-    alignSelf: 'flex-start',
-    marginTop: SPACING.xs,
-  },
-  statBadgeText: {
-    fontSize: 9,
-    fontWeight: '600',
-    color: COLORS.success,
-  },
-  statRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statItemValue: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.white,
-  },
-  statItemLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
-  },
-  statDivider: {
-    width: 1,
-    height: 40,
-    backgroundColor: COLORS.gray700,
-  },
-  subscriptionCard: {
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-    ...SHADOWS.rose,
-  },
-  subscriptionGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.lg,
-  },
-  subscriptionIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  subscriptionContent: {
-    flex: 1,
-  },
-  subscriptionTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  subscriptionSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  challengeBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    borderWidth: 1,
-    borderColor: COLORS.accentSoft,
-  },
-  challengeRose: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  rosePetal: {
-    position: 'absolute',
-    width: 14,
-    height: 18,
-    backgroundColor: COLORS.rosePetal3,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 14,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 14,
-    opacity: 0.8,
-  },
-  challengeContent: {
-    flex: 1,
-  },
-  challengeTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  challengeSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textMuted,
+  actionsSection: {
+    marginBottom: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     color: COLORS.white,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.xl,
     marginBottom: SPACING.md,
   },
   actionsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.md,
-    paddingHorizontal: SPACING.lg,
   },
   actionCard: {
-    width: (width - SPACING.lg * 2 - SPACING.md * 3) / 4,
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
+    width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    overflow: 'hidden',
+  },
+  actionGradient: {
+    padding: SPACING.lg,
+    alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.gray800,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.xs,
+    marginBottom: SPACING.sm,
   },
   actionTitle: {
-    fontSize: FONT_SIZE.xs,
+    fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.textSecondary,
-    textAlign: 'center',
+    color: COLORS.white,
   },
-  benefitsSection: {
-    marginBottom: SPACING.xl,
+  subscriptionBanner: {
+    borderRadius: BORDER_RADIUS.xxl,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  benefitsList: {
-    paddingHorizontal: SPACING.lg,
-    gap: SPACING.sm,
-  },
-  benefitItem: {
+  subscriptionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.gray800,
+    justifyContent: 'space-between',
+    padding: SPACING.lg,
   },
-  benefitIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  subscriptionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  subscriptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.white,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
   },
-  benefitText: {
+  subscriptionTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  subscriptionDesc: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(25, 37, 63, 0.7)',
+  },
+  subscriptionPrice: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+  },
+  subscriptionPriceText: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  subscriptionPeriod: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(25, 37, 63, 0.7)',
+  },
+  aiCard: {
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+  },
+  aiGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
+  },
+  aiLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  aiIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accentGreenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  aiDesc: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
-    fontWeight: '500',
   },
   bottomSpacer: {
-    height: 100,
+    height: SPACING.xl,
   },
 });

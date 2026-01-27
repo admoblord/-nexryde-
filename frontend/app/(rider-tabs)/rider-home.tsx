@@ -11,9 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { FallingRoses } from '@/src/components/FallingRoses';
 
 const { width } = Dimensions.get('window');
 
@@ -24,15 +23,16 @@ export default function RiderHomeScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Subtle Falling Roses */}
-      <FallingRoses intensity="light" />
+      {/* Decorative Glows */}
+      <View style={[styles.glow, { top: 80, left: 30, backgroundColor: COLORS.accentGreen }]} />
+      <View style={[styles.glow, { top: 150, right: 40, backgroundColor: COLORS.accentBlue, width: 50, height: 50 }]} />
       
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           {/* Header */}
           <View style={styles.header}>
             <View>
@@ -41,12 +41,18 @@ export default function RiderHomeScreen() {
             </View>
             <TouchableOpacity style={styles.profileButton}>
               <LinearGradient
-                colors={[COLORS.accent, COLORS.accentDark]}
+                colors={[COLORS.accentGreen, COLORS.accentBlue]}
                 style={styles.profileGradient}
               >
                 <Text style={styles.profileInitial}>{user?.name?.charAt(0) || 'R'}</Text>
               </LinearGradient>
             </TouchableOpacity>
+          </View>
+
+          {/* Rider Mode Badge */}
+          <View style={styles.modeBadge}>
+            <View style={[styles.modeDot, { backgroundColor: COLORS.accentBlue }]} />
+            <Text style={[styles.modeText, { color: COLORS.accentBlue }]}>Rider Mode</Text>
           </View>
 
           {/* Where To Card */}
@@ -63,20 +69,19 @@ export default function RiderHomeScreen() {
             >
               <View style={styles.whereToHeader}>
                 <Text style={styles.whereToTitle}>Where to?</Text>
-                <View style={styles.whereToRose} />
               </View>
               
               <View style={styles.whereToInput}>
                 <View style={styles.whereToIcon}>
-                  <Ionicons name="search" size={20} color={COLORS.accent} />
+                  <Ionicons name="search" size={20} color={COLORS.accentGreen} />
                 </View>
                 <Text style={styles.whereToPlaceholder}>Enter your destination</Text>
               </View>
               
               <View style={styles.quickLocations}>
-                <QuickLocation icon="home" label="Home" color={COLORS.rosePetal2} />
-                <QuickLocation icon="briefcase" label="Work" color={COLORS.rosePetal3} />
-                <QuickLocation icon="location" label="Map" color={COLORS.rosePetal4} />
+                <QuickLocation icon="home" label="Home" color={COLORS.accentBlue} />
+                <QuickLocation icon="briefcase" label="Work" color={COLORS.accentGreen} />
+                <QuickLocation icon="location" label="Map" color={COLORS.gold} />
               </View>
             </LinearGradient>
           </TouchableOpacity>
@@ -89,7 +94,7 @@ export default function RiderHomeScreen() {
                 icon="car-sport"
                 title="Economy"
                 desc="Affordable rides"
-                color={COLORS.rosePetal2}
+                color={COLORS.accentGreen}
               />
               <ServiceCard
                 icon="diamond"
@@ -100,76 +105,56 @@ export default function RiderHomeScreen() {
             </View>
           </View>
 
-          {/* AI Assistant Card */}
+          {/* AI Assistant */}
           <TouchableOpacity 
             style={styles.aiCard}
             onPress={() => router.push('/assistant')}
             activeOpacity={0.9}
           >
             <LinearGradient
-              colors={[COLORS.rosePetal4, COLORS.rosePetal5]}
+              colors={[COLORS.primary, COLORS.primaryLight]}
               style={styles.aiGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
             >
-              <View style={styles.aiIcon}>
-                <Ionicons name="sparkles" size={24} color={COLORS.white} />
+              <View style={styles.aiLeft}>
+                <View style={styles.aiIcon}>
+                  <Ionicons name="sparkles" size={24} color={COLORS.accentGreen} />
+                </View>
+                <View>
+                  <Text style={styles.aiTitle}>AI Assistant</Text>
+                  <Text style={styles.aiDesc}>Get help with your rides</Text>
+                </View>
               </View>
-              <View style={styles.aiContent}>
-                <Text style={styles.aiTitle}>AI Assistant</Text>
-                <Text style={styles.aiDesc}>Get help with anything</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={24} color={COLORS.white} />
+              <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* NEXRYDE Family */}
-          <TouchableOpacity 
-            style={styles.familyCard}
-            onPress={() => router.push('/rider/family')}
-            activeOpacity={0.9}
-          >
-            <View style={styles.familyIconWrap}>
-              <Ionicons name="people" size={24} color={COLORS.accent} />
-            </View>
-            <View style={styles.familyContent}>
-              <Text style={styles.familyTitle}>NEXRYDE Family</Text>
-              <Text style={styles.familyDesc}>Share trips with loved ones</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
-          </TouchableOpacity>
-
-          {/* Why NEXRYDE Section */}
+          {/* Why NEXRYDE */}
           <View style={styles.whySection}>
             <Text style={styles.sectionTitle}>Why NEXRYDE?</Text>
             <View style={styles.whyGrid}>
-              <WhyCard
-                icon="shield-checkmark"
-                title="Verified Drivers"
-                desc="All drivers verified with NIN"
-                color={COLORS.success}
+              <WhyCard 
+                icon="shield-checkmark" 
+                title="Verified Drivers" 
+                color={COLORS.accentGreen}
               />
-              <WhyCard
-                icon="wallet"
-                title="Fair Pricing"
-                desc="No hidden charges"
-                color={COLORS.gold}
+              <WhyCard 
+                icon="cash" 
+                title="Fair Pricing" 
+                color={COLORS.accentBlue}
               />
-              <WhyCard
-                icon="location"
-                title="Live Tracking"
-                desc="Real-time trip monitoring"
+              <WhyCard 
+                icon="location" 
+                title="Live Tracking" 
                 color={COLORS.info}
               />
-              <WhyCard
-                icon="heart"
-                title="Premium Care"
-                desc="24/7 support available"
-                color={COLORS.rosePetal3}
+              <WhyCard 
+                icon="heart" 
+                title="Driver Welfare" 
+                color={COLORS.error}
               />
             </View>
           </View>
-
+          
           <View style={styles.bottomSpacer} />
         </ScrollView>
       </SafeAreaView>
@@ -177,50 +162,64 @@ export default function RiderHomeScreen() {
   );
 }
 
-const QuickLocation = ({ icon, label, color }: any) => (
+const QuickLocation = ({ icon, label, color }: { icon: string; label: string; color: string }) => (
   <TouchableOpacity style={styles.quickLocation}>
-    <View style={[styles.quickIcon, { backgroundColor: `${color}20` }]}>
-      <Ionicons name={icon} size={18} color={color} />
+    <View style={[styles.quickLocationIcon, { backgroundColor: color + '20' }]}>
+      <Ionicons name={icon as any} size={18} color={color} />
     </View>
-    <Text style={styles.quickLabel}>{label}</Text>
+    <Text style={styles.quickLocationLabel}>{label}</Text>
   </TouchableOpacity>
 );
 
-const ServiceCard = ({ icon, title, desc, color }: any) => (
-  <TouchableOpacity style={styles.serviceCard} activeOpacity={0.8}>
-    <View style={[styles.serviceIcon, { backgroundColor: `${color}20` }]}>
-      <Ionicons name={icon} size={26} color={color} />
-    </View>
-    <Text style={styles.serviceTitle}>{title}</Text>
-    <Text style={styles.serviceDesc}>{desc}</Text>
+const ServiceCard = ({ icon, title, desc, color }: { icon: string; title: string; desc: string; color: string }) => (
+  <TouchableOpacity style={styles.serviceCard}>
+    <LinearGradient
+      colors={[COLORS.surface, COLORS.surfaceLight]}
+      style={styles.serviceGradient}
+    >
+      <View style={[styles.serviceIcon, { backgroundColor: color + '20' }]}>
+        <Ionicons name={icon as any} size={24} color={color} />
+      </View>
+      <Text style={styles.serviceTitle}>{title}</Text>
+      <Text style={styles.serviceDesc}>{desc}</Text>
+    </LinearGradient>
   </TouchableOpacity>
 );
 
-const WhyCard = ({ icon, title, desc, color }: any) => (
+const WhyCard = ({ icon, title, color }: { icon: string; title: string; color: string }) => (
   <View style={styles.whyCard}>
-    <View style={[styles.whyIcon, { backgroundColor: `${color}15` }]}>
-      <Ionicons name={icon} size={22} color={color} />
+    <View style={[styles.whyIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon as any} size={20} color={color} />
     </View>
     <Text style={styles.whyTitle}>{title}</Text>
-    <Text style={styles.whyDesc}>{desc}</Text>
   </View>
 );
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.background,
+  },
+  glow: {
+    position: 'absolute',
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    opacity: 0.12,
   },
   safeArea: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxl,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xl,
     paddingTop: SPACING.md,
-    paddingBottom: SPACING.lg,
+    marginBottom: SPACING.sm,
   },
   greeting: {
     fontSize: FONT_SIZE.md,
@@ -232,65 +231,79 @@ const styles = StyleSheet.create({
     color: COLORS.white,
   },
   profileButton: {
-    borderRadius: 25,
-    ...SHADOWS.rose,
+    borderRadius: 24,
+    overflow: 'hidden',
   },
   profileGradient: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileInitial: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.white,
+  },
+  modeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: COLORS.accentBlueSoft,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    marginBottom: SPACING.lg,
+    gap: SPACING.xs,
+  },
+  modeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  modeText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
   },
   whereToCard: {
-    marginHorizontal: SPACING.lg,
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
-    ...SHADOWS.lg,
+    marginBottom: SPACING.lg,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
   whereToGradient: {
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xxl,
   },
   whereToHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
     marginBottom: SPACING.md,
   },
   whereToTitle: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
     color: COLORS.white,
-  },
-  whereToRose: {
-    width: 12,
-    height: 14,
-    backgroundColor: COLORS.rosePetal3,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 12,
-    transform: [{ rotate: '-45deg' }],
-    opacity: 0.7,
   },
   whereToInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray800,
+    backgroundColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
   },
   whereToIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.accentSoft,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
@@ -305,23 +318,22 @@ const styles = StyleSheet.create({
   },
   quickLocation: {
     alignItems: 'center',
+    gap: SPACING.sm,
   },
-  quickIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+  quickLocationIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.xs,
   },
-  quickLabel: {
+  quickLocationLabel: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.textSecondary,
     fontWeight: '500',
   },
   servicesSection: {
-    paddingHorizontal: SPACING.lg,
-    marginTop: SPACING.xl,
+    marginBottom: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
@@ -335,17 +347,20 @@ const styles = StyleSheet.create({
   },
   serviceCard: {
     flex: 1,
-    backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
+    overflow: 'hidden',
+  },
+  serviceGradient: {
+    padding: SPACING.md,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.gray800,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
   },
   serviceIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 52,
+    height: 52,
+    borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
@@ -354,80 +369,50 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
     color: COLORS.white,
-    marginBottom: 2,
   },
   serviceDesc: {
     fontSize: FONT_SIZE.xs,
     color: COLORS.textMuted,
+    marginTop: 2,
   },
   aiCard: {
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
-    ...SHADOWS.rose,
+    marginBottom: SPACING.lg,
   },
   aiGradient: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
+  },
+  aiLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.md,
   },
   aiIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  aiContent: {
-    flex: 1,
   },
   aiTitle: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: FONT_SIZE.md,
     fontWeight: '700',
     color: COLORS.white,
   },
   aiDesc: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
-  },
-  familyCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    borderWidth: 1,
-    borderColor: COLORS.gray800,
-  },
-  familyIconWrap: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.accentSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  familyContent: {
-    flex: 1,
-  },
-  familyTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  familyDesc: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textMuted,
+    color: COLORS.textSecondary,
   },
   whySection: {
-    paddingHorizontal: SPACING.lg,
-    marginTop: SPACING.xl,
+    marginBottom: SPACING.lg,
   },
   whyGrid: {
     flexDirection: 'row',
@@ -435,32 +420,27 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
   },
   whyCard: {
-    width: (width - SPACING.lg * 2 - SPACING.md) / 2,
+    width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
     backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.gray800,
+    borderColor: COLORS.surfaceLight,
   },
   whyIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: BORDER_RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
   },
   whyTitle: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.white,
-    marginBottom: 2,
-  },
-  whyDesc: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
   },
   bottomSpacer: {
-    height: 100,
+    height: SPACING.xl,
   },
 });
