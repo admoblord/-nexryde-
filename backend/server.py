@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, status
+from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -8,7 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 import math
 import httpx
@@ -36,6 +36,9 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
 TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://api.ng.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
+
+# Emergent Auth URL
+EMERGENT_AUTH_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
