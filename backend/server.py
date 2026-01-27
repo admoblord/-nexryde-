@@ -813,15 +813,15 @@ async def send_otp(request: OTPRequest):
             async with httpx.AsyncClient() as client:
                 payload = {
                     "api_key": TERMII_API_KEY,
-                    "message_type": "NUMERIC",
+                    "pin_type": "NUMERIC",
                     "to": normalized_phone,
                     "from": "OEalert",  # Approved sender ID
                     "channel": "dnd",   # DND route for reliable delivery
                     "pin_attempts": 3,
                     "pin_time_to_live": 10,
                     "pin_length": 6,
-                    "pin_placeholder": "{{code}}",
-                    "message_text": "Your NexRyde verification code is {{code}}. This code expires in 10 minutes."
+                    "pin_placeholder": "< 1234 >",
+                    "message_text": "Your NexRyde verification code is < 1234 >. This code expires in 10 minutes."
                 }
                 
                 logger.info(f"Sending OTP to {normalized_phone} via Termii (sender: OEalert, channel: dnd)")
