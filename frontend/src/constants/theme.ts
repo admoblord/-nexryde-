@@ -26,11 +26,20 @@ export const COLORS = {
   gradientBlue: ['#3A8CD1', '#1A5AA6'],
   gradientPrimary: ['#19253F', '#0F1729'],
   
-  // Backgrounds
+  // Backgrounds (Dark - for splash/login)
   background: '#0D1420',        // Deep dark background
   surface: '#19253F',           // Card surfaces
   surfaceLight: '#243654',      // Elevated surfaces
   surfaceGlass: 'rgba(25, 37, 63, 0.8)',
+  
+  // Light Theme (White - for internal app screens)
+  lightBackground: '#FFFFFF',   // Pure white background
+  lightSurface: '#F5F7FA',      // Light gray cards
+  lightSurfaceAlt: '#EDF1F7',   // Slightly darker cards
+  lightBorder: '#E2E8F0',       // Border color
+  lightTextPrimary: '#1A1A1A',  // Dark text
+  lightTextSecondary: '#4A5568', // Medium gray text
+  lightTextMuted: '#718096',    // Light gray text
   
   // Text Colors
   white: '#FFFFFF',
