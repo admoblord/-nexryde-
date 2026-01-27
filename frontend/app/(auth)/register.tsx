@@ -2,312 +2,171 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
-  TouchableOpacity,
   StyleSheet,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
   KeyboardAvoidingView,
   Platform,
-  ScrollView,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { phone } = useLocalSearchParams<{ phone: string }>();
-  const { setUser, setUserType, setIsAuthenticated } = useAppStore();
-  
+  const params = useLocalSearchParams();
+  const phone = params.phone as string;
+  const { setUser } = useAppStore();
+
+  const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
-  const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
-  const [loading, setLoading] = useState(false);
 
-  const handleRegister = async () => {
-    if (!name.trim()) {
-      Alert.alert('Error', 'Please enter your name');
-      return;
+  const handleContinue = () => {
+    setUser({
+      id: Date.now().toString(),
+      name: name || 'User',
+      phone: phone || '+234 XXX XXX XXXX',
+      role: selectedRole,
+      email: email,
+    });
+    
+    if (selectedRole === 'driver') {
+      router.replace('/driver-home');
+    } else {
+      router.replace('/rider-home');
     }
-
-    setLoading(true);
-    try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: `+234${phone}`,
-          name: name.trim(),
-          email: email.trim() || undefined,
-          role: selectedRole,
-        }),
-      });
-
-      const data = await response.json();
-      
-      if (response.ok) {
-        setUser({ ...data.user, role: selectedRole });
-        setUserType(selectedRole);
-        setIsAuthenticated(true);
-        
-        if (selectedRole === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
-        } else {
-          router.replace('/(rider-tabs)/rider-home');
-        }
-      } else {
-        Alert.alert('Error', data.message || 'Registration failed');
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      // Demo mode - proceed anyway
-      setUser({ name: name.trim(), phone: `+234${phone}`, role: selectedRole });
-      setUserType(selectedRole);
-      setIsAuthenticated(true);
-      
-      if (selectedRole === 'driver') {
-        router.replace('/(driver-tabs)/driver-home');
-      } else {
-        router.replace('/(rider-tabs)/rider-home');
-      }
-    }
-    setLoading(false);
   };
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.background, COLORS.primary, COLORS.background]}
-        style={StyleSheet.absoluteFillObject}
-      />
-      
-      {/* Decorative Glows */}
-      <View style={[styles.glow, { top: 60, right: 30, backgroundColor: COLORS.accentGreen }]} />
-      <View style={[styles.glow, { bottom: 200, left: 20, backgroundColor: COLORS.accentBlue, width: 60, height: 60 }]} />
-      
       <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView
+        <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
         >
           <ScrollView 
+            showsVerticalScrollIndicator={false} 
             contentContainerStyle={styles.scrollContent}
-            showsVerticalScrollIndicator={false}
           >
-            {/* Header */}
-            <View style={styles.header}>
-              <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                <Ionicons name="arrow-back" size={24} color={COLORS.white} />
-              </TouchableOpacity>
+            {/* Logo */}
+            <View style={styles.logoContainer}>
+              <LinearGradient
+                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                style={styles.logoGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <Ionicons name="car-sport" size={32} color={COLORS.white} />
+              </LinearGradient>
             </View>
 
-            {/* Title Section */}
-            <View style={styles.titleSection}>
-              <View style={styles.titleIcon}>
-                <LinearGradient
-                  colors={[COLORS.accentGreenLight, COLORS.accentGreen]}
-                  style={styles.titleIconLeft}
-                />
-                <LinearGradient
-                  colors={[COLORS.accentBlue, COLORS.accentBlueDark]}
-                  style={styles.titleIconRight}
-                />
-              </View>
-              <Text style={styles.title}>Join NEXRYDE</Text>
-              <Text style={styles.subtitle}>Choose how you want to use NEXRYDE</Text>
-            </View>
+            <Text style={styles.title}>Join NEXRYDE</Text>
+            <Text style={styles.subtitle}>Choose how you want to use NEXRYDE</Text>
 
             {/* Role Selection */}
-            <View style={styles.roleSection}>
-              {/* Rider Option */}
+            <View style={styles.roleContainer}>
               <TouchableOpacity
                 style={[styles.roleCard, selectedRole === 'rider' && styles.roleCardActive]}
                 onPress={() => setSelectedRole('rider')}
-                activeOpacity={0.9}
               >
-                <LinearGradient
-                  colors={selectedRole === 'rider' 
-                    ? [COLORS.accentGreen, COLORS.accentGreenDark]
-                    : [COLORS.surface, COLORS.surfaceLight]}
-                  style={styles.roleGradient}
-                >
-                  <View style={styles.roleHeader}>
-                    <View style={[styles.roleIcon, selectedRole === 'rider' && styles.roleIconActive]}>
-                      <Ionicons 
-                        name="person" 
-                        size={28} 
-                        color={selectedRole === 'rider' ? COLORS.primary : COLORS.accentGreen} 
-                      />
-                    </View>
-                    <View style={[styles.radioOuter, selectedRole === 'rider' && styles.radioOuterActive]}>
-                      {selectedRole === 'rider' && <View style={styles.radioInner} />}
-                    </View>
-                  </View>
-                  
-                  <Text style={[styles.roleName, selectedRole === 'rider' && styles.roleNameActive]}>
-                    Rider
-                  </Text>
-                  <Text style={[styles.rolePrice, selectedRole === 'rider' && styles.rolePriceActive]}>
-                    FREE
-                  </Text>
-                  
-                  <View style={styles.roleFeatures}>
-                    <RoleFeature text="Book rides instantly" active={selectedRole === 'rider'} />
-                    <RoleFeature text="Live trip tracking" active={selectedRole === 'rider'} />
-                    <RoleFeature text="AI-powered assistance" active={selectedRole === 'rider'} />
-                  </View>
-                </LinearGradient>
+                <View style={[styles.radioOuter, selectedRole === 'rider' && styles.radioOuterActive]}>
+                  {selectedRole === 'rider' && <View style={styles.radioInner} />}
+                </View>
+                <View style={styles.roleInfo}>
+                  <Text style={[styles.roleTitle, selectedRole === 'rider' && styles.roleTitleActive]}>Rider</Text>
+                  <Text style={[styles.rolePrice, selectedRole === 'rider' && styles.rolePriceActive]}>FREE</Text>
+                </View>
+                <View style={styles.roleFeatures}>
+                  <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>Book rides instantly</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>Live trip tracking</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'rider' && styles.roleFeatureActive]}>AI-powered assistance</Text>
+                </View>
               </TouchableOpacity>
 
-              {/* Driver Option */}
               <TouchableOpacity
-                style={[styles.roleCard, selectedRole === 'driver' && styles.roleCardActive]}
+                style={[styles.roleCard, selectedRole === 'driver' && styles.roleCardDriver]}
                 onPress={() => setSelectedRole('driver')}
-                activeOpacity={0.9}
               >
-                <LinearGradient
-                  colors={selectedRole === 'driver' 
-                    ? [COLORS.accentBlue, COLORS.accentBlueDark]
-                    : [COLORS.surface, COLORS.surfaceLight]}
-                  style={styles.roleGradient}
-                >
-                  {/* Premium Badge */}
-                  <View style={styles.premiumBadge}>
-                    <Ionicons name="diamond" size={12} color={COLORS.primary} />
-                    <Text style={styles.premiumBadgeText}>PREMIUM</Text>
-                  </View>
-                  
-                  <View style={styles.roleHeader}>
-                    <View style={[styles.roleIcon, selectedRole === 'driver' && styles.roleIconDriver]}>
-                      <Ionicons 
-                        name="car-sport" 
-                        size={28} 
-                        color={selectedRole === 'driver' ? COLORS.white : COLORS.accentBlue} 
-                      />
-                    </View>
-                    <View style={[styles.radioOuter, selectedRole === 'driver' && styles.radioOuterDriver]}>
-                      {selectedRole === 'driver' && <View style={styles.radioInnerDriver} />}
-                    </View>
-                  </View>
-                  
-                  <Text style={[styles.roleName, selectedRole === 'driver' && styles.roleNameActive]}>
-                    Driver
-                  </Text>
-                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceActive]}>
-                    {CURRENCY}25K/month
-                  </Text>
-                  
-                  <View style={styles.roleFeatures}>
-                    <RoleFeature text="Keep 100% earnings" active={selectedRole === 'driver'} />
-                    <RoleFeature text="Zero commission" active={selectedRole === 'driver'} />
-                    <RoleFeature text="Daily challenges & rewards" active={selectedRole === 'driver'} />
-                  </View>
-                </LinearGradient>
+                <View style={styles.premiumBadge}>
+                  <Text style={styles.premiumText}>PREMIUM</Text>
+                </View>
+                <View style={[styles.radioOuter, selectedRole === 'driver' && styles.radioOuterDriver]}>
+                  {selectedRole === 'driver' && <View style={[styles.radioInner, styles.radioInnerDriver]} />}
+                </View>
+                <View style={styles.roleInfo}>
+                  <Text style={[styles.roleTitle, selectedRole === 'driver' && styles.roleTitleDriver]}>Driver</Text>
+                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceDriver]}>{CURRENCY}25K/month</Text>
+                </View>
+                <View style={styles.roleFeatures}>
+                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Keep 100% earnings</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Zero commission</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Daily challenges & rewards</Text>
+                </View>
               </TouchableOpacity>
             </View>
 
-            {/* Form Section */}
-            <View style={styles.formSection}>
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Full Name</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="person-outline" size={20} color={COLORS.textMuted} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your full name"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={name}
-                    onChangeText={setName}
-                  />
-                </View>
-              </View>
+            {/* Input Fields */}
+            <View style={styles.inputSection}>
+              <Text style={styles.inputLabel}>Full Name</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter your full name"
+                placeholderTextColor={COLORS.lightTextMuted}
+                value={name}
+                onChangeText={setName}
+              />
 
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>Email (Optional)</Text>
-                <View style={styles.inputWrapper}>
-                  <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} />
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Enter your email"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={email}
-                    onChangeText={setEmail}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                  />
-                </View>
-              </View>
+              <Text style={styles.inputLabel}>Email (Optional)</Text>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Enter your email"
+                placeholderTextColor={COLORS.lightTextMuted}
+                value={email}
+                onChangeText={setEmail}
+                keyboardType="email-address"
+                autoCapitalize="none"
+              />
             </View>
+          </ScrollView>
 
-            {/* Register Button */}
-            <TouchableOpacity
-              style={styles.registerButton}
-              onPress={handleRegister}
-              disabled={loading || !name.trim()}
-              activeOpacity={0.9}
+          {/* Continue Button */}
+          <View style={styles.bottomContainer}>
+            <TouchableOpacity 
+              style={styles.continueButton}
+              onPress={handleContinue}
             >
               <LinearGradient
-                colors={name.trim() 
-                  ? (selectedRole === 'driver' 
-                    ? [COLORS.accentBlue, COLORS.accentBlueDark] 
-                    : [COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue])
-                  : [COLORS.gray700, COLORS.gray700]}
-                style={styles.registerGradient}
+                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                style={styles.continueGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
               >
-                <Text style={[styles.registerText, !name.trim() && styles.registerTextDisabled]}>
-                  {loading ? 'Creating Account...' : `Continue as ${selectedRole === 'driver' ? 'Driver' : 'Rider'}`}
+                <Text style={styles.continueText}>
+                  Continue as {selectedRole === 'rider' ? 'Rider' : 'Driver'}
                 </Text>
-                <View style={[styles.registerArrow, !name.trim() && styles.registerArrowDisabled]}>
-                  <Ionicons 
-                    name="arrow-forward" 
-                    size={20} 
-                    color={name.trim() ? COLORS.primary : COLORS.gray500} 
-                  />
-                </View>
               </LinearGradient>
             </TouchableOpacity>
-
-            {/* Terms */}
             <Text style={styles.termsText}>
               By continuing, you agree to our{' '}
-              <Text style={styles.termsLink}>Terms of Service</Text>
-              {' '}and{' '}
+              <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
               <Text style={styles.termsLink}>Privacy Policy</Text>
             </Text>
-          </ScrollView>
+          </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
   );
 }
 
-const RoleFeature = ({ text, active }: { text: string; active: boolean }) => (
-  <View style={styles.featureRow}>
-    <Ionicons 
-      name="checkmark-circle" 
-      size={16} 
-      color={active ? 'rgba(255,255,255,0.9)' : COLORS.textMuted} 
-    />
-    <Text style={[styles.featureText, active && styles.featureTextActive]}>{text}</Text>
-  </View>
-);
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  glow: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    opacity: 0.15,
+    backgroundColor: COLORS.lightBackground,
   },
   safeArea: {
     flex: 1,
@@ -316,250 +175,178 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: SPACING.xl,
-    paddingBottom: SPACING.xxl,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.lg,
   },
-  header: {
-    paddingTop: SPACING.sm,
-    paddingBottom: SPACING.md,
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
   },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.surface,
+  logoGradient: {
+    width: 64,
+    height: 64,
+    borderRadius: BORDER_RADIUS.xl,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  titleSection: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl,
-  },
-  titleIcon: {
-    width: 50,
-    height: 50,
-    position: 'relative',
-    marginBottom: SPACING.md,
-  },
-  titleIconLeft: {
-    position: 'absolute',
-    left: 3,
-    top: 0,
-    width: 20,
-    height: 50,
-    borderTopLeftRadius: 5,
-    borderBottomLeftRadius: 5,
-    transform: [{ skewX: '-8deg' }],
-  },
-  titleIconRight: {
-    position: 'absolute',
-    right: 3,
-    top: 0,
-    width: 20,
-    height: 50,
-    borderTopRightRadius: 5,
-    borderBottomRightRadius: 5,
-    transform: [{ skewX: '8deg' }],
-  },
   title: {
-    fontSize: FONT_SIZE.xxxl,
-    fontWeight: '900',
-    color: COLORS.white,
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    textAlign: 'center',
     marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: COLORS.lightTextSecondary,
+    textAlign: 'center',
+    marginBottom: SPACING.xl,
   },
-  roleSection: {
+  roleContainer: {
     flexDirection: 'row',
     gap: SPACING.md,
     marginBottom: SPACING.xl,
   },
   roleCard: {
     flex: 1,
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xxl,
-    overflow: 'hidden',
+    padding: SPACING.md,
     borderWidth: 2,
-    borderColor: 'transparent',
+    borderColor: COLORS.lightBorder,
   },
   roleCardActive: {
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
+    borderColor: COLORS.accentGreen,
+    backgroundColor: COLORS.accentGreenSoft,
   },
-  roleGradient: {
-    padding: SPACING.md,
-    minHeight: 220,
+  roleCardDriver: {
+    borderColor: COLORS.gold,
+    backgroundColor: COLORS.warningSoft,
   },
   premiumBadge: {
     position: 'absolute',
     top: SPACING.sm,
     right: SPACING.sm,
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: COLORS.gold,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.sm,
-    gap: 2,
   },
-  premiumBadgeText: {
-    fontSize: 8,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  roleHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.md,
-  },
-  roleIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: COLORS.accentGreenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  roleIconActive: {
-    backgroundColor: COLORS.primary,
-  },
-  roleIconDriver: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  premiumText: {
+    fontSize: FONT_SIZE.xxs,
+    fontWeight: '700',
+    color: COLORS.white,
   },
   radioOuter: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: COLORS.gray600,
+    borderColor: COLORS.lightBorder,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: SPACING.md,
   },
   radioOuterActive: {
-    borderColor: COLORS.primary,
+    borderColor: COLORS.accentGreen,
   },
   radioOuterDriver: {
-    borderColor: COLORS.white,
+    borderColor: COLORS.gold,
   },
   radioInner: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.accentGreen,
   },
   radioInnerDriver: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.gold,
   },
-  roleName: {
+  roleInfo: {
+    marginBottom: SPACING.sm,
+  },
+  roleTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.textSecondary,
-    marginBottom: 2,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
   },
-  roleNameActive: {
-    color: COLORS.white,
+  roleTitleActive: {
+    color: COLORS.accentGreen,
+  },
+  roleTitleDriver: {
+    color: COLORS.gold,
   },
   rolePrice: {
-    fontSize: FONT_SIZE.md,
+    fontSize: FONT_SIZE.sm,
     fontWeight: '700',
-    color: COLORS.textMuted,
-    marginBottom: SPACING.md,
+    color: COLORS.lightTextSecondary,
   },
   rolePriceActive: {
-    color: COLORS.white,
+    color: COLORS.accentGreen,
+  },
+  rolePriceDriver: {
+    color: COLORS.gold,
   },
   roleFeatures: {
-    gap: SPACING.xs,
+    gap: 4,
   },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  featureText: {
+  roleFeature: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
+    color: COLORS.lightTextSecondary,
   },
-  featureTextActive: {
-    color: 'rgba(255,255,255,0.85)',
+  roleFeatureActive: {
+    color: COLORS.accentGreenDark,
   },
-  formSection: {
-    gap: SPACING.md,
-    marginBottom: SPACING.xl,
+  roleFeatureDriver: {
+    color: COLORS.warning,
   },
-  inputContainer: {},
+  inputSection: {
+    marginBottom: SPACING.lg,
+  },
   inputLabel: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.xs,
+    color: COLORS.lightTextSecondary,
+    marginBottom: SPACING.sm,
   },
-  inputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
+  textInput: {
+    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    paddingHorizontal: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
-    gap: SPACING.sm,
-  },
-  input: {
-    flex: 1,
+    padding: SPACING.md,
     fontSize: FONT_SIZE.md,
-    color: COLORS.white,
-    paddingVertical: SPACING.md,
+    color: COLORS.lightTextPrimary,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    marginBottom: SPACING.md,
   },
-  registerButton: {
+  bottomContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.lg,
+  },
+  continueButton: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
     shadowColor: COLORS.accentGreen,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 6,
   },
-  registerGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+  continueGradient: {
     paddingVertical: SPACING.lg,
-  },
-  registerText: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.primary,
-    marginRight: SPACING.sm,
-  },
-  registerTextDisabled: {
-    color: COLORS.gray500,
-  },
-  registerArrow: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
-    justifyContent: 'center',
   },
-  registerArrowDisabled: {
-    backgroundColor: COLORS.gray800,
+  continueText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.white,
   },
   termsText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.textMuted,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 20,
   },
   termsLink: {
     color: COLORS.accentGreen,
