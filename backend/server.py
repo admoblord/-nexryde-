@@ -953,7 +953,104 @@ async def verify_otp(request: OTPVerify):
         del otp_store[request.phone]
         return {"message": "OTP verified", "is_new_user": True}
 
-# Google Sign-In endpoint
+# Google Sign-In with Emergent Auth
+class SessionExchangeRequest(BaseModel):
+    session_id: str
+
+class SessionDataResponse(BaseModel):
+    id: str
+    email: str
+    name: str
+    picture: Optional[str] = None
+    session_token: str
+
+@api_router.post("/auth/google/exchange")
+async def exchange_google_session(request: SessionExchangeRequest, response: Response):
+    """Exchange session_id from Emergent Auth for user data and session"""
+    try:
+        # Call Emergent Auth to get user data
+        async with httpx.AsyncClient() as client:
+            auth_response = await client.get(
+                EMERGENT_AUTH_URL,
+                headers={"X-Session-ID": request.session_id},
+                timeout=30.0
+            )
+            
+            if auth_response.status_code != 200:
+                logger.error(f"Emergent Auth error: {auth_response.status_code} - {auth_response.text}")
+                raise HTTPException(status_code=401, detail="Invalid session")
+            
+            user_data = auth_response.json()
+            session_data = SessionDataResponse(**user_data)
+        
+        # Check if user exists by email
+        existing_user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
+        
+        if existing_user:
+            # Update existing user
+            update_data = {
+                "is_verified": True,
+                "google_id": session_data.id,
+            }
+            if session_data.name and not existing_user.get("name"):
+                update_data["name"] = session_data.name
+            if session_data.picture and not existing_user.get("profile_image"):
+                update_data["profile_image"] = session_data.picture
+            
+            await db.users.update_one(
+                {"email": session_data.email}, 
+                {"$set": update_data}
+            )
+            
+            # Get updated user
+            user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
+            
+            # Store session
+            await db.user_sessions.insert_one({
+                "user_id": user["id"],
+                "session_token": session_data.session_token,
+                "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
+                "created_at": datetime.now(timezone.utc)
+            })
+            
+            # Set cookie
+            response.set_cookie(
+                key="session_token",
+                value=session_data.session_token,
+                httponly=True,
+                secure=True,
+                samesite="none",
+                max_age=7*24*60*60,
+                path="/"
+            )
+            
+            return {
+                "message": "Login successful",
+                "user": user,
+                "session_token": session_data.session_token,
+                "is_new_user": False
+            }
+        else:
+            # New user - need to register
+            return {
+                "message": "Google account verified",
+                "is_new_user": True,
+                "google_data": {
+                    "email": session_data.email,
+                    "name": session_data.name,
+                    "picture": session_data.picture,
+                    "google_id": session_data.id
+                },
+                "session_token": session_data.session_token
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google session exchange error: {str(e)}")
+        raise HTTPException(status_code=400, detail="Failed to process Google sign-in")
+
+# Legacy Google Sign-In endpoint (for backwards compatibility)
 class GoogleSignInRequest(BaseModel):
     id_token: str
     email: str
@@ -962,7 +1059,7 @@ class GoogleSignInRequest(BaseModel):
 
 @api_router.post("/auth/google")
 async def google_sign_in(request: GoogleSignInRequest):
-    """Handle Google Sign-In authentication"""
+    """Handle Google Sign-In authentication (legacy)"""
     try:
         # Check if user exists by email
         user = await db.users.find_one({"email": request.email})
