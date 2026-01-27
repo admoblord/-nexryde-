@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
+import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
@@ -44,6 +45,24 @@ const COLORS = {
 
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
+
+// Get backend URL - works on both web and mobile
+const getBackendUrl = (): string => {
+  // Try environment variable first
+  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  if (envUrl && envUrl.length > 0) {
+    return envUrl;
+  }
+  
+  // Try Constants for Expo Go
+  const constantsUrl = Constants.expoConfig?.extra?.backendUrl;
+  if (constantsUrl && constantsUrl.length > 0) {
+    return constantsUrl;
+  }
+  
+  // Fallback to the known preview URL
+  return 'https://nexryde-rebrand.preview.emergentagent.com';
+};
 
 export default function LoginScreen() {
   const router = useRouter();
