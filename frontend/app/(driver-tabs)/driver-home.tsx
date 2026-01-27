@@ -56,7 +56,7 @@ export default function DriverHomeScreen() {
               <View style={[styles.statusIcon, { backgroundColor: isOnline ? COLORS.accentGreenSoft : COLORS.lightSurface }]}>
                 <Ionicons 
                   name={isOnline ? "radio" : "radio-outline"} 
-                  size={24} 
+                  size={26} 
                   color={isOnline ? COLORS.accentGreen : COLORS.lightTextMuted} 
                 />
               </View>
@@ -88,14 +88,14 @@ export default function DriverHomeScreen() {
           <View style={styles.statsGrid}>
             <View style={styles.statCard}>
               <View style={[styles.statIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                <Ionicons name="cash" size={20} color={COLORS.accentGreen} />
+                <Ionicons name="cash" size={22} color={COLORS.accentGreen} />
               </View>
               <Text style={styles.statLabel}>Today</Text>
               <Text style={styles.statValue}>{CURRENCY}0</Text>
             </View>
             <View style={styles.statCard}>
               <View style={[styles.statIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                <Ionicons name="car" size={20} color={COLORS.accentBlue} />
+                <Ionicons name="car" size={22} color={COLORS.accentBlue} />
               </View>
               <Text style={styles.statLabel}>Trips</Text>
               <Text style={styles.statValue}>0</Text>
@@ -146,13 +146,13 @@ export default function DriverHomeScreen() {
               end={{ x: 1, y: 1 }}
             >
               <View style={styles.subscriptionLeft}>
-                <Ionicons name="diamond" size={28} color={COLORS.white} />
+                <Ionicons name="diamond" size={30} color={COLORS.white} />
                 <View>
                   <Text style={styles.subscriptionTitle}>Go Premium</Text>
                   <Text style={styles.subscriptionDesc}>Keep 100% of your earnings</Text>
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={24} color={COLORS.white} />
+              <Ionicons name="chevron-forward" size={26} color={COLORS.white} />
             </LinearGradient>
           </TouchableOpacity>
           
@@ -165,8 +165,8 @@ export default function DriverHomeScreen() {
 
 const ActionCard = ({ icon, title, color, onPress }: { icon: string; title: string; color: string; onPress: () => void }) => (
   <TouchableOpacity style={styles.actionCard} onPress={onPress} activeOpacity={0.8}>
-    <View style={[styles.actionIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon as any} size={22} color={color} />
+    <View style={[styles.actionIcon, { backgroundColor: color + '20' }]}>
+      <Ionicons name={icon as any} size={24} color={color} />
     </View>
     <Text style={styles.actionTitle}>{title}</Text>
   </TouchableOpacity>
@@ -192,7 +192,8 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   greeting: {
-    fontSize: FONT_SIZE.md,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '600',
     color: COLORS.lightTextSecondary,
   },
   userName: {
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextPrimary,
   },
   profileButton: {
-    borderRadius: 24,
+    borderRadius: 25,
     overflow: 'hidden',
     shadowColor: COLORS.accentGreen,
     shadowOffset: { width: 0, height: 2 },
@@ -210,14 +211,14 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   profileGradient: {
-    width: 48,
-    height: 48,
+    width: 50,
+    height: 50,
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileInitial: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '800',
     color: COLORS.white,
   },
   modeBadge: {
@@ -226,19 +227,19 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     backgroundColor: COLORS.accentGreenSoft,
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingVertical: SPACING.xs + 2,
     borderRadius: BORDER_RADIUS.full,
     marginBottom: SPACING.lg,
     gap: SPACING.xs,
   },
   modeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
   },
   modeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   statusCard: {
@@ -264,19 +265,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
   },
   statusTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.lightTextPrimary,
   },
   statusDesc: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
     color: COLORS.lightTextSecondary,
   },
   toggleButton: {
@@ -286,12 +288,12 @@ const styles = StyleSheet.create({
   toggleButtonOnline: {},
   toggleGradient: {
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
+    paddingVertical: SPACING.sm + 2,
     borderRadius: BORDER_RADIUS.full,
   },
   toggleText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.white,
   },
   statsGrid: {
@@ -303,7 +305,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    padding: SPACING.lg,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
@@ -314,20 +316,21 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   statIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
   },
   statLabel: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
     color: COLORS.lightTextSecondary,
     marginBottom: 4,
   },
   statValue: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
     color: COLORS.lightTextPrimary,
   },
@@ -336,7 +339,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.lightTextPrimary,
     marginBottom: SPACING.md,
   },
@@ -349,7 +352,7 @@ const styles = StyleSheet.create({
     width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    padding: SPACING.lg,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
@@ -360,16 +363,16 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   actionIcon: {
-    width: 48,
-    height: 48,
+    width: 52,
+    height: 52,
     borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
   },
   actionTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
     color: COLORS.lightTextPrimary,
   },
   subscriptionCard: {
@@ -394,12 +397,13 @@ const styles = StyleSheet.create({
   },
   subscriptionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.white,
   },
   subscriptionDesc: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.85)',
   },
   bottomSpacer: {
     height: SPACING.xl,
