@@ -111,12 +111,14 @@ export default function LoginScreen() {
     
     try {
       // Create redirect URL based on platform
+      // IMPORTANT: Mobile needs deep link URL (exp:// or custom scheme)
       let redirectUrl: string;
       if (Platform.OS === 'web') {
+        // Web: Use HTTP URL for same-origin
         redirectUrl = `${window.location.origin}/`;
       } else {
-        // For Expo Go, use the expo scheme with correct path
-        redirectUrl = Linking.createURL('(auth)/login');
+        // Mobile: Use deep link - this creates exp://... URL
+        redirectUrl = Linking.createURL('/');
       }
       
       console.log('Redirect URL:', redirectUrl);
@@ -129,19 +131,23 @@ export default function LoginScreen() {
         // Web: redirect directly
         window.location.href = authUrl;
       } else {
-        // Mobile: use WebBrowser
+        // Mobile: use WebBrowser with prefetch for better UX
+        await WebBrowser.warmUpAsync();
         const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+        await WebBrowser.coolDownAsync();
+        
         console.log('WebBrowser result:', result.type);
         
         if (result.type === 'success' && result.url) {
           console.log('Callback URL:', result.url);
-          // Extract session_id from URL
+          // Extract session_id from URL - MUST use result.url, not Linking events
           const sessionId = extractSessionId(result.url);
           console.log('Extracted session_id:', sessionId ? sessionId.substring(0, 10) + '...' : null);
           
           if (sessionId) {
             await processGoogleAuth(sessionId);
           } else {
+            console.log('No session_id found in callback URL');
             Alert.alert('Error', 'Failed to get session from Google. Please try again.');
           }
         } else if (result.type === 'cancel') {
