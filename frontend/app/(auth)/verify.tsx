@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,22 +9,39 @@ import {
   Platform,
   Alert,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { verifyOTP } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function VerifyScreen() {
   const router = useRouter();
-  const { phone, otp: expectedOTP } = useLocalSearchParams<{ phone: string; otp: string }>();
+  const { phone, pin_id, provider, mock_otp } = useLocalSearchParams<{ 
+    phone: string; 
+    pin_id: string;
+    provider: string;
+    mock_otp: string;
+  }>();
   const { setUser, setIsAuthenticated } = useAppStore();
   
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
+  const [resendTimer, setResendTimer] = useState(60);
+  const [canResend, setCanResend] = useState(false);
+
+  // Countdown timer for resend
+  useEffect(() => {
+    if (resendTimer > 0) {
+      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
+      return () => clearTimeout(timer);
+    } else {
+      setCanResend(true);
+    }
+  }, [resendTimer]);
 
   const handleVerifyOTP = async () => {
     if (otp.length !== 6) {
@@ -34,9 +51,23 @@ export default function VerifyScreen() {
 
     setLoading(true);
     try {
-      const response = await verifyOTP(phone!, otp);
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/verify-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          phone: `+234${phone}`,
+          otp: otp,
+          pin_id: pin_id || undefined
+        }),
+      });
+
+      const data = await response.json();
       
-      if (response.data.is_new_user) {
+      if (!response.ok) {
+        throw new Error(data.detail || 'Verification failed');
+      }
+      
+      if (data.is_new_user) {
         // New user - go to registration
         router.push({
           pathname: '/(auth)/register',
@@ -44,22 +75,46 @@ export default function VerifyScreen() {
         });
       } else {
         // Existing user - log them in
-        setUser(response.data.user);
+        setUser(data.user);
         setIsAuthenticated(true);
         
         // Route to appropriate app based on role
-        if (response.data.user.role === 'driver') {
+        if (data.user.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
         }
       }
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Verification failed');
+      Alert.alert('Verification Failed', error.message || 'Please check the code and try again');
     } finally {
       setLoading(false);
     }
   };
+
+  const handleResendOTP = async () => {
+    if (!canResend) return;
+    
+    setCanResend(false);
+    setResendTimer(60);
+    
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/send-otp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: `+234${phone}` }),
+      });
+      
+      if (response.ok) {
+        Alert.alert('Success', 'A new verification code has been sent to your phone');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to resend code. Please try again.');
+      setCanResend(true);
+    }
+  };
+
+  const isTermii = provider === 'termii';
 
   return (
     <View style={styles.container}>
@@ -84,11 +139,28 @@ export default function VerifyScreen() {
 
             <View style={styles.header}>
               <View style={styles.iconCircle}>
-                <Ionicons name="shield-checkmark" size={40} color={COLORS.accentGreen} />
+                <Ionicons name="chatbubble" size={36} color={COLORS.accentGreen} />
               </View>
-              <Text style={styles.title}>Verification</Text>
-              <Text style={styles.subtitle}>Enter the 6-digit code sent to</Text>
+              <Text style={styles.title}>Verify Phone</Text>
+              <Text style={styles.subtitle}>
+                {isTermii 
+                  ? 'Enter the 6-digit code sent via SMS to'
+                  : 'Enter the 6-digit verification code'
+                }
+              </Text>
               <Text style={styles.phone}>+234 {phone}</Text>
+              
+              {/* Provider indicator */}
+              <View style={styles.providerBadge}>
+                <Ionicons 
+                  name={isTermii ? "chatbubbles" : "code-working"} 
+                  size={14} 
+                  color={COLORS.accentGreen} 
+                />
+                <Text style={styles.providerText}>
+                  {isTermii ? 'SMS Verification' : 'Test Mode'}
+                </Text>
+              </View>
             </View>
 
             <View style={styles.form}>
@@ -103,16 +175,16 @@ export default function VerifyScreen() {
                 autoFocus
               />
 
-              {/* Show OTP hint for MVP */}
-              {expectedOTP && (
+              {/* Show OTP hint only for mock/test mode */}
+              {!isTermii && mock_otp && (
                 <View style={styles.otpHint}>
-                  <Ionicons name="information-circle" size={16} color={COLORS.accentGreen} />
-                  <Text style={styles.otpHintText}>Demo OTP: {expectedOTP}</Text>
+                  <Ionicons name="information-circle" size={16} color={COLORS.gold} />
+                  <Text style={styles.otpHintText}>Test OTP: {mock_otp}</Text>
                 </View>
               )}
 
               <TouchableOpacity
-                style={styles.verifyButton}
+                style={[styles.verifyButton, otp.length === 6 && styles.verifyButtonActive]}
                 onPress={handleVerifyOTP}
                 disabled={loading || otp.length !== 6}
                 activeOpacity={0.9}
@@ -125,23 +197,37 @@ export default function VerifyScreen() {
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                 >
-                  <Text style={[
-                    styles.verifyButtonText,
-                    otp.length === 6 && styles.verifyButtonTextActive
-                  ]}>
-                    {loading ? 'Verifying...' : 'Verify'}
-                  </Text>
-                  {otp.length === 6 && (
-                    <View style={styles.verifyArrow}>
-                      <Ionicons name="checkmark" size={18} color={COLORS.primary} />
-                    </View>
+                  {loading ? (
+                    <ActivityIndicator color={COLORS.primary} />
+                  ) : (
+                    <>
+                      <Text style={[
+                        styles.verifyButtonText,
+                        otp.length === 6 && styles.verifyButtonTextActive
+                      ]}>
+                        Verify Code
+                      </Text>
+                      {otp.length === 6 && (
+                        <View style={styles.verifyArrow}>
+                          <Ionicons name="checkmark" size={18} color={COLORS.primary} />
+                        </View>
+                      )}
+                    </>
                   )}
                 </LinearGradient>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.resendButton}>
+              <TouchableOpacity 
+                style={styles.resendButton}
+                onPress={handleResendOTP}
+                disabled={!canResend}
+              >
                 <Text style={styles.resendText}>Didn't receive code? </Text>
-                <Text style={styles.resendLink}>Resend</Text>
+                {canResend ? (
+                  <Text style={styles.resendLink}>Resend</Text>
+                ) : (
+                  <Text style={styles.resendTimer}>Resend in {resendTimer}s</Text>
+                )}
               </TouchableOpacity>
             </View>
           </ScrollView>
@@ -204,12 +290,28 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: FONT_SIZE.md,
     color: COLORS.textSecondary,
+    textAlign: 'center',
   },
   phone: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '600',
     color: COLORS.white,
     marginTop: SPACING.xs,
+  },
+  providerBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.accentGreenSoft,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+    marginTop: SPACING.md,
+    gap: SPACING.xs,
+  },
+  providerText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.accentGreen,
+    fontWeight: '600',
   },
   form: {
     alignItems: 'center',
@@ -232,7 +334,7 @@ const styles = StyleSheet.create({
   otpHint: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.accentGreenSoft,
+    backgroundColor: COLORS.warningSoft,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderRadius: BORDER_RADIUS.full,
@@ -241,7 +343,7 @@ const styles = StyleSheet.create({
   },
   otpHintText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.accentGreen,
+    color: COLORS.gold,
     fontWeight: '600',
   },
   verifyButton: {
@@ -249,6 +351,13 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
+  },
+  verifyButtonActive: {
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
   },
   verifyGradient: {
     flexDirection: 'row',
@@ -283,6 +392,11 @@ const styles = StyleSheet.create({
   resendLink: {
     fontSize: FONT_SIZE.md,
     color: COLORS.accentGreen,
+    fontWeight: '600',
+  },
+  resendTimer: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.textMuted,
     fontWeight: '600',
   },
 });
