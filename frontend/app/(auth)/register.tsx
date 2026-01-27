@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,8 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -19,26 +21,80 @@ import { useAppStore } from '@/src/store/appStore';
 export default function RegisterScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  
+  // Get params - can come from phone OTP or Google auth
   const phone = params.phone as string;
-  const { setUser } = useAppStore();
+  const googleEmail = params.email as string;
+  const googleName = params.name as string;
+  const googlePicture = params.picture as string;
+  const googleId = params.google_id as string;
+  const authType = params.auth_type as string;
+  
+  const { setUser, setIsAuthenticated } = useAppStore();
 
   const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const [name, setName] = useState(googleName || '');
+  const [email, setEmail] = useState(googleEmail || '');
+  const [phoneNumber, setPhoneNumber] = useState(phone || '');
 
-  const handleContinue = () => {
-    setUser({
-      id: Date.now().toString(),
-      name: name || 'User',
-      phone: phone || '+234 XXX XXX XXXX',
-      role: selectedRole,
-      email: email,
-    });
+  const isGoogleAuth = authType === 'google';
+
+  const handleContinue = async () => {
+    if (!name.trim()) {
+      Alert.alert('Error', 'Please enter your name');
+      return;
+    }
     
-    if (selectedRole === 'driver') {
-      router.replace('/driver-home');
-    } else {
-      router.replace('/rider-home');
+    if (!isGoogleAuth && !phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter your phone number');
+      return;
+    }
+
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phone: phoneNumber ? `+234${phoneNumber}` : null,
+          name: name,
+          email: email || null,
+          role: selectedRole,
+          google_id: googleId || null,
+          profile_image: googlePicture || null,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setUser(data.user);
+        setIsAuthenticated(true);
+        
+        if (selectedRole === 'driver') {
+          router.replace('/(driver-tabs)/driver-home');
+        } else {
+          router.replace('/(rider-tabs)/rider-home');
+        }
+      } else {
+        Alert.alert('Error', data.detail || 'Registration failed');
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      // Fallback to local registration for demo
+      setUser({
+        id: Date.now().toString(),
+        name: name || 'User',
+        phone: phoneNumber ? `+234${phoneNumber}` : undefined,
+        role: selectedRole,
+        email: email,
+      });
+      setIsAuthenticated(true);
+      
+      if (selectedRole === 'driver') {
+        router.replace('/(driver-tabs)/driver-home');
+      } else {
+        router.replace('/(rider-tabs)/rider-home');
+      }
     }
   };
 
@@ -53,20 +109,34 @@ export default function RegisterScreen() {
             showsVerticalScrollIndicator={false} 
             contentContainerStyle={styles.scrollContent}
           >
-            {/* Logo */}
+            {/* Header with Google Profile or Logo */}
             <View style={styles.logoContainer}>
-              <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
-                style={styles.logoGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-              >
-                <Ionicons name="car-sport" size={32} color={COLORS.white} />
-              </LinearGradient>
+              {isGoogleAuth && googlePicture ? (
+                <Image 
+                  source={{ uri: googlePicture }} 
+                  style={styles.profileImage}
+                />
+              ) : (
+                <LinearGradient
+                  colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                  style={styles.logoGradient}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <Ionicons name="car-sport" size={32} color={COLORS.white} />
+                </LinearGradient>
+              )}
             </View>
 
-            <Text style={styles.title}>Join NEXRYDE</Text>
-            <Text style={styles.subtitle}>Choose how you want to use NEXRYDE</Text>
+            <Text style={styles.title}>
+              {isGoogleAuth ? 'Complete Your Profile' : 'Join NEXRYDE'}
+            </Text>
+            <Text style={styles.subtitle}>
+              {isGoogleAuth 
+                ? `Welcome ${googleName || 'there'}! Choose how you want to use NEXRYDE`
+                : 'Choose how you want to use NEXRYDE'
+              }
+            </Text>
 
             {/* Role Selection */}
             <View style={styles.roleContainer}>
@@ -121,16 +191,55 @@ export default function RegisterScreen() {
                 onChangeText={setName}
               />
 
-              <Text style={styles.inputLabel}>Email (Optional)</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Enter your email"
-                placeholderTextColor={COLORS.lightTextMuted}
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
+              {/* Show phone input only if not already provided */}
+              {!phone && (
+                <>
+                  <Text style={styles.inputLabel}>Phone Number</Text>
+                  <View style={styles.phoneInputContainer}>
+                    <View style={styles.phonePrefixContainer}>
+                      <Text style={styles.phoneFlag}>🇳🇬</Text>
+                      <Text style={styles.phonePrefix}>+234</Text>
+                    </View>
+                    <TextInput
+                      style={styles.phoneInput}
+                      placeholder="801 234 5678"
+                      placeholderTextColor={COLORS.lightTextMuted}
+                      value={phoneNumber}
+                      onChangeText={setPhoneNumber}
+                      keyboardType="phone-pad"
+                      maxLength={11}
+                    />
+                  </View>
+                </>
+              )}
+
+              {/* Show email only if not from Google */}
+              {!isGoogleAuth && (
+                <>
+                  <Text style={styles.inputLabel}>Email (Optional)</Text>
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Enter your email"
+                    placeholderTextColor={COLORS.lightTextMuted}
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </>
+              )}
+
+              {/* Show Google email as read-only */}
+              {isGoogleAuth && googleEmail && (
+                <>
+                  <Text style={styles.inputLabel}>Email</Text>
+                  <View style={styles.readOnlyInput}>
+                    <Ionicons name="logo-google" size={18} color={COLORS.accentGreen} style={{ marginRight: 8 }} />
+                    <Text style={styles.readOnlyText}>{googleEmail}</Text>
+                    <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                  </View>
+                </>
+              )}
             </View>
           </ScrollView>
 
@@ -188,6 +297,13 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  profileImage: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    borderWidth: 3,
+    borderColor: COLORS.accentGreen,
   },
   title: {
     fontSize: FONT_SIZE.xxl,
@@ -318,6 +434,53 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
     marginBottom: SPACING.md,
+  },
+  phoneInputContainer: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    marginBottom: SPACING.md,
+    overflow: 'hidden',
+  },
+  phonePrefixContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.lightSurface,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    borderRightWidth: 1,
+    borderRightColor: COLORS.lightBorder,
+  },
+  phoneFlag: {
+    fontSize: 20,
+    marginRight: 6,
+  },
+  phonePrefix: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+  },
+  phoneInput: {
+    flex: 1,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextPrimary,
+  },
+  readOnlyInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  readOnlyText: {
+    flex: 1,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextPrimary,
   },
   bottomContainer: {
     paddingHorizontal: SPACING.lg,
