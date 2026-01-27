@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,14 @@ import {
   Dimensions,
   ScrollView,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
 import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
@@ -39,12 +42,15 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
+// Emergent Auth URL
+const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
+
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { setPhone: storePhone } = useAppStore();
+  const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
 
   const handleContinue = async () => {
     if (phone.length < 10) return;
@@ -61,33 +67,152 @@ export default function LoginScreen() {
       const data = await response.json();
       
       if (response.ok) {
-        // Pass pin_id if using Termii, or otp for mock mode
         router.push({ 
           pathname: '/(auth)/verify', 
           params: { 
             phone,
             pin_id: data.pin_id || '',
             provider: data.provider || 'mock',
-            mock_otp: data.otp || '' // Only for testing
+            mock_otp: data.otp || ''
           } 
         });
       }
     } catch (error) {
       console.error('Error:', error);
+      Alert.alert('Error', 'Failed to send OTP. Please try again.');
     }
     setLoading(false);
   };
 
   const handleGoogleSignIn = async () => {
     setGoogleLoading(true);
-    // Note: Full Google Sign-In requires expo-auth-session setup
-    // For now, we'll show a message that it's being set up
-    setTimeout(() => {
-      setGoogleLoading(false);
-      // Navigate to a placeholder or show setup instructions
-      alert('Google Sign-In coming soon! Please use phone number for now.');
-    }, 1000);
+    
+    try {
+      // Create redirect URL based on platform
+      const redirectUrl = Platform.OS === 'web'
+        ? `${window.location.origin}/`
+        : Linking.createURL('/');
+      
+      // Build auth URL
+      const authUrl = `${EMERGENT_AUTH_BASE}/?redirect=${encodeURIComponent(redirectUrl)}`;
+      
+      if (Platform.OS === 'web') {
+        // Web: redirect directly
+        window.location.href = authUrl;
+      } else {
+        // Mobile: use WebBrowser
+        const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+        
+        if (result.type === 'success' && result.url) {
+          // Extract session_id from URL
+          const sessionId = extractSessionId(result.url);
+          
+          if (sessionId) {
+            await processGoogleAuth(sessionId);
+          } else {
+            Alert.alert('Error', 'Failed to get session from Google. Please try again.');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Google sign-in error:', error);
+      Alert.alert('Error', 'Google sign-in failed. Please try again.');
+    }
+    
+    setGoogleLoading(false);
   };
+
+  // Extract session_id from URL (hash or query)
+  const extractSessionId = (url: string): string | null => {
+    try {
+      // Try hash first
+      if (url.includes('#session_id=')) {
+        const hash = url.split('#')[1];
+        const params = new URLSearchParams(hash);
+        return params.get('session_id');
+      }
+      // Try query
+      if (url.includes('?session_id=') || url.includes('&session_id=')) {
+        const urlObj = new URL(url);
+        return urlObj.searchParams.get('session_id');
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  // Process Google auth with session_id
+  const processGoogleAuth = async (sessionId: string) => {
+    try {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/google/exchange`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.detail || 'Authentication failed');
+      }
+      
+      if (data.is_new_user) {
+        // New user - go to registration with Google data
+        router.push({
+          pathname: '/(auth)/register',
+          params: {
+            email: data.google_data.email,
+            name: data.google_data.name || '',
+            picture: data.google_data.picture || '',
+            google_id: data.google_data.google_id || '',
+            auth_type: 'google'
+          }
+        });
+      } else {
+        // Existing user - log them in
+        setUser(data.user);
+        setIsAuthenticated(true);
+        
+        if (data.user.role === 'driver') {
+          router.replace('/(driver-tabs)/driver-home');
+        } else {
+          router.replace('/(rider-tabs)/rider-home');
+        }
+      }
+    } catch (error: any) {
+      console.error('Google auth processing error:', error);
+      Alert.alert('Error', error.message || 'Failed to process Google sign-in');
+    }
+  };
+
+  // Handle deep link / URL on web
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      // Check for session_id in URL hash on page load
+      const hash = window.location.hash;
+      if (hash && hash.includes('session_id=')) {
+        const sessionId = extractSessionId(window.location.href);
+        if (sessionId) {
+          // Clean URL
+          window.history.replaceState(null, '', window.location.pathname);
+          setGoogleLoading(true);
+          processGoogleAuth(sessionId).finally(() => setGoogleLoading(false));
+        }
+      }
+    } else {
+      // Mobile: Check initial URL
+      Linking.getInitialURL().then((url) => {
+        if (url) {
+          const sessionId = extractSessionId(url);
+          if (sessionId) {
+            setGoogleLoading(true);
+            processGoogleAuth(sessionId).finally(() => setGoogleLoading(false));
+          }
+        }
+      });
+    }
+  }, []);
 
   return (
     <View style={styles.container}>
