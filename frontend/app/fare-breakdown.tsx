@@ -1,5 +1,11 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -9,110 +15,102 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/const
 export default function FareBreakdownScreen() {
   const router = useRouter();
 
-  const fareDetails = {
-    baseFare: 500,
-    distance: 1200,
-    time: 320,
-    trafficSurcharge: 200,
-    weatherSurcharge: 0,
-    total: 2220,
-    originalEstimate: 2000,
-  };
-
-  const tripInfo = {
-    driver: 'Chukwuemeka Okafor',
-    pickup: 'Victoria Island, Lagos',
-    dropoff: 'Ikeja City Mall',
-    distance: '12.5 km',
-    duration: '35 min',
-  };
-
   return (
     <View style={styles.container}>
-      <LinearGradient colors={[COLORS.background, COLORS.primary, COLORS.background]} style={StyleSheet.absoluteFillObject} />
-      <View style={[styles.glow, { top: 80, right: 30, backgroundColor: COLORS.accentGreen }]} />
-      <View style={[styles.glow, { bottom: 200, left: 20, backgroundColor: COLORS.accentBlue, width: 60 }]} />
-      
       <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Fare Breakdown</Text>
-          <View style={{ width: 44 }} />
+          <View style={styles.placeholder} />
         </View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
-          {/* Total Card */}
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {/* Total Fare Card */}
           <View style={styles.totalCard}>
-            <LinearGradient colors={[COLORS.accentGreen, COLORS.accentBlue]} style={styles.totalGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+            <LinearGradient
+              colors={[COLORS.accentGreen, COLORS.accentBlue]}
+              style={styles.totalGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
               <Text style={styles.totalLabel}>Total Fare</Text>
-              <Text style={styles.totalAmount}>{CURRENCY}{fareDetails.total.toLocaleString()}</Text>
-              {fareDetails.total > fareDetails.originalEstimate && (
-                <View style={styles.adjustedBadge}>
-                  <Ionicons name="information-circle" size={14} color={COLORS.white} />
-                  <Text style={styles.adjustedText}>Adjusted from {CURRENCY}{fareDetails.originalEstimate}</Text>
-                </View>
-              )}
+              <Text style={styles.totalAmount}>{CURRENCY}2,220</Text>
+              <View style={styles.adjustedBadge}>
+                <Text style={styles.adjustedText}>Adjusted from {CURRENCY}2000</Text>
+              </View>
             </LinearGradient>
           </View>
 
-          {/* Trip Summary */}
+          {/* Trip Info */}
           <View style={styles.tripCard}>
-            <LinearGradient colors={[COLORS.surface, COLORS.surfaceLight]} style={styles.tripGradient}>
-              <View style={styles.tripHeader}>
-                <View style={styles.driverAvatar}>
-                  <Text style={styles.avatarText}>{tripInfo.driver.charAt(0)}</Text>
-                </View>
-                <View style={styles.tripInfo}>
-                  <Text style={styles.driverName}>{tripInfo.driver}</Text>
-                  <Text style={styles.tripStats}>{tripInfo.distance} • {tripInfo.duration}</Text>
-                </View>
+            <View style={styles.tripHeader}>
+              <View style={[styles.driverAvatar, { backgroundColor: COLORS.accentGreenSoft }]}>
+                <Text style={styles.driverInitial}>C</Text>
               </View>
-              <View style={styles.routeInfo}>
-                <View style={styles.routePoint}>
-                  <View style={styles.pickupDot} />
-                  <Text style={styles.routeText}>{tripInfo.pickup}</Text>
-                </View>
-                <View style={styles.routeLine} />
-                <View style={styles.routePoint}>
-                  <View style={styles.destDot} />
-                  <Text style={styles.routeText}>{tripInfo.dropoff}</Text>
-                </View>
+              <View style={styles.tripInfo}>
+                <Text style={styles.driverName}>Chukwuemeka Okafor</Text>
+                <Text style={styles.tripMeta}>12.5 km • 35 min</Text>
               </View>
-            </LinearGradient>
-          </View>
-
-          {/* Fare Breakdown */}
-          <Text style={styles.sectionTitle}>Fare Details</Text>
-          <View style={styles.breakdownCard}>
-            <FareRow label="Base Fare" value={fareDetails.baseFare} />
-            <FareRow label="Distance (12.5 km)" value={fareDetails.distance} />
-            <FareRow label="Time (35 min)" value={fareDetails.time} />
-            {fareDetails.trafficSurcharge > 0 && (
-              <FareRow label="Traffic Adjustment" value={fareDetails.trafficSurcharge} highlight />
-            )}
-            {fareDetails.weatherSurcharge > 0 && (
-              <FareRow label="Weather Surcharge" value={fareDetails.weatherSurcharge} highlight />
-            )}
-            <View style={styles.divider} />
-            <View style={styles.totalRow}>
-              <Text style={styles.totalRowLabel}>Total</Text>
-              <Text style={styles.totalRowValue}>{CURRENCY}{fareDetails.total.toLocaleString()}</Text>
+            </View>
+            
+            <View style={styles.routeContainer}>
+              <View style={styles.routePoint}>
+                <View style={[styles.routeDot, { backgroundColor: COLORS.accentGreen }]} />
+                <Text style={styles.routeText}>Victoria Island, Lagos</Text>
+              </View>
+              <View style={styles.routeLine} />
+              <View style={styles.routePoint}>
+                <View style={[styles.routeDot, { backgroundColor: COLORS.accentBlue }]} />
+                <Text style={styles.routeText}>Ikeja City Mall</Text>
+              </View>
             </View>
           </View>
 
-          {/* Info Box */}
-          <View style={styles.infoBox}>
-            <Ionicons name="information-circle" size={20} color={COLORS.info} />
-            <Text style={styles.infoText}>Fares may be adjusted based on real-time traffic conditions and weather. The maximum adjustment is capped at 50% of the original estimate.</Text>
+          {/* Fare Details */}
+          <Text style={styles.sectionTitle}>Fare Details</Text>
+          <View style={styles.detailsCard}>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Base Fare</Text>
+              <Text style={styles.detailValue}>{CURRENCY}500</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Distance (12.5 km)</Text>
+              <Text style={styles.detailValue}>{CURRENCY}1,200</Text>
+            </View>
+            <View style={styles.detailRow}>
+              <Text style={styles.detailLabel}>Time (35 min)</Text>
+              <Text style={styles.detailValue}>{CURRENCY}320</Text>
+            </View>
+            <View style={[styles.detailRow, styles.adjustmentRow]}>
+              <Text style={styles.adjustmentLabel}>Traffic Adjustment</Text>
+              <Text style={styles.adjustmentValue}>+{CURRENCY}200</Text>
+            </View>
+            <View style={[styles.detailRow, styles.totalRow]}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>{CURRENCY}2,220</Text>
+            </View>
           </View>
         </ScrollView>
 
-        <View style={styles.bottomAction}>
-          <TouchableOpacity style={styles.actionButton} onPress={() => router.back()}>
-            <LinearGradient colors={[COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]} style={styles.actionGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-              <Text style={styles.actionText}>Done</Text>
+        {/* Done Button */}
+        <View style={styles.bottomContainer}>
+          <TouchableOpacity 
+            style={styles.doneButton}
+            onPress={() => router.push('/rider-home')}
+          >
+            <LinearGradient
+              colors={[COLORS.accentGreen, COLORS.accentBlue]}
+              style={styles.doneGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.doneText}>Done</Text>
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -121,56 +119,219 @@ export default function FareBreakdownScreen() {
   );
 }
 
-const FareRow = ({ label, value, highlight = false }: { label: string; value: number; highlight?: boolean }) => (
-  <View style={styles.fareRow}>
-    <Text style={[styles.fareLabel, highlight && styles.fareLabelHighlight]}>{label}</Text>
-    <Text style={[styles.fareValue, highlight && styles.fareValueHighlight]}>{CURRENCY}{value.toLocaleString()}</Text>
-  </View>
-);
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.background },
-  glow: { position: 'absolute', width: 80, height: 80, borderRadius: 40, opacity: 0.12 },
-  safeArea: { flex: 1 },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md },
-  backButton: { width: 44, height: 44, borderRadius: 22, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '700', color: COLORS.white },
-  content: { paddingHorizontal: SPACING.lg, paddingBottom: SPACING.xxl },
-  totalCard: { marginBottom: SPACING.lg, borderRadius: BORDER_RADIUS.xxl, overflow: 'hidden' },
-  totalGradient: { padding: SPACING.xl, alignItems: 'center' },
-  totalLabel: { fontSize: FONT_SIZE.md, color: 'rgba(255,255,255,0.8)', marginBottom: SPACING.xs },
-  totalAmount: { fontSize: 48, fontWeight: '800', color: COLORS.white },
-  adjustedBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs, borderRadius: BORDER_RADIUS.full, marginTop: SPACING.sm, gap: SPACING.xs },
-  adjustedText: { fontSize: FONT_SIZE.sm, color: COLORS.white },
-  tripCard: { marginBottom: SPACING.lg, borderRadius: BORDER_RADIUS.xxl, overflow: 'hidden' },
-  tripGradient: { padding: SPACING.lg, borderWidth: 1, borderColor: COLORS.surfaceLight, borderRadius: BORDER_RADIUS.xxl },
-  tripHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: SPACING.md },
-  driverAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.accentGreenSoft, alignItems: 'center', justifyContent: 'center', marginRight: SPACING.md },
-  avatarText: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.accentGreen },
-  tripInfo: { flex: 1 },
-  driverName: { fontSize: FONT_SIZE.md, fontWeight: '600', color: COLORS.white },
-  tripStats: { fontSize: FONT_SIZE.sm, color: COLORS.textMuted },
-  routeInfo: { backgroundColor: COLORS.surfaceLight, borderRadius: BORDER_RADIUS.lg, padding: SPACING.md },
-  routePoint: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-  pickupDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.accentGreen },
-  destDot: { width: 10, height: 10, borderRadius: 2, backgroundColor: COLORS.accentBlue },
-  routeLine: { width: 2, height: 16, backgroundColor: COLORS.surface, marginLeft: 4, marginVertical: SPACING.xs },
-  routeText: { fontSize: FONT_SIZE.sm, color: COLORS.textSecondary, flex: 1 },
-  sectionTitle: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white, marginBottom: SPACING.md },
-  breakdownCard: { backgroundColor: COLORS.surface, borderRadius: BORDER_RADIUS.xxl, padding: SPACING.lg, borderWidth: 1, borderColor: COLORS.surfaceLight, marginBottom: SPACING.lg },
-  fareRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: SPACING.sm },
-  fareLabel: { fontSize: FONT_SIZE.md, color: COLORS.textSecondary },
-  fareLabelHighlight: { color: COLORS.warning },
-  fareValue: { fontSize: FONT_SIZE.md, fontWeight: '600', color: COLORS.white },
-  fareValueHighlight: { color: COLORS.warning },
-  divider: { height: 1, backgroundColor: COLORS.surfaceLight, marginVertical: SPACING.md },
-  totalRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  totalRowLabel: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.white },
-  totalRowValue: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.accentGreen },
-  infoBox: { flexDirection: 'row', backgroundColor: COLORS.infoSoft, borderRadius: BORDER_RADIUS.lg, padding: SPACING.md, gap: SPACING.sm },
-  infoText: { flex: 1, fontSize: FONT_SIZE.sm, color: COLORS.info, lineHeight: 20 },
-  bottomAction: { padding: SPACING.lg },
-  actionButton: { borderRadius: BORDER_RADIUS.xl, overflow: 'hidden' },
-  actionGradient: { paddingVertical: SPACING.lg, alignItems: 'center' },
-  actionText: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.primary },
+  container: {
+    flex: 1,
+    backgroundColor: COLORS.lightBackground,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+  },
+  backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  headerTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  placeholder: {
+    width: 44,
+  },
+  scrollContent: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.xxl,
+  },
+  totalCard: {
+    borderRadius: BORDER_RADIUS.xxl,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  totalGradient: {
+    padding: SPACING.xl,
+    alignItems: 'center',
+  },
+  totalLabel: {
+    fontSize: FONT_SIZE.sm,
+    color: 'rgba(255,255,255,0.8)',
+    marginBottom: SPACING.xs,
+  },
+  totalAmount: {
+    fontSize: 48,
+    fontWeight: '800',
+    color: COLORS.white,
+    marginBottom: SPACING.sm,
+  },
+  adjustedBadge: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  adjustedText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.white,
+  },
+  tripCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  tripHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.lg,
+  },
+  driverAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: SPACING.md,
+  },
+  driverInitial: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.accentGreen,
+  },
+  tripInfo: {
+    flex: 1,
+  },
+  driverName: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  tripMeta: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+  },
+  routeContainer: {
+    paddingLeft: SPACING.sm,
+  },
+  routePoint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  routeDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+  },
+  routeText: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextPrimary,
+  },
+  routeLine: {
+    width: 2,
+    height: 24,
+    backgroundColor: COLORS.lightBorder,
+    marginLeft: 5,
+    marginVertical: 4,
+  },
+  sectionTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.md,
+  },
+  detailsCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xxl,
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  detailRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightBorder,
+  },
+  detailLabel: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextSecondary,
+  },
+  detailValue: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
+  },
+  adjustmentRow: {
+    borderBottomWidth: 0,
+  },
+  adjustmentLabel: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.gold,
+  },
+  adjustmentValue: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '600',
+    color: COLORS.gold,
+  },
+  totalRow: {
+    borderBottomWidth: 0,
+    borderTopWidth: 2,
+    borderTopColor: COLORS.lightBorder,
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.md,
+  },
+  totalLabel: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  totalValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.accentGreen,
+  },
+  bottomContainer: {
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.lg,
+  },
+  doneButton: {
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 6,
+  },
+  doneGradient: {
+    paddingVertical: SPACING.lg,
+    alignItems: 'center',
+  },
+  doneText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
 });
