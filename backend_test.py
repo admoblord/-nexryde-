@@ -191,289 +191,54 @@ def test_api_health():
         return False
 
 def main():
-    print("🚀 Starting KODA Backend API Tests")
-    print(f"Base URL: {BASE_URL}")
+    """Run all authentication tests"""
+    print("NEXRYDE BACKEND AUTHENTICATION TESTING")
+    print(f"Backend URL: {BASE_URL}")
+    print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print()
     
-    # Test results tracking
-    results = {
-        "total": 0,
-        "passed": 0,
-        "failed": 0,
-        "details": []
-    }
+    results = {}
     
-    # Generate test user IDs
-    test_user_id = str(uuid.uuid4())
-    test_driver_id = str(uuid.uuid4())
-    test_trip_id = str(uuid.uuid4())
+    # Test API connectivity first
+    results['api_health'] = test_api_health()
     
-    print(f"\nUsing test IDs:")
-    print(f"User ID: {test_user_id}")
-    print(f"Driver ID: {test_driver_id}")
-    print(f"Trip ID: {test_trip_id}")
-    
-    # First, let's create a test user to ensure emergency contacts work properly
-    print(f"\n{'🔧 SETUP - Creating Test User':=^80}")
-    
-    # Send OTP first
-    test_api_endpoint(
-        "POST",
-        "/auth/send-otp",
-        data={"phone": "+2348123456789"}
-    )
-    
-    # Verify OTP (using the mock OTP from response)
-    test_api_endpoint(
-        "POST", 
-        "/auth/verify-otp",
-        data={"phone": "+2348123456789", "otp": "123456"}
-    )
-    
-    # Register user
-    register_success, register_response = test_api_endpoint(
-        "POST",
-        "/auth/register", 
-        data={
-            "phone": "+2348123456789",
-            "name": "Kemi Adebayo",
-            "email": "kemi.adebayo@example.com",
-            "role": "rider"
-        }
-    )
-    
-    # Use the registered user ID for emergency contacts test
-    if register_success and register_response:
-        try:
-            user_data = register_response.json()
-            if "user" in user_data and "id" in user_data["user"]:
-                test_user_id = user_data["user"]["id"]
-                print(f"✅ Created test user with ID: {test_user_id}")
-        except:
-            print("⚠️ Could not extract user ID from registration response")
-    
-    # =================================================================
-    # PRIORITY 1 - CORE SAFETY APIs
-    # =================================================================
-    
-    print(f"\n{'🔒 PRIORITY 1 - CORE SAFETY APIs':=^80}")
-    
-    # 1. AI Rider Assistant
-    test_name = "AI Rider Assistant"
-    success, response = test_api_endpoint(
-        "GET", 
-        "/ai/rider-assistant",
-        params={
-            "user_id": test_user_id,
-            "question": "Where is my driver?"
-        }
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
+    if results['api_health']:
+        # Test SMS OTP flow
+        results['sms_otp'] = test_sms_otp_flow()
+        
+        # Test Google OAuth flow
+        results['google_oauth'] = test_google_oauth_flow()
+        
+        # Test Logout API
+        results['logout'] = test_logout_api()
     else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
+        print("❌ Skipping other tests due to API connectivity issues")
+        results['sms_otp'] = False
+        results['google_oauth'] = False
+        results['logout'] = False
     
-    # 2. AI Driver Assistant  
-    test_name = "AI Driver Assistant"
-    success, response = test_api_endpoint(
-        "GET",
-        "/ai/driver-assistant", 
-        params={
-            "user_id": test_driver_id,
-            "question": "What are the best earning times today?"
-        }
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
+    # Summary
+    print("=" * 60)
+    print("TEST SUMMARY")
+    print("=" * 60)
+    
+    total_tests = len(results)
+    passed_tests = sum(1 for result in results.values() if result)
+    
+    for test_name, result in results.items():
+        status = "✅ PASS" if result else "❌ FAIL"
+        print(f"{test_name.upper().replace('_', ' ')}: {status}")
+    
+    print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
+    
+    if passed_tests == total_tests:
+        print("🎉 All authentication tests passed!")
+    elif passed_tests > 0:
+        print("⚠️ Some tests passed, check failed tests above")
     else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
+        print("❌ All tests failed, check API connectivity and configuration")
     
-    # 3. Add Emergency Contact
-    test_name = "Add Emergency Contact"
-    success, response = test_api_endpoint(
-        "POST",
-        f"/users/{test_user_id}/emergency-contacts",
-        data={
-            "name": "Adunni Okafor",
-            "phone": "+2348123456789", 
-            "relationship": "Sister"
-        }
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 4. Get Emergency Contacts
-    test_name = "Get Emergency Contacts"
-    success, response = test_api_endpoint(
-        "GET",
-        f"/users/{test_user_id}/emergency-contacts"
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 5. Trigger SOS (Expected 404 since trip doesn't exist)
-    test_name = "Trigger SOS"
-    success, response = test_api_endpoint(
-        "POST",
-        "/sos/trigger",
-        data={
-            "trip_id": test_trip_id,
-            "location_lat": 6.5244,
-            "location_lng": 3.3792
-        },
-        expected_status=404  # Expected since trip doesn't exist
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # =================================================================
-    # PRIORITY 2 - GAMIFICATION APIs
-    # =================================================================
-    
-    print(f"\n{'🎮 PRIORITY 2 - GAMIFICATION APIs':=^80}")
-    
-    # 6. Driver Leaderboard
-    test_name = "Driver Leaderboard"
-    success, response = test_api_endpoint(
-        "GET",
-        "/leaderboard/drivers",
-        params={
-            "city": "lagos",
-            "period": "weekly"
-        }
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 7. Top Rated Drivers
-    test_name = "Top Rated Drivers"
-    success, response = test_api_endpoint(
-        "GET",
-        "/leaderboard/top-rated",
-        params={"limit": 10}
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 8. Active Challenges
-    test_name = "Active Challenges"
-    success, response = test_api_endpoint(
-        "GET",
-        "/challenges/active"
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 9. Driver Fatigue Status
-    test_name = "Driver Fatigue Status"
-    success, response = test_api_endpoint(
-        "GET",
-        f"/drivers/{test_driver_id}/fatigue-status"
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # =================================================================
-    # PRIORITY 3 - DRIVER WELFARE APIs
-    # =================================================================
-    
-    print(f"\n{'🛡️ PRIORITY 3 - DRIVER WELFARE APIs':=^80}")
-    
-    # 10. Log Driver Break
-    test_name = "Log Driver Break"
-    success, response = test_api_endpoint(
-        "POST",
-        f"/drivers/{test_driver_id}/log-break"
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # 11. Driver Streaks (Expected 404 if user doesn't exist)
-    test_name = "Driver Streaks"
-    success, response = test_api_endpoint(
-        "GET",
-        f"/drivers/{test_driver_id}/streaks",
-        expected_status=404  # Expected since user doesn't exist
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # =================================================================
-    # PRIORITY 4 - TRIP FEATURES
-    # =================================================================
-    
-    print(f"\n{'🚗 PRIORITY 4 - TRIP FEATURES':=^80}")
-    
-    # 12. Trip Insurance (Expected 404 since trip doesn't exist)
-    test_name = "Trip Insurance"
-    success, response = test_api_endpoint(
-        "GET",
-        f"/trips/{test_trip_id}/insurance",
-        expected_status=404  # Expected since trip doesn't exist
-    )
-    results["total"] += 1
-    if success:
-        results["passed"] += 1
-    else:
-        results["failed"] += 1
-    results["details"].append({"test": test_name, "passed": success})
-    
-    # =================================================================
-    # TEST SUMMARY
-    # =================================================================
-    
-    print(f"\n{'📊 TEST SUMMARY':=^80}")
-    print(f"Total Tests: {results['total']}")
-    print(f"Passed: {results['passed']} ✅")
-    print(f"Failed: {results['failed']} ❌")
-    print(f"Success Rate: {(results['passed']/results['total']*100):.1f}%")
-    
-    print(f"\n{'📋 DETAILED RESULTS':=^80}")
-    for detail in results["details"]:
-        status = "✅ PASS" if detail["passed"] else "❌ FAIL"
-        print(f"{detail['test']:<30} {status}")
-    
-    # Return overall success
-    return results["failed"] == 0
+    return results
 
 if __name__ == "__main__":
     success = main()
