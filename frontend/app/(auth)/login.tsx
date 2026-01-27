@@ -89,12 +89,19 @@ export default function LoginScreen() {
     
     try {
       // Create redirect URL based on platform
-      const redirectUrl = Platform.OS === 'web'
-        ? `${window.location.origin}/`
-        : Linking.createURL('/');
+      let redirectUrl: string;
+      if (Platform.OS === 'web') {
+        redirectUrl = `${window.location.origin}/`;
+      } else {
+        // For Expo Go, use the expo scheme with correct path
+        redirectUrl = Linking.createURL('(auth)/login');
+      }
+      
+      console.log('Redirect URL:', redirectUrl);
       
       // Build auth URL
       const authUrl = `${EMERGENT_AUTH_BASE}/?redirect=${encodeURIComponent(redirectUrl)}`;
+      console.log('Auth URL:', authUrl);
       
       if (Platform.OS === 'web') {
         // Web: redirect directly
@@ -102,21 +109,30 @@ export default function LoginScreen() {
       } else {
         // Mobile: use WebBrowser
         const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
+        console.log('WebBrowser result:', result.type);
         
         if (result.type === 'success' && result.url) {
+          console.log('Callback URL:', result.url);
           // Extract session_id from URL
           const sessionId = extractSessionId(result.url);
+          console.log('Extracted session_id:', sessionId ? sessionId.substring(0, 10) + '...' : null);
           
           if (sessionId) {
             await processGoogleAuth(sessionId);
           } else {
             Alert.alert('Error', 'Failed to get session from Google. Please try again.');
           }
+        } else if (result.type === 'cancel') {
+          // User cancelled - no error needed
+          console.log('User cancelled Google sign-in');
+        } else if (result.type === 'dismiss') {
+          // Browser dismissed - no error needed
+          console.log('Google sign-in dismissed');
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Google sign-in error:', error);
-      Alert.alert('Error', 'Google sign-in failed. Please try again.');
+      Alert.alert('Error', error.message || 'Google sign-in failed. Please try again.');
     }
     
     setGoogleLoading(false);
