@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Dimensions, Image, Platform } from 'react-native';
+import { View, Text, StyleSheet, Dimensions, Image, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -13,8 +13,7 @@ import Animated, {
   interpolate,
 } from 'react-native-reanimated';
 import { COLORS, SPACING, FONT_SIZE } from '@/src/constants/theme';
-import { RisingParticles, StaticOrbs, RoadLines } from '@/src/components/FallingRoses';
-import { TouchableOpacity } from 'react-native';
+import { RisingParticles, StaticOrbs } from '@/src/components/FallingRoses';
 
 const { width, height } = Dimensions.get('window');
 
@@ -25,68 +24,48 @@ export default function SplashScreen() {
   const router = useRouter();
   
   // Animation values
-  const logoScale = useSharedValue(0.5);
   const logoOpacity = useSharedValue(0);
-  const textOpacity = useSharedValue(0);
-  const sloganOpacity = useSharedValue(0);
-  const featuresOpacity = useSharedValue(0);
+  const logoScale = useSharedValue(0.8);
+  const contentOpacity = useSharedValue(0);
   const buttonOpacity = useSharedValue(0);
-  const buttonScale = useSharedValue(0.9);
-  const pulseGlow = useSharedValue(0);
+  const glowPulse = useSharedValue(0);
 
   useEffect(() => {
-    // Logo animation
-    logoOpacity.value = withDelay(300, withTiming(1, { duration: 800 }));
-    logoScale.value = withDelay(300, withTiming(1, { duration: 1000, easing: Easing.out(Easing.back(1.5)) }));
+    // Animate in sequence
+    logoOpacity.value = withDelay(500, withTiming(1, { duration: 800 }));
+    logoScale.value = withDelay(500, withTiming(1, { duration: 1000, easing: Easing.out(Easing.back(1.2)) }));
+    contentOpacity.value = withDelay(1200, withTiming(1, { duration: 600 }));
+    buttonOpacity.value = withDelay(1800, withTiming(1, { duration: 600 }));
     
-    // Text animations
-    textOpacity.value = withDelay(800, withTiming(1, { duration: 600 }));
-    sloganOpacity.value = withDelay(1200, withTiming(1, { duration: 600 }));
-    featuresOpacity.value = withDelay(1600, withTiming(1, { duration: 600 }));
-    
-    // Button animation
-    buttonOpacity.value = withDelay(2000, withTiming(1, { duration: 600 }));
-    buttonScale.value = withDelay(2000, withTiming(1, { duration: 500, easing: Easing.out(Easing.back(1.2)) }));
-    
-    // Continuous pulse glow
-    pulseGlow.value = withDelay(2500, withRepeat(
+    // Continuous glow
+    glowPulse.value = withDelay(2000, withRepeat(
       withSequence(
-        withTiming(1, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0, { duration: 1500, easing: Easing.inOut(Easing.ease) })
+        withTiming(1, { duration: 2000, easing: Easing.inOut(Easing.ease) }),
+        withTiming(0, { duration: 2000, easing: Easing.inOut(Easing.ease) })
       ),
       -1,
       false
     ));
   }, []);
 
-  const logoAnimatedStyle = useAnimatedStyle(() => ({
+  const logoStyle = useAnimatedStyle(() => ({
     opacity: logoOpacity.value,
     transform: [{ scale: logoScale.value }],
   }));
 
-  const textAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: textOpacity.value,
-    transform: [{ translateY: interpolate(textOpacity.value, [0, 1], [20, 0]) }],
+  const contentStyle = useAnimatedStyle(() => ({
+    opacity: contentOpacity.value,
+    transform: [{ translateY: interpolate(contentOpacity.value, [0, 1], [30, 0]) }],
   }));
 
-  const sloganAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: sloganOpacity.value,
-    transform: [{ translateY: interpolate(sloganOpacity.value, [0, 1], [15, 0]) }],
-  }));
-
-  const featuresAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: featuresOpacity.value,
-    transform: [{ translateY: interpolate(featuresOpacity.value, [0, 1], [20, 0]) }],
-  }));
-
-  const buttonAnimatedStyle = useAnimatedStyle(() => ({
+  const buttonStyle = useAnimatedStyle(() => ({
     opacity: buttonOpacity.value,
-    transform: [{ scale: buttonScale.value }],
+    transform: [{ scale: interpolate(buttonOpacity.value, [0, 1], [0.9, 1]) }],
   }));
 
-  const glowAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(pulseGlow.value, [0, 1], [0.3, 0.7]),
-    transform: [{ scale: interpolate(pulseGlow.value, [0, 1], [1, 1.1]) }],
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(glowPulse.value, [0, 1], [0.2, 0.5]),
+    transform: [{ scale: interpolate(glowPulse.value, [0, 1], [1, 1.2]) }],
   }));
 
   const handleBeginJourney = () => {
@@ -95,24 +74,22 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Gradient Background */}
+      {/* Background Gradient */}
       <LinearGradient
-        colors={['#0D1420', '#19253F', '#0D1420']}
+        colors={['#0D1420', '#19253F', '#0F1729']}
         style={StyleSheet.absoluteFillObject}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
       />
       
-      {/* Background Orbs */}
-      <StaticOrbs count={10} />
+      {/* Background Effects */}
+      <StaticOrbs count={8} />
+      <RisingParticles intensity="medium" showStreaks={false} />
       
-      {/* Rising Particles */}
-      <RisingParticles intensity="medium" showStreaks={true} />
-      
-      {/* Glow effect behind logo */}
-      <Animated.View style={[styles.logoGlow, glowAnimatedStyle]}>
+      {/* Glow behind logo */}
+      <Animated.View style={[styles.glowContainer, glowStyle]}>
         <LinearGradient
-          colors={['transparent', COLORS.accentGreen + '30', COLORS.accentBlue + '30', 'transparent']}
+          colors={['transparent', COLORS.accentGreen + '20', COLORS.accentBlue + '20', 'transparent']}
           style={styles.glowGradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
@@ -120,93 +97,64 @@ export default function SplashScreen() {
       </Animated.View>
 
       {/* Main Content */}
-      <View style={styles.content}>
-        {/* Logo Section */}
-        <Animated.View style={[styles.logoSection, logoAnimatedStyle]}>
-          <View style={styles.logoContainer}>
-            <Image
-              source={{ uri: LOGO_URL }}
-              style={styles.logoImage}
-              resizeMode="contain"
-            />
-          </View>
+      <View style={styles.mainContent}>
+        {/* Logo */}
+        <Animated.View style={[styles.logoContainer, logoStyle]}>
+          <Image
+            source={{ uri: LOGO_URL }}
+            style={styles.logo}
+            resizeMode="contain"
+          />
         </Animated.View>
 
         {/* Tagline */}
-        <Animated.View style={[styles.taglineSection, sloganAnimatedStyle]}>
+        <Animated.View style={[styles.taglineContainer, contentStyle]}>
           <View style={styles.taglineBadge}>
-            <View style={[styles.taglineDot, { backgroundColor: COLORS.accentGreen }]} />
+            <View style={[styles.dot, { backgroundColor: COLORS.accentGreen }]} />
             <Text style={styles.taglineText}>RIDE SMART. RIDE SAFE.</Text>
-            <View style={[styles.taglineDot, { backgroundColor: COLORS.accentBlue }]} />
+            <View style={[styles.dot, { backgroundColor: COLORS.accentBlue }]} />
           </View>
-          <Text style={styles.subtitleText}>Nigeria's Smartest Ride Platform</Text>
+          <Text style={styles.subtitle}>Nigeria's Smartest Ride Platform</Text>
         </Animated.View>
 
-        {/* Features */}
-        <Animated.View style={[styles.featuresSection, featuresAnimatedStyle]}>
-          <View style={styles.featureRow}>
-            <FeatureBadge 
-              icon="●" 
-              text="Zero Commission" 
-              color={COLORS.accentGreen}
-            />
-            <View style={styles.featureDivider} />
-            <FeatureBadge 
-              icon="●" 
-              text="100% Earnings" 
-              color={COLORS.accentBlue}
-            />
-            <View style={styles.featureDivider} />
-            <FeatureBadge 
-              icon="●" 
-              text="Premium Safety" 
-              color={COLORS.accentGreenLight}
-            />
-          </View>
+        {/* Features Row */}
+        <Animated.View style={[styles.featuresRow, contentStyle]}>
+          <FeatureItem color={COLORS.accentGreen} text="Zero Commission" />
+          <View style={styles.featureDivider} />
+          <FeatureItem color={COLORS.accentBlue} text="100% Earnings" />
+          <View style={styles.featureDivider} />
+          <FeatureItem color={COLORS.accentGreenLight} text="Premium Safety" />
         </Animated.View>
 
         {/* CTA Button */}
-        <Animated.View style={[styles.buttonSection, buttonAnimatedStyle]}>
-          <TouchableOpacity 
-            style={styles.ctaButton}
-            onPress={handleBeginJourney}
-            activeOpacity={0.9}
-          >
+        <Animated.View style={[styles.buttonContainer, buttonStyle]}>
+          <TouchableOpacity onPress={handleBeginJourney} activeOpacity={0.9}>
             <LinearGradient
               colors={[COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]}
-              style={styles.buttonGradient}
+              style={styles.ctaButton}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
             >
-              <Text style={styles.ctaButtonText}>Begin Your Journey</Text>
-              <View style={styles.arrowContainer}>
-                <Text style={styles.arrowText}>→</Text>
+              <Text style={styles.ctaText}>Begin Your Journey</Text>
+              <View style={styles.arrowCircle}>
+                <Text style={styles.arrow}>→</Text>
               </View>
             </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
+      </View>
 
-        {/* Bottom Text */}
-        <View style={styles.bottomSection}>
-          <Text style={styles.bottomText}>RIDE SMART • RIDE SAFE</Text>
-        </View>
+      {/* Bottom Text */}
+      <View style={styles.bottomContainer}>
+        <Text style={styles.bottomText}>RIDE SMART • RIDE SAFE</Text>
       </View>
     </View>
   );
 }
 
-// Feature badge component
-const FeatureBadge = ({ 
-  icon, 
-  text, 
-  color 
-}: { 
-  icon: string; 
-  text: string; 
-  color: string;
-}) => (
-  <View style={styles.featureBadge}>
-    <Text style={[styles.featureIcon, { color }]}>{icon}</Text>
+const FeatureItem = ({ color, text }: { color: string; text: string }) => (
+  <View style={styles.featureItem}>
+    <View style={[styles.featureDot, { backgroundColor: color }]} />
     <Text style={styles.featureText}>{text}</Text>
   </View>
 );
@@ -216,86 +164,79 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  content: {
+  glowContainer: {
+    position: 'absolute',
+    top: height * 0.1,
+    left: 0,
+    right: 0,
+    height: 300,
+  },
+  glowGradient: {
+    flex: 1,
+    borderRadius: 150,
+  },
+  mainContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: SPACING.lg,
   },
-  logoGlow: {
-    position: 'absolute',
-    top: height * 0.15,
-    left: width * 0.1,
-    right: width * 0.1,
-    height: 300,
-    borderRadius: 150,
-    overflow: 'hidden',
-  },
-  glowGradient: {
-    flex: 1,
-  },
-  logoSection: {
-    alignItems: 'center',
+  logoContainer: {
+    width: width * 0.75,
+    height: 100,
     marginBottom: SPACING.xl,
   },
-  logoContainer: {
-    width: width * 0.7,
-    height: 120,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  logoImage: {
+  logo: {
     width: '100%',
     height: '100%',
   },
-  taglineSection: {
+  taglineContainer: {
     alignItems: 'center',
     marginBottom: SPACING.xxl,
   },
   taglineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderRadius: 30,
+    paddingVertical: SPACING.sm + 2,
+    borderRadius: 25,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.08)',
     marginBottom: SPACING.md,
   },
-  taglineDot: {
+  dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
   },
   taglineText: {
     color: COLORS.white,
-    fontSize: FONT_SIZE.md,
+    fontSize: FONT_SIZE.sm,
     fontWeight: '700',
-    letterSpacing: 3,
+    letterSpacing: 2,
     marginHorizontal: SPACING.md,
   },
-  subtitleText: {
+  subtitle: {
     color: COLORS.textSecondary,
     fontSize: FONT_SIZE.md,
     fontWeight: '400',
   },
-  featuresSection: {
+  featuresRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
     marginBottom: SPACING.xxl,
   },
-  featureRow: {
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    flexWrap: 'wrap',
   },
-  featureBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.sm,
-  },
-  featureIcon: {
-    fontSize: 8,
+  featureDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
     marginRight: SPACING.xs,
   },
   featureText: {
@@ -305,38 +246,34 @@ const styles = StyleSheet.create({
   },
   featureDivider: {
     width: 1,
-    height: 16,
+    height: 14,
     backgroundColor: COLORS.textMuted,
-    marginHorizontal: SPACING.sm,
+    marginHorizontal: SPACING.md,
   },
-  buttonSection: {
+  buttonContainer: {
     width: '100%',
     paddingHorizontal: SPACING.md,
-    marginBottom: SPACING.xl,
   },
   ctaButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.lg,
+    paddingHorizontal: SPACING.xl,
     borderRadius: 30,
-    overflow: 'hidden',
     shadowColor: COLORS.accentGreen,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 12,
   },
-  buttonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.lg,
-    paddingHorizontal: SPACING.xl,
-  },
-  ctaButtonText: {
+  ctaText: {
     color: COLORS.primary,
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     marginRight: SPACING.md,
   },
-  arrowContainer: {
+  arrowCircle: {
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -344,14 +281,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  arrowText: {
+  arrow: {
     color: COLORS.primary,
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
   },
-  bottomSection: {
+  bottomContainer: {
     position: 'absolute',
-    bottom: SPACING.xxl,
+    bottom: SPACING.xxl + 10,
+    left: 0,
+    right: 0,
     alignItems: 'center',
   },
   bottomText: {
