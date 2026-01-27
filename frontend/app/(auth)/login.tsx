@@ -145,13 +145,29 @@ export default function LoginScreen() {
   // Process Google auth with session_id
   const processGoogleAuth = async (sessionId: string) => {
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/google/exchange`, {
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      console.log('Processing Google auth with session:', sessionId.substring(0, 10) + '...');
+      console.log('Backend URL:', backendUrl);
+      
+      const response = await fetch(`${backendUrl}/api/auth/google/exchange`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ session_id: sessionId }),
       });
       
-      const data = await response.json();
+      // Get raw text first to handle non-JSON responses
+      const responseText = await response.text();
+      console.log('Response status:', response.status);
+      console.log('Response text:', responseText.substring(0, 200));
+      
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('Failed to parse response as JSON:', responseText.substring(0, 100));
+        throw new Error('Server returned invalid response. Please try again.');
+      }
       
       if (!response.ok) {
         throw new Error(data.detail || 'Authentication failed');
