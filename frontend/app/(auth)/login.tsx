@@ -183,7 +183,7 @@ export default function LoginScreen() {
   // Process Google auth with session_id
   const processGoogleAuth = async (sessionId: string) => {
     try {
-      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const backendUrl = getBackendUrl();
       console.log('Processing Google auth with session:', sessionId.substring(0, 10) + '...');
       console.log('Backend URL:', backendUrl);
       
