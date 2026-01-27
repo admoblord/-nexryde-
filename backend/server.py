@@ -1114,6 +1114,31 @@ async def register(request: RegisterRequest):
     
     return {"message": "Registration successful", "user": user.dict()}
 
+@api_router.post("/auth/logout")
+async def logout(request: Request, response: Response):
+    """Logout user and clear session"""
+    try:
+        # Get session token from cookie
+        session_token = request.cookies.get("session_token")
+        
+        if session_token:
+            # Delete session from database
+            await db.user_sessions.delete_one({"session_token": session_token})
+        
+        # Clear session cookie
+        response.delete_cookie(
+            key="session_token",
+            path="/",
+            secure=True,
+            httponly=True,
+            samesite="none"
+        )
+        
+        return {"message": "Logout successful"}
+    except Exception as e:
+        logger.error(f"Logout error: {str(e)}")
+        return {"message": "Logout successful"}
+
 # ==================== USER ENDPOINTS ====================
 
 @api_router.get("/users/{user_id}")
