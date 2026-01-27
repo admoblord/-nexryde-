@@ -968,6 +968,8 @@ class SessionDataResponse(BaseModel):
 async def exchange_google_session(request: SessionExchangeRequest, response: Response):
     """Exchange session_id from Emergent Auth for user data and session"""
     try:
+        logger.info(f"Received session_id for exchange: {request.session_id[:20]}..." if len(request.session_id) > 20 else f"Received session_id: {request.session_id}")
+        
         # Call Emergent Auth to get user data
         async with httpx.AsyncClient() as client:
             auth_response = await client.get(
@@ -976,11 +978,14 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
                 timeout=30.0
             )
             
+            logger.info(f"Emergent Auth response status: {auth_response.status_code}")
+            
             if auth_response.status_code != 200:
                 logger.error(f"Emergent Auth error: {auth_response.status_code} - {auth_response.text}")
-                raise HTTPException(status_code=401, detail="Invalid session")
+                raise HTTPException(status_code=401, detail="Invalid session. Please try signing in again.")
             
             user_data = auth_response.json()
+            logger.info(f"Emergent Auth returned user: {user_data.get('email', 'unknown')}")
             session_data = SessionDataResponse(**user_data)
         
         # Check if user exists by email
