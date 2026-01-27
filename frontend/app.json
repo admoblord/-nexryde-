@@ -20,7 +20,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#1A0A0F"
+        "backgroundColor": "#0D1420"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.nexryde.app",
