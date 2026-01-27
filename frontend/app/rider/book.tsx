@@ -81,7 +81,11 @@ export default function BookScreen() {
     }
   };
 
-  const canContinue = stops.every(stop => stop.address.length > 0);
+  const canContinue = stops.filter(s => s.type !== 'stop' || s.address.length > 0)
+    .filter(s => s.type === 'pickup' || s.type === 'dropoff')
+    .every(stop => stop.address.length > 0) && 
+    stops.find(s => s.type === 'pickup')?.address && 
+    stops.find(s => s.type === 'dropoff')?.address;
 
   const handleContinue = () => {
     if (canContinue) {
