@@ -12,9 +12,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { FallingRoses, RosePetalsStatic, RoseGlow, FloatingRoseBloom } from '@/src/components/FallingRoses';
 
 const { width } = Dimensions.get('window');
 
@@ -55,16 +54,13 @@ export default function BookScreen() {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark, COLORS.primary]}
+        colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
       />
       
-      {/* Background rose effects */}
-      <RosePetalsStatic count={10} />
-      <FallingRoses intensity="light" />
-      
-      {/* Decorative glow */}
-      <RoseGlow size={300} style={styles.glowTopRight} />
+      {/* Decorative Glows */}
+      <View style={[styles.glow, { top: 80, right: 30, backgroundColor: COLORS.accentGreen }]} />
+      <View style={[styles.glow, { bottom: 200, left: 20, backgroundColor: COLORS.accentBlue, width: 60, height: 60 }]} />
       
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
@@ -135,15 +131,14 @@ export default function BookScreen() {
                   <Text style={styles.suggestionTitle}>Current Location</Text>
                   <Text style={styles.suggestionSubtitle}>Use GPS location</Text>
                 </View>
-                <View style={styles.suggestionRose} />
               </TouchableOpacity>
 
               <TouchableOpacity 
                 style={styles.suggestionCard}
                 onPress={() => setPickup('Home - Victoria Island')}
               >
-                <View style={[styles.suggestionIcon, { backgroundColor: COLORS.accentSoft }]}>
-                  <Ionicons name="home" size={20} color={COLORS.accent} />
+                <View style={[styles.suggestionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+                  <Ionicons name="home" size={20} color={COLORS.accentBlue} />
                 </View>
                 <View style={styles.suggestionContent}>
                   <Text style={styles.suggestionTitle}>Home</Text>
@@ -155,8 +150,8 @@ export default function BookScreen() {
                 style={styles.suggestionCard}
                 onPress={() => setPickup('Work - Lekki Phase 1')}
               >
-                <View style={[styles.suggestionIcon, { backgroundColor: COLORS.infoSoft }]}>
-                  <Ionicons name="briefcase" size={20} color={COLORS.info} />
+                <View style={[styles.suggestionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+                  <Ionicons name="briefcase" size={20} color={COLORS.accentGreen} />
                 </View>
                 <View style={styles.suggestionContent}>
                   <Text style={styles.suggestionTitle}>Work</Text>
@@ -198,8 +193,8 @@ export default function BookScreen() {
                   style={styles.suggestionCard}
                   onPress={() => setDestination(place)}
                 >
-                  <View style={[styles.suggestionIcon, { backgroundColor: `${COLORS.rosePetal2}20` }]}>
-                    <Ionicons name="time" size={20} color={COLORS.rosePetal2} />
+                  <View style={[styles.suggestionIcon, { backgroundColor: COLORS.infoSoft }]}>
+                    <Ionicons name="time" size={20} color={COLORS.info} />
                   </View>
                   <View style={styles.suggestionContent}>
                     <Text style={styles.suggestionTitle}>{place}</Text>
@@ -247,7 +242,7 @@ export default function BookScreen() {
                   onPress={() => setSelectedService('economy')}
                 >
                   <View style={styles.serviceIconWrap}>
-                    <Ionicons name="car" size={28} color={selectedService === 'economy' ? COLORS.accent : COLORS.textMuted} />
+                    <Ionicons name="car" size={28} color={selectedService === 'economy' ? COLORS.accentGreen : COLORS.textMuted} />
                   </View>
                   <Text style={[styles.serviceName, selectedService === 'economy' && styles.serviceNameActive]}>Economy</Text>
                   <Text style={styles.servicePrice}>{CURRENCY}2,320</Text>
@@ -319,16 +314,16 @@ export default function BookScreen() {
             activeOpacity={0.9}
           >
             <LinearGradient
-              colors={[COLORS.accent, COLORS.accentDark]}
+              colors={[COLORS.accentGreenLight, COLORS.accentGreen, COLORS.accentBlue]}
               style={styles.actionGradient}
               start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
+              end={{ x: 1, y: 0 }}
             >
               <Text style={styles.actionText}>
                 {step === 1 ? 'Confirm Pickup' : step === 2 ? 'Confirm Destination' : 'Book Ride'}
               </Text>
               <View style={styles.actionArrow}>
-                <Ionicons name="arrow-forward" size={20} color={COLORS.accent} />
+                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
               </View>
             </LinearGradient>
           </TouchableOpacity>
@@ -341,12 +336,14 @@ export default function BookScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.background,
   },
-  glowTopRight: {
+  glow: {
     position: 'absolute',
-    top: -100,
-    right: -100,
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    opacity: 0.12,
   },
   safeArea: {
     flex: 1,
@@ -388,11 +385,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: COLORS.gray700,
+    borderColor: COLORS.surfaceLight,
   },
   stepDotActive: {
-    backgroundColor: COLORS.accent,
-    borderColor: COLORS.accent,
+    backgroundColor: COLORS.accentGreen,
+    borderColor: COLORS.accentGreen,
   },
   stepNumber: {
     fontSize: FONT_SIZE.sm,
@@ -405,11 +402,11 @@ const styles = StyleSheet.create({
   stepLine: {
     width: 40,
     height: 2,
-    backgroundColor: COLORS.gray700,
+    backgroundColor: COLORS.surfaceLight,
     marginHorizontal: SPACING.xs,
   },
   stepLineActive: {
-    backgroundColor: COLORS.accent,
+    backgroundColor: COLORS.accentGreen,
   },
   content: {
     flexGrow: 1,
@@ -422,10 +419,12 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
-    ...SHADOWS.md,
   },
   inputCardGradient: {
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
   },
   inputLabel: {
     fontSize: FONT_SIZE.sm,
@@ -436,7 +435,7 @@ const styles = StyleSheet.create({
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.gray800,
+    backgroundColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
   },
@@ -450,13 +449,13 @@ const styles = StyleSheet.create({
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.success,
+    backgroundColor: COLORS.accentGreen,
   },
   destDot: {
     width: 12,
     height: 12,
     borderRadius: 3,
-    backgroundColor: COLORS.rosePetal3,
+    backgroundColor: COLORS.accentBlue,
   },
   input: {
     flex: 1,
@@ -479,7 +478,7 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     marginBottom: SPACING.sm,
     borderWidth: 1,
-    borderColor: COLORS.gray800,
+    borderColor: COLORS.surfaceLight,
   },
   suggestionIcon: {
     width: 44,
@@ -501,25 +500,16 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.sm,
     color: COLORS.textMuted,
   },
-  suggestionRose: {
-    width: 10,
-    height: 12,
-    backgroundColor: COLORS.rosePetal3,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 10,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 10,
-    transform: [{ rotate: '-45deg' }],
-    opacity: 0.6,
-  },
   routeCard: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.xl,
-    ...SHADOWS.md,
   },
   routeGradient: {
     padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.xl,
   },
   routePoint: {
     flexDirection: 'row',
@@ -540,13 +530,13 @@ const styles = StyleSheet.create({
   routeLine: {
     width: 2,
     height: 30,
-    backgroundColor: COLORS.gray700,
+    backgroundColor: COLORS.surfaceLight,
     marginLeft: 5,
     marginVertical: SPACING.xs,
   },
   routeLineInner: {
     flex: 1,
-    backgroundColor: COLORS.accent,
+    backgroundColor: COLORS.accentGreen,
     opacity: 0.5,
   },
   sectionTitle: {
@@ -567,11 +557,11 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: COLORS.gray700,
+    borderColor: COLORS.surfaceLight,
   },
   serviceOptionActive: {
-    borderColor: COLORS.accent,
-    backgroundColor: COLORS.accentSoft,
+    borderColor: COLORS.accentGreen,
+    backgroundColor: COLORS.accentGreenSoft,
   },
   premiumBadge: {
     position: 'absolute',
@@ -590,7 +580,7 @@ const styles = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 30,
-    backgroundColor: COLORS.gray800,
+    backgroundColor: COLORS.surfaceLight,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,
@@ -606,7 +596,7 @@ const styles = StyleSheet.create({
   servicePrice: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '800',
-    color: COLORS.accent,
+    color: COLORS.accentGreen,
     marginTop: SPACING.xs,
   },
   serviceTime: {
@@ -628,10 +618,10 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     gap: SPACING.sm,
     borderWidth: 2,
-    borderColor: COLORS.gray700,
+    borderColor: COLORS.surfaceLight,
   },
   paymentOptionActive: {
-    borderColor: COLORS.accent,
+    borderColor: COLORS.accentGreen,
   },
   paymentText: {
     fontSize: FONT_SIZE.md,
@@ -646,7 +636,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.gray700,
+    borderColor: COLORS.surfaceLight,
   },
   fareRow: {
     flexDirection: 'row',
@@ -660,11 +650,11 @@ const styles = StyleSheet.create({
   fareValue: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.accent,
+    color: COLORS.accentGreen,
   },
   fareDivider: {
     height: 1,
-    backgroundColor: COLORS.gray700,
+    backgroundColor: COLORS.surfaceLight,
     marginVertical: SPACING.md,
   },
   fareFeatures: {
@@ -687,7 +677,11 @@ const styles = StyleSheet.create({
   actionButton: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
-    ...SHADOWS.rose,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   actionGradient: {
     flexDirection: 'row',
@@ -705,7 +699,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.primary,
+    backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
