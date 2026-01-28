@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
 """
-NEXRYDE Backend Authentication API Testing Script
-Tests SMS OTP flow, Google OAuth, and Logout functionality
+NEXRYDE Backend API Testing Script
+Tests SMS OTP flow, Google OAuth, Logout functionality, and Driver Subscription APIs
 """
 
 import requests
 import json
 import uuid
 import time
+import base64
 from datetime import datetime
 
 # API Base URL from frontend .env
 BASE_URL = "https://nexryde-map.preview.emergentagent.com/api"
+
+# Test data for subscription tests
+TEST_DRIVER_ID = "test-driver-123"
+TEST_PAYMENT_SCREENSHOT = base64.b64encode(b"fake_screenshot_data").decode('utf-8')
 
 def log_test(test_name, status, details=""):
     """Log test results with timestamp"""
