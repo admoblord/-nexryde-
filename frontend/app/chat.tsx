@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   FlatList,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -18,10 +19,13 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 interface Message {
   id: string;
   text: string;
-  sender: 'user' | 'driver';
+  sender: 'user' | 'driver' | 'ai';
   timestamp: Date;
   isRead: boolean;
+  isLoading?: boolean;
 }
+
+type ChatTab = 'driver' | 'ai';
 
 export default function ChatScreen() {
   const router = useRouter();
@@ -29,8 +33,12 @@ export default function ChatScreen() {
   const driverName = params.driverName as string || 'Driver';
   const flatListRef = useRef<FlatList>(null);
   
+  const [activeTab, setActiveTab] = useState<ChatTab>('ai');
   const [message, setMessage] = useState('');
-  const [messages, setMessages] = useState<Message[]>([
+  const [isAiTyping, setIsAiTyping] = useState(false);
+  
+  // Driver messages
+  const [driverMessages, setDriverMessages] = useState<Message[]>([
     {
       id: '1',
       text: "Hello! I'm on my way to pick you up.",
@@ -53,18 +61,74 @@ export default function ChatScreen() {
       isRead: true,
     },
   ]);
+  
+  // AI messages
+  const [aiMessages, setAiMessages] = useState<Message[]>([
+    {
+      id: 'ai-welcome',
+      text: "👋 Hi! I'm your NEXRYDE AI Assistant. I can help you with:\n\n• Trip information & fare estimates\n• Safety tips & emergency help\n• Account & payment questions\n• Finding nearby places\n\nHow can I assist you today?",
+      sender: 'ai',
+      timestamp: new Date(),
+      isRead: true,
+    },
+  ]);
 
-  const quickReplies = [
-    "I'm here",
-    "On my way",
-    "Running late",
-    "Can you wait?",
-  ];
+  const quickReplies = activeTab === 'driver' 
+    ? ["I'm here", "On my way", "Running late", "Can you wait?"]
+    : ["Estimate fare", "Safety tips", "Report issue", "Help"];
 
-  const sendMessage = () => {
+  const messages = activeTab === 'driver' ? driverMessages : aiMessages;
+  const setMessages = activeTab === 'driver' ? setDriverMessages : setAiMessages;
+
+  // AI Response function
+  const getAIResponse = async (userMessage: string): Promise<string> => {
+    const lowerMsg = userMessage.toLowerCase();
+    
+    // Simulated AI responses based on keywords
+    if (lowerMsg.includes('fare') || lowerMsg.includes('price') || lowerMsg.includes('cost')) {
+      return "💰 **Fare Estimates**\n\nNEXRYDE fares are calculated based on:\n• Base fare: ₦500\n• Per kilometer: ₦100-150\n• Time-based rate: ₦20/min\n\nFor an exact estimate, enter your pickup and dropoff locations in the booking screen. Premium rides may have different rates.";
+    }
+    
+    if (lowerMsg.includes('safety') || lowerMsg.includes('safe') || lowerMsg.includes('emergency')) {
+      return "🛡️ **Safety Features**\n\n• **Share Trip**: Send your live location to contacts\n• **Emergency SOS**: Quick access to emergency services\n• **Driver Verification**: All drivers are verified\n• **Trip Recording**: Audio recording available\n\nFor emergencies, use the SOS button in your trip screen or call 112/199.";
+    }
+    
+    if (lowerMsg.includes('report') || lowerMsg.includes('issue') || lowerMsg.includes('problem')) {
+      return "📝 **Report an Issue**\n\nI can help you report:\n1. Driver behavior concerns\n2. Vehicle issues\n3. Payment problems\n4. Lost items\n5. Route concerns\n\nPlease describe your issue and I'll guide you through the reporting process.";
+    }
+    
+    if (lowerMsg.includes('payment') || lowerMsg.includes('pay') || lowerMsg.includes('wallet')) {
+      return "💳 **Payment Options**\n\nNEXRYDE supports:\n• Cash payment\n• Card payment (Visa, Mastercard)\n• Wallet balance\n• Bank transfer\n\nTo add a payment method, go to Profile > Wallet. Need help with a specific payment issue?";
+    }
+    
+    if (lowerMsg.includes('cancel')) {
+      return "❌ **Cancellation Policy**\n\n• Free cancellation within 2 minutes of booking\n• After driver accepts: ₦200-500 fee may apply\n• No fee if driver takes too long\n\nTo cancel a trip, tap the X button on your active trip screen.";
+    }
+    
+    if (lowerMsg.includes('driver') || lowerMsg.includes('rating')) {
+      return "⭐ **Driver Information**\n\nAll NEXRYDE drivers:\n• Complete background verification\n• Have valid licenses & permits\n• Maintain 4.5+ star ratings\n• Receive regular training\n\nYou can rate your driver after each trip to help maintain quality.";
+    }
+    
+    if (lowerMsg.includes('hello') || lowerMsg.includes('hi') || lowerMsg.includes('hey')) {
+      return "Hello! 👋 I'm here to help. What would you like to know about NEXRYDE?";
+    }
+    
+    if (lowerMsg.includes('thank')) {
+      return "You're welcome! 😊 Is there anything else I can help you with?";
+    }
+    
+    if (lowerMsg.includes('help')) {
+      return "🆘 **How can I help?**\n\nI can assist with:\n• 💰 Fare estimates\n• 🛡️ Safety information\n• 💳 Payment questions\n• 📍 Trip assistance\n• 📝 Reporting issues\n• ❓ General questions\n\nJust type your question!";
+    }
+    
+    // Default response
+    return "I understand you're asking about: \"" + userMessage + "\"\n\nLet me help you with that. Could you please provide more details about what specific information you need? You can also try asking about:\n• Fares & pricing\n• Safety features\n• Payment options\n• Reporting issues";
+  };
+
+  const sendMessage = async () => {
     if (!message.trim()) return;
     
-    const newMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       text: message.trim(),
       sender: 'user',
@@ -72,29 +136,50 @@ export default function ChatScreen() {
       isRead: false,
     };
     
-    setMessages([...messages, newMessage]);
+    if (activeTab === 'driver') {
+      setDriverMessages(prev => [...prev, userMessage]);
+    } else {
+      setAiMessages(prev => [...prev, userMessage]);
+      
+      // Show AI typing indicator
+      setIsAiTyping(true);
+      
+      // Get AI response after a short delay
+      const userText = message.trim();
+      setMessage('');
+      
+      setTimeout(async () => {
+        const aiResponse = await getAIResponse(userText);
+        
+        const aiMessage: Message = {
+          id: `ai-${Date.now()}`,
+          text: aiResponse,
+          sender: 'ai',
+          timestamp: new Date(),
+          isRead: true,
+        };
+        
+        setAiMessages(prev => [...prev, aiMessage]);
+        setIsAiTyping(false);
+        
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }, 1000 + Math.random() * 1000); // Random delay for natural feel
+      
+      return;
+    }
+    
     setMessage('');
     
-    // Auto scroll to bottom
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
   };
 
   const sendQuickReply = (text: string) => {
-    const newMessage: Message = {
-      id: Date.now().toString(),
-      text,
-      sender: 'user',
-      timestamp: new Date(),
-      isRead: false,
-    };
-    
-    setMessages([...messages, newMessage]);
-    
-    setTimeout(() => {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }, 100);
+    setMessage(text);
+    setTimeout(() => sendMessage(), 100);
   };
 
   const formatTime = (date: Date) => {
@@ -107,20 +192,25 @@ export default function ChatScreen() {
 
   const renderMessage = ({ item }: { item: Message }) => {
     const isUser = item.sender === 'user';
+    const isAI = item.sender === 'ai';
     
     return (
       <View style={[
         styles.messageContainer,
-        isUser ? styles.userMessageContainer : styles.driverMessageContainer
+        isUser ? styles.userMessageContainer : styles.otherMessageContainer
       ]}>
         {!isUser && (
-          <View style={styles.driverAvatar}>
-            <Ionicons name="person" size={16} color={COLORS.white} />
+          <View style={[styles.avatar, isAI ? styles.aiAvatar : styles.driverAvatar]}>
+            <Ionicons 
+              name={isAI ? "sparkles" : "person"} 
+              size={16} 
+              color="#FFFFFF" 
+            />
           </View>
         )}
         <View style={[
           styles.messageBubble,
-          isUser ? styles.userBubble : styles.driverBubble
+          isUser ? styles.userBubble : (isAI ? styles.aiBubble : styles.driverBubble)
         ]}>
           <Text style={[
             styles.messageText,
@@ -133,14 +223,15 @@ export default function ChatScreen() {
             isUser && styles.userMessageTime
           ]}>
             {formatTime(item.timestamp)}
-            {isUser && item.isRead && (
-              <Ionicons name="checkmark-done" size={14} color={COLORS.white} style={{ marginLeft: 4 }} />
-            )}
           </Text>
         </View>
       </View>
     );
   };
+
+  useEffect(() => {
+    flatListRef.current?.scrollToEnd({ animated: false });
+  }, [activeTab]);
 
   return (
     <View style={styles.container}>
@@ -151,29 +242,54 @@ export default function ChatScreen() {
             style={styles.backButton}
             onPress={() => router.back()}
           >
-            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            <Ionicons name="arrow-back" size={24} color="#111827" />
           </TouchableOpacity>
           
-          <View style={styles.headerInfo}>
-            <View style={styles.headerAvatar}>
-              <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
-                style={styles.avatarGradient}
-              >
-                <Ionicons name="person" size={20} color={COLORS.white} />
-              </LinearGradient>
-              <View style={styles.onlineDot} />
-            </View>
-            <View>
-              <Text style={styles.headerName}>{driverName}</Text>
-              <Text style={styles.headerStatus}>Online • Your Driver</Text>
-            </View>
-          </View>
+          <Text style={styles.headerTitle}>Messages</Text>
           
-          <TouchableOpacity style={styles.callButton}>
-            <Ionicons name="call" size={22} color={COLORS.accentGreen} />
+          <View style={{ width: 40 }} />
+        </View>
+
+        {/* Tab Switcher */}
+        <View style={styles.tabContainer}>
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'ai' && styles.activeTab]}
+            onPress={() => setActiveTab('ai')}
+          >
+            <Ionicons 
+              name="sparkles" 
+              size={18} 
+              color={activeTab === 'ai' ? '#FFFFFF' : '#6B7280'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'ai' && styles.activeTabText]}>
+              AI Assistant
+            </Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity 
+            style={[styles.tab, activeTab === 'driver' && styles.activeTab]}
+            onPress={() => setActiveTab('driver')}
+          >
+            <Ionicons 
+              name="car" 
+              size={18} 
+              color={activeTab === 'driver' ? '#FFFFFF' : '#6B7280'} 
+            />
+            <Text style={[styles.tabText, activeTab === 'driver' && styles.activeTabText]}>
+              Driver Chat
+            </Text>
           </TouchableOpacity>
         </View>
+
+        {/* Chat Info Banner */}
+        {activeTab === 'ai' && (
+          <View style={styles.infoBanner}>
+            <Ionicons name="information-circle" size={18} color="#3B82F6" />
+            <Text style={styles.infoBannerText}>
+              AI Assistant is here to help 24/7
+            </Text>
+          </View>
+        )}
 
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -189,6 +305,16 @@ export default function ChatScreen() {
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
           />
+
+          {/* AI Typing Indicator */}
+          {isAiTyping && (
+            <View style={styles.typingContainer}>
+              <View style={styles.typingBubble}>
+                <ActivityIndicator size="small" color="#8B5CF6" />
+                <Text style={styles.typingText}>AI is typing...</Text>
+              </View>
+            </View>
+          )}
 
           {/* Quick Replies */}
           <View style={styles.quickRepliesContainer}>
@@ -214,22 +340,26 @@ export default function ChatScreen() {
             <View style={styles.inputWrapper}>
               <TextInput
                 style={styles.textInput}
-                placeholder="Type a message..."
-                placeholderTextColor={COLORS.lightTextMuted}
+                placeholder={activeTab === 'ai' ? "Ask AI anything..." : "Type a message..."}
+                placeholderTextColor="#9CA3AF"
                 value={message}
                 onChangeText={setMessage}
                 multiline
                 maxLength={500}
               />
               <TouchableOpacity 
-                style={[styles.sendButton, message.trim() && styles.sendButtonActive]}
+                style={[
+                  styles.sendButton, 
+                  message.trim() && styles.sendButtonActive,
+                  activeTab === 'ai' && message.trim() && styles.sendButtonAI
+                ]}
                 onPress={sendMessage}
-                disabled={!message.trim()}
+                disabled={!message.trim() || isAiTyping}
               >
                 <Ionicons 
                   name="send" 
                   size={20} 
-                  color={message.trim() ? COLORS.white : COLORS.lightTextMuted} 
+                  color={message.trim() ? '#FFFFFF' : '#9CA3AF'} 
                 />
               </TouchableOpacity>
             </View>
@@ -243,7 +373,7 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#F9FAFB',
   },
   safeArea: {
     flex: 1,
@@ -251,181 +381,215 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    borderBottomColor: '#E5E7EB',
   },
   backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.lightSurface,
+    backgroundColor: '#F3F4F6',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerInfo: {
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  tabContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    gap: 8,
+  },
+  tab: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginLeft: SPACING.sm,
-  },
-  headerAvatar: {
-    position: 'relative',
-    marginRight: SPACING.sm,
-  },
-  avatarGradient: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+    gap: 6,
   },
-  onlineDot: {
-    position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 14,
-    height: 14,
-    borderRadius: 7,
-    backgroundColor: COLORS.accentGreen,
-    borderWidth: 2,
-    borderColor: COLORS.white,
+  activeTab: {
+    backgroundColor: '#8B5CF6',
   },
-  headerName: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+  tabText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#6B7280',
   },
-  headerStatus: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.accentGreen,
+  activeTabText: {
+    color: '#FFFFFF',
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  infoBannerText: {
+    fontSize: 13,
+    color: '#1D4ED8',
     fontWeight: '500',
-  },
-  callButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.accentGreenSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   keyboardView: {
     flex: 1,
   },
   messagesList: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   messageContainer: {
     flexDirection: 'row',
-    marginBottom: SPACING.md,
+    marginBottom: 12,
     alignItems: 'flex-end',
   },
   userMessageContainer: {
     justifyContent: 'flex-end',
   },
-  driverMessageContainer: {
+  otherMessageContainer: {
     justifyContent: 'flex-start',
   },
-  driverAvatar: {
+  avatar: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: COLORS.accentGreen,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.xs,
+    marginRight: 8,
+  },
+  driverAvatar: {
+    backgroundColor: '#22C55E',
+  },
+  aiAvatar: {
+    backgroundColor: '#8B5CF6',
   },
   messageBubble: {
-    maxWidth: '75%',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.xl,
+    maxWidth: '78%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
   },
   userBubble: {
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: '#22C55E',
     borderBottomRightRadius: 4,
   },
   driverBubble: {
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FFFFFF',
     borderBottomLeftRadius: 4,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: '#E5E7EB',
+  },
+  aiBubble: {
+    backgroundColor: '#FFFFFF',
+    borderBottomLeftRadius: 4,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
   },
   messageText: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    fontSize: 15,
+    color: '#111827',
     lineHeight: 22,
   },
   userMessageText: {
-    color: COLORS.white,
+    color: '#FFFFFF',
   },
   messageTime: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    fontSize: 11,
+    color: '#9CA3AF',
     marginTop: 4,
     alignSelf: 'flex-end',
   },
   userMessageTime: {
     color: 'rgba(255,255,255,0.7)',
   },
-  quickRepliesContainer: {
-    backgroundColor: COLORS.white,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
-    paddingVertical: SPACING.sm,
+  typingContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 8,
   },
-  quickRepliesList: {
-    paddingHorizontal: SPACING.md,
+  typingBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F3E8FF',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 18,
+    alignSelf: 'flex-start',
+    gap: 8,
   },
-  quickReplyButton: {
-    backgroundColor: COLORS.lightSurface,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    marginRight: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  quickReplyText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextPrimary,
+  typingText: {
+    fontSize: 13,
+    color: '#7C3AED',
     fontWeight: '500',
   },
-  inputContainer: {
-    backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
+  quickRepliesContainer: {
+    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
+    borderTopColor: '#E5E7EB',
+    paddingVertical: 10,
+  },
+  quickRepliesList: {
+    paddingHorizontal: 16,
+  },
+  quickReplyButton: {
+    backgroundColor: '#F3F4F6',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  quickReplyText: {
+    fontSize: 13,
+    color: '#374151',
+    fontWeight: '600',
+  },
+  inputContainer: {
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
   },
   inputWrapper: {
     flexDirection: 'row',
     alignItems: 'flex-end',
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingLeft: SPACING.md,
+    backgroundColor: '#F3F4F6',
+    borderRadius: 24,
+    paddingLeft: 16,
     paddingRight: 4,
     paddingVertical: 4,
   },
   textInput: {
     flex: 1,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    fontSize: 15,
+    color: '#111827',
     maxHeight: 100,
-    paddingVertical: SPACING.sm,
+    paddingVertical: 10,
   },
   sendButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.lightBorder,
+    backgroundColor: '#D1D5DB',
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonActive: {
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: '#22C55E',
+  },
+  sendButtonAI: {
+    backgroundColor: '#8B5CF6',
   },
 });
