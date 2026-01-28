@@ -791,6 +791,12 @@ def calculate_behavior_score_change(event_type: str) -> float:
 
 # ==================== AUTH ENDPOINTS ====================
 
+# OTP Configuration
+OTP_EXPIRY_MINUTES = 10
+OTP_MAX_ATTEMPTS = 3
+OTP_RESEND_COOLDOWN_SECONDS = 60
+OTP_MAX_DAILY_REQUESTS = 10
+
 def normalize_phone(phone: str) -> str:
     """Normalize Nigerian phone number to international format with + prefix"""
     import re
@@ -801,160 +807,322 @@ def normalize_phone(phone: str) -> str:
         cleaned = '+' + cleaned
     return cleaned
 
+async def get_otp_record(phone: str):
+    """Get OTP record from database"""
+    return await db.otp_records.find_one({"phone": phone})
+
+async def save_otp_record(phone: str, otp: str, provider: str, message_id: str = None):
+    """Save OTP record to database with expiry"""
+    now = datetime.utcnow()
+    expiry = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    
+    # Check for existing record
+    existing = await db.otp_records.find_one({"phone": phone})
+    
+    if existing:
+        # Update existing record
+        await db.otp_records.update_one(
+            {"phone": phone},
+            {
+                "$set": {
+                    "otp": otp,
+                    "provider": provider,
+                    "message_id": message_id,
+                    "expires_at": expiry,
+                    "attempts": 0,
+                    "last_sent_at": now,
+                    "updated_at": now
+                },
+                "$inc": {"daily_requests": 1}
+            }
+        )
+    else:
+        # Create new record
+        await db.otp_records.insert_one({
+            "phone": phone,
+            "otp": otp,
+            "provider": provider,
+            "message_id": message_id,
+            "expires_at": expiry,
+            "attempts": 0,
+            "daily_requests": 1,
+            "last_sent_at": now,
+            "created_at": now,
+            "updated_at": now,
+            "daily_reset_at": now + timedelta(days=1)
+        })
+
+async def check_resend_cooldown(phone: str) -> dict:
+    """Check if user can request new OTP (cooldown check)"""
+    record = await db.otp_records.find_one({"phone": phone})
+    
+    if not record:
+        return {"can_resend": True, "wait_seconds": 0}
+    
+    now = datetime.utcnow()
+    last_sent = record.get("last_sent_at")
+    
+    if last_sent:
+        elapsed = (now - last_sent).total_seconds()
+        if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+            wait_time = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
+            return {"can_resend": False, "wait_seconds": wait_time}
+    
+    # Check daily limit
+    daily_reset = record.get("daily_reset_at")
+    if daily_reset and now > daily_reset:
+        # Reset daily counter
+        await db.otp_records.update_one(
+            {"phone": phone},
+            {"$set": {"daily_requests": 0, "daily_reset_at": now + timedelta(days=1)}}
+        )
+    elif record.get("daily_requests", 0) >= OTP_MAX_DAILY_REQUESTS:
+        return {"can_resend": False, "wait_seconds": -1, "error": "Daily limit reached. Try again tomorrow."}
+    
+    return {"can_resend": True, "wait_seconds": 0}
+
+async def increment_otp_attempts(phone: str) -> int:
+    """Increment OTP verification attempts and return new count"""
+    result = await db.otp_records.find_one_and_update(
+        {"phone": phone},
+        {"$inc": {"attempts": 1}},
+        return_document=True
+    )
+    return result.get("attempts", 0) if result else 0
+
+async def delete_otp_record(phone: str):
+    """Delete OTP record after successful verification"""
+    await db.otp_records.delete_one({"phone": phone})
+
 @api_router.post("/auth/send-otp")
 async def send_otp(request: OTPRequest):
     """Send OTP via Termii SMS or fallback to mock mode"""
     try:
         normalized_phone = normalize_phone(request.phone)
         
-        # Generate OTP first
+        # Check resend cooldown
+        cooldown_check = await check_resend_cooldown(request.phone)
+        if not cooldown_check["can_resend"]:
+            if cooldown_check.get("error"):
+                raise HTTPException(status_code=429, detail=cooldown_check["error"])
+            raise HTTPException(
+                status_code=429, 
+                detail=f"Please wait {cooldown_check['wait_seconds']} seconds before requesting a new code."
+            )
+        
+        # Generate OTP
         otp_code = generate_otp()
         
-        # Check if Termii is configured
+        # Check if Termii is configured and try to send
         if TERMII_API_KEY:
-            # Use Termii DND route with sender ID "OE Alert" (active sender)
-            async with httpx.AsyncClient() as client:
-                payload = {
-                    "api_key": TERMII_API_KEY,
-                    "to": normalized_phone,
-                    "from": "OE Alert",
-                    "channel": "dnd",
-                    "type": "plain",
-                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in 10 minutes."
-                }
-                
-                logger.info(f"Sending OTP to {normalized_phone} via Termii v3 API (from: OE Alert)")
-                
-                response = await client.post(
-                    f"{TERMII_BASE_URL}/api/sms/send",
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                logger.info(f"Termii response status: {response.status_code}")
-                logger.info(f"Termii response: {response.text}")
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    message_id = data.get('message_id')
-                    
-                    # Store OTP for verification
-                    otp_store[request.phone] = {
-                        "otp": otp_code,
-                        "message_id": message_id,
-                        "normalized_phone": normalized_phone,
-                        "expires": datetime.utcnow() + timedelta(minutes=10),
-                        "provider": "termii"
+            try:
+                async with httpx.AsyncClient() as http_client:
+                    payload = {
+                        "api_key": TERMII_API_KEY,
+                        "to": normalized_phone,
+                        "from": "OE Alert",
+                        "channel": "dnd",
+                        "type": "plain",
+                        "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
                     }
                     
-                    logger.info(f"Termii SMS sent successfully to {normalized_phone}, message_id: {message_id}")
-                    return {
-                        "message": "OTP sent successfully via SMS",
-                        "expires_in_minutes": 10,
-                        "provider": "termii"
-                    }
-                else:
-                    logger.error(f"Termii API error: {response.status_code} - {response.text}")
-                    raise Exception(f"Termii API failed: {response.text}")
+                    logger.info(f"Sending OTP to {normalized_phone} via Termii v3 API")
+                    
+                    response = await http_client.post(
+                        f"{TERMII_BASE_URL}/api/sms/send",
+                        json=payload,
+                        timeout=30.0
+                    )
+                    
+                    logger.info(f"Termii response status: {response.status_code}")
+                    logger.info(f"Termii response: {response.text}")
+                    
+                    if response.status_code == 200:
+                        data = response.json()
+                        message_id = data.get('message_id')
+                        
+                        # Save OTP to database
+                        await save_otp_record(
+                            phone=request.phone,
+                            otp=otp_code,
+                            provider="termii",
+                            message_id=message_id
+                        )
+                        
+                        logger.info(f"Termii SMS sent successfully to {normalized_phone}")
+                        return {
+                            "message": "OTP sent successfully via SMS",
+                            "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                            "provider": "termii"
+                        }
+                    else:
+                        logger.error(f"Termii API error: {response.status_code} - {response.text}")
+                        raise Exception(f"Termii API failed: {response.text}")
+            except Exception as e:
+                logger.error(f"Termii error: {str(e)}")
+                # Fall through to mock mode
         
-        # Fallback: Mock OTP (for testing)
-        otp = generate_otp()
+        # Fallback: Mock OTP (for testing/development)
+        await save_otp_record(
+            phone=request.phone,
+            otp=otp_code,
+            provider="mock"
+        )
+        
+        # Also keep in memory for backward compatibility
         otp_store[request.phone] = {
-            "otp": otp,
-            "expires": datetime.utcnow() + timedelta(minutes=10),
-            "provider": "mock"
-        }
-        logger.info(f"Mock OTP for {request.phone}: {otp}")
-        return {
-            "message": "OTP sent successfully",
-            "otp": otp,  # Only shown in mock mode for testing
-            "expires_in_minutes": 10,
+            "otp": otp_code,
+            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
         
+        logger.info(f"Mock OTP for {request.phone}: {otp_code}")
+        return {
+            "message": "OTP sent successfully (test mode)",
+            "otp": otp_code,  # Only shown in mock mode for testing
+            "expires_in_minutes": OTP_EXPIRY_MINUTES,
+            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+            "provider": "mock"
+        }
+        
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error sending OTP: {str(e)}")
         # Final fallback
         otp = generate_otp()
+        await save_otp_record(phone=request.phone, otp=otp, provider="mock")
         otp_store[request.phone] = {
             "otp": otp,
-            "expires": datetime.utcnow() + timedelta(minutes=10),
+            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
         return {
             "message": "OTP sent successfully (test mode)",
             "otp": otp,
-            "expires_in_minutes": 10,
+            "expires_in_minutes": OTP_EXPIRY_MINUTES,
+            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
             "provider": "mock"
         }
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify):
-    """Verify OTP - supports both Termii and mock mode"""
-    stored = otp_store.get(request.phone)
+    """Verify OTP with retry limiting"""
+    # First try database record
+    db_record = await get_otp_record(request.phone)
+    
+    # Fall back to in-memory store if no DB record
+    stored = db_record or otp_store.get(request.phone)
+    
     if not stored:
         raise HTTPException(status_code=400, detail="OTP not found. Please request a new code.")
     
-    if datetime.utcnow() > stored["expires"]:
-        del otp_store[request.phone]
+    # Check expiry
+    expiry = stored.get("expires_at") or stored.get("expires")
+    if expiry and datetime.utcnow() > expiry:
+        await delete_otp_record(request.phone)
+        if request.phone in otp_store:
+            del otp_store[request.phone]
         raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
     
-    # Check provider type
-    if stored.get("provider") == "termii" and stored.get("pin_id"):
-        # Verify with Termii
-        try:
-            async with httpx.AsyncClient() as client:
-                payload = {
-                    "api_key": TERMII_API_KEY,
-                    "pin_id": stored["pin_id"],
-                    "pin": request.otp
-                }
-                
-                response = await client.post(
-                    f"{TERMII_BASE_URL}/api/sms/otp/verify",
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get('verified') == 'True' or data.get('verified') == True:
-                        # OTP verified successfully
-                        del otp_store[request.phone]
-                        
-                        # Check if user exists
-                        user = await db.users.find_one({"phone": request.phone})
-                        if user:
-                            await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
-                            user["is_verified"] = True
-                            user["_id"] = str(user["_id"])
-                            return {"message": "Login successful", "user": user, "is_new_user": False}
-                        
-                        return {"message": "OTP verified", "is_new_user": True}
-                    else:
-                        raise HTTPException(status_code=400, detail="Invalid OTP code. Please try again.")
-                else:
-                    raise HTTPException(status_code=400, detail="Verification failed. Please try again.")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"Termii verification error: {str(e)}")
-            raise HTTPException(status_code=400, detail="Verification failed. Please request a new code.")
-    else:
-        # Mock mode verification
-        if stored.get("otp") != request.otp:
-            raise HTTPException(status_code=400, detail="Invalid OTP code")
-        
-        user = await db.users.find_one({"phone": request.phone})
-        if user:
-            await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
-            user["is_verified"] = True
-            user["_id"] = str(user["_id"])
+    # Check attempt limit
+    current_attempts = stored.get("attempts", 0)
+    if current_attempts >= OTP_MAX_ATTEMPTS:
+        await delete_otp_record(request.phone)
+        if request.phone in otp_store:
             del otp_store[request.phone]
-            return {"message": "Login successful", "user": user, "is_new_user": False}
+        raise HTTPException(
+            status_code=400, 
+            detail="Too many failed attempts. Please request a new code."
+        )
+    
+    # Verify OTP
+    stored_otp = stored.get("otp")
+    if stored_otp != request.otp:
+        # Increment attempts
+        new_attempts = await increment_otp_attempts(request.phone)
+        remaining = OTP_MAX_ATTEMPTS - new_attempts
         
+        if remaining <= 0:
+            await delete_otp_record(request.phone)
+            if request.phone in otp_store:
+                del otp_store[request.phone]
+            raise HTTPException(
+                status_code=400, 
+                detail="Too many failed attempts. Please request a new code."
+            )
+        
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid OTP code. {remaining} attempt(s) remaining."
+        )
+    
+    # OTP verified successfully - clean up
+    await delete_otp_record(request.phone)
+    if request.phone in otp_store:
         del otp_store[request.phone]
-        return {"message": "OTP verified", "is_new_user": True}
+    
+    # Check if user exists
+    user = await db.users.find_one({"phone": request.phone})
+    if user:
+        await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
+        user["is_verified"] = True
+        user["_id"] = str(user["_id"])
+        return {"message": "Login successful", "user": user, "is_new_user": False}
+    
+    return {"message": "OTP verified", "is_new_user": True}
+
+@api_router.get("/auth/otp-status/{phone}")
+async def get_otp_status(phone: str):
+    """Get OTP status for a phone number (resend cooldown, attempts remaining)"""
+    record = await get_otp_record(phone)
+    
+    if not record:
+        return {
+            "has_active_otp": False,
+            "can_resend": True,
+            "wait_seconds": 0,
+            "attempts_remaining": OTP_MAX_ATTEMPTS
+        }
+    
+    now = datetime.utcnow()
+    
+    # Check if expired
+    expiry = record.get("expires_at")
+    if expiry and now > expiry:
+        return {
+            "has_active_otp": False,
+            "can_resend": True,
+            "wait_seconds": 0,
+            "attempts_remaining": OTP_MAX_ATTEMPTS
+        }
+    
+    # Calculate resend cooldown
+    last_sent = record.get("last_sent_at")
+    wait_seconds = 0
+    can_resend = True
+    
+    if last_sent:
+        elapsed = (now - last_sent).total_seconds()
+        if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+            wait_seconds = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
+            can_resend = False
+    
+    # Calculate attempts remaining
+    attempts = record.get("attempts", 0)
+    attempts_remaining = max(0, OTP_MAX_ATTEMPTS - attempts)
+    
+    # Calculate time until expiry
+    seconds_until_expiry = int((expiry - now).total_seconds()) if expiry else 0
+    
+    return {
+        "has_active_otp": True,
+        "can_resend": can_resend,
+        "wait_seconds": wait_seconds,
+        "attempts_remaining": attempts_remaining,
+        "expires_in_seconds": max(0, seconds_until_expiry)
+    }
 
 # Google Sign-In with Emergent Auth
 class SessionExchangeRequest(BaseModel):
