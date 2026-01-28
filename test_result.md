@@ -703,9 +703,9 @@ agent_communication:
 
   - task: "SMS OTP Authentication"
     implemented: true
-    working: true
+    working: false
     file: "server.py"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
@@ -718,6 +718,9 @@ agent_communication:
         - working: true
         - agent: "testing"
         - comment: "✅ RE-TESTED: SMS OTP endpoint working correctly. ⚠️ ISSUE: Termii SMS integration failing with error 'Country Inactive. Contact Administrator to activate country.' Fallback to mock mode working perfectly (OTP: 329801). API returns 200 status with provider: 'mock'. Backend logs show Termii API returning 400 error consistently."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ TERMII INTEGRATION STILL FAILING: Comprehensive testing confirms Termii SMS is NOT working. Backend logs show two different errors: 1) 'Country Inactive. Contact Administrator to activate country.' 2) 'No Route on your account. Kindly contact your account manager.' API returns provider: 'mock' instead of 'termii'. Real SMS not being sent. Fallback to mock mode working correctly but this is NOT the intended functionality. CRITICAL: Termii account configuration issues need to be resolved."
 
   - task: "Google OAuth Authentication"
     implemented: true
