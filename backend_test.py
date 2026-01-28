@@ -645,7 +645,7 @@ def test_fare_estimation_google_maps():
             print(f"Response Data: {json.dumps(data, indent=2)}")
             
             # Verify required fields
-            required_fields = ["distance_km", "duration_min", "fare"]
+            required_fields = ["distance_km", "duration_min", "total_fare"]
             missing_fields = [field for field in required_fields if field not in data]
             
             if missing_fields:
@@ -664,7 +664,7 @@ def test_fare_estimation_google_maps():
                 
                 log_test("Test Case 2", "PASS", 
                         f"Distance: {data['distance_km']}km, Duration: {data['duration_min']}min, "
-                        f"Fare: ₦{data['fare']}, Breakdown: {'Yes' if has_breakdown else 'No'}, "
+                        f"Fare: ₦{data['total_fare']}, Breakdown: {'Yes' if has_breakdown else 'No'}, "
                         f"Google Maps: {'Yes' if google_used else 'Fallback'}")
                 results['test_case_2'] = True
         else:
