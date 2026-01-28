@@ -411,8 +411,8 @@ async def test_ai_chat_apis():
                 data = response.json()
                 
                 # Check if response contains AI response
-                if "response" in data and data["response"]:
-                    ai_response = data["response"]
+                if "message" in data and data["message"]:
+                    ai_response = data["message"]
                     # Check if it's a real AI response (not mocked)
                     if len(ai_response) > 50 and ("fare" in ai_response.lower() or "lekki" in ai_response.lower() or "victoria" in ai_response.lower()):
                         log_test("AI Chat - First Message", "PASS", f"Real GPT-4o response received: {ai_response[:100]}...")
@@ -421,7 +421,7 @@ async def test_ai_chat_apis():
                         log_test("AI Chat - First Message", "FAIL", f"Response seems mocked or irrelevant: {ai_response}")
                         results['ai_chat_first'] = False
                 else:
-                    log_test("AI Chat - First Message", "FAIL", f"No 'response' field in API response")
+                    log_test("AI Chat - First Message", "FAIL", f"No 'message' field in API response")
                     results['ai_chat_first'] = False
             else:
                 log_test("AI Chat - First Message", "FAIL", f"API error {response.status_code}: {response.text}")
