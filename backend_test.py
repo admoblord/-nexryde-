@@ -237,41 +237,154 @@ def log_test(test_name, status, details=""):
         print(f"    Details: {details}")
     print()
 
-def test_sms_otp_flow():
-    """Test SMS OTP authentication flow"""
+def test_termii_sms_otp_specific():
+    """Test Termii SMS OTP functionality specifically"""
     print("=" * 60)
-    print("TESTING SMS OTP AUTHENTICATION FLOW")
+    print("TESTING TERMII SMS OTP FUNCTIONALITY - FOCUSED TEST")
     print("=" * 60)
     
     phone_number = "+2348012345678"
     
-    # Step 1: Send OTP
+    # Step 1: Send OTP and check Termii integration
     try:
-        print(f"Step 1: Sending OTP to {phone_number}")
+        print(f"Step 1: Sending OTP to {phone_number} - Testing Termii Integration")
         response = requests.post(
             f"{BASE_URL}/auth/send-otp",
             json={"phone": phone_number},
             timeout=30
         )
         
+        print(f"Response Status Code: {response.status_code}")
+        print(f"Response Headers: {dict(response.headers)}")
+        
         if response.status_code == 200:
             data = response.json()
-            log_test("Send OTP", "PASS", f"Provider: {data.get('provider')}, Message: {data.get('message')}")
+            print(f"Full Response Data: {json.dumps(data, indent=2)}")
             
-            # Extract OTP (available in mock mode)
-            otp_code = data.get('otp')
-            if not otp_code:
-                log_test("OTP Extraction", "WARN", "OTP not returned (likely using Termii SMS). Using mock OTP for testing.")
-                otp_code = "123456"  # Default mock OTP for testing
+            provider = data.get('provider', 'unknown')
+            message = data.get('message', '')
+            
+            # Check if Termii is working
+            if provider == "termii":
+                log_test("Termii SMS Integration", "PASS", "✅ SMS sent via Termii successfully!")
+                log_test("Provider Check", "PASS", f"Provider: {provider} (NOT mock)")
+                termii_working = True
+            elif provider == "mock":
+                log_test("Termii SMS Integration", "FAIL", "❌ Falling back to mock mode - Termii integration failed")
+                log_test("Provider Check", "FAIL", f"Provider: {provider} (should be 'termii')")
+                termii_working = False
             else:
-                log_test("OTP Extraction", "PASS", f"OTP: {otp_code}")
+                log_test("Termii SMS Integration", "FAIL", f"❌ Unknown provider: {provider}")
+                termii_working = False
+            
+            # Extract OTP for verification test
+            otp_code = data.get('otp')
+            if not otp_code and provider == "mock":
+                log_test("OTP Extraction", "WARN", "OTP visible in mock mode for testing")
+            elif not otp_code and provider == "termii":
+                log_test("OTP Extraction", "PASS", "OTP not returned in response (sent via real SMS)")
+                otp_code = "123456"  # We'll need to use a test OTP
+            
+            return termii_working, otp_code
         else:
             log_test("Send OTP", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
-            return False
+            return False, None
             
     except Exception as e:
         log_test("Send OTP", "FAIL", f"Exception: {str(e)}")
-        return False
+        return False, None
+
+def check_backend_logs_for_termii():
+    """Check backend logs specifically for Termii messages"""
+    print("\n" + "=" * 60)
+    print("CHECKING BACKEND LOGS FOR TERMII MESSAGES")
+    print("=" * 60)
+    
+    try:
+        import subprocess
+        
+        # Check both stdout and stderr logs
+        log_files = [
+            "/var/log/supervisor/backend.out.log",
+            "/var/log/supervisor/backend.err.log"
+        ]
+        
+        termii_success_found = False
+        country_inactive_found = False
+        
+        for log_file in log_files:
+            try:
+                result = subprocess.run(
+                    ["tail", "-n", "100", log_file],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode == 0:
+                    logs = result.stdout
+                    print(f"\nChecking {log_file}:")
+                    print("-" * 40)
+                    
+                    # Look for specific Termii messages
+                    lines = logs.split('\n')
+                    termii_lines = []
+                    
+                    for line in lines:
+                        line_lower = line.lower()
+                        if any(keyword in line_lower for keyword in ['termii', 'sms sent successfully', 'country inactive']):
+                            termii_lines.append(line)
+                            
+                            # Check for specific success/error patterns
+                            if "termii sms sent successfully" in line_lower:
+                                termii_success_found = True
+                            elif "country inactive" in line_lower:
+                                country_inactive_found = True
+                    
+                    if termii_lines:
+                        print("Termii-related messages found:")
+                        for line in termii_lines[-10:]:  # Show last 10 relevant lines
+                            print(f"  {line}")
+                    else:
+                        print("  No Termii-related messages found")
+                        
+            except Exception as e:
+                print(f"  Error reading {log_file}: {str(e)}")
+        
+        # Summary of log analysis
+        print(f"\n" + "=" * 40)
+        print("LOG ANALYSIS SUMMARY")
+        print("=" * 40)
+        
+        if termii_success_found:
+            log_test("Backend Logs - Success Message", "PASS", "✅ Found 'Termii SMS sent successfully' message")
+        else:
+            log_test("Backend Logs - Success Message", "FAIL", "❌ No 'Termii SMS sent successfully' message found")
+        
+        if country_inactive_found:
+            log_test("Backend Logs - Error Check", "FAIL", "❌ Still finding 'Country Inactive' errors")
+        else:
+            log_test("Backend Logs - Error Check", "PASS", "✅ No 'Country Inactive' errors found")
+        
+        return termii_success_found, not country_inactive_found
+        
+    except Exception as e:
+        log_test("Backend Log Check", "FAIL", f"Exception: {str(e)}")
+        return False, False
+
+def test_sms_otp_flow():
+    """Test SMS OTP authentication flow with Termii focus"""
+    print("=" * 60)
+    print("TESTING SMS OTP AUTHENTICATION FLOW")
+    print("=" * 60)
+    
+    # First run the specific Termii test
+    termii_working, otp_code = test_termii_sms_otp_specific()
+    
+    # Check backend logs
+    success_in_logs, no_errors_in_logs = check_backend_logs_for_termii()
+    
+    phone_number = "+2348012345678"
     
     # Step 2: Verify OTP
     try:
