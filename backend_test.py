@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NEXRYDE Backend API Testing Script
-Tests SMS OTP flow, Google OAuth, Logout functionality, and Driver Subscription APIs
+Tests SMS OTP flow, Google OAuth, Logout functionality, Driver Subscription APIs, and AI Chat APIs
 """
 
 import requests
@@ -9,6 +9,8 @@ import json
 import uuid
 import time
 import base64
+import asyncio
+import httpx
 from datetime import datetime
 
 # API Base URL from frontend .env
