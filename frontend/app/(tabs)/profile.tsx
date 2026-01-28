@@ -30,7 +30,6 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Call backend logout endpoint
               await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/logout`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -39,7 +38,6 @@ export default function ProfileScreen() {
               console.log('Logout API error:', error);
             }
             
-            // Clear local state
             logout();
             setIsAuthenticated(false);
             router.replace('/login');
@@ -52,12 +50,17 @@ export default function ProfileScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
+        {/* Header */}
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Profile</Text>
+        </View>
+
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Profile Header */}
-          <View style={styles.profileHeader}>
+          {/* Profile Header Card */}
+          <View style={styles.profileCard}>
             <View style={styles.avatarContainer}>
               <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                colors={['#3AD173', '#2BA858']}
                 style={styles.avatar}
               >
                 <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'U'}</Text>
@@ -66,80 +69,112 @@ export default function ProfileScreen() {
             </View>
             <Text style={styles.userName}>{user?.name || 'User'}</Text>
             <Text style={styles.userPhone}>{user?.phone || user?.email || 'No contact info'}</Text>
-            <View style={styles.roleBadge}>
-              <View style={[styles.roleDot, { backgroundColor: COLORS.accentGreen }]} />
-              <Text style={styles.roleText}>{isDriver ? 'Driver' : 'Rider'}</Text>
+            <View style={[styles.roleBadge, isDriver ? styles.driverBadge : styles.riderBadge]}>
+              <Ionicons 
+                name={isDriver ? "car" : "person"} 
+                size={14} 
+                color={isDriver ? "#3A8CD1" : "#3AD173"} 
+              />
+              <Text style={[styles.roleText, isDriver ? styles.driverText : styles.riderText]}>
+                {isDriver ? 'Driver' : 'Rider'}
+              </Text>
             </View>
           </View>
 
-          {/* Menu Items */}
-          <View style={styles.menuSection}>
-            <MenuItem 
-              icon="person" 
-              label="Edit Profile" 
-              subtitle="Update your personal information"
-              onPress={() => {}}
-              color={COLORS.accentGreen}
-            />
-            <MenuItem 
-              icon="time" 
-              label="Ride History" 
-              subtitle="View your past trips"
-              onPress={() => router.push('/ride-history')}
-              color={COLORS.accentBlue}
-            />
-            <MenuItem 
-              icon="chatbubbles" 
-              label="Messages" 
-              subtitle="Chat with your driver"
-              onPress={() => router.push('/chat')}
-              color={COLORS.info}
-            />
-            <MenuItem 
-              icon="shield-checkmark" 
-              label="Safety Center" 
-              subtitle="Emergency contacts & safety features"
-              onPress={() => router.push('/safety')}
-              color={COLORS.accentGreen}
-            />
-            <MenuItem 
-              icon="wallet" 
-              label="Wallet" 
-              subtitle="Payment methods & balance"
-              onPress={() => {}}
-              color={COLORS.gold}
-            />
-            <MenuItem 
-              icon="help-circle" 
-              label="Help & Support" 
-              subtitle="Get help with NEXRYDE"
-              onPress={() => {}}
-              color={COLORS.accentGreen}
-            />
-            <MenuItem 
-              icon="document-text" 
-              label="Terms & Privacy" 
-              subtitle="Read our policies"
-              onPress={() => {}}
-              color={COLORS.lightTextSecondary}
-            />
-            <MenuItem 
-              icon="settings" 
-              label="Settings" 
-              subtitle="App preferences & notifications"
-              onPress={() => {}}
-              color={COLORS.lightTextSecondary}
-            />
+          {/* Account Section */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>ACCOUNT</Text>
+            <View style={styles.menuCard}>
+              <MenuItem 
+                icon="person-outline" 
+                label="Edit Profile" 
+                subtitle="Update your personal information"
+                onPress={() => {}}
+                iconBg="#E8F5E9"
+                iconColor="#2E7D32"
+              />
+              <MenuItem 
+                icon="time-outline" 
+                label="Ride History" 
+                subtitle="View your past trips"
+                onPress={() => router.push('/ride-history')}
+                iconBg="#E3F2FD"
+                iconColor="#1565C0"
+              />
+              <MenuItem 
+                icon="chatbubbles-outline" 
+                label="Messages" 
+                subtitle="Chat with your driver"
+                onPress={() => router.push('/chat')}
+                iconBg="#F3E5F5"
+                iconColor="#7B1FA2"
+                isLast
+              />
+            </View>
+          </View>
+
+          {/* Safety & Payment Section */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>SAFETY & PAYMENT</Text>
+            <View style={styles.menuCard}>
+              <MenuItem 
+                icon="shield-checkmark-outline" 
+                label="Safety Center" 
+                subtitle="Emergency contacts & safety features"
+                onPress={() => router.push('/safety')}
+                iconBg="#FFEBEE"
+                iconColor="#C62828"
+              />
+              <MenuItem 
+                icon="wallet-outline" 
+                label="Wallet" 
+                subtitle="Payment methods & balance"
+                onPress={() => {}}
+                iconBg="#FFF3E0"
+                iconColor="#E65100"
+                isLast
+              />
+            </View>
+          </View>
+
+          {/* Support Section */}
+          <View style={styles.sectionContainer}>
+            <Text style={styles.sectionTitle}>SUPPORT</Text>
+            <View style={styles.menuCard}>
+              <MenuItem 
+                icon="help-circle-outline" 
+                label="Help & Support" 
+                subtitle="Get help with NEXRYDE"
+                onPress={() => {}}
+                iconBg="#E0F7FA"
+                iconColor="#00838F"
+              />
+              <MenuItem 
+                icon="document-text-outline" 
+                label="Terms & Privacy" 
+                subtitle="Read our policies"
+                onPress={() => {}}
+                iconBg="#ECEFF1"
+                iconColor="#455A64"
+              />
+              <MenuItem 
+                icon="settings-outline" 
+                label="Settings" 
+                subtitle="App preferences & notifications"
+                onPress={() => {}}
+                iconBg="#F5F5F5"
+                iconColor="#616161"
+                isLast
+              />
+            </View>
           </View>
 
           {/* Logout Button */}
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-            <View style={styles.logoutContent}>
-              <View style={styles.logoutIcon}>
-                <Ionicons name="log-out" size={22} color={COLORS.error} />
-              </View>
-              <Text style={styles.logoutText}>Log Out</Text>
+            <View style={styles.logoutIcon}>
+              <Ionicons name="log-out-outline" size={22} color="#D32F2F" />
             </View>
+            <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
 
           {/* App Version */}
@@ -155,179 +190,223 @@ const MenuItem = ({
   label, 
   subtitle, 
   onPress,
-  color 
+  iconBg,
+  iconColor,
+  isLast = false
 }: { 
   icon: string; 
   label: string; 
   subtitle?: string;
   onPress: () => void;
-  color: string;
+  iconBg: string;
+  iconColor: string;
+  isLast?: boolean;
 }) => (
-  <TouchableOpacity style={styles.menuItem} onPress={onPress} activeOpacity={0.7}>
-    <View style={[styles.menuIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon as any} size={22} color={color} />
+  <TouchableOpacity 
+    style={[styles.menuItem, !isLast && styles.menuItemBorder]} 
+    onPress={onPress} 
+    activeOpacity={0.7}
+  >
+    <View style={[styles.menuIcon, { backgroundColor: iconBg }]}>
+      <Ionicons name={icon as any} size={22} color={iconColor} />
     </View>
     <View style={styles.menuContent}>
       <Text style={styles.menuLabel}>{label}</Text>
       {subtitle && <Text style={styles.menuSubtitle}>{subtitle}</Text>}
     </View>
-    <Ionicons name="chevron-forward" size={22} color={COLORS.lightTextMuted} />
+    <Ionicons name="chevron-forward" size={20} color="#9CA3AF" />
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#F3F4F6',
   },
   safeArea: {
     flex: 1,
   },
+  header: {
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E5E7EB',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+  },
   scrollContent: {
     paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.lg,
     paddingBottom: SPACING.xxl,
   },
-  profileHeader: {
+  profileCard: {
     alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
     paddingVertical: SPACING.xl,
+    paddingHorizontal: SPACING.lg,
+    marginBottom: SPACING.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
   },
   avatarContainer: {
     position: 'relative',
     marginBottom: SPACING.md,
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    width: 90,
+    height: 90,
+    borderRadius: 45,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: COLORS.accentGreen,
+    shadowColor: '#3AD173',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 12,
     elevation: 8,
   },
   avatarText: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontSize: 36,
+    fontWeight: '700',
+    color: '#FFFFFF',
   },
   onlineDot: {
     position: 'absolute',
-    bottom: 8,
-    right: 8,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: COLORS.accentGreen,
+    bottom: 4,
+    right: 4,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#22C55E',
     borderWidth: 3,
-    borderColor: COLORS.lightBackground,
+    borderColor: '#FFFFFF',
   },
   userName: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#111827',
     marginBottom: 4,
   },
   userPhone: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 15,
     fontWeight: '500',
-    color: COLORS.lightTextSecondary,
+    color: '#6B7280',
     marginBottom: SPACING.sm,
   },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.accentGreenSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
-    gap: SPACING.xs,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 6,
   },
-  roleDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  riderBadge: {
+    backgroundColor: '#DCFCE7',
+  },
+  driverBadge: {
+    backgroundColor: '#DBEAFE',
   },
   roleText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '700',
-    color: COLORS.accentGreen,
   },
-  menuSection: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xxl,
-    paddingVertical: SPACING.sm,
+  riderText: {
+    color: '#166534',
+  },
+  driverText: {
+    color: '#1E40AF',
+  },
+  sectionContainer: {
     marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6B7280',
+    letterSpacing: 1,
+    marginBottom: SPACING.sm,
+    marginLeft: 4,
+  },
+  menuCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
   },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.lg,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: '#FFFFFF',
+  },
+  menuItemBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    borderBottomColor: '#F3F4F6',
   },
   menuIcon: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
+    marginRight: 14,
   },
   menuContent: {
     flex: 1,
   },
   menuLabel: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111827',
   },
   menuSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
-    color: COLORS.lightTextSecondary,
+    fontSize: 13,
+    fontWeight: '400',
+    color: '#6B7280',
     marginTop: 2,
   },
   logoutButton: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    borderWidth: 2,
-    borderColor: COLORS.errorSoft,
-    marginBottom: SPACING.lg,
-  },
-  logoutContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.lg,
-    gap: SPACING.sm,
+    backgroundColor: '#FEF2F2',
+    borderRadius: 14,
+    paddingVertical: 16,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    gap: 10,
   },
   logoutIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.errorSoft,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
   },
   logoutText: {
-    fontSize: FONT_SIZE.md,
+    fontSize: 16,
     fontWeight: '700',
-    color: COLORS.error,
+    color: '#DC2626',
   },
   versionText: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: 13,
     fontWeight: '500',
-    color: COLORS.lightTextMuted,
+    color: '#9CA3AF',
     textAlign: 'center',
   },
 });
