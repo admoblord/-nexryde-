@@ -1685,6 +1685,9 @@ async def start_trial(driver_id: str):
     
     await db.subscriptions.insert_one(subscription)
     
+    # Remove MongoDB _id field for JSON serialization
+    subscription.pop("_id", None)
+    
     return {
         "message": f"Free {SUBSCRIPTION_CONFIG['trial_days']}-day trial activated!",
         "subscription": subscription,
