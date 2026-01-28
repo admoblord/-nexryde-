@@ -197,13 +197,23 @@ class Subscription(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     driver_id: str
     amount: float = 25000.0
-    status: str = "active"
+    status: str = "trial"  # trial, pending_payment, pending_verification, active, expired, suspended
     start_date: datetime = Field(default_factory=datetime.utcnow)
     end_date: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(days=30))
+    trial_end_date: Optional[datetime] = None  # Trial period end date
     payment_method: Optional[str] = None
     transaction_id: Optional[str] = None
+    payment_screenshot: Optional[str] = None  # Base64 encoded screenshot
+    payment_submitted_at: Optional[datetime] = None
+    payment_verified_at: Optional[datetime] = None
     grace_period_requested: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    
+class PaymentProofSubmission(BaseModel):
+    driver_id: str
+    screenshot: str  # Base64 encoded image
+    amount: float = 25000.0
+    payment_reference: Optional[str] = None
 
 class Trip(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
