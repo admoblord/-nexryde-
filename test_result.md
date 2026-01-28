@@ -558,15 +558,18 @@ frontend:
 
   - task: "Rider Booking Screen"
     implemented: true
-    working: true
+    working: false
     file: "app/rider/book.tsx"
-    stuck_count: 0
+    stuck_count: 1
     priority: "high"
     needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
         - comment: "Pickup/destination input, fare estimate, payment selection (cash/bank transfer)"
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CRITICAL ISSUES FOUND: 1) Location search modal not opening when clicking pickup/dropoff fields - click handlers not triggering setShowMapPicker(true). 2) Google Places API integration not working - no search results appear when typing in search field. 3) Continue button doesn't navigate to tracking screen. 4) Add stop functionality not working properly. WORKING: UI elements display correctly (header, pickup/dropoff fields, saved locations, recent locations, current location button). Mobile responsive design confirmed (390x844). Core location selection functionality is broken."
 
   - task: "Safety Center Screen"
     implemented: true
