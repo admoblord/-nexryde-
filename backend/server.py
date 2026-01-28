@@ -1597,30 +1597,230 @@ async def get_driver_stats(user_id: str):
 
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 
+@api_router.get("/subscriptions/config")
+async def get_subscription_config():
+    """Get subscription configuration including bank details"""
+    return {
+        "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
+        "trial_days": SUBSCRIPTION_CONFIG["trial_days"],
+        "currency": SUBSCRIPTION_CONFIG["currency"],
+        "bank_details": SUBSCRIPTION_CONFIG["bank_details"]
+    }
+
 @api_router.get("/subscriptions/{driver_id}")
 async def get_subscription(driver_id: str):
+    """Get driver's subscription status"""
     subscription = await db.subscriptions.find_one({
-        "driver_id": driver_id,
-        "status": {"$in": ["active", "grace_period"]}
-    })
+        "driver_id": driver_id
+    }, sort=[("created_at", -1)])
+    
     if subscription:
         subscription["_id"] = str(subscription["_id"])
+        
+        # Calculate days remaining
+        now = datetime.utcnow()
+        
+        # Check trial status
+        if subscription.get("status") == "trial":
+            trial_end = subscription.get("trial_end_date")
+            if trial_end and now > trial_end:
+                # Trial expired
+                await db.subscriptions.update_one(
+                    {"id": subscription["id"]},
+                    {"$set": {"status": "pending_payment"}}
+                )
+                subscription["status"] = "pending_payment"
+                subscription["trial_expired"] = True
+                subscription["days_remaining"] = 0
+            else:
+                days_remaining = (trial_end - now).days if trial_end else 0
+                subscription["days_remaining"] = max(0, days_remaining)
+                subscription["trial_expired"] = False
+        elif subscription.get("status") == "active":
+            end_date = subscription.get("end_date")
+            if end_date:
+                if now > end_date:
+                    # Subscription expired
+                    await db.subscriptions.update_one(
+                        {"id": subscription["id"]},
+                        {"$set": {"status": "expired"}}
+                    )
+                    subscription["status"] = "expired"
+                    subscription["days_remaining"] = 0
+                else:
+                    subscription["days_remaining"] = max(0, (end_date - now).days)
+            else:
+                subscription["days_remaining"] = 0
+        else:
+            subscription["days_remaining"] = 0
+        
+        # Add bank details
+        subscription["bank_details"] = SUBSCRIPTION_CONFIG["bank_details"]
+        subscription["monthly_fee"] = SUBSCRIPTION_CONFIG["monthly_fee"]
+        
     return subscription
 
-@api_router.post("/subscriptions/{driver_id}/subscribe")
-async def create_subscription(driver_id: str, request: SubscriptionRequest):
-    existing = await db.subscriptions.find_one({"driver_id": driver_id, "status": "active"})
+@api_router.post("/subscriptions/{driver_id}/start-trial")
+async def start_trial(driver_id: str):
+    """Start 7-day free trial for new driver"""
+    # Check if driver already has a subscription
+    existing = await db.subscriptions.find_one({"driver_id": driver_id})
     if existing:
-        raise HTTPException(status_code=400, detail="Active subscription already exists")
+        raise HTTPException(status_code=400, detail="Driver already has a subscription record")
     
-    subscription = Subscription(
-        driver_id=driver_id,
-        payment_method=request.payment_method,
-        transaction_id=f"TXN_{uuid.uuid4().hex[:12].upper()}"
+    # Create trial subscription
+    now = datetime.utcnow()
+    trial_end = now + timedelta(days=SUBSCRIPTION_CONFIG["trial_days"])
+    
+    subscription = {
+        "id": str(uuid.uuid4()),
+        "driver_id": driver_id,
+        "amount": SUBSCRIPTION_CONFIG["monthly_fee"],
+        "status": "trial",
+        "start_date": now,
+        "trial_end_date": trial_end,
+        "end_date": trial_end,
+        "created_at": now
+    }
+    
+    await db.subscriptions.insert_one(subscription)
+    
+    return {
+        "message": f"Free {SUBSCRIPTION_CONFIG['trial_days']}-day trial activated!",
+        "subscription": subscription,
+        "trial_end_date": trial_end.isoformat(),
+        "days_remaining": SUBSCRIPTION_CONFIG["trial_days"]
+    }
+
+@api_router.post("/subscriptions/{driver_id}/submit-payment")
+async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission):
+    """Submit payment screenshot for verification"""
+    # Find existing subscription
+    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
+    
+    if not subscription:
+        # Create new subscription record
+        subscription = {
+            "id": str(uuid.uuid4()),
+            "driver_id": driver_id,
+            "amount": SUBSCRIPTION_CONFIG["monthly_fee"],
+            "status": "pending_verification",
+            "created_at": datetime.utcnow()
+        }
+        await db.subscriptions.insert_one(subscription)
+    
+    # Update with payment proof
+    now = datetime.utcnow()
+    await db.subscriptions.update_one(
+        {"driver_id": driver_id},
+        {"$set": {
+            "status": "pending_verification",
+            "payment_screenshot": request.screenshot,
+            "payment_submitted_at": now,
+            "amount": request.amount,
+            "payment_reference": request.payment_reference
+        }}
     )
-    await db.subscriptions.insert_one(subscription.dict())
     
-    return {"message": "Subscription activated successfully", "subscription": subscription.dict()}
+    # Auto-verify after 2 seconds (simulating admin approval)
+    # In production, this would be manual admin approval
+    import asyncio
+    async def auto_verify():
+        await asyncio.sleep(2)
+        await verify_payment(driver_id)
+    
+    asyncio.create_task(auto_verify())
+    
+    return {
+        "message": "Payment proof submitted successfully. Awaiting verification.",
+        "status": "pending_verification"
+    }
+
+@api_router.post("/subscriptions/{driver_id}/verify-payment")
+async def verify_payment(driver_id: str):
+    """Verify payment and activate subscription (admin or auto)"""
+    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
+    
+    if not subscription:
+        raise HTTPException(status_code=404, detail="No subscription found")
+    
+    now = datetime.utcnow()
+    end_date = now + timedelta(days=30)  # 30 days subscription
+    
+    await db.subscriptions.update_one(
+        {"driver_id": driver_id},
+        {"$set": {
+            "status": "active",
+            "start_date": now,
+            "end_date": end_date,
+            "payment_verified_at": now,
+            "transaction_id": f"TXN_{uuid.uuid4().hex[:12].upper()}"
+        }}
+    )
+    
+    logger.info(f"Subscription activated for driver {driver_id} until {end_date}")
+    
+    return {
+        "message": "Payment verified! Subscription activated.",
+        "status": "active",
+        "start_date": now.isoformat(),
+        "end_date": end_date.isoformat(),
+        "days_remaining": 30
+    }
+
+@api_router.get("/subscriptions/{driver_id}/check-restrictions")
+async def check_restrictions(driver_id: str):
+    """Check if driver has any restrictions due to subscription status"""
+    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
+    
+    restrictions = {
+        "can_go_online": False,
+        "can_accept_rides": False,
+        "can_withdraw_earnings": False,
+        "show_payment_popup": False,
+        "message": ""
+    }
+    
+    if not subscription:
+        restrictions["show_payment_popup"] = True
+        restrictions["message"] = "Please subscribe to start accepting rides"
+        return restrictions
+    
+    status = subscription.get("status")
+    now = datetime.utcnow()
+    
+    if status == "trial":
+        trial_end = subscription.get("trial_end_date")
+        if trial_end and now > trial_end:
+            restrictions["show_payment_popup"] = True
+            restrictions["message"] = "Your free trial has expired. Please make payment to continue."
+        else:
+            days_left = (trial_end - now).days if trial_end else 0
+            restrictions["can_go_online"] = True
+            restrictions["can_accept_rides"] = True
+            restrictions["can_withdraw_earnings"] = True
+            restrictions["message"] = f"Trial period: {days_left} days remaining"
+    
+    elif status == "active":
+        end_date = subscription.get("end_date")
+        if end_date and now > end_date:
+            restrictions["show_payment_popup"] = True
+            restrictions["message"] = "Your subscription has expired. Please renew to continue."
+        else:
+            days_left = (end_date - now).days if end_date else 0
+            restrictions["can_go_online"] = True
+            restrictions["can_accept_rides"] = True
+            restrictions["can_withdraw_earnings"] = True
+            restrictions["message"] = f"Subscription active: {days_left} days remaining"
+    
+    elif status == "pending_verification":
+        restrictions["message"] = "Payment is being verified. Please wait."
+    
+    elif status in ["pending_payment", "expired"]:
+        restrictions["show_payment_popup"] = True
+        restrictions["message"] = "Please make payment to activate your account."
+    
+    return restrictions
 
 @api_router.post("/subscriptions/{driver_id}/grace-period")
 async def request_grace_period(driver_id: str, request: GracePeriodRequest):
@@ -1641,7 +1841,7 @@ async def request_grace_period(driver_id: str, request: GracePeriodRequest):
     new_end_date = datetime.utcnow() + timedelta(days=days)
     
     await db.subscriptions.update_one(
-        {"id": subscription["id"]},
+        {"driver_id": driver_id},
         {"$set": {
             "status": "grace_period",
             "end_date": new_end_date,
