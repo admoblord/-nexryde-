@@ -404,8 +404,8 @@ def test_api_health():
         return False
 
 def main():
-    """Run all authentication tests"""
-    print("NEXRYDE BACKEND AUTHENTICATION TESTING")
+    """Run all authentication and subscription tests"""
+    print("NEXRYDE BACKEND API TESTING")
     print(f"Backend URL: {BASE_URL}")
     print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print()
@@ -424,11 +424,20 @@ def main():
         
         # Test Logout API
         results['logout'] = test_logout_api()
+        
+        # Test Subscription APIs
+        subscription_results = test_subscription_apis()
+        results.update(subscription_results)
     else:
         print("❌ Skipping other tests due to API connectivity issues")
         results['sms_otp'] = False
         results['google_oauth'] = False
         results['logout'] = False
+        results['subscription_config'] = False
+        results['start_trial'] = False
+        results['get_subscription_status'] = False
+        results['submit_payment'] = False
+        results['status_after_payment'] = False
     
     # Summary
     print("=" * 60)
@@ -438,14 +447,26 @@ def main():
     total_tests = len(results)
     passed_tests = sum(1 for result in results.values() if result)
     
-    for test_name, result in results.items():
-        status = "✅ PASS" if result else "❌ FAIL"
-        print(f"{test_name.upper().replace('_', ' ')}: {status}")
+    # Group results by category
+    auth_tests = ['api_health', 'sms_otp', 'google_oauth', 'logout']
+    subscription_tests = ['subscription_config', 'start_trial', 'get_subscription_status', 'submit_payment', 'status_after_payment']
+    
+    print("AUTHENTICATION TESTS:")
+    for test_name in auth_tests:
+        if test_name in results:
+            status = "✅ PASS" if results[test_name] else "❌ FAIL"
+            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
+    
+    print("\nSUBSCRIPTION TESTS:")
+    for test_name in subscription_tests:
+        if test_name in results:
+            status = "✅ PASS" if results[test_name] else "❌ FAIL"
+            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
     
     print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
     
     if passed_tests == total_tests:
-        print("🎉 All authentication tests passed!")
+        print("🎉 All tests passed!")
     elif passed_tests > 0:
         print("⚠️ Some tests passed, check failed tests above")
     else:
