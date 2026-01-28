@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -9,12 +9,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
+
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 interface Message {
   id: string;
@@ -22,7 +24,6 @@ interface Message {
   sender: 'user' | 'driver' | 'ai';
   timestamp: Date;
   isRead: boolean;
-  isLoading?: boolean;
 }
 
 type ChatTab = 'driver' | 'ai';
@@ -30,43 +31,26 @@ type ChatTab = 'driver' | 'ai';
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { user } = useAppStore();
+  const tripId = params.tripId as string;
   const driverName = params.driverName as string || 'Driver';
   const flatListRef = useRef<FlatList>(null);
   
   const [activeTab, setActiveTab] = useState<ChatTab>('ai');
   const [message, setMessage] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   
   // Driver messages
-  const [driverMessages, setDriverMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: "Hello! I'm on my way to pick you up.",
-      sender: 'driver',
-      timestamp: new Date(Date.now() - 300000),
-      isRead: true,
-    },
-    {
-      id: '2',
-      text: "Great, I'll be waiting at the entrance.",
-      sender: 'user',
-      timestamp: new Date(Date.now() - 240000),
-      isRead: true,
-    },
-    {
-      id: '3',
-      text: "I'm about 5 minutes away. The traffic is light.",
-      sender: 'driver',
-      timestamp: new Date(Date.now() - 120000),
-      isRead: true,
-    },
-  ]);
+  const [driverMessages, setDriverMessages] = useState<Message[]>([]);
+  const [presetMessages, setPresetMessages] = useState<string[]>([]);
   
   // AI messages
   const [aiMessages, setAiMessages] = useState<Message[]>([
     {
       id: 'ai-welcome',
-      text: "👋 Hi! I'm your NEXRYDE AI Assistant. I can help you with:\n\n• Trip information & fare estimates\n• Safety tips & emergency help\n• Account & payment questions\n• Finding nearby places\n\nHow can I assist you today?",
+      text: "👋 Hi! I'm your NEXRYDE AI Assistant powered by GPT-4o.\n\nI can help you with:\n• Trip information & fare estimates\n• Safety tips & emergency help\n• Account & payment questions\n• Finding nearby places\n\nHow can I assist you today?",
       sender: 'ai',
       timestamp: new Date(),
       isRead: true,
@@ -74,113 +58,218 @@ export default function ChatScreen() {
   ]);
 
   const quickReplies = activeTab === 'driver' 
-    ? ["I'm here", "On my way", "Running late", "Can you wait?"]
-    : ["Estimate fare", "Safety tips", "Report issue", "Help"];
+    ? presetMessages.length > 0 ? presetMessages : ["I'm here", "On my way", "Running late", "Can you wait?"]
+    : ["Estimate fare", "Safety tips", "Report issue", "Cancel trip"];
 
   const messages = activeTab === 'driver' ? driverMessages : aiMessages;
-  const setMessages = activeTab === 'driver' ? setDriverMessages : setAiMessages;
 
-  // AI Response function
-  const getAIResponse = async (userMessage: string): Promise<string> => {
-    const lowerMsg = userMessage.toLowerCase();
+  // Load chat history on mount
+  useEffect(() => {
+    loadAIChatHistory();
+    loadPresetMessages();
     
-    // Simulated AI responses based on keywords
-    if (lowerMsg.includes('fare') || lowerMsg.includes('price') || lowerMsg.includes('cost')) {
-      return "💰 **Fare Estimates**\n\nNEXRYDE fares are calculated based on:\n• Base fare: ₦500\n• Per kilometer: ₦100-150\n• Time-based rate: ₦20/min\n\nFor an exact estimate, enter your pickup and dropoff locations in the booking screen. Premium rides may have different rates.";
+    if (tripId) {
+      loadDriverMessages();
+      // Start polling for new messages
+      const interval = setInterval(loadDriverMessages, 3000);
+      return () => clearInterval(interval);
     }
+  }, [activeTab, tripId]);
+
+  const loadAIChatHistory = async () => {
+    if (!user?.id) return;
     
-    if (lowerMsg.includes('safety') || lowerMsg.includes('safe') || lowerMsg.includes('emergency')) {
-      return "🛡️ **Safety Features**\n\n• **Share Trip**: Send your live location to contacts\n• **Emergency SOS**: Quick access to emergency services\n• **Driver Verification**: All drivers are verified\n• **Trip Recording**: Audio recording available\n\nFor emergencies, use the SOS button in your trip screen or call 112/199.";
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/chat/ai/history/${user.id}`);
+      const data = await response.json();
+      
+      if (data.messages && data.messages.length > 0) {
+        setSessionId(data.session_id);
+        const loadedMessages: Message[] = data.messages.map((msg: any) => ({
+          id: msg.id,
+          text: msg.message,
+          sender: msg.role === 'user' ? 'user' : 'ai',
+          timestamp: new Date(msg.timestamp),
+          isRead: true,
+        }));
+        
+        // Keep welcome message + loaded history
+        setAiMessages([aiMessages[0], ...loadedMessages]);
+      }
+    } catch (error) {
+      console.error('Error loading AI chat history:', error);
     }
-    
-    if (lowerMsg.includes('report') || lowerMsg.includes('issue') || lowerMsg.includes('problem')) {
-      return "📝 **Report an Issue**\n\nI can help you report:\n1. Driver behavior concerns\n2. Vehicle issues\n3. Payment problems\n4. Lost items\n5. Route concerns\n\nPlease describe your issue and I'll guide you through the reporting process.";
-    }
-    
-    if (lowerMsg.includes('payment') || lowerMsg.includes('pay') || lowerMsg.includes('wallet')) {
-      return "💳 **Payment Options**\n\nNEXRYDE supports:\n• Cash payment\n• Card payment (Visa, Mastercard)\n• Wallet balance\n• Bank transfer\n\nTo add a payment method, go to Profile > Wallet. Need help with a specific payment issue?";
-    }
-    
-    if (lowerMsg.includes('cancel')) {
-      return "❌ **Cancellation Policy**\n\n• Free cancellation within 2 minutes of booking\n• After driver accepts: ₦200-500 fee may apply\n• No fee if driver takes too long\n\nTo cancel a trip, tap the X button on your active trip screen.";
-    }
-    
-    if (lowerMsg.includes('driver') || lowerMsg.includes('rating')) {
-      return "⭐ **Driver Information**\n\nAll NEXRYDE drivers:\n• Complete background verification\n• Have valid licenses & permits\n• Maintain 4.5+ star ratings\n• Receive regular training\n\nYou can rate your driver after each trip to help maintain quality.";
-    }
-    
-    if (lowerMsg.includes('hello') || lowerMsg.includes('hi') || lowerMsg.includes('hey')) {
-      return "Hello! 👋 I'm here to help. What would you like to know about NEXRYDE?";
-    }
-    
-    if (lowerMsg.includes('thank')) {
-      return "You're welcome! 😊 Is there anything else I can help you with?";
-    }
-    
-    if (lowerMsg.includes('help')) {
-      return "🆘 **How can I help?**\n\nI can assist with:\n• 💰 Fare estimates\n• 🛡️ Safety information\n• 💳 Payment questions\n• 📍 Trip assistance\n• 📝 Reporting issues\n• ❓ General questions\n\nJust type your question!";
-    }
-    
-    // Default response
-    return "I understand you're asking about: \"" + userMessage + "\"\n\nLet me help you with that. Could you please provide more details about what specific information you need? You can also try asking about:\n• Fares & pricing\n• Safety features\n• Payment options\n• Reporting issues";
   };
 
-  const sendMessage = async () => {
-    if (!message.trim()) return;
+  const loadDriverMessages = async () => {
+    if (!tripId || !user?.id) return;
+    
+    try {
+      const response = await fetch(
+        `${BACKEND_URL}/api/chat/messages/${tripId}?user_id=${user.id}`
+      );
+      const data = await response.json();
+      
+      if (data.messages) {
+        const loadedMessages: Message[] = data.messages.map((msg: any) => ({
+          id: msg.id,
+          text: msg.message,
+          sender: msg.sender_role === 'rider' ? 'user' : 'driver',
+          timestamp: new Date(msg.timestamp),
+          isRead: msg.is_read,
+        }));
+        setDriverMessages(loadedMessages);
+      }
+    } catch (error) {
+      console.error('Error loading driver messages:', error);
+    }
+  };
+
+  const loadPresetMessages = async () => {
+    try {
+      const role = user?.role === 'driver' ? 'driver' : 'rider';
+      const response = await fetch(`${BACKEND_URL}/api/chat/presets/${role}`);
+      const data = await response.json();
+      if (data.presets) {
+        setPresetMessages(data.presets);
+      }
+    } catch (error) {
+      console.error('Error loading preset messages:', error);
+    }
+  };
+
+  const sendAIMessage = async (messageText: string) => {
+    if (!messageText.trim() || !user?.id) return;
     
     const userMessage: Message = {
       id: Date.now().toString(),
-      text: message.trim(),
+      text: messageText.trim(),
       sender: 'user',
       timestamp: new Date(),
       isRead: false,
     };
     
-    if (activeTab === 'driver') {
-      setDriverMessages(prev => [...prev, userMessage]);
-    } else {
-      setAiMessages(prev => [...prev, userMessage]);
+    setAiMessages(prev => [...prev, userMessage]);
+    setIsAiTyping(true);
+    setMessage('');
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/chat/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: user.id,
+          message: messageText.trim(),
+          user_role: user.role || 'rider',
+          session_id: sessionId,
+        }),
+      });
       
-      // Show AI typing indicator
-      setIsAiTyping(true);
+      const data = await response.json();
       
-      // Get AI response after a short delay
-      const userText = message.trim();
-      setMessage('');
-      
-      setTimeout(async () => {
-        const aiResponse = await getAIResponse(userText);
+      if (data.success && data.message) {
+        setSessionId(data.session_id);
         
         const aiMessage: Message = {
           id: `ai-${Date.now()}`,
-          text: aiResponse,
+          text: data.message,
           sender: 'ai',
           timestamp: new Date(),
           isRead: true,
         };
         
         setAiMessages(prev => [...prev, aiMessage]);
-        setIsAiTyping(false);
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      }, 1000 + Math.random() * 1000); // Random delay for natural feel
-      
-      return;
+      } else {
+        // Show error message
+        const errorMessage: Message = {
+          id: `ai-error-${Date.now()}`,
+          text: data.message || "Sorry, I couldn't process that. Please try again.",
+          sender: 'ai',
+          timestamp: new Date(),
+          isRead: true,
+        };
+        setAiMessages(prev => [...prev, errorMessage]);
+      }
+    } catch (error) {
+      console.error('AI chat error:', error);
+      const errorMessage: Message = {
+        id: `ai-error-${Date.now()}`,
+        text: "I'm having trouble connecting. Please check your internet and try again.",
+        sender: 'ai',
+        timestamp: new Date(),
+        isRead: true,
+      };
+      setAiMessages(prev => [...prev, errorMessage]);
     }
     
+    setIsAiTyping(false);
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
+
+  const sendDriverMessage = async (messageText: string) => {
+    if (!messageText.trim() || !tripId || !user?.id) return;
+    
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      text: messageText.trim(),
+      sender: 'user',
+      timestamp: new Date(),
+      isRead: false,
+    };
+    
+    setDriverMessages(prev => [...prev, userMessage]);
     setMessage('');
+    
+    try {
+      await fetch(`${BACKEND_URL}/api/chat/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          trip_id: tripId,
+          sender_id: user.id,
+          sender_role: user.role === 'driver' ? 'driver' : 'rider',
+          message: messageText.trim(),
+          message_type: 'text',
+        }),
+      });
+    } catch (error) {
+      console.error('Send driver message error:', error);
+    }
     
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
   };
 
-  const sendQuickReply = (text: string) => {
-    setMessage(text);
-    setTimeout(() => sendMessage(), 100);
+  const sendMessage = async () => {
+    if (!message.trim()) return;
+    
+    if (activeTab === 'ai') {
+      await sendAIMessage(message);
+    } else {
+      await sendDriverMessage(message);
+    }
   };
+
+  const sendQuickReply = (text: string) => {
+    if (activeTab === 'ai') {
+      sendAIMessage(text);
+    } else {
+      sendDriverMessage(text);
+    }
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    if (activeTab === 'ai') {
+      await loadAIChatHistory();
+    } else {
+      await loadDriverMessages();
+    }
+    setRefreshing(false);
+  }, [activeTab]);
 
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('en-US', { 
@@ -202,7 +291,7 @@ export default function ChatScreen() {
         {!isUser && (
           <View style={[styles.avatar, isAI ? styles.aiAvatar : styles.driverAvatar]}>
             <Ionicons 
-              name={isAI ? "sparkles" : "person"} 
+              name={isAI ? "sparkles" : "car"} 
               size={16} 
               color="#FFFFFF" 
             />
@@ -218,20 +307,23 @@ export default function ChatScreen() {
           ]}>
             {item.text}
           </Text>
-          <Text style={[
-            styles.messageTime,
-            isUser && styles.userMessageTime
-          ]}>
-            {formatTime(item.timestamp)}
-          </Text>
+          <View style={styles.messageFooter}>
+            <Text style={[
+              styles.messageTime,
+              isUser && styles.userMessageTime
+            ]}>
+              {formatTime(item.timestamp)}
+            </Text>
+            {isAI && (
+              <View style={styles.poweredBy}>
+                <Text style={styles.poweredByText}>GPT-4o</Text>
+              </View>
+            )}
+          </View>
         </View>
       </View>
     );
   };
-
-  useEffect(() => {
-    flatListRef.current?.scrollToEnd({ animated: false });
-  }, [activeTab]);
 
   return (
     <View style={styles.container}>
@@ -276,7 +368,7 @@ export default function ChatScreen() {
               color={activeTab === 'driver' ? '#FFFFFF' : '#6B7280'} 
             />
             <Text style={[styles.tabText, activeTab === 'driver' && styles.activeTabText]}>
-              Driver Chat
+              {user?.role === 'driver' ? 'Rider Chat' : 'Driver Chat'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -284,9 +376,18 @@ export default function ChatScreen() {
         {/* Chat Info Banner */}
         {activeTab === 'ai' && (
           <View style={styles.infoBanner}>
-            <Ionicons name="information-circle" size={18} color="#3B82F6" />
+            <Ionicons name="flash" size={16} color="#8B5CF6" />
             <Text style={styles.infoBannerText}>
-              AI Assistant is here to help 24/7
+              Powered by GPT-4o • Available 24/7
+            </Text>
+          </View>
+        )}
+        
+        {activeTab === 'driver' && !tripId && (
+          <View style={[styles.infoBanner, styles.warningBanner]}>
+            <Ionicons name="information-circle" size={16} color="#F59E0B" />
+            <Text style={[styles.infoBannerText, styles.warningText]}>
+              Start a trip to chat with your {user?.role === 'driver' ? 'rider' : 'driver'}
             </Text>
           </View>
         )}
@@ -304,14 +405,25 @@ export default function ChatScreen() {
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#8B5CF6"
+              />
+            }
           />
 
           {/* AI Typing Indicator */}
           {isAiTyping && (
             <View style={styles.typingContainer}>
               <View style={styles.typingBubble}>
-                <ActivityIndicator size="small" color="#8B5CF6" />
-                <Text style={styles.typingText}>AI is typing...</Text>
+                <View style={styles.typingDots}>
+                  <View style={[styles.dot, styles.dot1]} />
+                  <View style={[styles.dot, styles.dot2]} />
+                  <View style={[styles.dot, styles.dot3]} />
+                </View>
+                <Text style={styles.typingText}>AI is thinking...</Text>
               </View>
             </View>
           )}
@@ -323,13 +435,19 @@ export default function ChatScreen() {
               data={quickReplies}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  style={styles.quickReplyButton}
+                  style={[
+                    styles.quickReplyButton,
+                    activeTab === 'ai' && styles.quickReplyButtonAI
+                  ]}
                   onPress={() => sendQuickReply(item)}
                 >
-                  <Text style={styles.quickReplyText}>{item}</Text>
+                  <Text style={[
+                    styles.quickReplyText,
+                    activeTab === 'ai' && styles.quickReplyTextAI
+                  ]}>{item}</Text>
                 </TouchableOpacity>
               )}
-              keyExtractor={(item) => item}
+              keyExtractor={(item, index) => `${item}-${index}`}
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.quickRepliesList}
             />
@@ -346,6 +464,7 @@ export default function ChatScreen() {
                 onChangeText={setMessage}
                 multiline
                 maxLength={500}
+                editable={activeTab === 'ai' || !!tripId}
               />
               <TouchableOpacity 
                 style={[
@@ -354,7 +473,7 @@ export default function ChatScreen() {
                   activeTab === 'ai' && message.trim() && styles.sendButtonAI
                 ]}
                 onPress={sendMessage}
-                disabled={!message.trim() || isAiTyping}
+                disabled={!message.trim() || isAiTyping || (activeTab === 'driver' && !tripId)}
               >
                 <Ionicons 
                   name="send" 
@@ -432,15 +551,21 @@ const styles = StyleSheet.create({
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#EFF6FF',
+    backgroundColor: '#F3E8FF',
     paddingHorizontal: 16,
     paddingVertical: 10,
     gap: 8,
   },
+  warningBanner: {
+    backgroundColor: '#FEF3C7',
+  },
   infoBannerText: {
     fontSize: 13,
-    color: '#1D4ED8',
+    color: '#7C3AED',
     fontWeight: '500',
+  },
+  warningText: {
+    color: '#92400E',
   },
   keyboardView: {
     flex: 1,
@@ -504,14 +629,30 @@ const styles = StyleSheet.create({
   userMessageText: {
     color: '#FFFFFF',
   },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   messageTime: {
     fontSize: 11,
     color: '#9CA3AF',
-    marginTop: 4,
-    alignSelf: 'flex-end',
   },
   userMessageTime: {
     color: 'rgba(255,255,255,0.7)',
+  },
+  poweredBy: {
+    backgroundColor: '#F3E8FF',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 8,
+  },
+  poweredByText: {
+    fontSize: 9,
+    color: '#7C3AED',
+    fontWeight: '600',
   },
   typingContainer: {
     paddingHorizontal: 16,
@@ -525,7 +666,26 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 18,
     alignSelf: 'flex-start',
-    gap: 8,
+    gap: 10,
+  },
+  typingDots: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#8B5CF6',
+  },
+  dot1: {
+    opacity: 0.4,
+  },
+  dot2: {
+    opacity: 0.7,
+  },
+  dot3: {
+    opacity: 1,
   },
   typingText: {
     fontSize: 13,
@@ -550,10 +710,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
+  quickReplyButtonAI: {
+    backgroundColor: '#F3E8FF',
+    borderColor: '#DDD6FE',
+  },
   quickReplyText: {
     fontSize: 13,
     color: '#374151',
     fontWeight: '600',
+  },
+  quickReplyTextAI: {
+    color: '#7C3AED',
   },
   inputContainer: {
     backgroundColor: '#FFFFFF',
