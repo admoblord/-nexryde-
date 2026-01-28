@@ -152,28 +152,51 @@ export default function LoginScreen() {
     
     try {
       console.log('Processing Google auth with session_id:', sessionId.substring(0, 15) + '...');
+      console.log('Using backend URL:', BACKEND_URL);
       
       const response = await fetch(`${BACKEND_URL}/api/auth/google/exchange`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
         body: JSON.stringify({ session_id: sessionId }),
       });
       
-      const responseText = await response.text();
       console.log('Backend response status:', response.status);
-      console.log('Backend response:', responseText.substring(0, 100));
+      
+      // Check if response is ok before parsing
+      const contentType = response.headers.get('content-type');
+      console.log('Response content-type:', contentType);
+      
+      if (!contentType || !contentType.includes('application/json')) {
+        console.error('Response is not JSON. Content-Type:', contentType);
+        const textResponse = await response.text();
+        console.error('Raw response:', textResponse.substring(0, 200));
+        Alert.alert('Error', 'Server returned an unexpected response. Please try again.');
+        return false;
+      }
       
       let data;
       try {
+        const responseText = await response.text();
+        console.log('Response text length:', responseText.length);
+        
+        if (!responseText || responseText.trim() === '') {
+          console.error('Empty response from server');
+          Alert.alert('Error', 'Server returned empty response. Please try again.');
+          return false;
+        }
+        
         data = JSON.parse(responseText);
       } catch (parseError) {
         console.error('JSON parse error:', parseError);
-        Alert.alert('Error', 'Server returned invalid response. Please try again.');
+        Alert.alert('Error', 'Could not process server response. Please try again.');
         return false;
       }
       
       if (!response.ok) {
-        const errorMessage = data.detail || 'Authentication failed';
+        const errorMessage = data.detail || data.message || 'Authentication failed';
         console.error('Auth error:', errorMessage);
         Alert.alert('Sign In Failed', errorMessage);
         return false;
@@ -208,7 +231,13 @@ export default function LoginScreen() {
       return true;
     } catch (error: any) {
       console.error('Google auth error:', error);
-      Alert.alert('Error', error.message || 'Failed to complete sign in');
+      
+      // Check for network errors
+      if (error.message?.includes('Network request failed')) {
+        Alert.alert('Network Error', 'Please check your internet connection and try again.');
+      } else {
+        Alert.alert('Error', 'Failed to complete sign in. Please try again.');
+      }
       return false;
     } finally {
       isProcessingSession.current = false;
