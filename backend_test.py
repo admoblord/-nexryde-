@@ -588,7 +588,7 @@ def test_fare_estimation_google_maps():
             print(f"Response Data: {json.dumps(data, indent=2)}")
             
             # Verify required fields
-            required_fields = ["distance_km", "duration_min", "fare"]
+            required_fields = ["distance_km", "duration_min", "total_fare"]
             missing_fields = [field for field in required_fields if field not in data]
             
             if missing_fields:
@@ -602,8 +602,8 @@ def test_fare_estimation_google_maps():
                 elif not isinstance(data["duration_min"], (int, float)) or data["duration_min"] <= 0:
                     log_test("Test Case 1", "FAIL", f"Invalid duration_min: {data['duration_min']}")
                     results['test_case_1'] = False
-                elif not isinstance(data["fare"], (int, float)) or data["fare"] <= 0:
-                    log_test("Test Case 1", "FAIL", f"Invalid fare: {data['fare']}")
+                elif not isinstance(data["total_fare"], (int, float)) or data["total_fare"] <= 0:
+                    log_test("Test Case 1", "FAIL", f"Invalid total_fare: {data['total_fare']}")
                     results['test_case_1'] = False
                 else:
                     # Check if Google Maps was used (distance should be more accurate than Haversine)
@@ -611,7 +611,7 @@ def test_fare_estimation_google_maps():
                     
                     log_test("Test Case 1", "PASS", 
                             f"Distance: {data['distance_km']}km, Duration: {data['duration_min']}min, "
-                            f"Fare: ₦{data['fare']}, Google Maps: {'Yes' if google_used else 'Fallback'}")
+                            f"Fare: ₦{data['total_fare']}, Google Maps: {'Yes' if google_used else 'Fallback'}")
                     results['test_case_1'] = True
         else:
             log_test("Test Case 1", "FAIL", f"HTTP {response.status_code}: {response.text}")
