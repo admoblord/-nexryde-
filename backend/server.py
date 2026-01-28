@@ -122,9 +122,9 @@ SUBSCRIPTION_CONFIG = {
     "trial_days": 7,       # 7 days free trial
     "currency": "NGN",
     "bank_details": {
-        "bank_name": "Access Bank",
-        "account_name": "NEXRYDE Technologies Ltd",
-        "account_number": "0123456789",
+        "bank_name": "UBA",
+        "account_name": "ADMOBLORDGROUP LIMITED",
+        "account_number": "1028400669",
     }
 }
 
