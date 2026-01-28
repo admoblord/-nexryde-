@@ -2817,6 +2817,341 @@ async def driver_assistant_pidgin(user_id: str, question: str):
         logger.error(f"Pidgin AI error: {e}")
         return {"response": "E get wahala. Abeg try again.", "type": "error"}
 
+# ==================== REAL-TIME CHAT SYSTEM ====================
+
+# AI Chat Request Model
+class AIChatRequest(BaseModel):
+    user_id: str
+    message: str
+    user_role: str = "rider"  # rider or driver
+    session_id: Optional[str] = None
+
+# Driver-Rider Chat Models
+class ChatMessageRequest(BaseModel):
+    trip_id: str
+    sender_id: str
+    sender_role: str  # rider or driver
+    message: str
+    message_type: str = "text"  # text or preset
+
+class ChatMessage(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    trip_id: str
+    sender_id: str
+    sender_role: str
+    message: str
+    message_type: str = "text"
+    is_read: bool = False
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Enhanced AI System Prompts for Chat
+AI_CHAT_SYSTEM_PROMPT = """You are NEXRYDE AI, a smart and friendly assistant for Nigeria's premier ride-hailing platform.
+
+About NEXRYDE:
+- Driver-first platform: Drivers pay ₦25,000/month flat fee, keep 100% of earnings
+- No per-trip commission - drivers keep what they earn
+- Safety features: SOS button, trip sharing, verified drivers, route monitoring
+- Cash and bank transfer payments (peer-to-peer)
+
+Your personality:
+- Friendly, helpful, and concise
+- Use Nigerian context and expressions naturally
+- Be empathetic and solution-oriented
+- Keep responses under 150 words
+
+You can help with:
+- Fare estimates and pricing questions
+- Safety features and emergency help
+- Account and payment questions  
+- Trip information and status
+- Driver/rider ratings and feedback
+- General platform questions
+
+Always be helpful and if you don't know something specific, guide users to contact support."""
+
+@api_router.post("/chat/ai")
+async def ai_chat(request: AIChatRequest):
+    """
+    Real-time AI Chat - Powered by GPT-4o
+    Handles conversation with memory for better context
+    """
+    try:
+        session_id = request.session_id or f"chat-{request.user_id}-{datetime.utcnow().strftime('%Y%m%d%H')}"
+        
+        # Get user context
+        user = await db.users.find_one({"id": request.user_id})
+        user_context = ""
+        if user:
+            user_context = f"\nUser: {user.get('name', 'User')}, Role: {request.user_role}"
+            
+            # Check for active trip
+            current_trip = await db.trips.find_one({
+                f"{request.user_role}_id": request.user_id,
+                "status": {"$in": ["pending", "accepted", "ongoing"]}
+            })
+            if current_trip:
+                user_context += f"\nActive trip: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
+        
+        # Store message in chat history
+        chat_msg = {
+            "session_id": session_id,
+            "user_id": request.user_id,
+            "role": "user",
+            "message": request.message,
+            "created_at": datetime.utcnow()
+        }
+        await db.chat_history.insert_one(chat_msg)
+        
+        # Get recent chat history for context (last 10 messages)
+        history = await db.chat_history.find(
+            {"session_id": session_id}
+        ).sort("created_at", -1).limit(10).to_list(10)
+        history.reverse()  # Oldest first
+        
+        # Build conversation history string for context
+        conversation_context = ""
+        for msg in history[-6:]:  # Last 6 messages for context
+            role = "User" if msg["role"] == "user" else "AI"
+            conversation_context += f"\n{role}: {msg['message']}"
+        
+        if EMERGENT_LLM_KEY:
+            chat = LlmChat(
+                api_key=EMERGENT_LLM_KEY,
+                session_id=session_id,
+                system_message=AI_CHAT_SYSTEM_PROMPT + user_context + f"\n\nRecent conversation:{conversation_context}"
+            ).with_model("openai", "gpt-4o")
+            
+            user_message = UserMessage(text=request.message)
+            response_text = await chat.send_message(user_message)
+            
+            # Store AI response
+            ai_msg = {
+                "session_id": session_id,
+                "user_id": request.user_id,
+                "role": "assistant",
+                "message": response_text,
+                "created_at": datetime.utcnow()
+            }
+            await db.chat_history.insert_one(ai_msg)
+            
+            return {
+                "success": True,
+                "message": response_text,
+                "session_id": session_id,
+                "powered_by": "gpt-4o",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+        else:
+            # Fallback response
+            fallback = "I'm here to help! You can ask me about fares, safety, payments, or trip status. What would you like to know?"
+            return {
+                "success": True,
+                "message": fallback,
+                "session_id": session_id,
+                "powered_by": "fallback",
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+    except Exception as e:
+        logger.error(f"AI Chat error: {str(e)}")
+        return {
+            "success": False,
+            "message": "Sorry, I'm having trouble right now. Please try again in a moment.",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+@api_router.get("/chat/ai/history/{user_id}")
+async def get_ai_chat_history(user_id: str, limit: int = 50):
+    """Get AI chat history for a user"""
+    try:
+        # Get latest session
+        latest = await db.chat_history.find_one(
+            {"user_id": user_id},
+            sort=[("created_at", -1)]
+        )
+        
+        if not latest:
+            return {"messages": [], "session_id": None}
+        
+        session_id = latest.get("session_id")
+        
+        messages = await db.chat_history.find(
+            {"session_id": session_id}
+        ).sort("created_at", 1).limit(limit).to_list(limit)
+        
+        return {
+            "messages": [
+                {
+                    "id": str(msg.get("_id")),
+                    "role": msg["role"],
+                    "message": msg["message"],
+                    "timestamp": msg["created_at"].isoformat()
+                }
+                for msg in messages
+            ],
+            "session_id": session_id
+        }
+    except Exception as e:
+        logger.error(f"Get chat history error: {e}")
+        return {"messages": [], "session_id": None, "error": str(e)}
+
+# ==================== DRIVER-RIDER REAL-TIME MESSAGING ====================
+
+@api_router.post("/chat/message")
+async def send_chat_message(request: ChatMessageRequest):
+    """Send a message between driver and rider"""
+    try:
+        # Verify trip exists
+        trip = await db.trips.find_one({"id": request.trip_id})
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        
+        # Verify sender is part of trip
+        if request.sender_role == "rider" and trip["rider_id"] != request.sender_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        if request.sender_role == "driver" and trip.get("driver_id") != request.sender_id:
+            raise HTTPException(status_code=403, detail="Not authorized")
+        
+        # Create message
+        message = {
+            "id": str(uuid.uuid4()),
+            "trip_id": request.trip_id,
+            "sender_id": request.sender_id,
+            "sender_role": request.sender_role,
+            "message": request.message,
+            "message_type": request.message_type,
+            "is_read": False,
+            "created_at": datetime.utcnow()
+        }
+        
+        await db.trip_messages.insert_one(message)
+        
+        # Update trip with latest message timestamp
+        await db.trips.update_one(
+            {"id": request.trip_id},
+            {"$set": {"last_message_at": datetime.utcnow()}}
+        )
+        
+        return {
+            "success": True,
+            "message_id": message["id"],
+            "timestamp": message["created_at"].isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Send message error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send message")
+
+@api_router.get("/chat/messages/{trip_id}")
+async def get_trip_messages(trip_id: str, user_id: str, limit: int = 50, since: Optional[str] = None):
+    """Get messages for a trip (polling endpoint for real-time updates)"""
+    try:
+        trip = await db.trips.find_one({"id": trip_id})
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+        
+        # Build query
+        query = {"trip_id": trip_id}
+        if since:
+            try:
+                since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
+                query["created_at"] = {"$gt": since_dt}
+            except:
+                pass
+        
+        messages = await db.trip_messages.find(query).sort("created_at", 1).limit(limit).to_list(limit)
+        
+        # Mark messages as read for this user
+        other_role = "driver" if trip["rider_id"] == user_id else "rider"
+        await db.trip_messages.update_many(
+            {"trip_id": trip_id, "sender_role": other_role, "is_read": False},
+            {"$set": {"is_read": True}}
+        )
+        
+        return {
+            "messages": [
+                {
+                    "id": msg["id"],
+                    "sender_id": msg["sender_id"],
+                    "sender_role": msg["sender_role"],
+                    "message": msg["message"],
+                    "message_type": msg["message_type"],
+                    "is_read": msg["is_read"],
+                    "timestamp": msg["created_at"].isoformat()
+                }
+                for msg in messages
+            ],
+            "trip_id": trip_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get messages error: {e}")
+        return {"messages": [], "trip_id": trip_id, "error": str(e)}
+
+@api_router.get("/chat/unread-count/{user_id}")
+async def get_unread_count(user_id: str):
+    """Get unread message count for a user"""
+    try:
+        # Find active trips for user
+        active_trips = await db.trips.find({
+            "$or": [
+                {"rider_id": user_id},
+                {"driver_id": user_id}
+            ],
+            "status": {"$in": ["accepted", "ongoing"]}
+        }).to_list(100)
+        
+        total_unread = 0
+        for trip in active_trips:
+            # Determine user's role in this trip
+            is_rider = trip["rider_id"] == user_id
+            other_role = "driver" if is_rider else "rider"
+            
+            count = await db.trip_messages.count_documents({
+                "trip_id": trip["id"],
+                "sender_role": other_role,
+                "is_read": False
+            })
+            total_unread += count
+        
+        return {"unread_count": total_unread}
+        
+    except Exception as e:
+        logger.error(f"Get unread count error: {e}")
+        return {"unread_count": 0, "error": str(e)}
+
+# Preset messages for quick replies
+PRESET_MESSAGES = {
+    "driver": [
+        "I'm on my way",
+        "I've arrived at pickup",
+        "Please come to the car",
+        "I'm waiting for you",
+        "Traffic is heavy",
+        "I'll be there in 5 minutes"
+    ],
+    "rider": [
+        "I'm coming out now",
+        "Please wait a moment",
+        "I'm at the entrance",
+        "Can you call me?",
+        "Running a bit late",
+        "I see you!"
+    ]
+}
+
+@api_router.get("/chat/presets/{role}")
+async def get_preset_messages(role: str):
+    """Get preset quick reply messages"""
+    if role not in PRESET_MESSAGES:
+        return {"presets": PRESET_MESSAGES["rider"]}
+    return {"presets": PRESET_MESSAGES[role]}
+
 # ==================== KODA FAMILY ====================
 
 @api_router.post("/family/create")
