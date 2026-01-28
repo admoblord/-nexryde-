@@ -204,6 +204,36 @@ backend:
         - agent: "main"
         - comment: "POST /api/fare/estimate - Uses Google Routes/Directions API with fallback to Haversine. Returns distance_km, duration_min, fare breakdown, price locked for 3 minutes."
 
+  - task: "Real-Time AI Chat API (GPT-4o)"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/chat/ai - Real-time conversational AI chat powered by GPT-4o with conversation history"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Real GPT-4o integration confirmed via backend logs. AI provides contextual answers about fares, safety, and more. Conversation history maintained across messages. Session management working."
+
+  - task: "Driver-Rider Messaging API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "POST /api/chat/message, GET /api/chat/messages/{trip_id} - Real-time messaging between driver and rider during trips"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED: Preset messages available for both rider and driver roles. Message structure and API endpoints working."
+
   - task: "AI Rider Assistant API"
     implemented: true
     working: true
