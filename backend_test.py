@@ -784,7 +784,7 @@ def test_api_health():
         return False
 
 def main():
-    """Run all authentication, subscription, and AI chat tests"""
+    """Run all authentication, subscription, AI chat, and Google Maps tests"""
     print("NEXRYDE BACKEND API TESTING")
     print(f"Backend URL: {BASE_URL}")
     print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -796,6 +796,13 @@ def main():
     results['api_health'] = test_api_health()
     
     if results['api_health']:
+        # Test Google Maps API configuration
+        results['google_maps_api'] = test_google_maps_api_key()
+        
+        # Test Google Maps fare estimation
+        fare_estimation_results = test_fare_estimation_google_maps()
+        results.update(fare_estimation_results)
+        
         # Test SMS OTP flow
         results['sms_otp'] = test_sms_otp_flow()
         
@@ -818,6 +825,10 @@ def main():
         
     else:
         print("❌ Skipping other tests due to API connectivity issues")
+        results['google_maps_api'] = False
+        results['test_case_1'] = False
+        results['test_case_2'] = False
+        results['test_case_3'] = False
         results['sms_otp'] = False
         results['google_oauth'] = False
         results['logout'] = False
@@ -841,11 +852,25 @@ def main():
     passed_tests = sum(1 for result in results.values() if result)
     
     # Group results by category
-    auth_tests = ['api_health', 'sms_otp', 'google_oauth', 'logout']
+    connectivity_tests = ['api_health']
+    google_maps_tests = ['google_maps_api', 'test_case_1', 'test_case_2', 'test_case_3']
+    auth_tests = ['sms_otp', 'google_oauth', 'logout']
     subscription_tests = ['subscription_config', 'start_trial', 'get_subscription_status', 'submit_payment', 'status_after_payment']
     ai_chat_tests = ['ai_chat_first', 'ai_chat_context', 'ai_chat_history', 'rider_presets', 'driver_presets']
     
-    print("AUTHENTICATION TESTS:")
+    print("CONNECTIVITY TESTS:")
+    for test_name in connectivity_tests:
+        if test_name in results:
+            status = "✅ PASS" if results[test_name] else "❌ FAIL"
+            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
+    
+    print("\nGOOGLE MAPS INTEGRATION TESTS:")
+    for test_name in google_maps_tests:
+        if test_name in results:
+            status = "✅ PASS" if results[test_name] else "❌ FAIL"
+            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
+    
+    print("\nAUTHENTICATION TESTS:")
     for test_name in auth_tests:
         if test_name in results:
             status = "✅ PASS" if results[test_name] else "❌ FAIL"
@@ -865,12 +890,18 @@ def main():
     
     print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
     
-    if passed_tests == total_tests:
-        print("🎉 All tests passed!")
-    elif passed_tests > 0:
-        print("⚠️ Some tests passed, check failed tests above")
+    # Focus on Google Maps results for this testing session
+    google_maps_passed = sum(1 for test_name in google_maps_tests if results.get(test_name, False))
+    google_maps_total = len([test_name for test_name in google_maps_tests if test_name in results])
+    
+    print(f"\n🗺️  GOOGLE MAPS INTEGRATION: {google_maps_passed}/{google_maps_total} tests passed")
+    
+    if google_maps_passed == google_maps_total and google_maps_total > 0:
+        print("🎉 Google Maps integration working perfectly!")
+    elif google_maps_passed > 0:
+        print("⚠️ Google Maps partially working, check failed tests above")
     else:
-        print("❌ All tests failed, check API connectivity and configuration")
+        print("❌ Google Maps integration has issues")
     
     return results
 
