@@ -152,6 +152,9 @@ backend:
         - working: true
         - agent: "main"
         - comment: "Subscription creation and status check working"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ COMPREHENSIVE TESTING COMPLETE: All 4 subscription endpoints tested successfully. 1) GET /api/subscriptions/config returns correct bank details (UBA, ADMOBLORDGROUP LIMITED, 1028400669) and ₦25,000 monthly fee. 2) POST /api/subscriptions/{driver_id}/start-trial creates 7-day trial successfully (fixed ObjectId serialization issue). 3) GET /api/subscriptions/{driver_id} returns status, days_remaining, and bank_details correctly. 4) POST /api/subscriptions/{driver_id}/submit-payment accepts payment proof and changes status to pending_verification, then auto-verifies to active status. Complete subscription flow working end-to-end."
 
   - task: "Driver Stats API"
     implemented: true
