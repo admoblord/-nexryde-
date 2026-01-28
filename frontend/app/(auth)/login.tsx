@@ -46,7 +46,7 @@ const COLORS = {
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
 // Backend URL - hardcoded for reliability
-const BACKEND_URL = 'https://nexryde-rebrand.preview.emergentagent.com';
+const BACKEND_URL = 'https://nexryde-map.preview.emergentagent.com';
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
