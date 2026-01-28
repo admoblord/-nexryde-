@@ -101,6 +101,10 @@ export default function SubscriptionScreen() {
   }, []);
 
   const fetchSubscription = async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
     try {
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}`);
       const data = await response.json();
