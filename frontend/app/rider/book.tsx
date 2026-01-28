@@ -215,6 +215,7 @@ export default function BookScreen() {
 
   // Open location picker for a specific stop
   const openLocationPicker = (stopId: string) => {
+    console.log('Opening location picker for stop:', stopId);
     setActiveStopId(stopId);
     setShowMapPicker(true);
   };
