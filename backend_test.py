@@ -445,8 +445,8 @@ async def test_ai_chat_apis():
             if response.status_code == 200:
                 data = response.json()
                 
-                if "response" in data and data["response"]:
-                    ai_response = data["response"]
+                if "message" in data and data["message"]:
+                    ai_response = data["message"]
                     if len(ai_response) > 30 and ("safety" in ai_response.lower() or "secure" in ai_response.lower() or "protection" in ai_response.lower()):
                         log_test("AI Chat - Context Message", "PASS", f"Contextual GPT-4o response: {ai_response[:100]}...")
                         results['ai_chat_context'] = True
@@ -454,7 +454,7 @@ async def test_ai_chat_apis():
                         log_test("AI Chat - Context Message", "FAIL", f"Response doesn't seem contextual: {ai_response}")
                         results['ai_chat_context'] = False
                 else:
-                    log_test("AI Chat - Context Message", "FAIL", f"No 'response' field in API response")
+                    log_test("AI Chat - Context Message", "FAIL", f"No 'message' field in API response")
                     results['ai_chat_context'] = False
             else:
                 log_test("AI Chat - Context Message", "FAIL", f"API error {response.status_code}: {response.text}")
