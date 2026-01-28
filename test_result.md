@@ -560,7 +560,7 @@ frontend:
     implemented: true
     working: false
     file: "app/rider/book.tsx"
-    stuck_count: 1
+    stuck_count: 2
     priority: "high"
     needs_retesting: false
     status_history:
@@ -570,6 +570,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ CRITICAL ISSUES FOUND: 1) Location search modal not opening when clicking pickup/dropoff fields - click handlers not triggering setShowMapPicker(true). 2) Google Places API integration not working - no search results appear when typing in search field. 3) Continue button doesn't navigate to tracking screen. 4) Add stop functionality not working properly. WORKING: UI elements display correctly (header, pickup/dropoff fields, saved locations, recent locations, current location button). Mobile responsive design confirmed (390x844). Core location selection functionality is broken."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CONFIRMED CRITICAL ISSUES ON MOBILE (390x844): 1) Pressable onPress handlers for pickup/dropoff location fields NOT WORKING - no console logs for 'Opening location picker for stop:', modal never opens. 2) Continue button handleContinue function NOT WORKING - doesn't navigate to /rider/tracking even when locations are selected via saved places. 3) Console error: 'Cannot use import.meta outside a module'. WORKING: UI renders perfectly, saved location selection works (Home/Work fill fields correctly), mobile responsive design confirmed. The Pressable components replaced TouchableOpacity but click handlers are completely broken."
 
   - task: "Safety Center Screen"
     implemented: true
@@ -688,6 +691,8 @@ agent_communication:
     - message: "✅ AI CHAT API TESTING COMPLETE: All 5 AI Chat and messaging endpoints tested successfully with REAL GPT-4o integration confirmed. POST /api/chat/ai provides intelligent, contextual responses for fare inquiries and safety questions. Chat history API maintains conversation context properly. Preset message APIs return role-specific quick replies (6 rider presets, 6 driver presets). Backend logs confirm LiteLLM GPT-4o usage - responses are NOT mocked. Complete AI-powered chat system working perfectly."
     - agent: "testing"
     - message: "❌ MAP AND LOCATION FEATURES TESTING: Tested booking screen (app/rider/book.tsx) on mobile viewport (390x844). WORKING: UI elements display correctly (header, pickup/dropoff fields, saved locations, recent locations, current location button), mobile responsive design confirmed. CRITICAL ISSUES: 1) Location search modal not opening when clicking pickup/dropoff fields - click handlers not triggering setShowMapPicker(true), 2) Google Places API integration not working - no search results appear, 3) Continue button doesn't navigate to tracking screen, 4) Add stop functionality not working. Core location selection functionality is broken and needs immediate attention."
+    - agent: "testing"
+    - message: "❌ PRESSABLE CLICK HANDLERS BROKEN: Comprehensive testing on mobile (390x844) confirms Pressable components in booking screen are NOT functional. Click events for pickup/dropoff fields don't trigger openLocationPicker function (no console logs). Continue button doesn't execute handleContinue navigation. Console error: 'Cannot use import.meta outside a module' suggests build/module issue. Saved location selection works correctly. The Pressable replacement for TouchableOpacity has broken all interactive functionality. URGENT: Need to fix Pressable onPress handlers or revert to TouchableOpacity."
 
   - task: "SMS OTP Authentication"
     implemented: true
