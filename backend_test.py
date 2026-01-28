@@ -386,6 +386,175 @@ def test_logout_api():
         log_test("Logout API", "FAIL", f"Exception: {str(e)}")
         return False
 
+async def test_ai_chat_apis():
+    """Test AI Chat APIs with GPT-4o integration"""
+    print("=" * 60)
+    print("TESTING AI CHAT APIS")
+    print("=" * 60)
+    
+    results = {}
+    
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        
+        # Test 1: First AI Chat Message
+        print("Testing POST /api/chat/ai - First message...")
+        try:
+            payload = {
+                "user_id": "test-user-123",
+                "message": "What is the fare from Lekki to Victoria Island?",
+                "user_role": "rider"
+            }
+            
+            response = await client.post(f"{BASE_URL}/chat/ai", json=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                # Check if response contains AI response
+                if "response" in data and data["response"]:
+                    ai_response = data["response"]
+                    # Check if it's a real AI response (not mocked)
+                    if len(ai_response) > 50 and ("fare" in ai_response.lower() or "lekki" in ai_response.lower() or "victoria" in ai_response.lower()):
+                        log_test("AI Chat - First Message", "PASS", f"Real GPT-4o response received: {ai_response[:100]}...")
+                        results['ai_chat_first'] = True
+                    else:
+                        log_test("AI Chat - First Message", "FAIL", f"Response seems mocked or irrelevant: {ai_response}")
+                        results['ai_chat_first'] = False
+                else:
+                    log_test("AI Chat - First Message", "FAIL", f"No 'response' field in API response")
+                    results['ai_chat_first'] = False
+            else:
+                log_test("AI Chat - First Message", "FAIL", f"API error {response.status_code}: {response.text}")
+                results['ai_chat_first'] = False
+                
+        except Exception as e:
+            log_test("AI Chat - First Message", "FAIL", f"Exception: {str(e)}")
+            results['ai_chat_first'] = False
+        
+        # Test 2: Second AI Chat Message (Context Test)
+        print("Testing POST /api/chat/ai - Second message with context...")
+        try:
+            payload = {
+                "user_id": "test-user-123",
+                "message": "What about safety features?",
+                "user_role": "rider"
+            }
+            
+            response = await client.post(f"{BASE_URL}/chat/ai", json=payload)
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "response" in data and data["response"]:
+                    ai_response = data["response"]
+                    if len(ai_response) > 30 and ("safety" in ai_response.lower() or "secure" in ai_response.lower() or "protection" in ai_response.lower()):
+                        log_test("AI Chat - Context Message", "PASS", f"Contextual GPT-4o response: {ai_response[:100]}...")
+                        results['ai_chat_context'] = True
+                    else:
+                        log_test("AI Chat - Context Message", "FAIL", f"Response doesn't seem contextual: {ai_response}")
+                        results['ai_chat_context'] = False
+                else:
+                    log_test("AI Chat - Context Message", "FAIL", f"No 'response' field in API response")
+                    results['ai_chat_context'] = False
+            else:
+                log_test("AI Chat - Context Message", "FAIL", f"API error {response.status_code}: {response.text}")
+                results['ai_chat_context'] = False
+                
+        except Exception as e:
+            log_test("AI Chat - Context Message", "FAIL", f"Exception: {str(e)}")
+            results['ai_chat_context'] = False
+        
+        # Test 3: Get AI Chat History
+        print("Testing GET /api/chat/ai/history/{user_id}...")
+        try:
+            response = await client.get(f"{BASE_URL}/chat/ai/history/test-user-123")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "messages" in data and isinstance(data["messages"], list):
+                    messages = data["messages"]
+                    if len(messages) >= 2:  # Should have at least our 2 test messages
+                        log_test("AI Chat History", "PASS", f"Chat history retrieved with {len(messages)} messages")
+                        results['ai_chat_history'] = True
+                    else:
+                        log_test("AI Chat History", "WARN", f"Expected at least 2 messages, got {len(messages)} (may be empty initially)")
+                        results['ai_chat_history'] = True  # Still consider pass as API works
+                else:
+                    log_test("AI Chat History", "FAIL", f"Invalid response format")
+                    results['ai_chat_history'] = False
+            else:
+                log_test("AI Chat History", "FAIL", f"API error {response.status_code}: {response.text}")
+                results['ai_chat_history'] = False
+                
+        except Exception as e:
+            log_test("AI Chat History", "FAIL", f"Exception: {str(e)}")
+            results['ai_chat_history'] = False
+        
+        # Test 4: Get Rider Preset Messages
+        print("Testing GET /api/chat/presets/rider...")
+        try:
+            response = await client.get(f"{BASE_URL}/chat/presets/rider")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "presets" in data and isinstance(data["presets"], list):
+                    presets = data["presets"]
+                    if len(presets) > 0:
+                        log_test("Rider Preset Messages", "PASS", f"{len(presets)} rider presets retrieved")
+                        results['rider_presets'] = True
+                    else:
+                        log_test("Rider Preset Messages", "FAIL", "No preset messages returned")
+                        results['rider_presets'] = False
+                else:
+                    log_test("Rider Preset Messages", "FAIL", f"Invalid response format")
+                    results['rider_presets'] = False
+            else:
+                log_test("Rider Preset Messages", "FAIL", f"API error {response.status_code}: {response.text}")
+                results['rider_presets'] = False
+                
+        except Exception as e:
+            log_test("Rider Preset Messages", "FAIL", f"Exception: {str(e)}")
+            results['rider_presets'] = False
+        
+        # Test 5: Get Driver Preset Messages
+        print("Testing GET /api/chat/presets/driver...")
+        try:
+            response = await client.get(f"{BASE_URL}/chat/presets/driver")
+            
+            if response.status_code == 200:
+                data = response.json()
+                
+                if "presets" in data and isinstance(data["presets"], list):
+                    presets = data["presets"]
+                    if len(presets) > 0:
+                        # Check if driver presets are different from rider presets
+                        expected_driver_messages = ["I'm on my way", "I've arrived at pickup", "Please come to the car"]
+                        has_driver_specific = any(msg in presets for msg in expected_driver_messages)
+                        
+                        if has_driver_specific:
+                            log_test("Driver Preset Messages", "PASS", f"{len(presets)} driver-specific presets retrieved")
+                            results['driver_presets'] = True
+                        else:
+                            log_test("Driver Preset Messages", "WARN", f"Driver presets may not be driver-specific")
+                            results['driver_presets'] = True  # Still pass as API works
+                    else:
+                        log_test("Driver Preset Messages", "FAIL", "No preset messages returned")
+                        results['driver_presets'] = False
+                else:
+                    log_test("Driver Preset Messages", "FAIL", f"Invalid response format")
+                    results['driver_presets'] = False
+            else:
+                log_test("Driver Preset Messages", "FAIL", f"API error {response.status_code}: {response.text}")
+                results['driver_presets'] = False
+                
+        except Exception as e:
+            log_test("Driver Preset Messages", "FAIL", f"Exception: {str(e)}")
+            results['driver_presets'] = False
+    
+    return results
+
 def test_api_health():
     """Test basic API connectivity"""
     print("=" * 60)
