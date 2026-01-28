@@ -812,18 +812,18 @@ async def send_otp(request: OTPRequest):
         
         # Check if Termii is configured
         if TERMII_API_KEY:
-            # Use Termii DND route with sender ID "NEXRYDE"
+            # Use Termii DND route with sender ID "OEalert"
             async with httpx.AsyncClient() as client:
                 payload = {
                     "api_key": TERMII_API_KEY,
                     "to": normalized_phone,
-                    "from": "NEXRYDE",
+                    "from": "OEalert",
                     "channel": "dnd",
                     "type": "plain",
                     "sms": f"Your NexRyde verification code is {otp_code}. This code expires in 10 minutes."
                 }
                 
-                logger.info(f"Sending OTP to {normalized_phone} via Termii DND (from: NEXRYDE)")
+                logger.info(f"Sending OTP to {normalized_phone} via Termii v3 API (from: OEalert)")
                 
                 response = await client.post(
                     f"{TERMII_BASE_URL}/api/sms/send",
