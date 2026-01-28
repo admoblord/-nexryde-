@@ -86,28 +86,28 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>ACCOUNT</Text>
             <View style={styles.menuCard}>
               <MenuItem 
-                icon="person-outline" 
+                icon="person" 
                 label="Edit Profile" 
                 subtitle="Update your personal information"
                 onPress={() => {}}
-                iconBg="#E8F5E9"
-                iconColor="#2E7D32"
+                iconBg="#22C55E"
+                iconColor="#FFFFFF"
               />
               <MenuItem 
-                icon="time-outline" 
+                icon="time" 
                 label="Ride History" 
                 subtitle="View your past trips"
                 onPress={() => router.push('/ride-history')}
-                iconBg="#E3F2FD"
-                iconColor="#1565C0"
+                iconBg="#3B82F6"
+                iconColor="#FFFFFF"
               />
               <MenuItem 
-                icon="chatbubbles-outline" 
+                icon="chatbubbles" 
                 label="Messages" 
                 subtitle="Chat with your driver"
                 onPress={() => router.push('/chat')}
-                iconBg="#F3E5F5"
-                iconColor="#7B1FA2"
+                iconBg="#8B5CF6"
+                iconColor="#FFFFFF"
                 isLast
               />
             </View>
@@ -118,20 +118,20 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>SAFETY & PAYMENT</Text>
             <View style={styles.menuCard}>
               <MenuItem 
-                icon="shield-checkmark-outline" 
+                icon="shield-checkmark" 
                 label="Safety Center" 
                 subtitle="Emergency contacts & safety features"
                 onPress={() => router.push('/safety')}
-                iconBg="#FFEBEE"
-                iconColor="#C62828"
+                iconBg="#EF4444"
+                iconColor="#FFFFFF"
               />
               <MenuItem 
-                icon="wallet-outline" 
+                icon="wallet" 
                 label="Wallet" 
                 subtitle="Payment methods & balance"
                 onPress={() => {}}
-                iconBg="#FFF3E0"
-                iconColor="#E65100"
+                iconBg="#F59E0B"
+                iconColor="#FFFFFF"
                 isLast
               />
             </View>
@@ -142,28 +142,28 @@ export default function ProfileScreen() {
             <Text style={styles.sectionTitle}>SUPPORT</Text>
             <View style={styles.menuCard}>
               <MenuItem 
-                icon="help-circle-outline" 
+                icon="help-circle" 
                 label="Help & Support" 
                 subtitle="Get help with NEXRYDE"
                 onPress={() => {}}
-                iconBg="#E0F7FA"
-                iconColor="#00838F"
+                iconBg="#06B6D4"
+                iconColor="#FFFFFF"
               />
               <MenuItem 
-                icon="document-text-outline" 
+                icon="document-text" 
                 label="Terms & Privacy" 
                 subtitle="Read our policies"
                 onPress={() => {}}
-                iconBg="#ECEFF1"
-                iconColor="#455A64"
+                iconBg="#64748B"
+                iconColor="#FFFFFF"
               />
               <MenuItem 
-                icon="settings-outline" 
+                icon="settings" 
                 label="Settings" 
                 subtitle="App preferences & notifications"
                 onPress={() => {}}
-                iconBg="#F5F5F5"
-                iconColor="#616161"
+                iconBg="#71717A"
+                iconColor="#FFFFFF"
                 isLast
               />
             </View>
