@@ -713,6 +713,9 @@ agent_communication:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: SMS OTP flow working perfectly. Send OTP returns mock OTP (340518) in test mode, verify OTP accepts correct code and returns is_new_user flag. Complete registration flow successful with Nigerian phone number +2348012345678. User created with ID: 10928a28-a5e1-4d73-a5b1-71afbce524de."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ RE-TESTED: SMS OTP endpoint working correctly. ⚠️ ISSUE: Termii SMS integration failing with error 'Country Inactive. Contact Administrator to activate country.' Fallback to mock mode working perfectly (OTP: 329801). API returns 200 status with provider: 'mock'. Backend logs show Termii API returning 400 error consistently."
 
   - task: "Google OAuth Authentication"
     implemented: true
