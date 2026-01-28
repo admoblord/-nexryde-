@@ -636,8 +636,9 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Authentication Testing Complete"
-  stuck_tasks: []
+    - "Map and Location Features - Booking Screen"
+  stuck_tasks:
+    - "Rider Booking Screen"
   test_all: false
   test_priority: "high_first"
 
