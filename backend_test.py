@@ -575,7 +575,7 @@ def test_api_health():
         return False
 
 def main():
-    """Run all authentication and subscription tests"""
+    """Run all authentication, subscription, and AI chat tests"""
     print("NEXRYDE BACKEND API TESTING")
     print(f"Backend URL: {BASE_URL}")
     print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -599,6 +599,14 @@ def main():
         # Test Subscription APIs
         subscription_results = test_subscription_apis()
         results.update(subscription_results)
+        
+        # Test AI Chat APIs (async)
+        print("\n" + "=" * 60)
+        print("RUNNING AI CHAT API TESTS")
+        print("=" * 60)
+        ai_chat_results = asyncio.run(test_ai_chat_apis())
+        results.update(ai_chat_results)
+        
     else:
         print("❌ Skipping other tests due to API connectivity issues")
         results['sms_otp'] = False
@@ -609,6 +617,11 @@ def main():
         results['get_subscription_status'] = False
         results['submit_payment'] = False
         results['status_after_payment'] = False
+        results['ai_chat_first'] = False
+        results['ai_chat_context'] = False
+        results['ai_chat_history'] = False
+        results['rider_presets'] = False
+        results['driver_presets'] = False
     
     # Summary
     print("=" * 60)
@@ -621,6 +634,7 @@ def main():
     # Group results by category
     auth_tests = ['api_health', 'sms_otp', 'google_oauth', 'logout']
     subscription_tests = ['subscription_config', 'start_trial', 'get_subscription_status', 'submit_payment', 'status_after_payment']
+    ai_chat_tests = ['ai_chat_first', 'ai_chat_context', 'ai_chat_history', 'rider_presets', 'driver_presets']
     
     print("AUTHENTICATION TESTS:")
     for test_name in auth_tests:
@@ -630,6 +644,12 @@ def main():
     
     print("\nSUBSCRIPTION TESTS:")
     for test_name in subscription_tests:
+        if test_name in results:
+            status = "✅ PASS" if results[test_name] else "❌ FAIL"
+            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
+    
+    print("\nAI CHAT TESTS:")
+    for test_name in ai_chat_tests:
         if test_name in results:
             status = "✅ PASS" if results[test_name] else "❌ FAIL"
             print(f"  {test_name.upper().replace('_', ' ')}: {status}")
