@@ -792,13 +792,13 @@ def calculate_behavior_score_change(event_type: str) -> float:
 # ==================== AUTH ENDPOINTS ====================
 
 def normalize_phone(phone: str) -> str:
-    """Normalize Nigerian phone number to international format"""
+    """Normalize Nigerian phone number to international format with + prefix"""
     import re
     cleaned = re.sub(r'\s+', '', phone)
     if cleaned.startswith('0'):
-        cleaned = '234' + cleaned[1:]
-    elif cleaned.startswith('+'):
-        cleaned = cleaned.replace('+', '')
+        cleaned = '+234' + cleaned[1:]
+    elif not cleaned.startswith('+'):
+        cleaned = '+' + cleaned
     return cleaned
 
 @api_router.post("/auth/send-otp")
