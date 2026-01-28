@@ -81,6 +81,24 @@ export default function ProfileScreen() {
             </View>
           </View>
 
+          {/* Driver Subscription Section - Only show for drivers */}
+          {isDriver && (
+            <View style={styles.sectionContainer}>
+              <Text style={styles.sectionTitle}>DRIVER</Text>
+              <View style={styles.menuCard}>
+                <MenuItem 
+                  icon="card" 
+                  label="Subscription" 
+                  subtitle="Manage your subscription plan"
+                  onPress={() => router.push('/driver/subscription')}
+                  iconBg="#6366F1"
+                  iconColor="#FFFFFF"
+                  isLast
+                />
+              </View>
+            </View>
+          )}
+
           {/* Account Section */}
           <View style={styles.sectionContainer}>
             <Text style={styles.sectionTitle}>ACCOUNT</Text>
