@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,16 +10,21 @@ import {
   Alert,
   ActivityIndicator,
   Image,
+  Animated,
+  Dimensions,
+  Clipboard,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { BlurView } from 'expo-blur';
 import { useAppStore } from '@/src/store/appStore';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-map.preview.emergentagent.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface SubscriptionData {
   status: string;
@@ -44,9 +49,55 @@ export default function SubscriptionScreen() {
   const [paymentScreenshot, setPaymentScreenshot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentReference, setPaymentReference] = useState('');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+  
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     fetchSubscription();
+    
+    // Entry animations
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 600,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Pulse animation for active status
+    const pulse = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.05,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    pulse.start();
+    
+    return () => pulse.stop();
   }, []);
 
   const fetchSubscription = async () => {
@@ -70,7 +121,7 @@ export default function SubscriptionScreen() {
       const data = await response.json();
       
       if (response.ok) {
-        Alert.alert('Success! 🎉', data.message);
+        Alert.alert('Welcome to NEXRYDE!', data.message);
         fetchSubscription();
       } else {
         Alert.alert('Error', data.detail || 'Failed to start trial');
@@ -79,6 +130,12 @@ export default function SubscriptionScreen() {
       Alert.alert('Error', 'Something went wrong');
     }
     setLoading(false);
+  };
+
+  const copyToClipboard = (text: string, field: string) => {
+    Clipboard.setString(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   const pickImage = async () => {
@@ -136,12 +193,11 @@ export default function SubscriptionScreen() {
       const data = await response.json();
       
       if (response.ok) {
-        Alert.alert('Submitted! ✅', 'Your payment is being verified. This usually takes a few seconds.');
+        Alert.alert('Payment Submitted!', 'Your payment is being verified. This usually takes a few seconds.');
         setShowPaymentModal(false);
         setPaymentScreenshot(null);
         setPaymentReference('');
         
-        // Poll for verification
         setTimeout(() => fetchSubscription(), 3000);
       } else {
         Alert.alert('Error', data.detail || 'Failed to submit payment');
@@ -152,30 +208,37 @@ export default function SubscriptionScreen() {
     setSubmitting(false);
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusConfig = (status: string) => {
     switch (status) {
-      case 'active': return '#22C55E';
-      case 'trial': return '#3B82F6';
-      case 'pending_verification': return '#F59E0B';
-      case 'expired':
-      case 'pending_payment': return '#EF4444';
-      default: return '#6B7280';
+      case 'active':
+        return {
+          gradient: ['#00C853', '#00E676'] as const,
+          icon: 'checkmark-shield',
+          label: 'ACTIVE',
+          bgColor: 'rgba(0, 200, 83, 0.1)',
+        };
+      case 'trial':
+        return {
+          gradient: ['#6366F1', '#8B5CF6'] as const,
+          icon: 'gift',
+          label: 'FREE TRIAL',
+          bgColor: 'rgba(99, 102, 241, 0.1)',
+        };
+      case 'pending_verification':
+        return {
+          gradient: ['#F59E0B', '#FBBF24'] as const,
+          icon: 'time',
+          label: 'VERIFYING',
+          bgColor: 'rgba(245, 158, 11, 0.1)',
+        };
+      default:
+        return {
+          gradient: ['#EF4444', '#F87171'] as const,
+          icon: 'alert-circle',
+          label: 'EXPIRED',
+          bgColor: 'rgba(239, 68, 68, 0.1)',
+        };
     }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'active': return 'Active';
-      case 'trial': return 'Free Trial';
-      case 'pending_verification': return 'Verifying Payment...';
-      case 'expired': return 'Expired';
-      case 'pending_payment': return 'Payment Required';
-      default: return status;
-    }
-  };
-
-  const formatCurrency = (amount: number) => {
-    return `₦${amount.toLocaleString()}`;
   };
 
   const formatDate = (dateString: string) => {
@@ -189,241 +252,376 @@ export default function SubscriptionScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#22C55E" />
+        <LinearGradient
+          colors={['#0F172A', '#1E293B']}
+          style={StyleSheet.absoluteFill}
+        />
+        <ActivityIndicator size="large" color="#00E676" />
+        <Text style={styles.loadingText}>Loading subscription...</Text>
       </View>
     );
   }
 
+  const statusConfig = getStatusConfig(subscription?.status || 'expired');
+
   return (
     <View style={styles.container}>
+      {/* Background Gradient */}
+      <LinearGradient
+        colors={['#0F172A', '#1E293B', '#0F172A']}
+        style={StyleSheet.absoluteFill}
+      />
+      
+      {/* Decorative Circles */}
+      <View style={styles.decorCircle1} />
+      <View style={styles.decorCircle2} />
+      <View style={styles.decorCircle3} />
+
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={styles.header}>
+        <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#111827" />
+            <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Subscription</Text>
-          <View style={{ width: 40 }} />
-        </View>
+          <TouchableOpacity style={styles.helpButton}>
+            <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
+          </TouchableOpacity>
+        </Animated.View>
 
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Status Card */}
-          <View style={styles.statusCard}>
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* Status Card - Hero Section */}
+          <Animated.View 
+            style={[
+              styles.heroCard,
+              {
+                opacity: fadeAnim,
+                transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
+              }
+            ]}
+          >
             <LinearGradient
-              colors={subscription?.status === 'active' ? ['#22C55E', '#16A34A'] : 
-                      subscription?.status === 'trial' ? ['#3B82F6', '#2563EB'] :
-                      ['#EF4444', '#DC2626']}
-              style={styles.statusBadge}
+              colors={statusConfig.gradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.heroGradient}
             >
-              <Ionicons 
-                name={subscription?.status === 'active' || subscription?.status === 'trial' ? 'checkmark-circle' : 'alert-circle'} 
-                size={24} 
-                color="#FFFFFF" 
-              />
-              <Text style={styles.statusText}>{getStatusText(subscription?.status || 'none')}</Text>
+              {/* Floating particles effect */}
+              <View style={styles.particle1} />
+              <View style={styles.particle2} />
+              <View style={styles.particle3} />
+              
+              <Animated.View style={[
+                styles.statusIconContainer,
+                subscription?.status === 'active' && { transform: [{ scale: pulseAnim }] }
+              ]}>
+                <Ionicons name={statusConfig.icon as any} size={40} color="#FFFFFF" />
+              </Animated.View>
+              
+              <Text style={styles.statusLabel}>{statusConfig.label}</Text>
+              
+              {subscription && subscription.days_remaining !== undefined && (
+                <View style={styles.daysContainer}>
+                  <Text style={styles.daysNumber}>{subscription.days_remaining}</Text>
+                  <Text style={styles.daysText}>days remaining</Text>
+                </View>
+              )}
+              
+              {subscription?.end_date && (
+                <Text style={styles.expiryText}>
+                  {subscription.status === 'trial' ? 'Trial ends' : 'Renews'}: {formatDate(subscription.end_date)}
+                </Text>
+              )}
             </LinearGradient>
+          </Animated.View>
 
-            {subscription && (
-              <View style={styles.statusDetails}>
-                {subscription.days_remaining !== undefined && (
-                  <View style={styles.daysRemaining}>
-                    <Text style={styles.daysNumber}>{subscription.days_remaining}</Text>
-                    <Text style={styles.daysLabel}>Days Remaining</Text>
-                  </View>
-                )}
+          {/* No Subscription - Start Trial */}
+          {!subscription && (
+            <Animated.View style={[styles.trialCard, { opacity: fadeAnim }]}>
+              <LinearGradient
+                colors={['rgba(99, 102, 241, 0.2)', 'rgba(139, 92, 246, 0.1)']}
+                style={styles.trialGradient}
+              >
+                <Ionicons name="sparkles" size={48} color="#8B5CF6" />
+                <Text style={styles.trialTitle}>Start Your Journey!</Text>
+                <Text style={styles.trialSubtitle}>Get 7 days free to experience premium features</Text>
                 
-                {subscription.end_date && (
-                  <Text style={styles.expiryText}>
-                    {subscription.status === 'trial' ? 'Trial ends' : 'Expires'}: {formatDate(subscription.end_date)}
-                  </Text>
-                )}
-              </View>
-            )}
-
-            {!subscription && (
-              <View style={styles.noSubscription}>
-                <Ionicons name="gift" size={48} color="#3B82F6" />
-                <Text style={styles.noSubTitle}>Start Your Free Trial!</Text>
-                <Text style={styles.noSubText}>Get 7 days free to experience NEXRYDE</Text>
                 <TouchableOpacity style={styles.trialButton} onPress={startTrial}>
-                  <Text style={styles.trialButtonText}>Start 7-Day Free Trial</Text>
+                  <LinearGradient
+                    colors={['#6366F1', '#8B5CF6']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                    style={styles.trialButtonGradient}
+                  >
+                    <Ionicons name="rocket" size={20} color="#FFFFFF" />
+                    <Text style={styles.trialButtonText}>Start Free Trial</Text>
+                  </LinearGradient>
                 </TouchableOpacity>
-              </View>
-            )}
-          </View>
+              </LinearGradient>
+            </Animated.View>
+          )}
 
           {/* Price Card */}
-          <View style={styles.priceCard}>
+          <Animated.View 
+            style={[
+              styles.glassCard,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
+            ]}
+          >
             <View style={styles.priceHeader}>
-              <Text style={styles.priceTitle}>Monthly Subscription</Text>
-              <View style={styles.priceAmount}>
-                <Text style={styles.currency}>₦</Text>
-                <Text style={styles.price}>25,000</Text>
-                <Text style={styles.period}>/month</Text>
+              <View style={styles.priceBadge}>
+                <Text style={styles.priceBadgeText}>MONTHLY</Text>
               </View>
+              <View style={styles.priceRow}>
+                <Text style={styles.currencySymbol}>₦</Text>
+                <Text style={styles.priceValue}>25,000</Text>
+              </View>
+              <Text style={styles.priceSubtext}>per month • No commission fees</Text>
             </View>
             
-            <View style={styles.benefitsList}>
-              <BenefitItem icon="checkmark-circle" text="Unlimited ride requests" />
-              <BenefitItem icon="checkmark-circle" text="Priority customer support" />
-              <BenefitItem icon="checkmark-circle" text="100% earnings - no commission" />
-              <BenefitItem icon="checkmark-circle" text="Real-time ride matching" />
-              <BenefitItem icon="checkmark-circle" text="Insurance coverage" />
+            <View style={styles.divider} />
+            
+            <View style={styles.benefitsContainer}>
+              <Text style={styles.benefitsTitle}>What's Included</Text>
+              {[
+                { icon: 'infinite', text: 'Unlimited ride requests', color: '#00E676' },
+                { icon: 'cash', text: '100% earnings - Zero commission', color: '#FFD700' },
+                { icon: 'shield-checkmark', text: 'Full insurance coverage', color: '#00B0FF' },
+                { icon: 'headset', text: 'Priority customer support', color: '#FF6B6B' },
+                { icon: 'flash', text: 'Real-time ride matching', color: '#8B5CF6' },
+              ].map((benefit, index) => (
+                <View key={index} style={styles.benefitRow}>
+                  <View style={[styles.benefitIcon, { backgroundColor: `${benefit.color}20` }]}>
+                    <Ionicons name={benefit.icon as any} size={18} color={benefit.color} />
+                  </View>
+                  <Text style={styles.benefitText}>{benefit.text}</Text>
+                </View>
+              ))}
             </View>
-          </View>
+          </Animated.View>
 
           {/* Bank Details Card */}
-          <View style={styles.bankCard}>
+          <Animated.View 
+            style={[
+              styles.bankCard,
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
+            ]}
+          >
             <View style={styles.bankHeader}>
-              <Ionicons name="card" size={24} color="#22C55E" />
+              <LinearGradient
+                colors={['#00E676', '#00C853']}
+                style={styles.bankIconBg}
+              >
+                <Ionicons name="card" size={20} color="#FFFFFF" />
+              </LinearGradient>
               <Text style={styles.bankTitle}>Payment Details</Text>
             </View>
             
-            <View style={styles.bankDetails}>
-              <DetailRow label="Bank Name" value={subscription?.bank_details?.bank_name || 'Access Bank'} />
-              <DetailRow label="Account Name" value={subscription?.bank_details?.account_name || 'NEXRYDE Technologies Ltd'} />
-              <DetailRow 
+            <View style={styles.bankDetailsContainer}>
+              <BankDetailRow 
+                label="Bank Name" 
+                value="UBA"
+                copied={copiedField === 'bank'}
+                onCopy={() => copyToClipboard('UBA', 'bank')}
+              />
+              <BankDetailRow 
+                label="Account Name" 
+                value="ADMOBLORDGROUP LIMITED"
+                copied={copiedField === 'name'}
+                onCopy={() => copyToClipboard('ADMOBLORDGROUP LIMITED', 'name')}
+              />
+              <BankDetailRow 
                 label="Account Number" 
-                value={subscription?.bank_details?.account_number || '0123456789'} 
-                copyable 
+                value="1028400669"
+                copied={copiedField === 'number'}
+                onCopy={() => copyToClipboard('1028400669', 'number')}
+                highlight
               />
             </View>
-
-            <View style={styles.instructions}>
-              <Text style={styles.instructionsTitle}>How to Pay:</Text>
-              <Text style={styles.instructionsText}>
-                1. Transfer ₦25,000 to the account above{'\n'}
-                2. Take a screenshot of your payment receipt{'\n'}
-                3. Upload the screenshot below{'\n'}
-                4. Your subscription will be activated within minutes
-              </Text>
+            
+            <View style={styles.stepsContainer}>
+              <Text style={styles.stepsTitle}>Quick Steps</Text>
+              {[
+                'Transfer ₦25,000 to the account above',
+                'Screenshot your payment receipt',
+                'Upload & submit for verification',
+                'Get activated within minutes!',
+              ].map((step, index) => (
+                <View key={index} style={styles.stepRow}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepNumberText}>{index + 1}</Text>
+                  </View>
+                  <Text style={styles.stepText}>{step}</Text>
+                </View>
+              ))}
             </View>
-          </View>
+          </Animated.View>
 
-          {/* Payment Button */}
+          {/* Action Button */}
           {(subscription?.status === 'trial' || 
             subscription?.status === 'expired' || 
             subscription?.status === 'pending_payment' ||
             !subscription) && (
             <TouchableOpacity 
-              style={styles.payButton} 
+              style={styles.actionButton} 
               onPress={() => setShowPaymentModal(true)}
+              activeOpacity={0.9}
             >
               <LinearGradient
-                colors={['#22C55E', '#16A34A']}
-                style={styles.payButtonGradient}
+                colors={['#00E676', '#00C853']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.actionButtonGradient}
               >
-                <Ionicons name="cloud-upload" size={24} color="#FFFFFF" />
-                <Text style={styles.payButtonText}>Upload Payment Proof</Text>
+                <Ionicons name="cloud-upload" size={22} color="#FFFFFF" />
+                <Text style={styles.actionButtonText}>Upload Payment Proof</Text>
+                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
               </LinearGradient>
             </TouchableOpacity>
           )}
 
           {subscription?.status === 'pending_verification' && (
-            <View style={styles.verifyingCard}>
+            <View style={styles.verifyingContainer}>
               <ActivityIndicator size="small" color="#F59E0B" />
-              <Text style={styles.verifyingText}>Your payment is being verified...</Text>
+              <Text style={styles.verifyingText}>Verifying your payment...</Text>
             </View>
           )}
+          
+          <View style={{ height: 40 }} />
         </ScrollView>
 
         {/* Payment Modal */}
         <Modal visible={showPaymentModal} animationType="slide" presentationStyle="pageSheet">
-          <SafeAreaView style={styles.modalContainer}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowPaymentModal(false)}>
-                <Ionicons name="close" size={24} color="#111827" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Submit Payment</Text>
-              <View style={{ width: 24 }} />
-            </View>
+          <View style={styles.modalContainer}>
+            <LinearGradient
+              colors={['#0F172A', '#1E293B']}
+              style={StyleSheet.absoluteFill}
+            />
+            
+            <SafeAreaView style={{ flex: 1 }}>
+              <View style={styles.modalHeader}>
+                <TouchableOpacity 
+                  style={styles.modalCloseButton}
+                  onPress={() => setShowPaymentModal(false)}
+                >
+                  <Ionicons name="close" size={24} color="#FFFFFF" />
+                </TouchableOpacity>
+                <Text style={styles.modalTitle}>Submit Payment</Text>
+                <View style={{ width: 40 }} />
+              </View>
 
-            <ScrollView style={styles.modalContent}>
-              {/* Screenshot Upload */}
-              <Text style={styles.uploadLabel}>Payment Screenshot</Text>
-              
-              {paymentScreenshot ? (
-                <View style={styles.screenshotContainer}>
-                  <Image source={{ uri: paymentScreenshot }} style={styles.screenshot} />
-                  <TouchableOpacity 
-                    style={styles.removeScreenshot}
-                    onPress={() => setPaymentScreenshot(null)}
-                  >
-                    <Ionicons name="close-circle" size={28} color="#EF4444" />
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.uploadOptions}>
-                  <TouchableOpacity style={styles.uploadButton} onPress={takePhoto}>
-                    <Ionicons name="camera" size={32} color="#3B82F6" />
-                    <Text style={styles.uploadButtonText}>Take Photo</Text>
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity style={styles.uploadButton} onPress={pickImage}>
-                    <Ionicons name="images" size={32} color="#8B5CF6" />
-                    <Text style={styles.uploadButtonText}>From Gallery</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {/* Payment Reference */}
-              <Text style={styles.inputLabel}>Payment Reference (Optional)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Enter transaction reference"
-                placeholderTextColor="#9CA3AF"
-                value={paymentReference}
-                onChangeText={setPaymentReference}
-              />
-
-              {/* Submit Button */}
-              <TouchableOpacity 
-                style={[styles.submitButton, !paymentScreenshot && styles.submitButtonDisabled]}
-                onPress={submitPayment}
-                disabled={!paymentScreenshot || submitting}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
+              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+                <Text style={styles.modalSectionTitle}>Payment Screenshot</Text>
+                
+                {paymentScreenshot ? (
+                  <View style={styles.screenshotPreview}>
+                    <Image source={{ uri: paymentScreenshot }} style={styles.screenshotImage} />
+                    <TouchableOpacity 
+                      style={styles.removeImageButton}
+                      onPress={() => setPaymentScreenshot(null)}
+                    >
+                      <Ionicons name="close-circle" size={32} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
                 ) : (
-                  <>
-                    <Ionicons name="send" size={20} color="#FFFFFF" />
-                    <Text style={styles.submitButtonText}>Submit for Verification</Text>
-                  </>
+                  <View style={styles.uploadOptionsContainer}>
+                    <TouchableOpacity style={styles.uploadOption} onPress={takePhoto}>
+                      <LinearGradient
+                        colors={['rgba(99, 102, 241, 0.2)', 'rgba(99, 102, 241, 0.05)']}
+                        style={styles.uploadOptionGradient}
+                      >
+                        <Ionicons name="camera" size={36} color="#6366F1" />
+                        <Text style={styles.uploadOptionText}>Take Photo</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity style={styles.uploadOption} onPress={pickImage}>
+                      <LinearGradient
+                        colors={['rgba(139, 92, 246, 0.2)', 'rgba(139, 92, 246, 0.05)']}
+                        style={styles.uploadOptionGradient}
+                      >
+                        <Ionicons name="images" size={36} color="#8B5CF6" />
+                        <Text style={styles.uploadOptionText}>From Gallery</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
                 )}
-              </TouchableOpacity>
-            </ScrollView>
-          </SafeAreaView>
+
+                <Text style={styles.modalSectionTitle}>Reference (Optional)</Text>
+                <TextInput
+                  style={styles.referenceInput}
+                  placeholder="Transaction reference..."
+                  placeholderTextColor="#64748B"
+                  value={paymentReference}
+                  onChangeText={setPaymentReference}
+                />
+
+                <TouchableOpacity 
+                  style={[
+                    styles.submitButton,
+                    !paymentScreenshot && styles.submitButtonDisabled
+                  ]}
+                  onPress={submitPayment}
+                  disabled={!paymentScreenshot || submitting}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <LinearGradient
+                      colors={paymentScreenshot ? ['#00E676', '#00C853'] : ['#475569', '#475569']}
+                      style={styles.submitButtonGradient}
+                    >
+                      <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
+                      <Text style={styles.submitButtonText}>Submit for Verification</Text>
+                    </LinearGradient>
+                  )}
+                </TouchableOpacity>
+              </ScrollView>
+            </SafeAreaView>
+          </View>
         </Modal>
       </SafeAreaView>
     </View>
   );
 }
 
-const BenefitItem = ({ icon, text }: { icon: string; text: string }) => (
-  <View style={styles.benefitItem}>
-    <Ionicons name={icon as any} size={20} color="#22C55E" />
-    <Text style={styles.benefitText}>{text}</Text>
-  </View>
-);
-
-const DetailRow = ({ label, value, copyable }: { label: string; value: string; copyable?: boolean }) => (
-  <View style={styles.detailRow}>
-    <Text style={styles.detailLabel}>{label}</Text>
-    <View style={styles.detailValueContainer}>
-      <Text style={styles.detailValue}>{value}</Text>
-      {copyable && (
-        <TouchableOpacity style={styles.copyButton}>
-          <Ionicons name="copy-outline" size={18} color="#3B82F6" />
-        </TouchableOpacity>
-      )}
+const BankDetailRow = ({ 
+  label, 
+  value, 
+  copied, 
+  onCopy,
+  highlight 
+}: { 
+  label: string; 
+  value: string; 
+  copied: boolean;
+  onCopy: () => void;
+  highlight?: boolean;
+}) => (
+  <View style={[styles.bankDetailRow, highlight && styles.bankDetailRowHighlight]}>
+    <View>
+      <Text style={styles.bankDetailLabel}>{label}</Text>
+      <Text style={[styles.bankDetailValue, highlight && styles.bankDetailValueHighlight]}>
+        {value}
+      </Text>
     </View>
+    <TouchableOpacity style={styles.copyButton} onPress={onCopy}>
+      <Ionicons 
+        name={copied ? "checkmark" : "copy-outline"} 
+        size={20} 
+        color={copied ? "#00E676" : "#94A3B8"} 
+      />
+    </TouchableOpacity>
   </View>
 );
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
+    backgroundColor: '#0F172A',
   },
   safeArea: {
     flex: 1,
@@ -432,253 +630,420 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#F3F4F6',
   },
+  loadingText: {
+    marginTop: 12,
+    color: '#94A3B8',
+    fontSize: 14,
+  },
+  
+  // Decorative elements
+  decorCircle1: {
+    position: 'absolute',
+    top: -100,
+    right: -100,
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: 'rgba(99, 102, 241, 0.1)',
+  },
+  decorCircle2: {
+    position: 'absolute',
+    bottom: 100,
+    left: -80,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: 'rgba(0, 230, 118, 0.08)',
+  },
+  decorCircle3: {
+    position: 'absolute',
+    top: '40%',
+    right: -50,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+  },
+  
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
   },
   backButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F3F4F6',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
-  },
-  scrollContent: {
-    padding: 16,
-  },
-  statusCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
-    alignItems: 'center',
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 24,
-    gap: 8,
-  },
-  statusText: {
-    fontSize: 16,
-    fontWeight: '700',
     color: '#FFFFFF',
   },
-  statusDetails: {
-    marginTop: 16,
+  helpButton: {
+    width: 40,
+    height: 40,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  daysRemaining: {
+  
+  scrollContent: {
+    paddingHorizontal: 16,
+    paddingTop: 8,
+  },
+  
+  // Hero Card
+  heroCard: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  heroGradient: {
+    padding: 28,
     alignItems: 'center',
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  particle1: {
+    position: 'absolute',
+    top: 20,
+    left: 30,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  particle2: {
+    position: 'absolute',
+    top: 60,
+    right: 40,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  particle3: {
+    position: 'absolute',
+    bottom: 30,
+    left: 60,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255, 255, 255, 0.4)',
+  },
+  statusIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  statusLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 2,
     marginBottom: 8,
   },
-  daysNumber: {
-    fontSize: 48,
-    fontWeight: '800',
-    color: '#111827',
+  daysContainer: {
+    alignItems: 'center',
+    marginTop: 8,
   },
-  daysLabel: {
+  daysNumber: {
+    fontSize: 56,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    lineHeight: 60,
+  },
+  daysText: {
     fontSize: 14,
-    color: '#6B7280',
+    color: 'rgba(255, 255, 255, 0.8)',
     fontWeight: '500',
   },
   expiryText: {
     fontSize: 13,
-    color: '#6B7280',
-  },
-  noSubscription: {
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  noSubTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111827',
+    color: 'rgba(255, 255, 255, 0.7)',
     marginTop: 12,
   },
-  noSubText: {
+  
+  // Trial Card
+  trialCard: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 20,
+  },
+  trialGradient: {
+    padding: 28,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+    borderRadius: 24,
+  },
+  trialTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    marginTop: 16,
+  },
+  trialSubtitle: {
     fontSize: 14,
-    color: '#6B7280',
-    marginTop: 4,
-    marginBottom: 16,
+    color: '#94A3B8',
+    marginTop: 8,
+    textAlign: 'center',
   },
   trialButton: {
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 24,
+    marginTop: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  trialButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 28,
     paddingVertical: 14,
-    borderRadius: 12,
+    gap: 10,
   },
   trialButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  priceCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+  
+  // Glass Card (Price)
+  glassCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   priceHeader: {
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-    paddingBottom: 16,
+  },
+  priceBadge: {
+    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     marginBottom: 16,
   },
-  priceTitle: {
-    fontSize: 14,
-    color: '#6B7280',
-    fontWeight: '500',
-    marginBottom: 8,
+  priceBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#00E676',
+    letterSpacing: 1,
   },
-  priceAmount: {
+  priceRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
+    alignItems: 'flex-start',
   },
-  currency: {
+  currencySymbol: {
     fontSize: 24,
     fontWeight: '700',
-    color: '#22C55E',
+    color: '#00E676',
+    marginTop: 8,
   },
-  price: {
-    fontSize: 40,
+  priceValue: {
+    fontSize: 48,
     fontWeight: '800',
-    color: '#111827',
+    color: '#FFFFFF',
   },
-  period: {
-    fontSize: 16,
-    color: '#6B7280',
-    marginLeft: 4,
+  priceSubtext: {
+    fontSize: 13,
+    color: '#94A3B8',
+    marginTop: 4,
   },
-  benefitsList: {
-    gap: 12,
+  divider: {
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    marginVertical: 20,
   },
-  benefitItem: {
+  benefitsContainer: {
+    gap: 14,
+  },
+  benefitsTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  benefitRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
+  },
+  benefitIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   benefitText: {
     fontSize: 15,
-    color: '#374151',
+    color: '#FFFFFF',
     fontWeight: '500',
+    flex: 1,
   },
+  
+  // Bank Card
   bankCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 20,
-    marginBottom: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   bankHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
+    gap: 12,
+    marginBottom: 20,
+  },
+  bankIconBg: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   bankTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: '#FFFFFF',
   },
-  bankDetails: {
-    backgroundColor: '#F9FAFB',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-  },
-  detailRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
-  },
-  detailLabel: {
-    fontSize: 13,
-    color: '#6B7280',
-  },
-  detailValueContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  detailValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#111827',
-  },
-  copyButton: {
-    padding: 4,
-  },
-  instructions: {
-    backgroundColor: '#FEF3C7',
-    borderRadius: 12,
-    padding: 14,
-  },
-  instructionsTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#92400E',
-    marginBottom: 8,
-  },
-  instructionsText: {
-    fontSize: 13,
-    color: '#92400E',
-    lineHeight: 20,
-  },
-  payButton: {
-    borderRadius: 14,
+  bankDetailsContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 20,
   },
-  payButtonGradient: {
+  bankDetailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  bankDetailRowHighlight: {
+    backgroundColor: 'rgba(0, 230, 118, 0.1)',
+  },
+  bankDetailLabel: {
+    fontSize: 12,
+    color: '#94A3B8',
+    marginBottom: 4,
+  },
+  bankDetailValue: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  bankDetailValueHighlight: {
+    color: '#00E676',
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 1,
+  },
+  copyButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  
+  // Steps
+  stepsContainer: {
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(245, 158, 11, 0.2)',
+  },
+  stepsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#F59E0B',
+    marginBottom: 12,
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 10,
+  },
+  stepNumber: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#F59E0B',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepNumberText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  stepText: {
+    fontSize: 13,
+    color: '#FCD34D',
+    flex: 1,
+  },
+  
+  // Action Button
+  actionButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 4,
+  },
+  actionButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 10,
+    paddingVertical: 18,
+    gap: 12,
   },
-  payButtonText: {
+  actionButtonText: {
     fontSize: 16,
     fontWeight: '700',
     color: '#FFFFFF',
   },
-  verifyingCard: {
+  
+  // Verifying
+  verifyingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#FEF3C7',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
     borderRadius: 12,
     padding: 16,
-    gap: 10,
+    gap: 12,
+    marginTop: 4,
   },
   verifyingText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#92400E',
+    color: '#F59E0B',
   },
-  // Modal Styles
+  
+  // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -687,87 +1052,108 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: '#E5E7EB',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  modalCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#111827',
+    color: '#FFFFFF',
   },
   modalContent: {
     flex: 1,
-    padding: 16,
+    padding: 20,
   },
-  uploadLabel: {
+  modalSectionTitle: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
+    color: '#94A3B8',
     marginBottom: 12,
+    marginTop: 8,
   },
-  uploadOptions: {
+  
+  // Upload Options
+  uploadOptionsContainer: {
     flexDirection: 'row',
     gap: 12,
     marginBottom: 24,
   },
-  uploadButton: {
+  uploadOption: {
     flex: 1,
-    backgroundColor: '#F3F4F6',
     borderRadius: 16,
-    paddingVertical: 24,
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#E5E7EB',
-    borderStyle: 'dashed',
+    overflow: 'hidden',
   },
-  uploadButtonText: {
+  uploadOptionGradient: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 32,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderStyle: 'dashed',
+    borderRadius: 16,
+  },
+  uploadOptionText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#374151',
-    marginTop: 8,
+    color: '#FFFFFF',
+    marginTop: 10,
   },
-  screenshotContainer: {
+  
+  // Screenshot Preview
+  screenshotPreview: {
     position: 'relative',
     marginBottom: 24,
+    borderRadius: 16,
+    overflow: 'hidden',
   },
-  screenshot: {
+  screenshotImage: {
     width: '100%',
-    height: 200,
-    borderRadius: 12,
-    backgroundColor: '#F3F4F6',
+    height: 220,
+    borderRadius: 16,
+    backgroundColor: '#1E293B',
   },
-  removeScreenshot: {
+  removeImageButton: {
     position: 'absolute',
-    top: -10,
-    right: -10,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
+    top: 8,
+    right: 8,
+    backgroundColor: '#0F172A',
+    borderRadius: 16,
   },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#374151',
-    marginBottom: 8,
-  },
-  input: {
-    backgroundColor: '#F3F4F6',
+  
+  // Reference Input
+  referenceInput: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
-    color: '#111827',
+    color: '#FFFFFF',
     marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
+  
+  // Submit Button
   submitButton: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  submitButtonDisabled: {
+    opacity: 0.6,
+  },
+  submitButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#22C55E',
-    borderRadius: 14,
     paddingVertical: 16,
     gap: 10,
-  },
-  submitButtonDisabled: {
-    backgroundColor: '#D1D5DB',
   },
   submitButtonText: {
     fontSize: 16,
