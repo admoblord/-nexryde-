@@ -19,7 +19,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-rebrand.preview.emergentagent.com';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-map.preview.emergentagent.com';
 
 interface SubscriptionData {
   status: string;
