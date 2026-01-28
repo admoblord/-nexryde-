@@ -45,8 +45,8 @@ const COLORS = {
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
-// Backend URL - hardcoded for reliability
-const BACKEND_URL = 'https://nexryde-map.preview.emergentagent.com';
+// Backend URL - use environment variable
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-map.preview.emergentagent.com';
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
