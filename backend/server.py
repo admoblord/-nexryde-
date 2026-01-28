@@ -116,6 +116,18 @@ otp_store = {}
 # Fare estimate storage
 fare_estimate_store: Dict[str, Dict[str, Any]] = {}
 
+# ==================== DRIVER SUBSCRIPTION CONFIG ====================
+SUBSCRIPTION_CONFIG = {
+    "monthly_fee": 25000,  # ₦25,000 monthly
+    "trial_days": 7,       # 7 days free trial
+    "currency": "NGN",
+    "bank_details": {
+        "bank_name": "Access Bank",
+        "account_name": "NEXRYDE Technologies Ltd",
+        "account_number": "0123456789",
+    }
+}
+
 # ==================== MODELS ====================
 
 class User(BaseModel):
