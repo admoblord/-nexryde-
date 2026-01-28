@@ -623,6 +623,18 @@ test_plan:
         - agent: "testing"
         - comment: "❌ ISSUE: Family Mode screen shows 'Loading family...' indefinitely and doesn't complete loading. Likely requires user authentication or backend family data. Screen structure exists but data loading fails."
 
+  - task: "AI Chat and Driver-Rider Messaging APIs"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "testing"
+        - comment: "✅ COMPREHENSIVE AI CHAT API TESTING COMPLETE: All 5 endpoints tested successfully with real GPT-4o integration. 1) POST /api/chat/ai with first message returns intelligent fare information for Lekki to Victoria Island route (₦2,000-₦3,500 range). 2) POST /api/chat/ai with second message maintains conversation context and provides detailed safety features (SOS button, trip sharing, verified drivers, route monitoring). 3) GET /api/chat/ai/history/{user_id} retrieves complete conversation history with 12+ messages showing proper session management. 4) GET /api/chat/presets/rider returns 6 rider-specific quick replies ('I'm coming out now', 'I'm at the entrance', etc.). 5) GET /api/chat/presets/driver returns 6 driver-specific quick replies ('I'm on my way', 'I've arrived at pickup', etc.). Backend logs confirm real GPT-4o usage via LiteLLM. AI responses are contextual, intelligent, and NOT MOCKED. Complete messaging system working end-to-end."
+
 agent_communication:
     - agent: "main"
     - message: "Major feature update complete. Added all Core Safety Features, AI Assistants, Gamification (Streaks, Badges, Challenges, Leaderboard), Driver Welfare (Fatigue Monitoring, Grace Period), Rider Welfare (Family Mode, Trip Sharing, Insurance). Frontend screens created for Safety Center, AI Assistant, and Leaderboard. Backend APIs tested with curl - all returning expected data."
@@ -638,6 +650,8 @@ agent_communication:
     - message: "❌ GOOGLE SIGN-IN FLOW TESTING: Tested Google Sign-In flow on mobile viewport (390x844). LOGIN SCREEN: Perfect UI with NEXRYDE branding, both SMS and Google buttons present, phone input working. ISSUES: 1) Splash screen 'Begin Your Journey' button doesn't navigate to login, 2) Google Sign-In button clicks but doesn't trigger network requests, navigation, or popup to Emergent Auth. ExpoWebBrowser not available in web environment. SMS authentication works correctly. Backend Google OAuth API is functional but frontend integration broken."
     - agent: "testing"
     - message: "✅ DRIVER SUBSCRIPTION API TESTING COMPLETE: Comprehensive testing of all 4 subscription endpoints successful. Fixed critical ObjectId serialization bug in start-trial endpoint. All APIs working perfectly: 1) GET /api/subscriptions/config returns correct bank details (UBA, ADMOBLORDGROUP LIMITED, 1028400669) and ₦25,000 monthly fee, 2) POST /api/subscriptions/{driver_id}/start-trial creates 7-day trial successfully, 3) GET /api/subscriptions/{driver_id} returns complete subscription status with all required fields, 4) POST /api/subscriptions/{driver_id}/submit-payment processes payment proof and triggers auto-verification flow. Complete subscription management working end-to-end."
+    - agent: "testing"
+    - message: "✅ AI CHAT API TESTING COMPLETE: All 5 AI Chat and messaging endpoints tested successfully with REAL GPT-4o integration confirmed. POST /api/chat/ai provides intelligent, contextual responses for fare inquiries and safety questions. Chat history API maintains conversation context properly. Preset message APIs return role-specific quick replies (6 rider presets, 6 driver presets). Backend logs confirm LiteLLM GPT-4o usage - responses are NOT mocked. Complete AI-powered chat system working perfectly."
 
   - task: "SMS OTP Authentication"
     implemented: true
