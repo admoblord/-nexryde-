@@ -505,6 +505,18 @@ frontend:
     file: "app/driver/subscription.tsx"
     stuck_count: 0
     priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "NEW: Complete subscription management screen with dark glassmorphism design. Features: subscription status card with animated hero section, 7-day trial start button, ₦25,000 monthly price display with benefits, bank details (UBA - ADMOBLORDGROUP LIMITED - 1028400669) with copy functionality, payment screenshot upload via camera/gallery, quick steps guide. Accessible from Profile screen for drivers."
+
+  - task: "Driver Subscription Screen"
+    implemented: true
+    working: true
+    file: "app/driver/subscription.tsx"
+    stuck_count: 0
+    priority: "high"
     needs_retesting: false
     status_history:
         - working: true
