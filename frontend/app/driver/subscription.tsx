@@ -43,8 +43,17 @@ interface SubscriptionData {
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAppStore();
-  const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false); // Start with false for web compatibility
+  const [subscription, setSubscription] = useState<any>({
+    status: 'none',
+    days_remaining: 0,
+    monthly_fee: 25000,
+    bank_details: {
+      bank_name: 'United Bank for Africa (UBA)',
+      account_name: 'ADMOBLORDGROUP LIMITED',
+      account_number: '1028400669',
+    },
+  });
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [paymentScreenshot, setPaymentScreenshot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
