@@ -5206,6 +5206,227 @@ async def health_check():
 
 # ==================== ADMIN ENDPOINTS ====================
 
+# Admin credentials (in production, use secure hashing)
+ADMIN_CREDENTIALS = {
+    "admin@nexryde.com": "nexryde2025"
+}
+
+class AdminLoginRequest(BaseModel):
+    email: str
+    password: str
+
+@api_router.post("/admin/login")
+async def admin_login(request: AdminLoginRequest):
+    """Admin login endpoint"""
+    if request.email in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[request.email] == request.password:
+        # Generate a simple token (in production, use JWT)
+        token = hashlib.sha256(f"{request.email}{datetime.utcnow().isoformat()}".encode()).hexdigest()
+        return {"success": True, "token": token, "email": request.email}
+    return {"success": False, "detail": "Invalid credentials"}
+
+@api_router.get("/admin/overview")
+async def admin_overview():
+    """Get dashboard overview stats"""
+    total_riders = await db.users.count_documents({"role": "rider"})
+    total_drivers = await db.users.count_documents({"role": "driver"})
+    total_trips = await db.trips.count_documents({})
+    completed_trips = await db.trips.count_documents({"status": "completed"})
+    
+    # Calculate revenue from completed trips
+    revenue_pipeline = [
+        {"$match": {"status": "completed"}},
+        {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
+    ]
+    revenue_result = await db.trips.aggregate(revenue_pipeline).to_list(1)
+    total_revenue = revenue_result[0]["total"] if revenue_result else 0
+    
+    # Subscription revenue
+    active_subs = await db.subscriptions.count_documents({"status": "active"})
+    subscription_revenue = active_subs * SUBSCRIPTION_CONFIG["monthly_fee"]
+    
+    # Today's stats
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_trips = await db.trips.count_documents({"created_at": {"$gte": today_start}})
+    today_signups = await db.users.count_documents({"created_at": {"$gte": today_start}})
+    
+    return {
+        "total_riders": total_riders,
+        "total_drivers": total_drivers,
+        "total_trips": total_trips,
+        "completed_trips": completed_trips,
+        "total_revenue": total_revenue,
+        "subscription_revenue": subscription_revenue,
+        "active_subscriptions": active_subs,
+        "today_trips": today_trips,
+        "today_signups": today_signups
+    }
+
+@api_router.get("/admin/riders")
+async def admin_get_riders(limit: int = 100, skip: int = 0):
+    """Get all riders with their details"""
+    riders = await db.users.find(
+        {"role": "rider"},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with trip counts
+    for rider in riders:
+        rider["total_trips"] = await db.trips.count_documents({"rider_id": rider["id"]})
+        rider["blocked"] = rider.get("blocked", False)
+    
+    return {"riders": riders, "total": len(riders)}
+
+@api_router.get("/admin/drivers")
+async def admin_get_drivers(limit: int = 100, skip: int = 0):
+    """Get all drivers with their details"""
+    drivers = await db.users.find(
+        {"role": "driver"},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with profile and subscription data
+    enriched_drivers = []
+    for driver in drivers:
+        profile = await db.driver_profiles.find_one({"user_id": driver["id"]}, {"_id": 0})
+        subscription = await db.subscriptions.find_one(
+            {"driver_id": driver["id"]},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        
+        enriched_drivers.append({
+            **driver,
+            "vehicle": {
+                "make": profile.get("vehicle_type") if profile else None,
+                "model": profile.get("vehicle_model") if profile else None,
+                "plate": profile.get("vehicle_plate") if profile else None,
+            } if profile else None,
+            "subscription_status": subscription.get("status") if subscription else "none",
+            "is_online": profile.get("is_online", False) if profile else False,
+            "total_trips": await db.trips.count_documents({"driver_id": driver["id"]}),
+            "blocked": driver.get("blocked", False)
+        })
+    
+    return {"drivers": enriched_drivers, "total": len(enriched_drivers)}
+
+@api_router.get("/admin/trips")
+async def admin_get_trips(limit: int = 100, skip: int = 0, status: str = None):
+    """Get all trips with details"""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    trips = await db.trips.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with user names
+    enriched_trips = []
+    for trip in trips:
+        rider = await db.users.find_one({"id": trip.get("rider_id")}, {"name": 1, "_id": 0})
+        driver = await db.users.find_one({"id": trip.get("driver_id")}, {"name": 1, "_id": 0}) if trip.get("driver_id") else None
+        
+        enriched_trips.append({
+            **trip,
+            "rider_name": rider.get("name") if rider else "Unknown",
+            "driver_name": driver.get("name") if driver else None,
+            "pickup": {"address": trip.get("pickup_location", {}).get("address", "N/A")},
+            "dropoff": {"address": trip.get("dropoff_location", {}).get("address", "N/A")}
+        })
+    
+    return {"trips": enriched_trips, "total": len(enriched_trips)}
+
+@api_router.get("/admin/payments")
+async def admin_get_payments(limit: int = 100, skip: int = 0):
+    """Get subscription payments"""
+    subscriptions = await db.subscriptions.find(
+        {},
+        {"_id": 0}
+    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with driver names
+    payments = []
+    approved_count = 0
+    pending_count = 0
+    total_revenue = 0
+    
+    for sub in subscriptions:
+        driver = await db.users.find_one({"id": sub.get("driver_id")}, {"name": 1, "_id": 0})
+        
+        status = "approved" if sub.get("status") == "active" else sub.get("status", "pending")
+        if status == "approved" or status == "active":
+            approved_count += 1
+            total_revenue += sub.get("amount", SUBSCRIPTION_CONFIG["monthly_fee"])
+        elif status in ["pending", "pending_verification"]:
+            pending_count += 1
+        
+        payments.append({
+            "id": sub.get("id"),
+            "driver_id": sub.get("driver_id"),
+            "driver_name": driver.get("name") if driver else "Unknown",
+            "amount": sub.get("amount", SUBSCRIPTION_CONFIG["monthly_fee"]),
+            "status": status,
+            "screenshot": sub.get("payment_screenshot"),
+            "created_at": sub.get("created_at", datetime.utcnow()).isoformat() if isinstance(sub.get("created_at"), datetime) else sub.get("created_at"),
+            "payment_submitted_at": sub.get("payment_submitted_at"),
+            "auto_approved": sub.get("auto_approved", False)
+        })
+    
+    return {
+        "payments": payments,
+        "approved_count": approved_count,
+        "pending_count": pending_count,
+        "total_revenue": total_revenue
+    }
+
+@api_router.post("/admin/subscriptions/{subscription_id}/approve")
+async def admin_approve_subscription(subscription_id: str):
+    """Manually approve a subscription payment"""
+    result = await db.subscriptions.update_one(
+        {"id": subscription_id},
+        {"$set": {
+            "status": "active",
+            "payment_verified_at": datetime.utcnow(),
+            "end_date": datetime.utcnow() + timedelta(days=30)
+        }}
+    )
+    
+    if result.modified_count > 0:
+        return {"success": True, "message": "Subscription approved"}
+    return {"success": False, "message": "Subscription not found"}
+
+@api_router.post("/admin/subscriptions/{subscription_id}/reject")
+async def admin_reject_subscription(subscription_id: str, reason: str = "Payment verification failed"):
+    """Reject a subscription payment"""
+    result = await db.subscriptions.update_one(
+        {"id": subscription_id},
+        {"$set": {
+            "status": "rejected",
+            "rejection_reason": reason,
+            "payment_verified_at": datetime.utcnow()
+        }}
+    )
+    
+    if result.modified_count > 0:
+        return {"success": True, "message": "Subscription rejected"}
+    return {"success": False, "message": "Subscription not found"}
+
+@api_router.post("/admin/users/{user_id}/block")
+async def admin_block_user(user_id: str, block: bool = True):
+    """Block or unblock a user"""
+    result = await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"blocked": block}}
+    )
+    
+    if result.modified_count > 0:
+        return {"success": True, "message": f"User {'blocked' if block else 'unblocked'}"}
+    return {"success": False, "message": "User not found"}
+
+@api_router.get("/admin/promos")
+async def admin_get_promos():
+    """Get all promo codes"""
+    promos = await db.promo_codes.find({}, {"_id": 0}).to_list(100)
+    return {"promos": promos}
+
 @api_router.post("/admin/promo/create")
 async def create_promo_code(code: str, discount_percent: int = 10, max_uses: int = 1000):
     """Create a new promo code"""
@@ -5223,6 +5444,65 @@ async def create_promo_code(code: str, discount_percent: int = 10, max_uses: int
         upsert=True
     )
     return {"success": True, "code": code.upper(), "discount_percent": discount_percent}
+
+@api_router.post("/admin/promo/{code}/toggle")
+async def admin_toggle_promo(code: str):
+    """Toggle promo code active status"""
+    promo = await db.promo_codes.find_one({"code": code.upper()})
+    if promo:
+        new_status = not promo.get("active", True)
+        await db.promo_codes.update_one(
+            {"code": code.upper()},
+            {"$set": {"active": new_status}}
+        )
+        return {"success": True, "active": new_status}
+    return {"success": False, "message": "Promo code not found"}
+
+@api_router.get("/admin/sos-alerts")
+async def admin_get_sos_alerts():
+    """Get all SOS alerts"""
+    alerts = await db.sos_alerts.find({}, {"_id": 0}).sort("triggered_at", -1).to_list(100)
+    return {"alerts": alerts}
+
+@api_router.get("/admin/activity-log")
+async def admin_get_activity_log(limit: int = 50):
+    """Get recent app activity"""
+    # Get recent trips
+    recent_trips = await db.trips.find(
+        {},
+        {"_id": 0, "id": 1, "status": 1, "created_at": 1, "rider_id": 1}
+    ).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Get recent subscriptions
+    recent_subs = await db.subscriptions.find(
+        {},
+        {"_id": 0, "id": 1, "status": 1, "created_at": 1, "driver_id": 1}
+    ).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Combine and sort
+    activities = []
+    for trip in recent_trips:
+        activities.append({
+            "type": "trip",
+            "action": f"Trip {trip.get('status', 'created')}",
+            "user_id": trip.get("rider_id"),
+            "timestamp": trip.get("created_at"),
+            "details": {"trip_id": trip.get("id")}
+        })
+    
+    for sub in recent_subs:
+        activities.append({
+            "type": "subscription",
+            "action": f"Subscription {sub.get('status', 'created')}",
+            "user_id": sub.get("driver_id"),
+            "timestamp": sub.get("created_at"),
+            "details": {"subscription_id": sub.get("id")}
+        })
+    
+    # Sort by timestamp
+    activities.sort(key=lambda x: x.get("timestamp", datetime.min), reverse=True)
+    
+    return {"activities": activities[:limit]}
 
 # Seed default promo codes on startup
 @app.on_event("startup")
