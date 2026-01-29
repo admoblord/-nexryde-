@@ -67,14 +67,21 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
     
+    const backendUrl = BACKEND_URL || '';
+    console.log('=== Phone Login Started ===');
+    console.log('BACKEND_URL:', backendUrl);
+    console.log('Phone:', `+234${phone}`);
+    
     try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+      const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: `+234${phone}` }),
       });
       
+      console.log('Response status:', response.status);
       const data = await response.json();
+      console.log('Response data:', data);
       
       if (response.ok) {
         router.push({ 
@@ -88,12 +95,13 @@ export default function LoginScreen() {
         });
       } else {
         Alert.alert('Error', data.detail || 'Failed to send OTP');
+        setLoading(false);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('OTP Error:', error);
-      Alert.alert('Error', 'Failed to send OTP. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   // Extract session_id from URL (supports both hash and query params)
