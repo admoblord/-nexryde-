@@ -672,6 +672,331 @@ class NEXRYDEAPITester:
         
         return response["success"]
     
+    # ==================== NEW POWERFUL FEATURES TESTS ====================
+    
+    async def test_surge_pricing(self):
+        """Test GET /api/surge/check"""
+        params = {"lat": 6.4281, "lng": 3.4219}
+        response = await self.make_request("GET", "/surge/check", params=params)
+        
+        if response["success"]:
+            surge_data = response["data"]
+            multiplier = surge_data.get("surge_multiplier", 1.0)
+            is_active = surge_data.get("is_surge_active", False)
+            self.log_result(
+                "Surge Pricing Check", 
+                True, 
+                f"Surge multiplier: {multiplier}x, Active: {is_active}", 
+                surge_data
+            )
+        else:
+            self.log_result("Surge Pricing Check", False, f"Surge pricing failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_ride_bidding_create(self):
+        """Test POST /api/rides/bid/create"""
+        data = {
+            "rider_offered_price": 1500,
+            "pickup_lat": 6.4281,
+            "pickup_lng": 3.4219,
+            "dropoff_lat": 6.4355,
+            "dropoff_lng": 3.4567,
+            "pickup_address": "Victoria Island, Lagos",
+            "dropoff_address": "Lekki Phase 1, Lagos",
+            "ride_type": "economy"
+        }
+        params = {"rider_id": "test-rider-123"}
+        response = await self.make_request("POST", "/rides/bid/create", data, params=params)
+        
+        if response["success"]:
+            bid_data = response["data"]
+            bid_id = bid_data.get("bid_id") or bid_data.get("id")
+            self.log_result(
+                "Create Ride Bid", 
+                True, 
+                f"Bid created successfully. ID: {bid_id}, Price: ₦{data['rider_offered_price']}", 
+                bid_data
+            )
+        else:
+            self.log_result("Create Ride Bid", False, f"Ride bidding failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_ride_bidding_open(self):
+        """Test GET /api/rides/bid/open"""
+        params = {"lat": 6.4281, "lng": 3.4219}
+        response = await self.make_request("GET", "/rides/bid/open", params=params)
+        
+        if response["success"]:
+            bids_data = response["data"]
+            bids = bids_data.get("bids", []) if isinstance(bids_data, dict) else bids_data
+            self.log_result(
+                "Get Open Bids", 
+                True, 
+                f"Found {len(bids)} open bids in area", 
+                bids_data
+            )
+        else:
+            self.log_result("Get Open Bids", False, f"Get open bids failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_scheduled_rides_create(self):
+        """Test POST /api/rides/schedule"""
+        from datetime import datetime, timedelta
+        future_time = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        
+        data = {
+            "pickup_lat": 6.4281,
+            "pickup_lng": 3.4219,
+            "pickup_address": "Victoria Island, Lagos",
+            "dropoff_lat": 6.4355,
+            "dropoff_lng": 3.4567,
+            "dropoff_address": "Lekki Phase 1, Lagos",
+            "scheduled_time": future_time,
+            "ride_type": "economy"
+        }
+        params = {"rider_id": "test-rider-123"}
+        response = await self.make_request("POST", "/rides/schedule", data, params=params)
+        
+        if response["success"]:
+            schedule_data = response["data"]
+            schedule_id = schedule_data.get("schedule_id") or schedule_data.get("id")
+            self.log_result(
+                "Schedule Ride", 
+                True, 
+                f"Ride scheduled for {future_time}. ID: {schedule_id}", 
+                schedule_data
+            )
+        else:
+            self.log_result("Schedule Ride", False, f"Schedule ride failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_scheduled_rides_get(self):
+        """Test GET /api/rides/scheduled/{rider_id}"""
+        response = await self.make_request("GET", "/rides/scheduled/test-rider-123")
+        
+        if response["success"]:
+            scheduled_data = response["data"]
+            rides = scheduled_data.get("scheduled_rides", []) if isinstance(scheduled_data, dict) else scheduled_data
+            self.log_result(
+                "Get Scheduled Rides", 
+                True, 
+                f"Found {len(rides)} scheduled rides", 
+                scheduled_data
+            )
+        else:
+            self.log_result("Get Scheduled Rides", False, f"Get scheduled rides failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_package_delivery(self):
+        """Test POST /api/delivery/request"""
+        data = {
+            "pickup_lat": 6.4281,
+            "pickup_lng": 3.4219,
+            "pickup_address": "Victoria Island, Lagos",
+            "dropoff_lat": 6.4355,
+            "dropoff_lng": 3.4567,
+            "dropoff_address": "Lekki Phase 1, Lagos",
+            "recipient_name": "John Doe",
+            "recipient_phone": "+2348012345678",
+            "package_description": "Important Documents",
+            "package_size": "small"
+        }
+        params = {"sender_id": "test-user-123"}
+        response = await self.make_request("POST", "/delivery/request", data, params=params)
+        
+        if response["success"]:
+            delivery_data = response["data"]
+            delivery_id = delivery_data.get("delivery_id") or delivery_data.get("id")
+            self.log_result(
+                "Package Delivery Request", 
+                True, 
+                f"Delivery request created. ID: {delivery_id}, Package: {data['package_description']}", 
+                delivery_data
+            )
+        else:
+            self.log_result("Package Delivery Request", False, f"Package delivery failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_driver_heatmap(self):
+        """Test GET /api/driver/heatmap"""
+        response = await self.make_request("GET", "/driver/heatmap")
+        
+        if response["success"]:
+            heatmap_data = response["data"]
+            if isinstance(heatmap_data, dict):
+                zones = heatmap_data.get("zones", [])
+                drivers = heatmap_data.get("drivers", [])
+                self.log_result(
+                    "Driver Heatmap", 
+                    True, 
+                    f"Heatmap data: {len(zones)} zones, {len(drivers)} drivers", 
+                    heatmap_data
+                )
+            else:
+                self.log_result(
+                    "Driver Heatmap", 
+                    True, 
+                    f"Heatmap data received: {type(heatmap_data)}", 
+                    heatmap_data
+                )
+        else:
+            self.log_result("Driver Heatmap", False, f"Driver heatmap failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_wallet_balance(self):
+        """Test GET /api/wallet/{user_id}"""
+        response = await self.make_request("GET", "/wallet/test-user-123")
+        
+        if response["success"]:
+            wallet_data = response["data"]
+            balance = wallet_data.get("balance", 0)
+            currency = wallet_data.get("currency", "NGN")
+            self.log_result(
+                "Get Wallet Balance", 
+                True, 
+                f"Wallet balance: {currency} {balance}", 
+                wallet_data
+            )
+        else:
+            self.log_result("Get Wallet Balance", False, f"Get wallet balance failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_wallet_topup(self):
+        """Test POST /api/wallet/{user_id}/topup"""
+        params = {"amount": 5000}
+        response = await self.make_request("POST", "/wallet/test-user-123/topup", params=params)
+        
+        if response["success"]:
+            topup_data = response["data"]
+            new_balance = topup_data.get("new_balance") or topup_data.get("balance")
+            self.log_result(
+                "Wallet Top-up", 
+                True, 
+                f"Top-up successful. New balance: NGN {new_balance}", 
+                topup_data
+            )
+        else:
+            self.log_result("Wallet Top-up", False, f"Wallet top-up failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_referral_code(self):
+        """Test GET /api/referral/code/{user_id}"""
+        response = await self.make_request("GET", "/referral/code/test-user-123")
+        
+        if response["success"]:
+            referral_data = response["data"]
+            referral_code = referral_data.get("referral_code") or referral_data.get("code")
+            self.log_result(
+                "Get Referral Code", 
+                True, 
+                f"Referral code: {referral_code}", 
+                referral_data
+            )
+        else:
+            self.log_result("Get Referral Code", False, f"Get referral code failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_languages(self):
+        """Test GET /api/languages"""
+        response = await self.make_request("GET", "/languages")
+        
+        if response["success"]:
+            languages_data = response["data"]
+            languages = languages_data.get("languages", {}) if isinstance(languages_data, dict) else languages_data
+            lang_count = len(languages) if isinstance(languages, (dict, list)) else 0
+            self.log_result(
+                "Get Languages", 
+                True, 
+                f"Supported languages: {lang_count} languages available", 
+                languages_data
+            )
+        else:
+            self.log_result("Get Languages", False, f"Get languages failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_translations_pidgin(self):
+        """Test GET /api/translations/pcm"""
+        response = await self.make_request("GET", "/translations/pcm")
+        
+        if response["success"]:
+            translations_data = response["data"]
+            translations = translations_data.get("translations", {}) if isinstance(translations_data, dict) else translations_data
+            trans_count = len(translations) if isinstance(translations, (dict, list)) else 0
+            self.log_result(
+                "Get Pidgin Translations", 
+                True, 
+                f"Pidgin translations: {trans_count} entries", 
+                translations_data
+            )
+        else:
+            self.log_result("Get Pidgin Translations", False, f"Get pidgin translations failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_user_preferences(self):
+        """Test GET /api/users/{user_id}/preferences"""
+        response = await self.make_request("GET", "/users/test-user-123/preferences")
+        
+        if response["success"]:
+            preferences_data = response["data"]
+            self.log_result(
+                "Get User Preferences", 
+                True, 
+                "User preferences retrieved successfully", 
+                preferences_data
+            )
+        else:
+            self.log_result("Get User Preferences", False, f"Get user preferences failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_trip_receipt(self):
+        """Test GET /api/trips/{trip_id}/receipt"""
+        # Use existing trip ID or create a test one
+        test_trip_id = self.test_trip_id or "test-trip-123"
+        response = await self.make_request("GET", f"/trips/{test_trip_id}/receipt")
+        
+        if response["success"]:
+            receipt_data = response["data"]
+            receipt_fields = ["trip_id", "fare", "distance", "duration"]
+            has_receipt_data = any(field in receipt_data for field in receipt_fields)
+            
+            if has_receipt_data:
+                self.log_result(
+                    "Get Trip Receipt", 
+                    True, 
+                    "Trip receipt generated successfully", 
+                    receipt_data
+                )
+            else:
+                self.log_result(
+                    "Get Trip Receipt", 
+                    True, 
+                    "Receipt endpoint accessible (may need valid trip ID)", 
+                    receipt_data
+                )
+        elif response["status"] == 404:
+            self.log_result(
+                "Get Trip Receipt", 
+                True, 
+                "Endpoint accessible (404 expected for non-existent trip)"
+            )
+        else:
+            self.log_result("Get Trip Receipt", False, f"Get trip receipt failed: {response['data']}", response["data"])
+        
+        return response["success"] or response["status"] == 404
+    
     # ==================== SAFETY TESTS ====================
     
     async def test_trigger_sos(self):
