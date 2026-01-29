@@ -656,7 +656,8 @@ class NEXRYDEAPITester:
             self.log_result("Get Trip Messages", False, "No test trip ID available")
             return False
         
-        response = await self.make_request("GET", f"/chat/messages/{self.test_trip_id}")
+        user_id = self.test_user_id or "test_user"
+        response = await self.make_request("GET", f"/chat/messages/{self.test_trip_id}?user_id={user_id}")
         
         if response["success"]:
             messages = response["data"].get("messages", [])
