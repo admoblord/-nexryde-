@@ -196,7 +196,7 @@ export default function SplashScreen() {
 
       {/* Bottom Branding */}
       <View style={styles.bottomContainer}>
-        <Text style={styles.bottomText}>POWERED BY NEXRYDE TECHNOLOGIES</Text>
+        <Text style={styles.bottomText}>POWERED BY ADMOBLORDGROUP</Text>
       </View>
     </View>
   );
