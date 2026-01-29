@@ -313,16 +313,16 @@ class NEXRYDEAPITester:
             "account_name": "Mike Driver"
         })
         
-        # 20. POST /api/drivers/{user_id}/location - Update location
+        # 20. PUT /api/drivers/{user_id}/location - Update location
         self.test_endpoint("PUT", f"/drivers/{driver_id}/location", {
             "latitude": self.lagos_coords["pickup_lat"],
             "longitude": self.lagos_coords["pickup_lng"]
         })
         
-        # 21. POST /api/drivers/{user_id}/toggle-online - Toggle online status
-        self.test_endpoint("PUT", f"/drivers/{driver_id}/online", params={"is_online": "true"})
+        # 21. PUT /api/drivers/{user_id}/online - Toggle online status (with query param)
+        self.test_endpoint("PUT", f"/drivers/{driver_id}/online?is_online=true")
         
-        # 22. GET /api/drivers/{user_id}/earnings - Get earnings
+        # 22. GET /api/drivers/{user_id}/stats - Get earnings/stats
         self.test_endpoint("GET", f"/drivers/{driver_id}/stats")
         
         # 23. GET /api/drivers/nearby - Get nearby drivers
