@@ -210,8 +210,8 @@ export default function SettingsScreen() {
           <Text style={styles.sectionTitle}>ACCOUNT</Text>
           <View style={styles.section}>
             <MenuItem
-              icon="wallet"
-              label="Wallet"
+              icon="gift"
+              label="Rewards"
               value="₦0"
               onPress={() => router.push('/wallet')}
             />
