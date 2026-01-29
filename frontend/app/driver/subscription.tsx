@@ -101,7 +101,9 @@ export default function SubscriptionScreen() {
   }, []);
 
   const fetchSubscription = async () => {
+    console.log('fetchSubscription called, user:', user?.id);
     if (!user?.id) {
+      console.log('No user, setting default subscription');
       // Set default subscription data for demo/testing when no user is logged in
       setSubscription({
         status: 'none',
@@ -117,9 +119,12 @@ export default function SubscriptionScreen() {
       return;
     }
     try {
+      console.log('Fetching subscription for user:', user?.id);
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}`);
       const data = await response.json();
+      console.log('Subscription data:', data);
       setSubscription(data);
+      setLoading(false);
     } catch (error) {
       console.error('Error fetching subscription:', error);
       // Set default data on error
@@ -133,8 +138,8 @@ export default function SubscriptionScreen() {
           account_number: '1028400669',
         },
       });
+      setLoading(false);
     }
-    setLoading(false);
   };
 
   const startTrial = async () => {
