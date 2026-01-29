@@ -135,7 +135,10 @@ export default function SubscriptionScreen() {
     );
     pulse.start();
     
-    return () => pulse.stop();
+    return () => {
+      pulse.stop();
+      clearTimeout(timeout);
+    };
   }, []);
 
   const fetchSubscription = async () => {
