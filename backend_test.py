@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """
-NEXRYDE Backend API Testing Suite
-Comprehensive testing of all backend endpoints
+NEXRYDE Backend API Comprehensive Testing
+Tests all 27 endpoints as specified in the review request
 """
 
-import asyncio
-import aiohttp
+import requests
 import json
-import uuid
-from datetime import datetime
-import base64
+import sys
+from datetime import datetime, timedelta
 
 # Backend URL from frontend/.env
 BACKEND_URL = "https://nexryde-map.preview.emergentagent.com/api"
