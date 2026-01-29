@@ -305,8 +305,8 @@ class WebSocketFeaturesTester:
             )
             return False, f"Schedule ride failed: {result}"
         
-        if isinstance(result, dict) and "ride_id" in result:
-            ride_id = result["ride_id"]
+        if isinstance(result, dict) and "scheduled_ride_id" in result:
+            ride_id = result["scheduled_ride_id"]
             self.log_test(
                 "Schedule Ride", 
                 True, 
