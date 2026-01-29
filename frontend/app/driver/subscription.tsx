@@ -355,7 +355,7 @@ export default function SubscriptionScreen() {
 
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
+        <View style={[styles.header, { opacity: 1 }]}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>
@@ -363,7 +363,7 @@ export default function SubscriptionScreen() {
           <TouchableOpacity style={styles.helpButton}>
             <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
           </TouchableOpacity>
-        </Animated.View>
+        </View>
 
         <ScrollView 
           showsVerticalScrollIndicator={false} 
@@ -373,7 +373,7 @@ export default function SubscriptionScreen() {
           <Animated.View 
             style={[
               styles.heroCard,
-              {
+              Platform.OS !== 'web' && {
                 opacity: fadeAnim,
                 transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
               }
