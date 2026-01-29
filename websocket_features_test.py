@@ -227,7 +227,8 @@ class WebSocketFeaturesTester:
             )
             
             # Test 2: Get open bids (instead of offers for specific bid)
-            success2, result2 = self.test_endpoint("GET", "/rides/bid/open")
+            params = {"lat": 6.4281, "lng": 3.4219}
+            success2, result2 = self.test_endpoint("GET", "/rides/bid/open", params=params)
             if success2:
                 open_bids = result2.get('open_bids', []) if isinstance(result2, dict) else []
                 self.log_test(
