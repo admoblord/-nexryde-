@@ -81,6 +81,23 @@ export default function SubscriptionScreen() {
     
     initSubscription();
     
+    // Fallback timeout - ensure loading stops after 5 seconds
+    const timeout = setTimeout(() => {
+      if (loading) {
+        setSubscription({
+          status: 'none',
+          days_remaining: 0,
+          monthly_fee: 25000,
+          bank_details: {
+            bank_name: 'United Bank for Africa (UBA)',
+            account_name: 'ADMOBLORDGROUP LIMITED',
+            account_number: '1028400669',
+          },
+        });
+        setLoading(false);
+      }
+    }, 5000);
+    
     // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
