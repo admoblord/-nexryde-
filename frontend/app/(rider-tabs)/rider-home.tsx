@@ -183,8 +183,8 @@ const QuickLocation = ({ icon, label }: { icon: string; label: string }) => (
   </TouchableOpacity>
 );
 
-const ServiceCard = ({ icon, title, desc, color }: { icon: string; title: string; desc: string; color: string }) => (
-  <TouchableOpacity style={styles.serviceCard}>
+const ServiceCard = ({ icon, title, desc, color, onPress }: { icon: string; title: string; desc: string; color: string; onPress?: () => void }) => (
+  <TouchableOpacity style={styles.serviceCard} onPress={onPress} activeOpacity={0.8}>
     <View style={[styles.serviceIcon, { backgroundColor: color + '20' }]}>
       <Ionicons name={icon as any} size={26} color={color} />
     </View>
