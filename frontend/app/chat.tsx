@@ -815,15 +815,16 @@ const styles = StyleSheet.create({
     borderColor: '#DDD6FE',
   },
   senderName: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
     color: '#22C55E',
     marginBottom: 4,
   },
   messageText: {
-    fontSize: 15,
+    fontSize: 16,
+    fontWeight: '500',
     color: '#111827',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   userMessageText: {
     color: '#FFFFFF',
