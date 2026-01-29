@@ -1799,10 +1799,10 @@ Be lenient and driver-friendly. If all required documents are uploaded and basic
 Only REJECT if there are clear issues like missing required documents or obviously incomplete information.
 """
                 
-                response = await chat.send_message_async(UserMessage(content=verification_prompt))
-                ai_response = response.content
+                response = await chat.send_message(UserMessage(text=verification_prompt))
+                ai_response = response  # Direct string response
                 
-                logger.info(f"🤖 AI Agent response for {user_id}: {ai_response[:200]}...")
+                logger.info(f"🤖 AI Agent response for {user_id}: {str(ai_response)[:200]}...")
                 
                 # Parse AI response
                 try:
