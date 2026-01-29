@@ -2146,6 +2146,50 @@ async def admin_reject_verification(verification_id: str, reason: str = "Documen
     
     return {"success": True, "message": "Driver verification rejected", "reason": reason}
 
+# ==================== NOTIFICATIONS ENDPOINTS ====================
+
+@api_router.get("/users/{user_id}/notifications")
+async def get_user_notifications(user_id: str, limit: int = 50, unread_only: bool = False):
+    """Get user's notifications"""
+    query = {"user_id": user_id}
+    if unread_only:
+        query["read"] = False
+    
+    notifications = await db.notifications.find(
+        query,
+        {"_id": 0}
+    ).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    unread_count = await db.notifications.count_documents({"user_id": user_id, "read": False})
+    
+    return {
+        "notifications": notifications,
+        "unread_count": unread_count
+    }
+
+@api_router.post("/users/{user_id}/notifications/{notification_id}/read")
+async def mark_notification_read(user_id: str, notification_id: str):
+    """Mark a notification as read"""
+    result = await db.notifications.update_one(
+        {"id": notification_id, "user_id": user_id},
+        {"$set": {"read": True}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    
+    return {"success": True}
+
+@api_router.post("/users/{user_id}/notifications/read-all")
+async def mark_all_notifications_read(user_id: str):
+    """Mark all notifications as read"""
+    result = await db.notifications.update_many(
+        {"user_id": user_id, "read": False},
+        {"$set": {"read": True}}
+    )
+    
+    return {"success": True, "marked_read": result.modified_count}
+
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 
 @api_router.get("/subscriptions/config")
