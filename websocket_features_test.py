@@ -366,7 +366,6 @@ class WebSocketFeaturesTester:
         
         # Test 1: Request package delivery
         delivery_data = {
-            "sender_id": "test-sender-websocket-123",
             "pickup_lat": 6.4281,
             "pickup_lng": 3.4219,
             "pickup_address": "Victoria Island, Lagos",
@@ -379,7 +378,8 @@ class WebSocketFeaturesTester:
             "package_size": "small"
         }
         
-        success, result = self.test_endpoint("POST", "/delivery/request", data=delivery_data)
+        params = {"sender_id": "test-sender-websocket-123"}
+        success, result = self.test_endpoint("POST", "/delivery/request", data=delivery_data, params=params)
         if not success:
             self.log_test(
                 "Request Package Delivery", 
