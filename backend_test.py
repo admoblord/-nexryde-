@@ -710,12 +710,7 @@ class NEXRYDEAPITester:
         else:
             test_trip_id = self.test_trip_id
         
-        data = {
-            "contacts": ["+2348087654321", "+2348098765432"],
-            "message": "Sharing my trip for safety"
-        }
-        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id or "test_user"}
-        response = await self.make_request("POST", f"/trips/{test_trip_id}/share", data, headers)
+        response = await self.make_request("POST", f"/trips/{test_trip_id}/share?recipient_phone=+2348087654321&recipient_name=Emergency Contact")
         
         if response["success"]:
             self.log_result("Share Trip", True, "Trip shared successfully", response["data"])
