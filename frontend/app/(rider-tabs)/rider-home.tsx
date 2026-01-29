@@ -80,19 +80,42 @@ export default function RiderHomeScreen() {
 
           {/* Premium Services */}
           <View style={styles.servicesSection}>
-            <Text style={styles.sectionTitle}>Premium Services</Text>
+            <Text style={styles.sectionTitle}>Book a Ride</Text>
             <View style={styles.servicesGrid}>
               <ServiceCard
                 icon="car-sport"
-                title="Economy"
-                desc="Affordable rides"
+                title="Standard"
+                desc="Quick rides"
                 color={COLORS.accentGreen}
+                onPress={() => router.push('/rider/book')}
               />
               <ServiceCard
-                icon="diamond"
-                title="Premium"
-                desc="Luxury comfort"
-                color={COLORS.gold}
+                icon="pricetag"
+                title="Bid Ride"
+                desc="Name your price"
+                color="#F59E0B"
+                onPress={() => router.push('/rider/bid')}
+              />
+            </View>
+          </View>
+
+          {/* More Services */}
+          <View style={styles.servicesSection}>
+            <Text style={styles.sectionTitle}>More Services</Text>
+            <View style={styles.servicesGrid}>
+              <ServiceCard
+                icon="calendar"
+                title="Schedule"
+                desc="Book ahead"
+                color="#8B5CF6"
+                onPress={() => router.push('/rider/schedule')}
+              />
+              <ServiceCard
+                icon="cube"
+                title="Delivery"
+                desc="Send packages"
+                color="#06B6D4"
+                onPress={() => router.push('/rider/delivery')}
               />
             </View>
           </View>
