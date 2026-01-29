@@ -71,11 +71,18 @@ export default function SplashScreen() {
 
   const handleBeginJourney = () => {
     try {
-      router.push('/(auth)/login');
+      if (Platform.OS === 'web') {
+        // Web fallback - direct navigation
+        window.location.href = '/(auth)/login';
+      } else {
+        router.push('/(auth)/login');
+      }
     } catch (e) {
       console.error('Navigation error:', e);
-      // Fallback - try alternate navigation
-      router.navigate('/(auth)/login');
+      // Fallback
+      if (Platform.OS === 'web') {
+        window.location.href = '/(auth)/login';
+      }
     }
   };
 
