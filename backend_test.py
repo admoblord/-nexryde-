@@ -435,10 +435,10 @@ class NEXRYDEAPITester:
             "lng": self.lagos_coords["pickup_lng"]
         })
         
-        # 40. GET /api/safety/sos/contacts/{user_id} - SOS contacts
+        # 40. GET /api/users/{user_id}/emergency-contacts - SOS contacts
         self.test_endpoint("GET", f"/users/{user_id}/emergency-contacts")
         
-        # 41. POST /api/safety/sos/trigger - Trigger SOS
+        # 41. POST /api/sos/trigger - Trigger SOS (needs valid trip)
         self.test_endpoint("POST", "/sos/trigger", {
             "trip_id": trip_id,
             "location_lat": self.lagos_coords["pickup_lat"],
@@ -446,15 +446,18 @@ class NEXRYDEAPITester:
             "auto_triggered": False
         })
         
-        # 42. GET /api/promo/validate/{code} - Validate promo code
-        self.test_endpoint("GET", "/promo/validate/FIRST10")
+        # 42. POST /api/promo/apply - Apply promo code (correct endpoint)
+        self.test_endpoint("POST", "/promo/apply", {
+            "code": "FIRST10",
+            "user_id": user_id,
+            "trip_fare": 2000.0
+        })
         
         # 43. GET /api/wallet/{user_id} - Get wallet balance
         self.test_endpoint("GET", f"/wallet/{user_id}")
         
-        # 44. POST /api/wallet/{user_id}/add - Add to wallet
-        self.test_endpoint("POST", f"/wallet/{user_id}/topup", {
-            "amount": 1000.0,
+        # 44. POST /api/wallet/{user_id}/topup - Add to wallet (with query param)
+        self.test_endpoint("POST", f"/wallet/{user_id}/topup?amount=1000", {
             "payment_method": "bank_transfer",
             "reference": "TXN987654321"
         })
