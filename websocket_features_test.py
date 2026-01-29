@@ -284,7 +284,6 @@ class WebSocketFeaturesTester:
         # Test 1: Schedule a ride
         future_time = datetime.now() + timedelta(hours=2)
         schedule_data = {
-            "rider_id": "test-rider-websocket-123",
             "pickup_lat": 6.4281,
             "pickup_lng": 3.4219,
             "pickup_address": "Victoria Island, Lagos",
@@ -292,10 +291,11 @@ class WebSocketFeaturesTester:
             "dropoff_lng": 3.5562,
             "dropoff_address": "Lekki Phase 1, Lagos",
             "scheduled_time": future_time.isoformat(),
-            "service_type": "economy"
+            "ride_type": "economy"
         }
         
-        success, result = self.test_endpoint("POST", "/rides/schedule", data=schedule_data)
+        params = {"rider_id": "test-rider-websocket-123"}
+        success, result = self.test_endpoint("POST", "/rides/schedule", data=schedule_data, params=params)
         if not success:
             self.log_test(
                 "Schedule Ride", 
