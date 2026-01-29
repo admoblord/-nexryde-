@@ -486,6 +486,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ CONFIRMED ON MOBILE (390x844): Splash screen UI is perfect - NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', features (Zero Commission, 100% Earnings, Premium Safety), and 'Begin Your Journey' button all display correctly. However, navigation to login is completely broken. Button clicks but user remains on splash screen. router.push('/(auth)/login') in handleBeginJourney function is not working. This is a critical blocking issue for user onboarding."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ COMPREHENSIVE MOBILE TESTING COMPLETE (390x844): Splash screen UI is PERFECT - NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', feature highlights (Zero Commission, 100% Earnings, Premium Safety), and 'Begin Your Journey' button all display correctly with excellent mobile responsive design. CRITICAL ISSUE CONFIRMED: Navigation from splash to login is completely BROKEN. Button clicks but router.push('/(auth)/login') does not work - user remains on splash screen indefinitely. This blocks all user onboarding. URGENT: Fix expo-router navigation issue."
 
   - task: "Login Screen"
     implemented: true
@@ -585,6 +588,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ FINAL CONFIRMATION - MULTIPLE CRITICAL FAILURES: Comprehensive testing on mobile (390x844) confirms booking screen has severe functionality issues: 1) Pickup/Dropoff location field clicks do NOT open location search modal - Pressable onPress handlers completely broken, 2) Continue button navigation to /rider/tracking completely broken even when locations are selected, 3) Add stop functionality not working, 4) Location picker modal never opens despite clicking fields. WORKING ELEMENTS: UI displays perfectly (header 'Your route', pickup/dropoff fields, saved places Home/Work, recent locations, current location button), saved location selection works (clicking Home/Work fills fields), mobile responsive design excellent. ROOT CAUSE: Pressable components have broken onPress handlers - need to revert to TouchableOpacity or fix Pressable implementation. This is a critical blocking issue for core ride booking functionality."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ COMPREHENSIVE TESTING CONFIRMS CRITICAL FAILURES (390x844): Book ride screen UI is PERFECT - header 'Your route', pickup/dropoff location fields, saved places (Home: 123 Victoria Island, Work: 456 Lekki Phase 1), recent locations (Shoprite Mall, Murtala Mohammed Airport), 'Use current location' button, and Continue button all display correctly with excellent mobile design. CRITICAL ISSUES CONFIRMED: 1) Pickup/Dropoff location field clicks do NOT open location picker modal - Pressable onPress handlers completely broken, 2) Continue button navigation to /rider/tracking completely broken, 3) Add stop functionality not working. Saved location selection works (Home/Work fill fields). ROOT CAUSE: Pressable components have broken onPress event handlers. URGENT: Fix Pressable implementation or revert to TouchableOpacity."
 
   - task: "Safety Center Screen"
     implemented: true
@@ -658,11 +664,14 @@ frontend:
     file: "app/driver/subscription.tsx"
     stuck_count: 1
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: false
         - agent: "testing"
         - comment: "❌ LOADING ISSUE ON MOBILE (390x844): Driver subscription screen at /driver/subscription shows 'Loading subscription...' indefinitely and never completes loading. Screen gets stuck in loading state and doesn't display subscription status, bank details (UBA, ADMOBLORDGROUP LIMITED, 1028400669), or ₦25,000 price information. Likely requires authentication or proper driver ID to load subscription data. Backend subscription APIs are working but frontend screen cannot access or display the data."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CONFIRMED LOADING ISSUE (390x844): Driver subscription screen at /driver/subscription remains stuck on 'Loading subscription...' indefinitely. Screen never progresses beyond loading state to display subscription status, ₦25,000 monthly plan details, UBA bank details (ADMOBLORDGROUP LIMITED, 1028400669), or payment upload functionality. Backend subscription APIs are fully functional but frontend cannot load/display data. Likely requires proper authentication context or driver ID to fetch subscription data. This blocks driver subscription management completely."
 
 metadata:
   created_by: "main_agent"
