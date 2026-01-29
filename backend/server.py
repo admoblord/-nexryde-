@@ -363,10 +363,12 @@ class OTPVerify(BaseModel):
     otp: str
 
 class RegisterRequest(BaseModel):
-    phone: str
+    phone: Optional[str] = None
     name: str
     email: Optional[str] = None
     role: str = "rider"
+    google_id: Optional[str] = None
+    profile_image: Optional[str] = None
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
