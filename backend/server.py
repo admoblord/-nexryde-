@@ -5607,6 +5607,15 @@ async def admin_get_sos_alerts():
     alerts = await db.sos_alerts.find({}, {"_id": 0}).sort("triggered_at", -1).to_list(100)
     return {"alerts": alerts}
 
+# Serve admin panel via /api/admin-panel for external access through ingress
+@api_router.get("/admin-panel")
+async def serve_admin_via_api():
+    """Serve admin panel via API route"""
+    admin_file = ADMIN_DIR / "index.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Admin panel not found")
+
 @api_router.get("/admin/activity-log")
 async def admin_get_activity_log(limit: int = 50):
     """Get recent app activity"""
