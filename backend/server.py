@@ -1981,6 +1981,9 @@ async def _ai_approve_verification(verification_id: str, user_id: str, vehicle_i
         upsert=True
     )
     
+    # Send SMS notification to driver
+    await send_driver_verification_notification(user_id, "approved")
+    
     logger.info(f"🤖✅ AI Agent approved driver {user_id}: {notes}")
 
 async def _ai_reject_verification(verification_id: str, user_id: str, reason: str):
@@ -1999,6 +2002,9 @@ async def _ai_reject_verification(verification_id: str, user_id: str, reason: st
         {"id": user_id},
         {"$set": {"verification_status": "rejected"}}
     )
+    
+    # Send SMS notification to driver
+    await send_driver_verification_notification(user_id, "rejected", reason)
     
     logger.info(f"🤖❌ AI Agent rejected driver {user_id}: {reason}")
 
