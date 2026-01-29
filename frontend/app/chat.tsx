@@ -18,10 +18,20 @@ import { useAppStore } from '@/src/store/appStore';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// Construct WebSocket URL from backend URL
+const getWebSocketUrl = (tripId: string, userId: string) => {
+  // Convert http(s)://domain to ws(s)://domain
+  let wsUrl = BACKEND_URL.replace('https://', 'wss://').replace('http://', 'ws://');
+  // Remove /api suffix if present
+  wsUrl = wsUrl.replace('/api', '');
+  return `${wsUrl}/ws/chat/${tripId}/${userId}`;
+};
+
 interface Message {
   id: string;
   text: string;
   sender: 'user' | 'driver' | 'ai';
+  senderName?: string;
   timestamp: Date;
   isRead: boolean;
 }
@@ -35,12 +45,15 @@ export default function ChatScreen() {
   const tripId = params.tripId as string;
   const driverName = params.driverName as string || 'Driver';
   const flatListRef = useRef<FlatList>(null);
+  const wsRef = useRef<WebSocket | null>(null);
   
   const [activeTab, setActiveTab] = useState<ChatTab>('ai');
   const [message, setMessage] = useState('');
   const [isAiTyping, setIsAiTyping] = useState(false);
+  const [isDriverTyping, setIsDriverTyping] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
   
   // Driver messages
   const [driverMessages, setDriverMessages] = useState<Message[]>([]);
@@ -63,18 +76,121 @@ export default function ChatScreen() {
 
   const messages = activeTab === 'driver' ? driverMessages : aiMessages;
 
-  // Load chat history on mount
+  // Connect WebSocket when trip is active and driver tab selected
+  useEffect(() => {
+    if (activeTab === 'driver' && tripId && user?.id) {
+      connectWebSocket();
+    }
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, [activeTab, tripId, user?.id]);
+
+  // Load AI chat history on mount
   useEffect(() => {
     loadAIChatHistory();
     loadPresetMessages();
+  }, []);
+
+  const connectWebSocket = () => {
+    if (!tripId || !user?.id) return;
     
-    if (tripId) {
-      loadDriverMessages();
-      // Start polling for new messages
-      const interval = setInterval(loadDriverMessages, 3000);
-      return () => clearInterval(interval);
+    // Close existing connection if any
+    if (wsRef.current) {
+      wsRef.current.close();
     }
-  }, [activeTab, tripId]);
+    
+    try {
+      const wsUrl = getWebSocketUrl(tripId, user.id);
+      console.log('Connecting WebSocket:', wsUrl);
+      
+      const ws = new WebSocket(wsUrl);
+      
+      ws.onopen = () => {
+        console.log('WebSocket connected');
+        setWsConnected(true);
+      };
+      
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log('WebSocket message:', data.type);
+          
+          switch (data.type) {
+            case 'connected':
+              console.log('Chat connection confirmed');
+              break;
+              
+            case 'history':
+              // Load message history
+              if (data.messages && Array.isArray(data.messages)) {
+                const loadedMessages: Message[] = data.messages.map((msg: any) => ({
+                  id: msg.id,
+                  text: msg.message,
+                  sender: msg.sender_id === user?.id ? 'user' : 'driver',
+                  senderName: msg.sender_name,
+                  timestamp: new Date(msg.timestamp),
+                  isRead: msg.is_read,
+                }));
+                setDriverMessages(loadedMessages);
+              }
+              break;
+              
+            case 'new_message':
+              // Add new message
+              const newMessage: Message = {
+                id: data.id,
+                text: data.message,
+                sender: data.sender_id === user?.id ? 'user' : 'driver',
+                senderName: data.sender_name,
+                timestamp: new Date(data.timestamp),
+                isRead: data.is_read,
+              };
+              
+              // Only add if not our own message (we already added it optimistically)
+              if (data.sender_id !== user?.id) {
+                setDriverMessages(prev => [...prev, newMessage]);
+                setTimeout(() => {
+                  flatListRef.current?.scrollToEnd({ animated: true });
+                }, 100);
+              }
+              break;
+              
+            case 'typing':
+              setIsDriverTyping(data.is_typing && data.user_id !== user?.id);
+              break;
+              
+            case 'messages_read':
+              // Update read status
+              setDriverMessages(prev => 
+                prev.map(msg => ({ ...msg, isRead: true }))
+              );
+              break;
+          }
+        } catch (e) {
+          console.error('WebSocket parse error:', e);
+        }
+      };
+      
+      ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        setWsConnected(false);
+      };
+      
+      ws.onclose = () => {
+        console.log('WebSocket closed');
+        setWsConnected(false);
+      };
+      
+      wsRef.current = ws;
+    } catch (e) {
+      console.error('WebSocket connection error:', e);
+    }
+  };
 
   const loadAIChatHistory = async () => {
     if (!user?.id) return;
@@ -93,7 +209,6 @@ export default function ChatScreen() {
           isRead: true,
         }));
         
-        // Keep welcome message + loaded history
         setAiMessages([aiMessages[0], ...loadedMessages]);
       }
     } catch (error) {
@@ -115,6 +230,7 @@ export default function ChatScreen() {
           id: msg.id,
           text: msg.message,
           sender: msg.sender_role === 'rider' ? 'user' : 'driver',
+          senderName: msg.sender_name,
           timestamp: new Date(msg.timestamp),
           isRead: msg.is_read,
         }));
@@ -180,7 +296,6 @@ export default function ChatScreen() {
         
         setAiMessages(prev => [...prev, aiMessage]);
       } else {
-        // Show error message
         const errorMessage: Message = {
           id: `ai-error-${Date.now()}`,
           text: data.message || "Sorry, I couldn't process that. Please try again.",
@@ -219,28 +334,49 @@ export default function ChatScreen() {
       isRead: false,
     };
     
+    // Optimistically add message
     setDriverMessages(prev => [...prev, userMessage]);
     setMessage('');
     
-    try {
-      await fetch(`${BACKEND_URL}/api/chat/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trip_id: tripId,
-          sender_id: user.id,
-          sender_role: user.role === 'driver' ? 'driver' : 'rider',
-          message: messageText.trim(),
-          message_type: 'text',
-        }),
-      });
-    } catch (error) {
-      console.error('Send driver message error:', error);
+    // Send via WebSocket if connected
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'message',
+        message: messageText.trim(),
+        sender_role: user.role === 'driver' ? 'driver' : 'rider',
+        message_type: 'text',
+      }));
+    } else {
+      // Fallback to HTTP
+      try {
+        await fetch(`${BACKEND_URL}/api/chat/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trip_id: tripId,
+            sender_id: user.id,
+            sender_role: user.role === 'driver' ? 'driver' : 'rider',
+            message: messageText.trim(),
+            message_type: 'text',
+          }),
+        });
+      } catch (error) {
+        console.error('Send driver message error:', error);
+      }
     }
     
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
+  };
+
+  const sendTypingIndicator = (isTyping: boolean) => {
+    if (activeTab === 'driver' && wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'typing',
+        is_typing: isTyping,
+      }));
+    }
   };
 
   const sendMessage = async () => {
@@ -301,6 +437,9 @@ export default function ChatScreen() {
           styles.messageBubble,
           isUser ? styles.userBubble : (isAI ? styles.aiBubble : styles.driverBubble)
         ]}>
+          {!isUser && !isAI && item.senderName && (
+            <Text style={styles.senderName}>{item.senderName}</Text>
+          )}
           <Text style={[
             styles.messageText,
             isUser && styles.userMessageText
@@ -318,6 +457,9 @@ export default function ChatScreen() {
               <View style={styles.poweredBy}>
                 <Text style={styles.poweredByText}>GPT-4o</Text>
               </View>
+            )}
+            {isUser && item.isRead && (
+              <Ionicons name="checkmark-done" size={14} color="rgba(255,255,255,0.7)" style={{ marginLeft: 4 }} />
             )}
           </View>
         </View>
@@ -370,6 +512,9 @@ export default function ChatScreen() {
             <Text style={[styles.tabText, activeTab === 'driver' && styles.activeTabText]}>
               {user?.role === 'driver' ? 'Rider Chat' : 'Driver Chat'}
             </Text>
+            {activeTab === 'driver' && wsConnected && (
+              <View style={styles.onlineIndicator} />
+            )}
           </TouchableOpacity>
         </View>
 
@@ -388,6 +533,19 @@ export default function ChatScreen() {
             <Ionicons name="information-circle" size={16} color="#F59E0B" />
             <Text style={[styles.infoBannerText, styles.warningText]}>
               Start a trip to chat with your {user?.role === 'driver' ? 'rider' : 'driver'}
+            </Text>
+          </View>
+        )}
+        
+        {activeTab === 'driver' && tripId && (
+          <View style={[styles.infoBanner, wsConnected ? styles.connectedBanner : styles.disconnectedBanner]}>
+            <Ionicons 
+              name={wsConnected ? "wifi" : "wifi-outline"} 
+              size={16} 
+              color={wsConnected ? "#22C55E" : "#EF4444"} 
+            />
+            <Text style={[styles.infoBannerText, { color: wsConnected ? "#166534" : "#B91C1C" }]}>
+              {wsConnected ? "Real-time chat connected" : "Connecting..."}
             </Text>
           </View>
         )}
@@ -414,7 +572,7 @@ export default function ChatScreen() {
             }
           />
 
-          {/* AI Typing Indicator */}
+          {/* Typing Indicators */}
           {isAiTyping && (
             <View style={styles.typingContainer}>
               <View style={styles.typingBubble}>
@@ -424,6 +582,21 @@ export default function ChatScreen() {
                   <View style={[styles.dot, styles.dot3]} />
                 </View>
                 <Text style={styles.typingText}>AI is thinking...</Text>
+              </View>
+            </View>
+          )}
+          
+          {isDriverTyping && activeTab === 'driver' && (
+            <View style={styles.typingContainer}>
+              <View style={[styles.typingBubble, { backgroundColor: '#DCFCE7' }]}>
+                <View style={styles.typingDots}>
+                  <View style={[styles.dot, { backgroundColor: '#22C55E' }]} />
+                  <View style={[styles.dot, { backgroundColor: '#22C55E', opacity: 0.7 }]} />
+                  <View style={[styles.dot, { backgroundColor: '#22C55E', opacity: 0.4 }]} />
+                </View>
+                <Text style={[styles.typingText, { color: '#166534' }]}>
+                  {user?.role === 'driver' ? 'Rider' : 'Driver'} is typing...
+                </Text>
               </View>
             </View>
           )}
@@ -461,7 +634,11 @@ export default function ChatScreen() {
                 placeholder={activeTab === 'ai' ? "Ask AI anything..." : "Type a message..."}
                 placeholderTextColor="#9CA3AF"
                 value={message}
-                onChangeText={setMessage}
+                onChangeText={(text) => {
+                  setMessage(text);
+                  sendTypingIndicator(text.length > 0);
+                }}
+                onBlur={() => sendTypingIndicator(false)}
                 multiline
                 maxLength={500}
                 editable={activeTab === 'ai' || !!tripId}
@@ -548,6 +725,13 @@ const styles = StyleSheet.create({
   activeTabText: {
     color: '#FFFFFF',
   },
+  onlineIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+    marginLeft: 4,
+  },
   infoBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -558,6 +742,12 @@ const styles = StyleSheet.create({
   },
   warningBanner: {
     backgroundColor: '#FEF3C7',
+  },
+  connectedBanner: {
+    backgroundColor: '#DCFCE7',
+  },
+  disconnectedBanner: {
+    backgroundColor: '#FEE2E2',
   },
   infoBannerText: {
     fontSize: 13,
@@ -620,6 +810,12 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
     borderWidth: 1,
     borderColor: '#DDD6FE',
+  },
+  senderName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#22C55E',
+    marginBottom: 4,
   },
   messageText: {
     fontSize: 15,
