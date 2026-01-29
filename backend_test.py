@@ -370,16 +370,16 @@ class NEXRYDEAPITester:
         # 28. GET /api/chat/ai/history/{user_id} - AI chat history
         self.test_endpoint("GET", f"/chat/ai/history/{user_id}")
         
-        # 29. POST /api/chat/message - Send message
+        # 29. POST /api/chat/message - Send message (correct field name)
         self.test_endpoint("POST", "/chat/message", {
             "trip_id": trip_id,
             "sender_id": user_id,
             "sender_role": "rider",
-            "content": "I'm on my way to the pickup location"
+            "message": "I'm on my way to the pickup location"
         })
         
-        # 30. GET /api/chat/messages/{trip_id} - Get trip messages
-        self.test_endpoint("GET", f"/chat/messages/{trip_id}")
+        # 30. GET /api/chat/messages/{trip_id} - Get trip messages (with user_id param)
+        self.test_endpoint("GET", f"/chat/messages/{trip_id}", params={"user_id": user_id})
         
         # 31. GET /api/chat/presets/{role} - Get preset messages
         self.test_endpoint("GET", "/chat/presets/rider")
