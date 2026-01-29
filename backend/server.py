@@ -5527,6 +5527,16 @@ async def seed_promo_codes():
 # Include router
 app.include_router(api_router)
 
+# Serve admin panel at /admin
+@app.get("/admin")
+@app.get("/admin/")
+async def serve_admin():
+    """Serve admin panel"""
+    admin_file = ADMIN_DIR / "index.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Admin panel not found")
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
