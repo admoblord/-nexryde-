@@ -2253,7 +2253,16 @@ async def get_subscription(driver_id: str):
         subscription["bank_details"] = SUBSCRIPTION_CONFIG["bank_details"]
         subscription["monthly_fee"] = SUBSCRIPTION_CONFIG["monthly_fee"]
         
-    return subscription
+        return subscription
+    
+    # No subscription found - return default data for new drivers
+    return {
+        "status": "none",
+        "days_remaining": 0,
+        "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
+        "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
+        "message": "No active subscription. Start your 7-day free trial!"
+    }
 
 @api_router.post("/subscriptions/{driver_id}/start-trial")
 async def start_trial(driver_id: str):
