@@ -342,11 +342,12 @@ class NEXRYDEAPITester:
         # 24. GET /api/subscriptions/{driver_id} - Get subscription status
         self.test_endpoint("GET", f"/subscriptions/{driver_id}")
         
-        # 25. POST /api/subscriptions/initiate - Initiate subscription
+        # 25. POST /api/subscriptions/{driver_id}/start-trial - Initiate subscription
         self.test_endpoint("POST", f"/subscriptions/{driver_id}/start-trial")
         
-        # 26. POST /api/subscriptions/upload-proof - Upload payment proof
+        # 26. POST /api/subscriptions/{driver_id}/submit-payment - Upload payment proof (correct body format)
         self.test_endpoint("POST", f"/subscriptions/{driver_id}/submit-payment", {
+            "driver_id": driver_id,
             "screenshot": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
             "amount": 25000.0,
             "payment_reference": "TXN123456789"
