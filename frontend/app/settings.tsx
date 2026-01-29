@@ -562,12 +562,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingLabel: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: COLORS.primary,
   },
   settingSubtitle: {
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: '500',
     color: COLORS.textMuted,
     marginTop: 2,
   },
