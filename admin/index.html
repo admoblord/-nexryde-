@@ -846,7 +846,10 @@
                             <td>₦${(p.amount || 25000).toLocaleString()}</td>
                             <td>${p.screenshot ? '<a href="#" onclick="viewScreenshot(\'' + p.screenshot + '\')">View</a>' : 'N/A'}</td>
                             <td>${new Date(p.created_at).toLocaleDateString()}</td>
-                            <td><span class="badge ${p.status === 'approved' ? 'green' : 'yellow'}">${p.status}</span></td>
+                            <td><span class="badge green">Auto-Approved</span></td>
+                            <td>
+                                <button class="action-btn view" onclick="viewScreenshot('${p.screenshot || '#'}')">View Proof</button>
+                            </td>
                         </tr>
                     `).join('');
                 }
