@@ -67,10 +67,10 @@ export default function SubscriptionScreen() {
   const [paymentReference, setPaymentReference] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   
-  // Animations
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  // Animations - start with visible values for web compatibility
+  const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
+  const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 50)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
