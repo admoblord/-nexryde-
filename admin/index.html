@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NEXRYDE Admin Panel</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: #0F172A;
+            color: #FFFFFF;
+            min-height: 100vh;
+        }
+        
+        /* Login Page */
+        .login-container {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+        }
+        .login-box {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 24px;
+            padding: 48px;
+            width: 100%;
+            max-width: 420px;
+        }
+        .login-logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .login-logo h1 {
+            font-size: 28px;
+            font-weight: 800;
+            background: linear-gradient(135deg, #00E676, #00C853);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .login-logo p {
+            color: #94A3B8;
+            margin-top: 8px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            color: #94A3B8;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+        .form-group input {
+            width: 100%;
+            padding: 14px 16px;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            color: #FFFFFF;
+            font-size: 15px;
+            transition: all 0.2s;
+        }
+        .form-group input:focus {
+            outline: none;
+            border-color: #6366F1;
+            background: rgba(99,102,241,0.1);
+        }
+        .login-btn {
+            width: 100%;
+            padding: 16px;
+            background: linear-gradient(135deg, #6366F1, #8B5CF6);
+            border: none;
+            border-radius: 12px;
+            color: #FFFFFF;
+            font-size: 16px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .login-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 40px rgba(99,102,241,0.3);
+        }
+        .login-error {
+            background: rgba(239,68,68,0.1);
+            border: 1px solid rgba(239,68,68,0.3);
+            color: #EF4444;
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        /* Dashboard */
+        .dashboard { display: none; }
+        .sidebar {
+            position: fixed;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 260px;
+            background: #1E293B;
+            border-right: 1px solid rgba(255,255,255,0.05);
+            padding: 24px 0;
+        }
+        .sidebar-logo {
+            padding: 0 24px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        .sidebar-logo h2 {
+            font-size: 22px;
+            font-weight: 800;
+            color: #00E676;
+        }
+        .sidebar-logo span {
+            font-size: 12px;
+            color: #64748B;
+        }
+        .nav-menu {
+            padding: 24px 12px;
+        }
+        .nav-item {
+            display: flex;
+            align-items: center;
+            padding: 14px 16px;
+            color: #94A3B8;
+            text-decoration: none;
+            border-radius: 12px;
+            margin-bottom: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .nav-item:hover, .nav-item.active {
+            background: rgba(99,102,241,0.15);
+            color: #FFFFFF;
+        }
+        .nav-item.active {
+            background: linear-gradient(135deg, rgba(99,102,241,0.2), rgba(139,92,246,0.2));
+        }
+        .nav-item i {
+            font-size: 20px;
+            margin-right: 12px;
+        }
+        
+        .main-content {
+            margin-left: 260px;
+            padding: 24px;
+            min-height: 100vh;
+        }
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 32px;
+        }
+        .header h1 {
+            font-size: 28px;
+            font-weight: 700;
+        }
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        .admin-badge {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.05);
+            padding: 10px 16px;
+            border-radius: 12px;
+        }
+        .admin-badge i {
+            color: #00E676;
+        }
+        .logout-btn {
+            background: rgba(239,68,68,0.1);
+            color: #EF4444;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+        }
+        
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+        .stat-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+        }
+        .stat-card .icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+        .stat-card .icon.green { background: rgba(0,230,118,0.15); color: #00E676; }
+        .stat-card .icon.blue { background: rgba(99,102,241,0.15); color: #6366F1; }
+        .stat-card .icon.purple { background: rgba(139,92,246,0.15); color: #8B5CF6; }
+        .stat-card .icon.orange { background: rgba(245,158,11,0.15); color: #F59E0B; }
+        .stat-card .value {
+            font-size: 32px;
+            font-weight: 800;
+            margin-bottom: 4px;
+        }
+        .stat-card .label {
+            color: #64748B;
+            font-size: 14px;
+        }
+        
+        /* Tables */
+        .card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        .card-header h3 {
+            font-size: 18px;
+            font-weight: 700;
+        }
+        .badge {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .badge.green { background: rgba(0,230,118,0.15); color: #00E676; }
+        .badge.yellow { background: rgba(245,158,11,0.15); color: #F59E0B; }
+        .badge.red { background: rgba(239,68,68,0.15); color: #EF4444; }
+        .badge.blue { background: rgba(99,102,241,0.15); color: #6366F1; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 14px 16px;
+            text-align: left;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+        }
+        th {
+            color: #64748B;
+            font-weight: 600;
+            font-size: 13px;
+            text-transform: uppercase;
+        }
+        td {
+            font-size: 14px;
+        }
+        tr:hover {
+            background: rgba(255,255,255,0.02);
+        }
+        
+        .action-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: all 0.2s;
+        }
+        .action-btn.approve {
+            background: rgba(0,230,118,0.15);
+            color: #00E676;
+        }
+        .action-btn.view {
+            background: rgba(99,102,241,0.15);
+            color: #6366F1;
+        }
+        .action-btn.block {
+            background: rgba(239,68,68,0.15);
+            color: #EF4444;
+        }
+        
+        /* Page Sections */
+        .page-section { display: none; }
+        .page-section.active { display: block; }
+        
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 48px;
+            color: #64748B;
+        }
+        .empty-state i {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            display: none;
+        }
+        .modal-content {
+            background: #1E293B;
+            border-radius: 20px;
+            padding: 32px;
+            width: 100%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+        .modal-header h3 {
+            font-size: 20px;
+            font-weight: 700;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #94A3B8;
+            font-size: 24px;
+            cursor: pointer;
+        }
+        
+        /* Responsive */
+        @media (max-width: 1200px) {
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .main-content { margin-left: 0; }
+            .stats-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Login Page -->
+    <div class="login-container" id="loginPage">
+        <div class="login-box">
+            <div class="login-logo">
+                <h1>NEXRYDE</h1>
+                <p>Admin Panel</p>
+            </div>
+            <div class="login-error" id="loginError">Invalid credentials</div>
+            <form id="loginForm">
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="email" placeholder="admin@nexryde.com" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="password" placeholder="Enter password" required>
+                </div>
+                <button type="submit" class="login-btn">Sign In</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="dashboard" id="dashboard">
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <h2>NEXRYDE</h2>
+                <span>Admin Panel</span>
+            </div>
+            <nav class="nav-menu">
+                <a class="nav-item active" data-page="overview">
+                    <i class="ri-dashboard-line"></i> Overview
+                </a>
+                <a class="nav-item" data-page="riders">
+                    <i class="ri-user-line"></i> Riders
+                </a>
+                <a class="nav-item" data-page="drivers">
+                    <i class="ri-steering-2-line"></i> Drivers
+                </a>
+                <a class="nav-item" data-page="trips">
+                    <i class="ri-road-map-line"></i> Trips
+                </a>
+                <a class="nav-item" data-page="payments">
+                    <i class="ri-bank-card-line"></i> Payments
+                </a>
+                <a class="nav-item" data-page="promos">
+                    <i class="ri-coupon-line"></i> Promo Codes
+                </a>
+            </nav>
+        </aside>
+
+        <main class="main-content">
+            <div class="header">
+                <h1 id="pageTitle">Dashboard Overview</h1>
+                <div class="header-actions">
+                    <div class="admin-badge">
+                        <i class="ri-shield-user-line"></i>
+                        <span>Admin</span>
+                    </div>
+                    <button class="logout-btn" onclick="logout()">Logout</button>
+                </div>
+            </div>
+
+            <!-- Overview Page -->
+            <div class="page-section active" id="page-overview">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-user-line"></i></div>
+                        <div class="value" id="totalRiders">0</div>
+                        <div class="label">Total Riders</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-steering-2-line"></i></div>
+                        <div class="value" id="totalDrivers">0</div>
+                        <div class="label">Total Drivers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-road-map-line"></i></div>
+                        <div class="value" id="totalTrips">0</div>
+                        <div class="label">Total Trips</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon orange"><i class="ri-money-dollar-circle-line"></i></div>
+                        <div class="value" id="totalRevenue">₦0</div>
+                        <div class="label">Revenue (Subscriptions)</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Recent Activity</h3>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>User</th>
+                                <th>Details</th>
+                                <th>Time</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recentActivity">
+                            <tr><td colspan="4" class="empty-state"><i class="ri-inbox-line"></i><p>No recent activity</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Riders Page -->
+            <div class="page-section" id="page-riders">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>All Riders</h3>
+                        <span class="badge blue" id="riderCount">0 riders</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Email</th>
+                                <th>Trips</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="ridersTable">
+                            <tr><td colspan="6" class="empty-state"><i class="ri-user-line"></i><p>No riders yet</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Drivers Page -->
+            <div class="page-section" id="page-drivers">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>All Drivers</h3>
+                        <span class="badge green" id="driverCount">0 drivers</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Vehicle</th>
+                                <th>Subscription</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="driversTable">
+                            <tr><td colspan="6" class="empty-state"><i class="ri-steering-2-line"></i><p>No drivers yet</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Trips Page -->
+            <div class="page-section" id="page-trips">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>All Trips</h3>
+                        <span class="badge purple" id="tripCount">0 trips</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Rider</th>
+                                <th>Driver</th>
+                                <th>Route</th>
+                                <th>Fare</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tripsTable">
+                            <tr><td colspan="6" class="empty-state"><i class="ri-road-map-line"></i><p>No trips yet</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Payments Page -->
+            <div class="page-section" id="page-payments">
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-check-double-line"></i></div>
+                        <div class="value" id="approvedPayments">0</div>
+                        <div class="label">Approved</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon yellow"><i class="ri-time-line"></i></div>
+                        <div class="value" id="pendingPayments">0</div>
+                        <div class="label">Pending</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-money-dollar-circle-line"></i></div>
+                        <div class="value" id="totalSubscriptionRevenue">₦0</div>
+                        <div class="label">Total Revenue</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Subscription Payments</h3>
+                        <p style="color:#64748B;font-size:13px;">⚡ Auto-approved instantly when screenshot uploaded</p>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Driver</th>
+                                <th>Amount</th>
+                                <th>Screenshot</th>
+                                <th>Date</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="paymentsTable">
+                            <tr><td colspan="5" class="empty-state"><i class="ri-bank-card-line"></i><p>No payments yet</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Promos Page -->
+            <div class="page-section" id="page-promos">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Promo Codes</h3>
+                        <button class="action-btn view" onclick="showCreatePromo()">+ Create New</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Code</th>
+                                <th>Discount</th>
+                                <th>Used</th>
+                                <th>Max Uses</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody id="promosTable">
+                            <tr><td colspan="5" class="empty-state"><i class="ri-coupon-line"></i><p>No promo codes yet</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Create Promo Modal -->
+    <div class="modal-overlay" id="promoModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create Promo Code</h3>
+                <button class="modal-close" onclick="closePromoModal()">&times;</button>
+            </div>
+            <form id="promoForm">
+                <div class="form-group">
+                    <label>Promo Code</label>
+                    <input type="text" id="promoCode" placeholder="e.g., SAVE20" required style="text-transform:uppercase;">
+                </div>
+                <div class="form-group">
+                    <label>Discount Percentage</label>
+                    <input type="number" id="promoDiscount" placeholder="e.g., 20" min="1" max="100" required>
+                </div>
+                <div class="form-group">
+                    <label>Max Uses</label>
+                    <input type="number" id="promoMaxUses" placeholder="e.g., 1000" min="1" required>
+                </div>
+                <button type="submit" class="login-btn">Create Promo Code</button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = '/api';
+        let adminToken = localStorage.getItem('adminToken');
+
+        // Check if logged in
+        if (adminToken) {
+            showDashboard();
+        }
+
+        // Login Form
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, password })
+                });
+                
+                const data = await res.json();
+                
+                if (data.success) {
+                    adminToken = data.token;
+                    localStorage.setItem('adminToken', adminToken);
+                    showDashboard();
+                } else {
+                    document.getElementById('loginError').style.display = 'block';
+                    document.getElementById('loginError').textContent = data.detail || 'Invalid credentials';
+                }
+            } catch (err) {
+                document.getElementById('loginError').style.display = 'block';
+                document.getElementById('loginError').textContent = 'Connection error';
+            }
+        });
+
+        function showDashboard() {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('dashboard').style.display = 'block';
+            loadOverview();
+        }
+
+        function logout() {
+            localStorage.removeItem('adminToken');
+            adminToken = null;
+            document.getElementById('loginPage').style.display = 'flex';
+            document.getElementById('dashboard').style.display = 'none';
+        }
+
+        // Navigation
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const page = item.dataset.page;
+                
+                document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                
+                document.querySelectorAll('.page-section').forEach(p => p.classList.remove('active'));
+                document.getElementById(`page-${page}`).classList.add('active');
+                
+                document.getElementById('pageTitle').textContent = item.textContent.trim();
+                
+                // Load page data
+                switch(page) {
+                    case 'overview': loadOverview(); break;
+                    case 'riders': loadRiders(); break;
+                    case 'drivers': loadDrivers(); break;
+                    case 'trips': loadTrips(); break;
+                    case 'payments': loadPayments(); break;
+                    case 'promos': loadPromos(); break;
+                }
+            });
+        });
+
+        // API Calls
+        async function loadOverview() {
+            try {
+                const res = await fetch(`${API_URL}/admin/overview`);
+                const data = await res.json();
+                
+                document.getElementById('totalRiders').textContent = data.total_riders || 0;
+                document.getElementById('totalDrivers').textContent = data.total_drivers || 0;
+                document.getElementById('totalTrips').textContent = data.total_trips || 0;
+                document.getElementById('totalRevenue').textContent = `₦${(data.total_revenue || 0).toLocaleString()}`;
+            } catch (err) {
+                console.error('Load overview error:', err);
+            }
+        }
+
+        async function loadRiders() {
+            try {
+                const res = await fetch(`${API_URL}/admin/riders`);
+                const data = await res.json();
+                
+                document.getElementById('riderCount').textContent = `${data.riders?.length || 0} riders`;
+                
+                if (data.riders && data.riders.length > 0) {
+                    document.getElementById('ridersTable').innerHTML = data.riders.map(r => `
+                        <tr>
+                            <td>${r.name || 'N/A'}</td>
+                            <td>${r.phone || 'N/A'}</td>
+                            <td>${r.email || 'N/A'}</td>
+                            <td>${r.total_trips || 0}</td>
+                            <td><span class="badge ${r.blocked ? 'red' : 'green'}">${r.blocked ? 'Blocked' : 'Active'}</span></td>
+                            <td>
+                                <button class="action-btn ${r.blocked ? 'approve' : 'block'}" onclick="toggleUserBlock('${r.id}', ${!r.blocked})">
+                                    ${r.blocked ? 'Unblock' : 'Block'}
+                                </button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Load riders error:', err);
+            }
+        }
+
+        async function loadDrivers() {
+            try {
+                const res = await fetch(`${API_URL}/admin/drivers`);
+                const data = await res.json();
+                
+                document.getElementById('driverCount').textContent = `${data.drivers?.length || 0} drivers`;
+                
+                if (data.drivers && data.drivers.length > 0) {
+                    document.getElementById('driversTable').innerHTML = data.drivers.map(d => `
+                        <tr>
+                            <td>${d.name || 'N/A'}</td>
+                            <td>${d.phone || 'N/A'}</td>
+                            <td>${d.vehicle?.make || 'N/A'} ${d.vehicle?.model || ''}</td>
+                            <td><span class="badge ${getSubBadge(d.subscription_status)}">${d.subscription_status || 'None'}</span></td>
+                            <td><span class="badge ${d.blocked ? 'red' : 'green'}">${d.blocked ? 'Blocked' : 'Active'}</span></td>
+                            <td>
+                                <button class="action-btn view" onclick="viewDriver('${d.id}')">View</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Load drivers error:', err);
+            }
+        }
+
+        async function loadTrips() {
+            try {
+                const res = await fetch(`${API_URL}/admin/trips`);
+                const data = await res.json();
+                
+                document.getElementById('tripCount').textContent = `${data.trips?.length || 0} trips`;
+                
+                if (data.trips && data.trips.length > 0) {
+                    document.getElementById('tripsTable').innerHTML = data.trips.map(t => `
+                        <tr>
+                            <td>${t.id?.substring(0,8) || 'N/A'}...</td>
+                            <td>${t.rider_name || 'N/A'}</td>
+                            <td>${t.driver_name || 'Unassigned'}</td>
+                            <td>${t.pickup?.address?.substring(0,20) || 'N/A'}...</td>
+                            <td>₦${(t.fare || 0).toLocaleString()}</td>
+                            <td><span class="badge ${getTripBadge(t.status)}">${t.status || 'Unknown'}</span></td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Load trips error:', err);
+            }
+        }
+
+        async function loadPayments() {
+            try {
+                const res = await fetch(`${API_URL}/admin/payments`);
+                const data = await res.json();
+                
+                document.getElementById('approvedPayments').textContent = data.approved_count || 0;
+                document.getElementById('pendingPayments').textContent = data.pending_count || 0;
+                document.getElementById('totalSubscriptionRevenue').textContent = `₦${(data.total_revenue || 0).toLocaleString()}`;
+                
+                if (data.payments && data.payments.length > 0) {
+                    document.getElementById('paymentsTable').innerHTML = data.payments.map(p => `
+                        <tr>
+                            <td>${p.driver_name || 'N/A'}</td>
+                            <td>₦${(p.amount || 25000).toLocaleString()}</td>
+                            <td>${p.screenshot ? '<a href="#" onclick="viewScreenshot(\'' + p.screenshot + '\')">View</a>' : 'N/A'}</td>
+                            <td>${new Date(p.created_at).toLocaleDateString()}</td>
+                            <td><span class="badge ${p.status === 'approved' ? 'green' : 'yellow'}">${p.status}</span></td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Load payments error:', err);
+            }
+        }
+
+        async function loadPromos() {
+            try {
+                const res = await fetch(`${API_URL}/admin/promos`);
+                const data = await res.json();
+                
+                if (data.promos && data.promos.length > 0) {
+                    document.getElementById('promosTable').innerHTML = data.promos.map(p => `
+                        <tr>
+                            <td><strong>${p.code}</strong></td>
+                            <td>${p.discount_percent}%</td>
+                            <td>${p.used_by?.length || 0}</td>
+                            <td>${p.max_uses}</td>
+                            <td><span class="badge ${p.active ? 'green' : 'red'}">${p.active ? 'Active' : 'Inactive'}</span></td>
+                        </tr>
+                    `).join('');
+                }
+            } catch (err) {
+                console.error('Load promos error:', err);
+            }
+        }
+
+        function getSubBadge(status) {
+            if (status === 'active') return 'green';
+            if (status === 'trial') return 'blue';
+            if (status === 'pending') return 'yellow';
+            return 'red';
+        }
+
+        function getTripBadge(status) {
+            if (status === 'completed') return 'green';
+            if (status === 'ongoing') return 'blue';
+            if (status === 'pending') return 'yellow';
+            return 'red';
+        }
+
+        async function toggleUserBlock(userId, block) {
+            try {
+                await fetch(`${API_URL}/admin/users/${userId}/block?block=${block}`, { method: 'POST' });
+                loadRiders();
+                loadDrivers();
+            } catch (err) {
+                console.error('Toggle block error:', err);
+            }
+        }
+
+        function showCreatePromo() {
+            document.getElementById('promoModal').style.display = 'flex';
+        }
+
+        function closePromoModal() {
+            document.getElementById('promoModal').style.display = 'none';
+        }
+
+        document.getElementById('promoForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const code = document.getElementById('promoCode').value.toUpperCase();
+            const discount = parseInt(document.getElementById('promoDiscount').value);
+            const maxUses = parseInt(document.getElementById('promoMaxUses').value);
+            
+            try {
+                await fetch(`${API_URL}/admin/promo/create?code=${code}&discount_percent=${discount}&max_uses=${maxUses}`, {
+                    method: 'POST'
+                });
+                closePromoModal();
+                loadPromos();
+            } catch (err) {
+                console.error('Create promo error:', err);
+            }
+        });
+
+        function viewScreenshot(url) {
+            window.open(url, '_blank');
+        }
+    </script>
+</body>
+</html>
