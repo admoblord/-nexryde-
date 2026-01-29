@@ -177,7 +177,7 @@ SUPPORTED_LANGUAGES = {
 
 class User(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    phone: str
+    phone: str = ""
     name: Optional[str] = None
     email: Optional[str] = None
     role: str = "rider"
@@ -187,6 +187,7 @@ class User(BaseModel):
     face_verified: bool = False
     face_image: Optional[str] = None  # Base64 encoded face image for verification
     profile_image: Optional[str] = None
+    google_id: Optional[str] = None  # Google OAuth ID
     rating: float = 5.0
     total_trips: int = 0
     behavior_score: float = 100.0  # AI Behavior Score (hidden)
