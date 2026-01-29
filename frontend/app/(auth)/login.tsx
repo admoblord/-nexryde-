@@ -86,23 +86,32 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
     
-    const backendUrl = BACKEND_URL || '';
+    const backendUrl = BACKEND_URL;
     console.log('=== Phone Login Started ===');
     console.log('BACKEND_URL:', backendUrl);
     console.log('Phone:', `+234${phone}`);
     
     try {
+      // Add timeout to prevent infinite loading
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      
       const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: `+234${phone}` }),
+        signal: controller.signal,
       });
+      
+      clearTimeout(timeoutId);
       
       console.log('Response status:', response.status);
       const data = await response.json();
       console.log('Response data:', data);
       
       if (response.ok) {
+        // Navigate to verify screen
+        setLoading(false); // Reset loading BEFORE navigation
         router.push({ 
           pathname: '/(auth)/verify', 
           params: { 
@@ -118,7 +127,11 @@ export default function LoginScreen() {
       }
     } catch (error: any) {
       console.error('OTP Error:', error);
-      Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+      if (error.name === 'AbortError') {
+        Alert.alert('Timeout', 'Request took too long. Please check your internet connection and try again.');
+      } else {
+        Alert.alert('Error', error.message || 'Failed to send OTP. Please try again.');
+      }
       setLoading(false);
     }
   };
