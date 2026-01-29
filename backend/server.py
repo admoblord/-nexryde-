@@ -939,16 +939,19 @@ async def send_otp(request: OTPRequest):
         if TERMII_API_KEY:
             try:
                 async with httpx.AsyncClient() as http_client:
+                    # Termii requires phone number WITHOUT the + prefix
+                    termii_phone = normalized_phone.lstrip('+')
+                    
                     payload = {
                         "api_key": TERMII_API_KEY,
-                        "to": normalized_phone,
+                        "to": termii_phone,
                         "from": "OE Alert",
                         "channel": "dnd",
                         "type": "plain",
                         "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
                     }
                     
-                    logger.info(f"Sending OTP to {normalized_phone} via Termii v3 API")
+                    logger.info(f"Sending OTP to {termii_phone} via Termii v3 API")
                     
                     response = await http_client.post(
                         f"{TERMII_BASE_URL}/api/sms/send",
