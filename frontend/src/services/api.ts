@@ -1,6 +1,29 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+// Get backend URL with multiple fallbacks for reliability
+const getBackendUrl = (): string => {
+  // Try process.env first (works in development)
+  if (process.env.EXPO_PUBLIC_BACKEND_URL) {
+    return process.env.EXPO_PUBLIC_BACKEND_URL;
+  }
+  // Try expo-constants (works in production builds)
+  const expoConfig = Constants.expoConfig as any;
+  if (expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL) {
+    return expoConfig.extra.EXPO_PUBLIC_BACKEND_URL;
+  }
+  // Fallback for web - use current origin
+  if (typeof window !== 'undefined' && window.location) {
+    return window.location.origin;
+  }
+  // Last resort - hardcoded production URL
+  return 'https://nexryde-test.preview.emergentagent.com';
+};
+
+const API_URL = getBackendUrl();
+
+// Export for other components to use
+export const BACKEND_URL = API_URL;
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
