@@ -958,8 +958,19 @@
             }
         });
 
-        function viewScreenshot(url) {
-            window.open(url, '_blank');
+        async function viewScreenshot(subscriptionId) {
+            try {
+                const res = await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/screenshot`);
+                const data = await res.json();
+                if (data.screenshot_url) {
+                    window.open(data.screenshot_url, '_blank');
+                } else {
+                    alert('Screenshot not available');
+                }
+            } catch (err) {
+                console.error('View screenshot error:', err);
+                alert('Failed to load screenshot');
+            }
         }
     </script>
 </body>
