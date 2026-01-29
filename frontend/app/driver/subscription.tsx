@@ -337,19 +337,7 @@ export default function SubscriptionScreen() {
     });
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <LinearGradient
-          colors={['#0F172A', '#1E293B']}
-          style={StyleSheet.absoluteFill}
-        />
-        <ActivityIndicator size="large" color="#00E676" />
-        <Text style={styles.loadingText}>Loading subscription...</Text>
-      </View>
-    );
-  }
-
+  // Web preview has issues with import.meta, so skip loading screen
   const statusConfig = getStatusConfig(subscription?.status || 'expired');
 
   return (
