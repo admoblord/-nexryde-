@@ -981,6 +981,82 @@ async def delete_otp_record(phone: str):
     """Delete OTP record after successful verification"""
     await db.otp_records.delete_one({"phone": phone})
 
+async def send_sms_notification(phone: str, message: str):
+    """Send SMS notification via Termii"""
+    try:
+        if not TERMII_API_KEY:
+            logger.info(f"SMS notification (mock): {phone} - {message}")
+            return True
+        
+        async with httpx.AsyncClient() as http_client:
+            # Termii requires phone number WITHOUT the + prefix
+            termii_phone = phone.lstrip('+')
+            
+            payload = {
+                "api_key": TERMII_API_KEY,
+                "to": termii_phone,
+                "from": "NEXRYDE",
+                "channel": "dnd",
+                "type": "plain",
+                "sms": message
+            }
+            
+            logger.info(f"Sending SMS notification to {termii_phone}")
+            
+            response = await http_client.post(
+                f"{TERMII_BASE_URL}/api/sms/send",
+                json=payload,
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                logger.info(f"✅ SMS notification sent to {termii_phone}")
+                return True
+            else:
+                logger.error(f"SMS notification failed: {response.status_code} - {response.text}")
+                return False
+    except Exception as e:
+        logger.error(f"SMS notification error: {e}")
+        return False
+
+async def send_driver_verification_notification(user_id: str, status: str, reason: str = None):
+    """Send notification to driver about verification status"""
+    try:
+        user = await db.users.find_one({"id": user_id})
+        if not user or not user.get("phone"):
+            logger.warning(f"Cannot send notification - user {user_id} not found or no phone")
+            return
+        
+        phone = user.get("phone")
+        name = user.get("name", "Driver")
+        
+        if status == "approved":
+            message = f"🎉 Congratulations {name}! Your NEXRYDE driver account has been APPROVED. You can now start accepting rides and earning money. Welcome to the team!"
+        elif status == "rejected":
+            message = f"Hi {name}, your NEXRYDE driver verification was not approved. Reason: {reason or 'Documents did not meet requirements'}. Please re-submit your documents."
+        else:
+            message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you soon!"
+        
+        # Send SMS
+        await send_sms_notification(phone, message)
+        
+        # Also store in-app notification
+        notification = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "type": "verification_" + status,
+            "title": "Driver Verification " + status.upper(),
+            "message": message,
+            "read": False,
+            "created_at": datetime.utcnow()
+        }
+        await db.notifications.insert_one(notification)
+        
+        logger.info(f"📱 Verification notification sent to {name} ({phone}): {status}")
+        
+    except Exception as e:
+        logger.error(f"Failed to send verification notification: {e}")
+
 @api_router.post("/auth/send-otp")
 async def send_otp(request: OTPRequest):
     """Send OTP via Termii SMS or fallback to mock mode"""
