@@ -89,7 +89,7 @@ class WebSocketFeaturesTester:
             # Try to connect to WebSocket
             self.log(f"    Attempting connection to: {ws_endpoint}")
             
-            async with websockets.connect(ws_endpoint, timeout=15) as websocket:
+            async with websockets.connect(ws_endpoint) as websocket:
                 self.log_test(
                     "WebSocket Connection", 
                     True, 
