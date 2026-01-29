@@ -917,6 +917,42 @@
             }
         }
 
+        async function loadVerifications() {
+            try {
+                const res = await fetch(`${API_URL}/admin/verifications`);
+                const data = await res.json();
+                
+                const pendingCount = data.verifications?.filter(v => v.status === 'pending').length || 0;
+                document.getElementById('verificationCount').textContent = `${pendingCount} pending`;
+                
+                if (data.verifications && data.verifications.length > 0) {
+                    document.getElementById('verificationsTable').innerHTML = data.verifications.map(v => `
+                        <tr>
+                            <td><strong>${v.driver_name || 'N/A'}</strong></td>
+                            <td>${v.driver_phone || 'N/A'}</td>
+                            <td>
+                                ${v.license ? '✓ License' : '✗ License'}<br>
+                                ${v.vehicle_registration ? '✓ Registration' : '✗ Registration'}<br>
+                                ${v.insurance ? '✓ Insurance' : '✗ Insurance'}
+                            </td>
+                            <td>${v.vehicle_make || 'N/A'} ${v.vehicle_model || ''}<br><small>${v.vehicle_plate || 'No plate'}</small></td>
+                            <td><span class="badge ${getVerificationBadge(v.status)}">${v.status || 'Unknown'}</span></td>
+                            <td>
+                                ${v.status === 'pending' ? `
+                                    <button class="action-btn approve" onclick="approveVerification('${v.driver_id}')">Approve</button>
+                                    <button class="action-btn block" onclick="rejectVerification('${v.driver_id}')" style="margin-left:8px;">Reject</button>
+                                ` : '<span style="color:#22C55E;">✓ Processed</span>'}
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    document.getElementById('verificationsTable').innerHTML = '<tr><td colspan="6" class="empty-state"><i class="ri-shield-check-line"></i><p>No pending verifications</p></td></tr>';
+                }
+            } catch (err) {
+                console.error('Load verifications error:', err);
+            }
+        }
+
         async function loadPromos() {
             try {
                 const res = await fetch(`${API_URL}/admin/promos`);
