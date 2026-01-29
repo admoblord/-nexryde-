@@ -437,12 +437,13 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.textSecondary,
     letterSpacing: 1,
     marginBottom: 12,
     marginLeft: 4,
+    textTransform: 'uppercase',
   },
   card: {
     backgroundColor: COLORS.card,
