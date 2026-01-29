@@ -22,7 +22,6 @@ const COLORS = {
 };
 
 export default function SplashScreen() {
-  const router = useRouter();
   // Start with visible values for web compatibility, animate on mobile
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
