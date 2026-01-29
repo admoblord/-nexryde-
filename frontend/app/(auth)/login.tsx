@@ -110,21 +110,27 @@ export default function LoginScreen() {
       console.log('Response data:', data);
       
       if (response.ok) {
-        // Navigate to verify screen
-        setLoading(false); // Reset loading BEFORE navigation
+        console.log('OTP sent successfully, navigating to verify screen');
         
-        // Use href for more reliable navigation
-        const verifyPath = `/(auth)/verify?phone=${encodeURIComponent(phone)}&pin_id=${encodeURIComponent(data.pin_id || '')}&provider=${encodeURIComponent(data.provider || 'mock')}&mock_otp=${encodeURIComponent(data.otp || '')}`;
+        // Store OTP data for verify screen to access
+        const otpData = {
+          phone: phone,
+          pin_id: data.pin_id || '',
+          provider: data.provider || 'mock',
+          mock_otp: data.otp || ''
+        };
         
-        console.log('Navigating to:', verifyPath);
+        // Store in app state for the verify screen
+        storePhone(phone);
         
-        // Try router.push first, fallback to replace if needed
-        try {
-          router.push(verifyPath as any);
-        } catch (navError) {
-          console.error('Navigation error, trying replace:', navError);
-          router.replace(verifyPath as any);
-        }
+        // Reset loading BEFORE navigation
+        setLoading(false);
+        
+        // Use simple object-based navigation (works better with expo-router 5.x)
+        router.replace({
+          pathname: '/(auth)/verify',
+          params: otpData
+        });
       } else {
         Alert.alert('Error', data.detail || 'Failed to send OTP');
         setLoading(false);
