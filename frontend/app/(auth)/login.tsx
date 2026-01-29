@@ -45,8 +45,8 @@ const COLORS = {
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
-// Backend URL - use environment variable
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL;
+// Backend URL - use environment variable or derive from window location on web
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
