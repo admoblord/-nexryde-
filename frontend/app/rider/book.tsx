@@ -502,7 +502,8 @@ export default function BookScreen() {
         <Modal
           visible={showMapPicker}
           animationType="slide"
-          presentationStyle="pageSheet"
+          presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+          transparent={false}
         >
           <SafeAreaView style={styles.modalContainer}>
             {/* Modal Header */}
