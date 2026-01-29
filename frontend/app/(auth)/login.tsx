@@ -112,15 +112,19 @@ export default function LoginScreen() {
       if (response.ok) {
         // Navigate to verify screen
         setLoading(false); // Reset loading BEFORE navigation
-        router.push({ 
-          pathname: '/(auth)/verify', 
-          params: { 
-            phone,
-            pin_id: data.pin_id || '',
-            provider: data.provider || 'mock',
-            mock_otp: data.otp || ''
-          } 
-        });
+        
+        // Use href for more reliable navigation
+        const verifyPath = `/(auth)/verify?phone=${encodeURIComponent(phone)}&pin_id=${encodeURIComponent(data.pin_id || '')}&provider=${encodeURIComponent(data.provider || 'mock')}&mock_otp=${encodeURIComponent(data.otp || '')}`;
+        
+        console.log('Navigating to:', verifyPath);
+        
+        // Try router.push first, fallback to replace if needed
+        try {
+          router.push(verifyPath as any);
+        } catch (navError) {
+          console.error('Navigation error, trying replace:', navError);
+          router.replace(verifyPath as any);
+        }
       } else {
         Alert.alert('Error', data.detail || 'Failed to send OTP');
         setLoading(false);
