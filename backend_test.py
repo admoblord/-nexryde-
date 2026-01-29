@@ -542,9 +542,7 @@ class NEXRYDEAPITester:
             self.log_result("Cancel Trip", False, "No test trip ID available")
             return False
         
-        data = {"reason": "Testing cancellation"}
-        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id}
-        response = await self.make_request("PUT", f"/trips/{self.test_trip_id}/cancel?canceller_id={self.test_user_id}", data, headers)
+        response = await self.make_request("PUT", f"/trips/{self.test_trip_id}/cancel?cancelled_by={self.test_user_id}")
         
         if response["success"]:
             self.log_result("Cancel Trip", True, "Trip cancelled successfully", response["data"])
