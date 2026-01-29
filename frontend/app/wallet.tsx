@@ -110,7 +110,7 @@ export default function WalletScreen() {
             end={{ x: 1, y: 1 }}
             style={styles.balanceCard}
           >
-            <Text style={styles.balanceLabel}>Available Balance</Text>
+            <Text style={styles.balanceLabel}>Reward Balance</Text>
             <Text style={styles.balanceAmount}>
               {loading ? '...' : `₦${balance.toLocaleString()}`}
             </Text>
