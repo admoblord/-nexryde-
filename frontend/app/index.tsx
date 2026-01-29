@@ -70,7 +70,13 @@ export default function SplashScreen() {
   }, []);
 
   const handleBeginJourney = () => {
-    router.replace('/(auth)/login');
+    try {
+      router.push('/(auth)/login');
+    } catch (e) {
+      console.error('Navigation error:', e);
+      // Fallback - try alternate navigation
+      router.navigate('/(auth)/login');
+    }
   };
 
   return (
