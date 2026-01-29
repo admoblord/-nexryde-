@@ -285,8 +285,9 @@ class AdminAPITester:
         """Test user block/unblock functionality"""
         print("\n🚫 Testing User Block/Unblock...")
         
-        # Test with a dummy user ID (should return not found)
-        test_user_id = "test-user-123"
+        # Test with a truly non-existent user ID
+        import uuid
+        test_user_id = f"non-existent-user-{str(uuid.uuid4())[:8]}"
         
         # Test block user
         success1, data1 = self.make_request("POST", f"/admin/users/{test_user_id}/block?block=true")
