@@ -98,7 +98,7 @@ export default function WalletScreen() {
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Wallet</Text>
+          <Text style={styles.headerTitle}>Rewards</Text>
           <View style={{ width: 40 }} />
         </View>
 
