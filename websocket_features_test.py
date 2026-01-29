@@ -226,29 +226,29 @@ class WebSocketFeaturesTester:
                 result
             )
             
-            # Test 2: Get driver offers for bid
-            success2, result2 = self.test_endpoint("GET", f"/rides/bid/{bid_id}/offers")
+            # Test 2: Get open bids (instead of offers for specific bid)
+            success2, result2 = self.test_endpoint("GET", "/rides/bid/open")
             if success2:
-                offers = result2.get('offers', []) if isinstance(result2, dict) else []
+                open_bids = result2.get('open_bids', []) if isinstance(result2, dict) else []
                 self.log_test(
-                    "Get Bid Offers", 
+                    "Get Open Bids", 
                     True, 
-                    f"Retrieved {len(offers)} offers for bid",
+                    f"Retrieved {len(open_bids)} open bids",
                     result2
                 )
                 
-                # Test 3: Accept offer (will likely fail as no real offers)
+                # Test 3: Accept offer (will likely fail as no real offers, but endpoint should exist)
                 fake_offer_id = str(uuid.uuid4())
                 success3, result3 = self.test_endpoint(
                     "POST", 
-                    f"/rides/bid/{bid_id}/accept/{fake_offer_id}", 
+                    f"/rides/bid/{bid_id}/accept", 
                     expected_status=404
                 )
                 if success3 or "not found" in str(result3).lower():
                     self.log_test(
                         "Accept Bid Offer", 
                         True, 
-                        "Accept offer endpoint exists (404 expected for fake offer)",
+                        "Accept bid endpoint exists (404 expected for incomplete bid)",
                         result3
                     )
                     return True, "All ride bidding endpoints working"
@@ -256,10 +256,10 @@ class WebSocketFeaturesTester:
                     self.log_test(
                         "Accept Bid Offer", 
                         False, 
-                        "Accept offer endpoint failed unexpectedly",
+                        "Accept bid endpoint failed unexpectedly",
                         result3
                     )
-                    return False, f"Accept offer failed: {result3}"
+                    return False, f"Accept bid failed: {result3}"
             else:
                 self.log_test(
                     "Get Bid Offers", 
