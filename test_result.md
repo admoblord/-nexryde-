@@ -105,6 +105,18 @@
 user_problem_statement: Build KODA - Nigeria's driver-first ride-hailing platform with subscription-based driver access, no commission model, and role switching between driver/rider mode.
 
 backend:
+  - task: "Driver Document Verification API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ IMPLEMENTED: Complete driver document verification system. POST /api/drivers/verification/submit accepts personal info, vehicle info, and document statuses (NIN, license, passport, vehicle registration, insurance). GET /api/drivers/verification/{user_id} returns verification status. Admin endpoints: GET /api/admin/verifications lists all submissions with counts, POST /api/admin/verifications/{id}/approve and /reject handle admin decisions. Approved verifications automatically update driver profile with vehicle details and set verification flags to true."
+
   - task: "Auth API - Send OTP"
     implemented: true
     working: true
