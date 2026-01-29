@@ -157,7 +157,7 @@ class NEXRYDEAPITester:
         print("🚗 TESTING RIDER APIs")
         print("=" * 50)
         
-        # 6. POST /api/rides/request - Request a ride
+        # 6. POST /api/trips/request - Request a ride
         ride_data = {
             "pickup_lat": self.lagos_coords["pickup_lat"],
             "pickup_lng": self.lagos_coords["pickup_lng"],
@@ -168,36 +168,35 @@ class NEXRYDEAPITester:
             "service_type": "economy",
             "payment_method": "cash"
         }
-        success, response = self.test_endpoint("POST", "/rides/request", ride_data)
+        success, response = self.test_endpoint("POST", "/trips/request", ride_data)
         if success and isinstance(response, dict):
             self.test_trip_id = response.get("trip_id")
         
-        # 7. GET /api/rides/{ride_id} - Get ride details
+        # 7. GET /api/trips/{trip_id} - Get trip details
         if self.test_trip_id:
-            self.test_endpoint("GET", f"/rides/{self.test_trip_id}")
+            self.test_endpoint("GET", f"/trips/{self.test_trip_id}")
         else:
-            self.test_endpoint("GET", "/rides/sample-trip-123", expected_status=404)
+            self.test_endpoint("GET", "/trips/sample-trip-123", expected_status=404)
         
-        # 8. POST /api/rides/cancel/{ride_id} - Cancel ride
+        # 8. PUT /api/trips/{trip_id}/cancel - Cancel trip
         if self.test_trip_id:
-            self.test_endpoint("POST", f"/rides/cancel/{self.test_trip_id}")
+            self.test_endpoint("PUT", f"/trips/{self.test_trip_id}/cancel")
         
-        # 9. GET /api/rides/history/{user_id} - Ride history
+        # 9. GET /api/trips/user/{user_id} - Trip history
         if self.test_user_id:
-            self.test_endpoint("GET", f"/rides/history/{self.test_user_id}")
+            self.test_endpoint("GET", f"/trips/user/{self.test_user_id}")
         else:
-            self.test_endpoint("GET", "/rides/history/sample-user-123")
+            self.test_endpoint("GET", "/trips/user/sample-user-123")
         
-        # 10. POST /api/rides/rate - Rate a ride
+        # 10. PUT /api/trips/{trip_id}/rate - Rate a trip
         if self.test_trip_id:
-            self.test_endpoint("POST", "/rides/rate", {
-                "trip_id": self.test_trip_id,
+            self.test_endpoint("PUT", f"/trips/{self.test_trip_id}/rate", {
                 "rating": 5.0,
                 "comment": "Excellent service!"
             })
         
-        # 11. GET /api/rides/fare-estimate - Get fare estimate
-        self.test_endpoint("GET", "/rides/fare-estimate", params={
+        # 11. POST /api/fare/estimate - Get fare estimate
+        self.test_endpoint("POST", "/fare/estimate", {
             "pickup_lat": self.lagos_coords["pickup_lat"],
             "pickup_lng": self.lagos_coords["pickup_lng"],
             "dropoff_lat": self.lagos_coords["dropoff_lat"],
@@ -205,8 +204,8 @@ class NEXRYDEAPITester:
             "service_type": "economy"
         })
         
-        # 12. POST /api/rides/bid/create - Create bid request
-        self.test_endpoint("POST", "/rides/bid/create", {
+        # 12. POST /api/rides/bid/create - Create bid request (with query param)
+        success, response = self.test_endpoint("POST", f"/rides/bid/create?rider_id={self.test_user_id or 'sample-user-123'}", {
             "pickup_lat": self.lagos_coords["pickup_lat"],
             "pickup_lng": self.lagos_coords["pickup_lng"],
             "pickup_address": "Victoria Island, Lagos",
@@ -216,12 +215,15 @@ class NEXRYDEAPITester:
             "rider_offered_price": 2500.0
         })
         
-        # 13. GET /api/rides/bid/{bid_id}/offers - Get driver offers
-        self.test_endpoint("GET", "/rides/bid/sample-bid-123/offers", expected_status=404)
+        # 13. GET /api/rides/bid/open - Get open bids
+        self.test_endpoint("GET", "/rides/bid/open", params={
+            "lat": self.lagos_coords["pickup_lat"],
+            "lng": self.lagos_coords["pickup_lng"]
+        })
         
-        # 14. POST /api/rides/schedule - Schedule ride
+        # 14. POST /api/rides/schedule - Schedule ride (with query param)
         future_time = (datetime.now() + timedelta(hours=2)).isoformat()
-        self.test_endpoint("POST", "/rides/schedule", {
+        self.test_endpoint("POST", f"/rides/schedule?rider_id={self.test_user_id or 'sample-user-123'}", {
             "pickup_lat": self.lagos_coords["pickup_lat"],
             "pickup_lng": self.lagos_coords["pickup_lng"],
             "pickup_address": "Victoria Island, Lagos",
@@ -238,9 +240,8 @@ class NEXRYDEAPITester:
         else:
             self.test_endpoint("GET", "/rides/scheduled/sample-user-123")
         
-        # 16. POST /api/delivery/request - Request delivery
-        self.test_endpoint("POST", "/delivery/request", {
-            "sender_id": self.test_user_id or "sample-user-123",
+        # 16. POST /api/delivery/request - Request delivery (with query param)
+        self.test_endpoint("POST", f"/delivery/request?sender_id={self.test_user_id or 'sample-user-123'}", {
             "pickup_lat": self.lagos_coords["pickup_lat"],
             "pickup_lng": self.lagos_coords["pickup_lng"],
             "pickup_address": "Victoria Island, Lagos",
