@@ -381,6 +381,26 @@ class EmergencyContactRequest(BaseModel):
 class FaceVerificationRequest(BaseModel):
     face_image: str  # Base64 encoded image
 
+# Driver Document Verification Models
+class DriverVerificationSubmission(BaseModel):
+    user_id: str
+    personal_info: dict  # {fullName, phone, email, address, dateOfBirth}
+    vehicle_info: dict  # {vehicleMake, vehicleModel, vehicleYear, vehicleColor, plateNumber}
+    documents: dict  # {nin, drivers_license, passport_photo, vehicle_registration, insurance}
+
+class DriverVerificationStatus(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    user_id: str
+    personal_info: dict = {}
+    vehicle_info: dict = {}
+    documents: dict = {}
+    status: str = "pending"  # pending, under_review, approved, rejected
+    submitted_at: datetime = Field(default_factory=datetime.utcnow)
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[str] = None
+    rejection_reason: Optional[str] = None
+    notes: Optional[str] = None
+
 class DriverProfileUpdate(BaseModel):
     vehicle_type: Optional[str] = None
     vehicle_model: Optional[str] = None
