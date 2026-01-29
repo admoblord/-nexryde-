@@ -3201,6 +3201,145 @@ async def get_preset_messages(role: str):
     return {"presets": PRESET_MESSAGES[role]}
 
 
+# ==================== WEBSOCKET CHAT ====================
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time chat"""
+    def __init__(self):
+        # Store active connections by trip_id
+        self.active_connections: Dict[str, Set[WebSocket]] = {}
+        # Store user to websocket mapping
+        self.user_connections: Dict[str, WebSocket] = {}
+    
+    async def connect(self, websocket: WebSocket, trip_id: str, user_id: str):
+        await websocket.accept()
+        if trip_id not in self.active_connections:
+            self.active_connections[trip_id] = set()
+        self.active_connections[trip_id].add(websocket)
+        self.user_connections[user_id] = websocket
+        logger.info(f"WebSocket connected: user={user_id}, trip={trip_id}")
+    
+    def disconnect(self, websocket: WebSocket, trip_id: str, user_id: str):
+        if trip_id in self.active_connections:
+            self.active_connections[trip_id].discard(websocket)
+            if not self.active_connections[trip_id]:
+                del self.active_connections[trip_id]
+        if user_id in self.user_connections:
+            del self.user_connections[user_id]
+        logger.info(f"WebSocket disconnected: user={user_id}, trip={trip_id}")
+    
+    async def send_personal_message(self, message: dict, websocket: WebSocket):
+        try:
+            await websocket.send_json(message)
+        except Exception as e:
+            logger.error(f"Error sending message: {e}")
+    
+    async def broadcast_to_trip(self, message: dict, trip_id: str, exclude_user: str = None):
+        """Broadcast message to all users in a trip"""
+        if trip_id not in self.active_connections:
+            return
+        
+        for connection in self.active_connections[trip_id]:
+            try:
+                # Get user_id for this connection
+                user_id = None
+                for uid, ws in self.user_connections.items():
+                    if ws == connection:
+                        user_id = uid
+                        break
+                
+                if exclude_user and user_id == exclude_user:
+                    continue
+                    
+                await connection.send_json(message)
+            except Exception as e:
+                logger.error(f"Error broadcasting: {e}")
+
+# Global connection manager
+chat_manager = ConnectionManager()
+
+@app.websocket("/ws/chat/{trip_id}/{user_id}")
+async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
+    """WebSocket endpoint for real-time driver-rider chat"""
+    await chat_manager.connect(websocket, trip_id, user_id)
+    
+    try:
+        # Send connection confirmation
+        await websocket.send_json({
+            "type": "connected",
+            "trip_id": trip_id,
+            "user_id": user_id,
+            "message": "Connected to chat"
+        })
+        
+        # Load existing messages
+        messages = await db.trip_messages.find(
+            {"trip_id": trip_id},
+            {"_id": 0}
+        ).sort("timestamp", 1).to_list(100)
+        
+        if messages:
+            await websocket.send_json({
+                "type": "history",
+                "messages": messages
+            })
+        
+        while True:
+            # Wait for messages from this client
+            data = await websocket.receive_json()
+            
+            if data.get("type") == "message":
+                # Get user info
+                user = await db.users.find_one({"id": user_id}, {"name": 1, "role": 1, "_id": 0})
+                
+                # Create message document
+                message_doc = {
+                    "id": str(uuid.uuid4()),
+                    "trip_id": trip_id,
+                    "sender_id": user_id,
+                    "sender_name": user.get("name", "User") if user else "User",
+                    "sender_role": data.get("sender_role", user.get("role", "rider") if user else "rider"),
+                    "message": data.get("message", ""),
+                    "message_type": data.get("message_type", "text"),
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "is_read": False
+                }
+                
+                # Save to database
+                await db.trip_messages.insert_one(message_doc)
+                
+                # Broadcast to all users in trip
+                await chat_manager.broadcast_to_trip({
+                    "type": "new_message",
+                    **message_doc
+                }, trip_id)
+                
+            elif data.get("type") == "typing":
+                # Broadcast typing indicator
+                await chat_manager.broadcast_to_trip({
+                    "type": "typing",
+                    "user_id": user_id,
+                    "is_typing": data.get("is_typing", False)
+                }, trip_id, exclude_user=user_id)
+                
+            elif data.get("type") == "read":
+                # Mark messages as read
+                await db.trip_messages.update_many(
+                    {"trip_id": trip_id, "sender_id": {"$ne": user_id}},
+                    {"$set": {"is_read": True}}
+                )
+                await chat_manager.broadcast_to_trip({
+                    "type": "messages_read",
+                    "user_id": user_id
+                }, trip_id, exclude_user=user_id)
+                
+    except WebSocketDisconnect:
+        chat_manager.disconnect(websocket, trip_id, user_id)
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        chat_manager.disconnect(websocket, trip_id, user_id)
+
+
 # ==================== SURGE PRICING ====================
 
 def calculate_surge_multiplier(lat: float, lng: float) -> dict:
