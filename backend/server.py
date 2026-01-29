@@ -3196,6 +3196,373 @@ async def get_preset_messages(role: str):
         return {"presets": PRESET_MESSAGES["rider"]}
     return {"presets": PRESET_MESSAGES[role]}
 
+
+# ==================== SURGE PRICING ====================
+
+def calculate_surge_multiplier(lat: float, lng: float) -> dict:
+    """Calculate surge multiplier based on time, demand, and conditions"""
+    now = datetime.utcnow()
+    hour = now.hour
+    
+    base_multiplier = SURGE_CONFIG["base_multiplier"]
+    surge_reason = []
+    
+    # Check peak hours
+    for period, config in SURGE_CONFIG["peak_hours"].items():
+        if config["start"] <= hour < config["end"]:
+            base_multiplier = max(base_multiplier, config["multiplier"])
+            surge_reason.append(f"{period.title()} rush hour")
+    
+    # Simulate demand-based surge
+    demand_ratio = random.uniform(0.3, 0.9)
+    if demand_ratio > SURGE_CONFIG["high_demand_threshold"]:
+        demand_surge = 1 + (demand_ratio - SURGE_CONFIG["high_demand_threshold"]) * 2
+        if demand_surge > base_multiplier:
+            base_multiplier = demand_surge
+            surge_reason.append("High demand in area")
+    
+    final_multiplier = min(base_multiplier, SURGE_CONFIG["max_multiplier"])
+    
+    return {
+        "multiplier": round(final_multiplier, 2),
+        "is_surge": final_multiplier > 1.0,
+        "reasons": surge_reason if surge_reason else ["Normal pricing"],
+        "expires_in_minutes": 5
+    }
+
+@api_router.get("/surge/check")
+async def check_surge_pricing(lat: float, lng: float):
+    """Check current surge pricing for a location"""
+    return calculate_surge_multiplier(lat, lng)
+
+# ==================== RIDE BIDDING (INDRIVE STYLE) ====================
+
+class BidRequest(BaseModel):
+    rider_offered_price: float
+    pickup_lat: float
+    pickup_lng: float
+    dropoff_lat: float
+    dropoff_lng: float
+    pickup_address: str
+    dropoff_address: str
+    ride_type: str = "economy"
+
+@api_router.post("/rides/bid/create")
+async def create_ride_bid(request: BidRequest, rider_id: str):
+    """Rider creates a bid request with their offered price"""
+    surge = calculate_surge_multiplier(request.pickup_lat, request.pickup_lng)
+    
+    bid = {
+        "id": str(uuid.uuid4()),
+        "rider_id": rider_id,
+        "rider_offered_price": request.rider_offered_price,
+        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
+        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        "ride_type": request.ride_type,
+        "surge_multiplier": surge["multiplier"],
+        "status": "open",
+        "driver_bids": [],
+        "accepted_driver_id": None,
+        "accepted_price": None,
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(minutes=5)
+    }
+    
+    await db.ride_bids.insert_one(bid)
+    
+    return {"bid_id": bid["id"], "status": "open", "expires_in_minutes": 5, "surge_multiplier": surge["multiplier"]}
+
+@api_router.post("/rides/bid/{bid_id}/driver-offer")
+async def driver_make_offer(bid_id: str, driver_id: str, counter_price: float, message: Optional[str] = None):
+    """Driver makes a counter-offer"""
+    bid = await db.ride_bids.find_one({"id": bid_id, "status": "open"})
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found or closed")
+    
+    driver = await db.users.find_one({"id": driver_id, "role": "driver"})
+    
+    offer = {
+        "offer_id": str(uuid.uuid4()),
+        "driver_id": driver_id,
+        "driver_name": driver.get("name", "Driver") if driver else "Driver",
+        "driver_rating": driver.get("rating", 5.0) if driver else 5.0,
+        "counter_price": counter_price,
+        "message": message,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.ride_bids.update_one({"id": bid_id}, {"$push": {"driver_bids": offer}})
+    return {"success": True, "offer_id": offer["offer_id"]}
+
+@api_router.post("/rides/bid/{bid_id}/accept")
+async def accept_driver_offer(bid_id: str, rider_id: str, offer_id: str):
+    """Rider accepts a driver's offer"""
+    bid = await db.ride_bids.find_one({"id": bid_id, "rider_id": rider_id})
+    if not bid:
+        raise HTTPException(status_code=404, detail="Bid not found")
+    
+    accepted_offer = next((o for o in bid.get("driver_bids", []) if o["offer_id"] == offer_id), None)
+    if not accepted_offer:
+        raise HTTPException(status_code=404, detail="Offer not found")
+    
+    await db.ride_bids.update_one({"id": bid_id}, {"$set": {
+        "status": "accepted",
+        "accepted_driver_id": accepted_offer["driver_id"],
+        "accepted_price": accepted_offer["counter_price"]
+    }})
+    
+    trip = {
+        "id": str(uuid.uuid4()),
+        "bid_id": bid_id,
+        "rider_id": rider_id,
+        "driver_id": accepted_offer["driver_id"],
+        "pickup": bid["pickup"],
+        "dropoff": bid["dropoff"],
+        "fare": accepted_offer["counter_price"],
+        "ride_type": bid["ride_type"],
+        "status": "accepted",
+        "created_at": datetime.utcnow()
+    }
+    await db.trips.insert_one(trip)
+    
+    return {"success": True, "trip_id": trip["id"], "agreed_price": accepted_offer["counter_price"]}
+
+@api_router.get("/rides/bid/open")
+async def get_open_bids(lat: float, lng: float):
+    """Get open bids for drivers"""
+    bids = await db.ride_bids.find({"status": "open", "expires_at": {"$gt": datetime.utcnow()}}).limit(20).to_list(20)
+    return {"bids": [{"bid_id": b["id"], "rider_offered_price": b["rider_offered_price"], 
+                      "pickup_address": b["pickup"]["address"], "dropoff_address": b["dropoff"]["address"]} for b in bids]}
+
+# ==================== SCHEDULED RIDES ====================
+
+class ScheduledRideRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    pickup_address: str
+    dropoff_lat: float
+    dropoff_lng: float
+    dropoff_address: str
+    scheduled_time: datetime
+    ride_type: str = "economy"
+
+@api_router.post("/rides/schedule")
+async def schedule_ride(request: ScheduledRideRequest, rider_id: str):
+    """Schedule a ride for future"""
+    if request.scheduled_time < datetime.utcnow() + timedelta(minutes=30):
+        raise HTTPException(status_code=400, detail="Schedule at least 30 minutes ahead")
+    
+    scheduled = {
+        "id": str(uuid.uuid4()),
+        "rider_id": rider_id,
+        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
+        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        "scheduled_time": request.scheduled_time,
+        "ride_type": request.ride_type,
+        "status": "scheduled",
+        "created_at": datetime.utcnow()
+    }
+    await db.scheduled_rides.insert_one(scheduled)
+    return {"scheduled_ride_id": scheduled["id"], "scheduled_time": request.scheduled_time.isoformat()}
+
+@api_router.get("/rides/scheduled/{rider_id}")
+async def get_scheduled_rides(rider_id: str):
+    """Get scheduled rides"""
+    rides = await db.scheduled_rides.find({"rider_id": rider_id, "status": "scheduled"}).to_list(50)
+    return {"scheduled_rides": [{"id": r["id"], "pickup_address": r["pickup"]["address"], 
+                                 "scheduled_time": r["scheduled_time"].isoformat()} for r in rides]}
+
+# ==================== SPLIT FARE ====================
+
+@api_router.post("/rides/{trip_id}/split-fare")
+async def split_fare(trip_id: str, rider_id: str, phones: List[str]):
+    """Split fare with friends"""
+    trip = await db.trips.find_one({"id": trip_id, "rider_id": rider_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    per_person = round(trip.get("fare", 0) / (len(phones) + 1), 2)
+    split = {
+        "id": str(uuid.uuid4()),
+        "trip_id": trip_id,
+        "total_fare": trip.get("fare", 0),
+        "per_person": per_person,
+        "participants": [{"phone": p, "paid": False} for p in phones],
+        "created_at": datetime.utcnow()
+    }
+    await db.split_fares.insert_one(split)
+    return {"split_id": split["id"], "per_person": per_person, "num_participants": len(phones) + 1}
+
+# ==================== PACKAGE DELIVERY ====================
+
+class PackageRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    pickup_address: str
+    dropoff_lat: float
+    dropoff_lng: float
+    dropoff_address: str
+    recipient_name: str
+    recipient_phone: str
+    package_description: str
+    package_size: str = "small"
+
+@api_router.post("/delivery/request")
+async def request_delivery(request: PackageRequest, sender_id: str):
+    """Request package delivery"""
+    size_surcharge = {"small": 0, "medium": 200, "large": 500}
+    base_fare = 1500 + size_surcharge.get(request.package_size, 0)
+    
+    delivery = {
+        "id": str(uuid.uuid4()),
+        "sender_id": sender_id,
+        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
+        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        "recipient": {"name": request.recipient_name, "phone": request.recipient_phone},
+        "package": {"description": request.package_description, "size": request.package_size},
+        "fare": base_fare,
+        "pickup_code": str(random.randint(1000, 9999)),
+        "delivery_code": str(random.randint(1000, 9999)),
+        "status": "pending",
+        "created_at": datetime.utcnow()
+    }
+    await db.deliveries.insert_one(delivery)
+    return {"delivery_id": delivery["id"], "fare": base_fare, "pickup_code": delivery["pickup_code"]}
+
+# ==================== FEMALE DRIVER OPTION ====================
+
+@api_router.post("/rides/request-female-driver")
+async def request_female_driver(rider_id: str, pickup_lat: float, pickup_lng: float, pickup_address: str,
+                                 dropoff_lat: float, dropoff_lng: float, dropoff_address: str):
+    """Request ride with female driver only"""
+    trip = {
+        "id": str(uuid.uuid4()),
+        "rider_id": rider_id,
+        "pickup": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address},
+        "dropoff": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address},
+        "ride_type": "female_only",
+        "female_driver_only": True,
+        "status": "pending",
+        "created_at": datetime.utcnow()
+    }
+    await db.trips.insert_one(trip)
+    return {"trip_id": trip["id"], "message": "Looking for female drivers..."}
+
+# ==================== DRIVER HEAT MAPS ====================
+
+@api_router.get("/driver/heatmap")
+async def get_heatmap():
+    """Get demand heatmap for drivers"""
+    zones = [
+        {"lat": 6.5244, "lng": 3.3792, "intensity": 0.9, "name": "Lagos Island", "surge": 1.5},
+        {"lat": 6.4281, "lng": 3.4219, "intensity": 0.8, "name": "Victoria Island", "surge": 1.3},
+        {"lat": 6.4355, "lng": 3.4567, "intensity": 0.7, "name": "Lekki Phase 1", "surge": 1.2},
+        {"lat": 6.5833, "lng": 3.3500, "intensity": 0.85, "name": "Ikeja", "surge": 1.4},
+    ]
+    return {"zones": zones, "recommendation": "Head to Victoria Island for best earnings"}
+
+# ==================== PROMO CODES & REFERRALS ====================
+
+@api_router.post("/promo/apply")
+async def apply_promo(rider_id: str, code: str):
+    """Apply promo code"""
+    promo = await db.promo_codes.find_one({"code": code.upper(), "active": True})
+    if not promo:
+        raise HTTPException(status_code=404, detail="Invalid promo code")
+    
+    await db.users.update_one({"id": rider_id}, {"$push": {"active_promos": {"code": code, "applied_at": datetime.utcnow()}}})
+    return {"success": True, "discount_percent": promo.get("discount_percent", 10)}
+
+@api_router.get("/referral/code/{user_id}")
+async def get_referral_code(user_id: str):
+    """Get referral code"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    code = user.get("referral_code") or f"NEX{user.get('name', 'U')[:3].upper()}{random.randint(100, 999)}"
+    if not user.get("referral_code"):
+        await db.users.update_one({"id": user_id}, {"$set": {"referral_code": code}})
+    
+    return {"referral_code": code, "bonus_per_referral": 500}
+
+# ==================== WALLET ====================
+
+@api_router.get("/wallet/{user_id}")
+async def get_wallet(user_id: str):
+    """Get wallet balance"""
+    user = await db.users.find_one({"id": user_id})
+    return {"balance": user.get("wallet_balance", 0) if user else 0, "currency": "NGN"}
+
+@api_router.post("/wallet/{user_id}/topup")
+async def topup_wallet(user_id: str, amount: float):
+    """Top up wallet"""
+    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
+    user = await db.users.find_one({"id": user_id})
+    return {"success": True, "new_balance": user.get("wallet_balance", 0)}
+
+# ==================== TRIP RECEIPTS ====================
+
+@api_router.get("/trips/{trip_id}/receipt")
+async def get_receipt(trip_id: str):
+    """Get trip receipt"""
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    return {
+        "receipt_id": f"NXR-{trip_id[:8].upper()}",
+        "date": trip.get("created_at", datetime.utcnow()).isoformat(),
+        "pickup": trip.get("pickup", {}).get("address", ""),
+        "dropoff": trip.get("dropoff", {}).get("address", ""),
+        "fare": trip.get("fare", 0),
+        "payment_method": trip.get("payment_method", "cash"),
+        "status": trip.get("status", "completed")
+    }
+
+# ==================== MULTI-LANGUAGE ====================
+
+TRANSLATIONS = {
+    "en": {"welcome": "Welcome to NEXRYDE", "book_ride": "Book a Ride", "where_to": "Where to?"},
+    "pcm": {"welcome": "Welcome to NEXRYDE", "book_ride": "Book Ride", "where_to": "Where you dey go?"},
+    "yo": {"welcome": "Ẹ káàbọ̀ sí NEXRYDE", "book_ride": "Bẹ̀rẹ̀ Ìrìn-àjò", "where_to": "Níbo ni o ń lọ?"},
+    "ig": {"welcome": "Nnọọ na NEXRYDE", "book_ride": "Nweta Ụgbọ ala", "where_to": "Ebee ka ị na-aga?"},
+    "ha": {"welcome": "Barka da zuwa NEXRYDE", "book_ride": "Nemi Mota", "where_to": "Ina za ka?"},
+}
+
+@api_router.get("/languages")
+async def get_languages():
+    """Get supported languages"""
+    return {"languages": SUPPORTED_LANGUAGES, "default": "en"}
+
+@api_router.get("/translations/{lang}")
+async def get_translations(lang: str):
+    """Get translations"""
+    return {"language": lang, "translations": TRANSLATIONS.get(lang, TRANSLATIONS["en"])}
+
+# ==================== USER PREFERENCES ====================
+
+@api_router.put("/users/{user_id}/theme")
+async def set_theme(user_id: str, theme: str):
+    """Set theme preference"""
+    if theme not in ["light", "dark", "auto"]:
+        raise HTTPException(status_code=400, detail="Invalid theme")
+    await db.users.update_one({"id": user_id}, {"$set": {"theme_preference": theme}})
+    return {"success": True, "theme": theme}
+
+@api_router.get("/users/{user_id}/preferences")
+async def get_preferences(user_id: str):
+    """Get user preferences"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        return {"theme": "auto", "language": "en"}
+    return {
+        "theme": user.get("theme_preference", "auto"),
+        "language": user.get("preferred_language", "en"),
+        "notifications_enabled": user.get("notifications_enabled", True)
+    }
+
+
 # ==================== KODA FAMILY ====================
 
 @api_router.post("/family/create")
