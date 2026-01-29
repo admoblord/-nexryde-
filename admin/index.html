@@ -988,6 +988,38 @@
             return 'red';
         }
 
+        function getVerificationBadge(status) {
+            if (status === 'approved') return 'green';
+            if (status === 'pending') return 'yellow';
+            if (status === 'rejected') return 'red';
+            return 'blue';
+        }
+
+        async function approveVerification(driverId) {
+            if (!confirm('Approve this driver verification?')) return;
+            try {
+                await fetch(`${API_URL}/admin/verifications/${driverId}/approve`, { method: 'POST' });
+                loadVerifications();
+                alert('Driver verification approved successfully!');
+            } catch (err) {
+                console.error('Approve verification error:', err);
+                alert('Failed to approve verification');
+            }
+        }
+
+        async function rejectVerification(driverId) {
+            const reason = prompt('Enter rejection reason:', 'Documents incomplete or invalid');
+            if (!reason) return;
+            try {
+                await fetch(`${API_URL}/admin/verifications/${driverId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                loadVerifications();
+                alert('Driver verification rejected');
+            } catch (err) {
+                console.error('Reject verification error:', err);
+                alert('Failed to reject verification');
+            }
+        }
+
         async function toggleUserBlock(userId, block) {
             try {
                 await fetch(`${API_URL}/admin/users/${userId}/block?block=${block}`, { method: 'POST' });
