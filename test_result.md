@@ -111,11 +111,47 @@ backend:
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
         - working: true
         - agent: "main"
-        - comment: "✅ IMPLEMENTED: Complete driver document verification system. POST /api/drivers/verification/submit accepts personal info, vehicle info, and document statuses (NIN, license, passport, vehicle registration, insurance). GET /api/drivers/verification/{user_id} returns verification status. Admin endpoints: GET /api/admin/verifications lists all submissions with counts, POST /api/admin/verifications/{id}/approve and /reject handle admin decisions. Approved verifications automatically update driver profile with vehicle details and set verification flags to true."
+        - comment: "✅ IMPLEMENTED: Complete driver document verification system with AI auto-verification. POST /api/drivers/verification/submit triggers AI Agent review using GPT-4o. AI checks required documents (NIN, License, Passport), personal info, vehicle info and auto-approves/rejects. SMS notification sent via Termii on approval/rejection. In-app notifications stored. GET /api/users/{id}/notifications returns user notifications."
+
+  - task: "AI Document Verification Agent"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ NEW: AI Agent auto-verifies driver documents in seconds. Uses GPT-4o to check document completeness. Auto-approves if all required docs uploaded. Sends SMS + in-app notification on completion."
+
+  - task: "SMS Notifications API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ NEW: send_sms_notification() and send_driver_verification_notification() functions. Sends SMS via Termii when driver is approved/rejected. Also stores in-app notification in db.notifications collection."
+
+  - task: "User Notifications API"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ NEW: GET /api/users/{id}/notifications - returns notifications with unread_count. POST /api/users/{id}/notifications/{id}/read - mark as read. POST /api/users/{id}/notifications/read-all - mark all read."
 
   - task: "Auth API - Send OTP"
     implemented: true
