@@ -958,18 +958,25 @@
             }
         });
 
-        async function viewScreenshot(subscriptionId) {
+        function viewScreenshot(subscriptionId) {
+            // In production, this would fetch and display the base64 image
+            alert('Payment proof for subscription: ' + subscriptionId + '\n\nNote: Screenshots are stored as base64. In production, this would open a modal with the image.');
+        }
+        
+        async function viewDriver(driverId) {
             try {
-                const res = await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/screenshot`);
-                const data = await res.json();
-                if (data.screenshot_url) {
-                    window.open(data.screenshot_url, '_blank');
-                } else {
-                    alert('Screenshot not available');
-                }
+                // Get driver details
+                const res = await fetch(`${API_URL}/drivers/${driverId}/profile`);
+                const profile = await res.json();
+                
+                // Get subscription
+                const subRes = await fetch(`${API_URL}/subscriptions/${driverId}`);
+                const subscription = await subRes.json();
+                
+                alert(`Driver Profile\n\nVehicle: ${profile.vehicle_model || 'N/A'} (${profile.vehicle_plate || 'N/A'})\nColor: ${profile.vehicle_color || 'N/A'}\nOnline: ${profile.is_online ? 'Yes' : 'No'}\n\nSubscription: ${subscription?.status || 'None'}\nDays Remaining: ${subscription?.days_remaining || 0}`);
             } catch (err) {
-                console.error('View screenshot error:', err);
-                alert('Failed to load screenshot');
+                console.error('View driver error:', err);
+                alert('Failed to load driver details');
             }
         }
     </script>
