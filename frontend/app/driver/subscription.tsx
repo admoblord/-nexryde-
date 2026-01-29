@@ -58,7 +58,28 @@ export default function SubscriptionScreen() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
-    fetchSubscription();
+    // Immediately try to fetch or set default data
+    const initSubscription = async () => {
+      try {
+        await fetchSubscription();
+      } catch (e) {
+        console.error('Init error:', e);
+        // Ensure loading stops even on error
+        setSubscription({
+          status: 'none',
+          days_remaining: 0,
+          monthly_fee: 25000,
+          bank_details: {
+            bank_name: 'United Bank for Africa (UBA)',
+            account_name: 'ADMOBLORDGROUP LIMITED',
+            account_number: '1028400669',
+          },
+        });
+        setLoading(false);
+      }
+    };
+    
+    initSubscription();
     
     // Entry animations
     Animated.parallel([
