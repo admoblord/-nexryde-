@@ -351,13 +351,13 @@ export default function BookScreen() {
               <View style={styles.stopRow}>
                 {getStopIcon(stop.type)}
 
-                <Pressable 
-                  style={({ pressed }) => [
+                <TouchableOpacity 
+                  style={[
                     styles.stopInputContainer,
-                    activeStopId === stop.id && styles.stopInputActive,
-                    pressed && { opacity: 0.7 }
+                    activeStopId === stop.id && styles.stopInputActive
                   ]}
                   onPress={() => openLocationPicker(stop.id)}
+                  activeOpacity={0.7}
                 >
                   <Text 
                     style={[
@@ -370,7 +370,7 @@ export default function BookScreen() {
                   </Text>
                   
                   {stop.type === 'stop' && (
-                    <Pressable 
+                    <TouchableOpacity 
                       style={styles.mapButton}
                       onPress={() => openLocationPicker(stop.id)}
                     >
@@ -378,13 +378,13 @@ export default function BookScreen() {
                       <View style={styles.mapIconContainer}>
                         <Ionicons name="location" size={14} color={COLORS.accentGreen} />
                       </View>
-                    </Pressable>
+                    </TouchableOpacity>
                   )}
                   
                   <View style={styles.dragHandle}>
                     <Ionicons name="reorder-three" size={20} color={COLORS.lightTextMuted} />
                   </View>
-                </Pressable>
+                </TouchableOpacity>
 
                 {stop.type === 'pickup' ? (
                   <TouchableOpacity 
