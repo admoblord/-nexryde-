@@ -1,4 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -19,6 +21,7 @@ import json
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 ROOT_DIR = Path(__file__).parent
+ADMIN_DIR = ROOT_DIR.parent / 'admin'
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
