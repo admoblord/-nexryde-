@@ -695,9 +695,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '800',
     color: '#111827',
+    letterSpacing: -0.3,
   },
   tabContainer: {
     flexDirection: 'row',
