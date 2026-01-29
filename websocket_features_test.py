@@ -196,18 +196,18 @@ class WebSocketFeaturesTester:
         
         # Test 1: Create bid request
         bid_data = {
-            "rider_id": "test-rider-websocket-123",
+            "rider_offered_price": 1500,
             "pickup_lat": 6.4281,
             "pickup_lng": 3.4219,
             "pickup_address": "Victoria Island, Lagos",
             "dropoff_lat": 6.4474,
             "dropoff_lng": 3.5562,
             "dropoff_address": "Lekki Phase 1, Lagos",
-            "offered_fare": 1500,
-            "service_type": "economy"
+            "ride_type": "economy"
         }
         
-        success, result = self.test_endpoint("POST", "/rides/bid/create", data=bid_data)
+        params = {"rider_id": "test-rider-websocket-123"}
+        success, result = self.test_endpoint("POST", "/rides/bid/create", data=bid_data, params=params)
         if not success:
             self.log_test(
                 "Create Bid Request", 
