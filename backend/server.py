@@ -945,7 +945,7 @@ async def send_otp(request: OTPRequest):
                     payload = {
                         "api_key": TERMII_API_KEY,
                         "to": termii_phone,
-                        "from": "OE Alert",
+                        "from": "NEXRYDE",
                         "channel": "dnd",
                         "type": "plain",
                         "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
