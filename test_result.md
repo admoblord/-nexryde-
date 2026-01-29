@@ -600,6 +600,9 @@ frontend:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: Safety Center screen loads correctly. SOS button present (disabled when no active trip), Emergency Contacts section with add functionality, Trusted Drivers section, Safety Features list with 4 features (Live Trip Monitoring, Driver Verification, Trip Recording, Trip Insurance). All UI elements rendering properly on mobile viewport."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ EXCELLENT ON MOBILE (390x844): Safety Center screen works perfectly. SOS button prominently displayed (disabled for no active trip with proper messaging), Emergency Contacts section with 'Add Contact' button, Trusted Drivers section, Safety Features section visible. Dark theme with excellent contrast and mobile-optimized layout. All safety features properly presented for user awareness and emergency preparedness."
 
   - task: "AI Assistant Screen"
     implemented: true
@@ -615,6 +618,9 @@ frontend:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: AI Assistant screen loads correctly. Language toggle (English/Pidgin) working, chat interface present with quick suggestion chips, message input functional (works via Enter key), welcome messages display properly for both rider and driver modes. Minor: Visual send button needs better selector but core functionality works."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ FUNCTIONAL ON MOBILE (390x844): AI Chat screen at /chat works well. 'AI Assistant' tab selected by default, welcome message from NEXRYDE AI Assistant visible with GPT-4o integration details, quick reply buttons present (Estimate fare, Safety tips, etc.), 'Driver Chat' tab available for switching. Chat interface properly designed for mobile with good spacing and readability. Core AI chat functionality confirmed working."
 
   - task: "Driver Leaderboard Screen"
     implemented: true
