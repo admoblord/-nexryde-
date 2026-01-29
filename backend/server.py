@@ -128,6 +128,47 @@ SUBSCRIPTION_CONFIG = {
     }
 }
 
+# ==================== SURGE PRICING CONFIG ====================
+SURGE_CONFIG = {
+    "enabled": True,
+    "base_multiplier": 1.0,
+    "max_multiplier": 3.0,
+    "peak_hours": {
+        "morning": {"start": 7, "end": 9, "multiplier": 1.5},
+        "evening": {"start": 17, "end": 20, "multiplier": 1.8},
+    },
+    "high_demand_threshold": 0.7,  # 70% of drivers busy = surge
+    "rain_multiplier": 1.3,
+    "holiday_multiplier": 1.5,
+}
+
+# ==================== RIDE TYPES CONFIG ====================
+RIDE_TYPES = {
+    "economy": {"name": "Economy", "multiplier": 1.0, "description": "Affordable rides"},
+    "comfort": {"name": "Comfort", "multiplier": 1.3, "description": "Extra comfort"},
+    "premium": {"name": "Premium", "multiplier": 1.8, "description": "Luxury vehicles"},
+    "xl": {"name": "XL", "multiplier": 1.5, "description": "6+ passengers"},
+    "female_only": {"name": "Women Only", "multiplier": 1.1, "description": "Female drivers for female riders"},
+    "package": {"name": "Package", "multiplier": 0.9, "description": "Send packages"},
+}
+
+# ==================== PROMO/REFERRAL CONFIG ====================
+PROMO_CONFIG = {
+    "referral_bonus_referrer": 500,  # ₦500 for referrer
+    "referral_bonus_referee": 300,   # ₦300 for new user
+    "first_ride_discount": 0.2,      # 20% off first ride
+    "max_promo_discount": 0.5,       # Max 50% discount
+}
+
+# ==================== SUPPORTED LANGUAGES ====================
+SUPPORTED_LANGUAGES = {
+    "en": "English",
+    "pcm": "Pidgin",
+    "yo": "Yoruba",
+    "ig": "Igbo",
+    "ha": "Hausa",
+}
+
 # ==================== MODELS ====================
 
 class User(BaseModel):
