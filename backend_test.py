@@ -496,9 +496,8 @@ class NEXRYDEAPITester:
             "payment_method": "cash"
         }
         
-        # Add rider_id to the request
-        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id}
-        response = await self.make_request("POST", "/trips/request", data, headers)
+        # Add rider_id as query parameter
+        response = await self.make_request("POST", f"/trips/request?rider_id={self.test_user_id}", data)
         
         if response["success"]:
             trip_data = response["data"]
