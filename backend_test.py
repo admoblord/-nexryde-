@@ -291,8 +291,11 @@ class AdminAPITester:
         # Test block user
         success1, data1 = self.make_request("POST", f"/admin/users/{test_user_id}/block?block=true")
         
-        if not success1 or not data1.get("success"):
+        # The API returns 200 status but success:false for non-existent users
+        if success1 and not data1.get("success") and "not found" in data1.get("message", "").lower():
             self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly returned 'not found' for non-existent user (block)", data1)
+        elif not success1:
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly rejected non-existent user (block)", data1)
         else:
             self.log_test(f"/admin/users/{test_user_id}/block", "POST", False, "Blocked non-existent user", data1)
             return False
@@ -300,8 +303,12 @@ class AdminAPITester:
         # Test unblock user
         success2, data2 = self.make_request("POST", f"/admin/users/{test_user_id}/block?block=false")
         
-        if not success2 or not data2.get("success"):
+        # The API returns 200 status but success:false for non-existent users
+        if success2 and not data2.get("success") and "not found" in data2.get("message", "").lower():
             self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly returned 'not found' for non-existent user (unblock)", data2)
+            return True
+        elif not success2:
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly rejected non-existent user (unblock)", data2)
             return True
         else:
             self.log_test(f"/admin/users/{test_user_id}/block", "POST", False, "Unblocked non-existent user", data2)
