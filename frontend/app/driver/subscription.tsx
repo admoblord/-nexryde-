@@ -102,6 +102,17 @@ export default function SubscriptionScreen() {
 
   const fetchSubscription = async () => {
     if (!user?.id) {
+      // Set default subscription data for demo/testing when no user is logged in
+      setSubscription({
+        status: 'none',
+        days_remaining: 0,
+        monthly_fee: 25000,
+        bank_details: {
+          bank_name: 'United Bank for Africa (UBA)',
+          account_name: 'ADMOBLORDGROUP LIMITED',
+          account_number: '1028400669',
+        },
+      });
       setLoading(false);
       return;
     }
@@ -111,6 +122,17 @@ export default function SubscriptionScreen() {
       setSubscription(data);
     } catch (error) {
       console.error('Error fetching subscription:', error);
+      // Set default data on error
+      setSubscription({
+        status: 'none',
+        days_remaining: 0,
+        monthly_fee: 25000,
+        bank_details: {
+          bank_name: 'United Bank for Africa (UBA)',
+          account_name: 'ADMOBLORDGROUP LIMITED',
+          account_number: '1028400669',
+        },
+      });
     }
     setLoading(false);
   };
