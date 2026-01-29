@@ -483,6 +483,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ ISSUE: Splash screen displays correctly (NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', Begin Your Journey button) but navigation to login screen is not working. Button clicks but doesn't navigate to /(auth)/login. User stays on splash screen indefinitely. Routing logic needs fixing."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CONFIRMED ON MOBILE (390x844): Splash screen UI is perfect - NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', features (Zero Commission, 100% Earnings, Premium Safety), and 'Begin Your Journey' button all display correctly. However, navigation to login is completely broken. Button clicks but user remains on splash screen. router.push('/(auth)/login') in handleBeginJourney function is not working. This is a critical blocking issue for user onboarding."
 
   - task: "Login Screen"
     implemented: true
@@ -498,6 +501,9 @@ frontend:
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: Login screen works perfectly when accessed directly. Nigerian flag 🇳🇬 and +234 prefix displayed, phone input accepts numbers, Continue button functional, all 3 feature highlights visible (No Commission, Keep 100% Earnings, Verified Drivers). Minor: Automatic navigation from splash screen needs fixing."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ CONFIRMED EXCELLENT ON MOBILE (390x844): Login screen works perfectly when accessed directly at /(auth)/login. Welcome text, NEXRYDE branding, Nigerian flag 🇳🇬 with +234 prefix, phone input field (accepts numbers), 'Continue with SMS' button, OR divider, 'Continue with Google' button, Terms/Privacy links, and feature cards (Zero Commission, Premium Safety) all display and function correctly. Mobile responsive design is excellent. Only issue: Google Sign-In button clicks but doesn't trigger authentication flow (ExpoWebBrowser limitation in web environment)."
 
   - task: "OTP Verification Screen"
     implemented: true
@@ -576,6 +582,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ CONFIRMED CRITICAL ISSUES ON MOBILE (390x844): 1) Pressable onPress handlers for pickup/dropoff location fields NOT WORKING - no console logs for 'Opening location picker for stop:', modal never opens. 2) Continue button handleContinue function NOT WORKING - doesn't navigate to /rider/tracking even when locations are selected via saved places. 3) Console error: 'Cannot use import.meta outside a module'. WORKING: UI renders perfectly, saved location selection works (Home/Work fill fields correctly), mobile responsive design confirmed. The Pressable components replaced TouchableOpacity but click handlers are completely broken."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ FINAL CONFIRMATION - MULTIPLE CRITICAL FAILURES: Comprehensive testing on mobile (390x844) confirms booking screen has severe functionality issues: 1) Pickup/Dropoff location field clicks do NOT open location search modal - Pressable onPress handlers completely broken, 2) Continue button navigation to /rider/tracking completely broken even when locations are selected, 3) Add stop functionality not working, 4) Location picker modal never opens despite clicking fields. WORKING ELEMENTS: UI displays perfectly (header 'Your route', pickup/dropoff fields, saved places Home/Work, recent locations, current location button), saved location selection works (clicking Home/Work fills fields), mobile responsive design excellent. ROOT CAUSE: Pressable components have broken onPress handlers - need to revert to TouchableOpacity or fix Pressable implementation. This is a critical blocking issue for core ride booking functionality."
 
   - task: "Safety Center Screen"
     implemented: true
