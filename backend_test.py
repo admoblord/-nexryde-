@@ -636,11 +636,12 @@ class NEXRYDEAPITester:
         
         data = {
             "trip_id": self.test_trip_id,
-            "message_type": "text",
-            "content": "Test message from rider"
+            "sender_id": self.test_user_id or "test_user",
+            "sender_role": "rider",
+            "message": "Test message from rider",
+            "message_type": "text"
         }
-        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id or "test_user"}
-        response = await self.make_request("POST", "/chat/message", data, headers)
+        response = await self.make_request("POST", "/chat/message", data)
         
         if response["success"]:
             self.log_result("Send Message", True, "Message sent successfully", response["data"])
