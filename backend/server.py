@@ -1663,6 +1663,194 @@ async def get_driver_stats(user_id: str):
         "badges": user.get("badges", []) if user else []
     }
 
+# ==================== DRIVER DOCUMENT VERIFICATION ====================
+
+@api_router.post("/drivers/verification/submit")
+async def submit_driver_verification(request: DriverVerificationSubmission):
+    """Submit driver verification documents for review"""
+    # Check if user exists
+    user = await db.users.find_one({"id": request.user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if verification already exists
+    existing = await db.driver_verifications.find_one({"user_id": request.user_id})
+    if existing and existing.get("status") == "approved":
+        raise HTTPException(status_code=400, detail="Driver is already verified")
+    
+    # Create or update verification record
+    verification_data = {
+        "id": existing.get("id") if existing else str(uuid.uuid4()),
+        "user_id": request.user_id,
+        "personal_info": request.personal_info,
+        "vehicle_info": request.vehicle_info,
+        "documents": request.documents,
+        "status": "pending",
+        "submitted_at": datetime.utcnow(),
+        "reviewed_at": None,
+        "reviewed_by": None,
+        "rejection_reason": None
+    }
+    
+    await db.driver_verifications.update_one(
+        {"user_id": request.user_id},
+        {"$set": verification_data},
+        upsert=True
+    )
+    
+    # Update user record
+    await db.users.update_one(
+        {"id": request.user_id},
+        {"$set": {"verification_status": "pending"}}
+    )
+    
+    logger.info(f"Driver verification submitted for user {request.user_id}")
+    
+    return {
+        "success": True,
+        "message": "Verification documents submitted successfully",
+        "verification_id": verification_data["id"],
+        "status": "pending"
+    }
+
+@api_router.get("/drivers/verification/{user_id}")
+async def get_driver_verification_status(user_id: str):
+    """Get driver's verification status"""
+    verification = await db.driver_verifications.find_one({"user_id": user_id})
+    
+    if not verification:
+        return {
+            "status": "not_submitted",
+            "message": "No verification documents submitted yet"
+        }
+    
+    verification["_id"] = str(verification["_id"])
+    return verification
+
+@api_router.get("/admin/verifications")
+async def admin_get_verifications(status: str = None, limit: int = 100, skip: int = 0):
+    """Get all driver verification submissions for admin review"""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    verifications = await db.driver_verifications.find(
+        query,
+        {"_id": 0}
+    ).sort("submitted_at", -1).skip(skip).limit(limit).to_list(limit)
+    
+    # Enrich with user names
+    enriched_verifications = []
+    for v in verifications:
+        user = await db.users.find_one({"id": v.get("user_id")}, {"name": 1, "phone": 1, "_id": 0})
+        enriched_verifications.append({
+            **v,
+            "user_name": user.get("name") if user else "Unknown",
+            "user_phone": user.get("phone") if user else "Unknown"
+        })
+    
+    # Get counts by status
+    pending_count = await db.driver_verifications.count_documents({"status": "pending"})
+    under_review_count = await db.driver_verifications.count_documents({"status": "under_review"})
+    approved_count = await db.driver_verifications.count_documents({"status": "approved"})
+    rejected_count = await db.driver_verifications.count_documents({"status": "rejected"})
+    
+    return {
+        "verifications": enriched_verifications,
+        "counts": {
+            "pending": pending_count,
+            "under_review": under_review_count,
+            "approved": approved_count,
+            "rejected": rejected_count,
+            "total": pending_count + under_review_count + approved_count + rejected_count
+        }
+    }
+
+@api_router.post("/admin/verifications/{verification_id}/review")
+async def admin_start_verification_review(verification_id: str):
+    """Mark verification as under review"""
+    result = await db.driver_verifications.update_one(
+        {"id": verification_id},
+        {"$set": {"status": "under_review"}}
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    
+    return {"success": True, "message": "Verification marked as under review"}
+
+@api_router.post("/admin/verifications/{verification_id}/approve")
+async def admin_approve_verification(verification_id: str, notes: str = None):
+    """Approve driver verification"""
+    verification = await db.driver_verifications.find_one({"id": verification_id})
+    if not verification:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    
+    # Update verification status
+    await db.driver_verifications.update_one(
+        {"id": verification_id},
+        {"$set": {
+            "status": "approved",
+            "reviewed_at": datetime.utcnow(),
+            "reviewed_by": "admin",
+            "notes": notes
+        }}
+    )
+    
+    # Update user verification status
+    await db.users.update_one(
+        {"id": verification.get("user_id")},
+        {"$set": {"verification_status": "verified"}}
+    )
+    
+    # Update driver profile with verified documents
+    await db.driver_profiles.update_one(
+        {"user_id": verification.get("user_id")},
+        {"$set": {
+            "nin_verified": True,
+            "license_uploaded": True,
+            "vehicle_docs_uploaded": True,
+            "selfie_verified": True,
+            "vehicle_type": verification.get("vehicle_info", {}).get("vehicleMake"),
+            "vehicle_model": verification.get("vehicle_info", {}).get("vehicleModel"),
+            "vehicle_plate": verification.get("vehicle_info", {}).get("plateNumber"),
+            "vehicle_color": verification.get("vehicle_info", {}).get("vehicleColor")
+        }},
+        upsert=True
+    )
+    
+    logger.info(f"Driver verification approved for {verification.get('user_id')}")
+    
+    return {"success": True, "message": "Driver verification approved"}
+
+@api_router.post("/admin/verifications/{verification_id}/reject")
+async def admin_reject_verification(verification_id: str, reason: str = "Documents do not meet requirements"):
+    """Reject driver verification"""
+    verification = await db.driver_verifications.find_one({"id": verification_id})
+    if not verification:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    
+    # Update verification status
+    await db.driver_verifications.update_one(
+        {"id": verification_id},
+        {"$set": {
+            "status": "rejected",
+            "reviewed_at": datetime.utcnow(),
+            "reviewed_by": "admin",
+            "rejection_reason": reason
+        }}
+    )
+    
+    # Update user verification status
+    await db.users.update_one(
+        {"id": verification.get("user_id")},
+        {"$set": {"verification_status": "rejected"}}
+    )
+    
+    logger.info(f"Driver verification rejected for {verification.get('user_id')}: {reason}")
+    
+    return {"success": True, "message": "Driver verification rejected", "reason": reason}
+
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 
 @api_router.get("/subscriptions/config")
