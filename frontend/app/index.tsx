@@ -1,26 +1,70 @@
-import React from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Platform } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width, height } = Dimensions.get('window');
 
-// Colors based on NEXRYDE logo
+// Premium Color Palette
 const COLORS = {
-  background: '#0D1420',
-  primary: '#19253F',
-  green: '#3AD173',
-  greenLight: '#80EE50',
-  blue: '#3A8CD1',
-  blueDark: '#1A5AA6',
+  background: '#020617',
+  primary: '#0F172A',
+  green: '#22C55E',
+  greenLight: '#4ADE80',
+  greenBright: '#00FF7F',
+  blue: '#3B82F6',
+  blueDark: '#1D4ED8',
+  purple: '#8B5CF6',
   white: '#FFFFFF',
-  textSecondary: '#A8B8D0',
-  textMuted: '#6B7A94',
+  textSecondary: '#CBD5E1',
+  textMuted: '#94A3B8',
 };
 
 export default function SplashScreen() {
   const router = useRouter();
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(30)).current;
+  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    // Entry animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 800,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        friction: 8,
+        tension: 40,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Pulse animation for glow effect
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.2,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  }, []);
 
   const handleBeginJourney = () => {
     router.push('/(auth)/login');
@@ -28,7 +72,7 @@ export default function SplashScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Background */}
+      {/* Background Gradient */}
       <LinearGradient
         colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}
@@ -36,69 +80,94 @@ export default function SplashScreen() {
         end={{ x: 0.5, y: 1 }}
       />
 
-      {/* Decorative Glow */}
-      <View style={styles.glowTop} />
-      <View style={styles.glowBottom} />
+      {/* Animated Glow Effects */}
+      <Animated.View style={[styles.glowTop, { transform: [{ scale: pulseAnim }] }]} />
+      <Animated.View style={[styles.glowBottom, { transform: [{ scale: pulseAnim }] }]} />
+      <View style={styles.glowCenter} />
 
       {/* Main Content */}
-      <View style={styles.mainContent}>
+      <Animated.View 
+        style={[
+          styles.mainContent,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
+          }
+        ]}
+      >
         {/* Logo Section */}
         <View style={styles.logoSection}>
-          {/* N Logo with Road */}
+          {/* N Logo with Road - Premium Design */}
           <View style={styles.logoContainer}>
             <LinearGradient
-              colors={[COLORS.greenLight, COLORS.green]}
+              colors={[COLORS.greenBright, COLORS.green]}
               style={styles.logoLeft}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
             />
             <LinearGradient
               colors={[COLORS.blue, COLORS.blueDark]}
               style={styles.logoRight}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
             />
             <View style={styles.roadLine}>
               <View style={styles.roadDash} />
               <View style={styles.roadDash} />
               <View style={styles.roadDash} />
             </View>
+            {/* Glow effect on logo */}
+            <View style={styles.logoGlow} />
           </View>
           
-          {/* Brand Name */}
+          {/* Brand Name - Bigger & Bolder */}
           <View style={styles.brandContainer}>
             <Text style={styles.brandNex}>NEX</Text>
             <Text style={styles.brandRyde}>RYDE</Text>
           </View>
-        </View>
 
-        {/* Tagline */}
-        <View style={styles.taglineContainer}>
+          {/* Tagline Badge */}
           <View style={styles.taglineBadge}>
-            <View style={[styles.dot, { backgroundColor: COLORS.green }]} />
+            <View style={[styles.taglineDot, { backgroundColor: COLORS.green }]} />
             <Text style={styles.taglineText}>RIDE SMART. RIDE SAFE.</Text>
-            <View style={[styles.dot, { backgroundColor: COLORS.blue }]} />
-          </View>
-          <Text style={styles.subtitle}>Nigeria's Smartest Ride Platform</Text>
-        </View>
-
-        {/* Features Row */}
-        <View style={styles.featuresRow}>
-          <View style={styles.featureItem}>
-            <View style={[styles.featureDot, { backgroundColor: COLORS.green }]} />
-            <Text style={styles.featureText}>Zero Commission</Text>
-          </View>
-          <View style={styles.featureDivider} />
-          <View style={styles.featureItem}>
-            <View style={[styles.featureDot, { backgroundColor: COLORS.blue }]} />
-            <Text style={styles.featureText}>100% Earnings</Text>
-          </View>
-          <View style={styles.featureDivider} />
-          <View style={styles.featureItem}>
-            <View style={[styles.featureDot, { backgroundColor: COLORS.greenLight }]} />
-            <Text style={styles.featureText}>Premium Safety</Text>
+            <View style={[styles.taglineDot, { backgroundColor: COLORS.blue }]} />
           </View>
         </View>
 
-        {/* CTA Button */}
+        {/* Subtitle */}
+        <Text style={styles.subtitle}>Nigeria's #1 Ride-Hailing Platform</Text>
+
+        {/* Features Row - More Visible */}
+        <View style={styles.featuresContainer}>
+          <View style={styles.featureItem}>
+            <View style={[styles.featureIcon, { backgroundColor: COLORS.green + '30' }]}>
+              <Ionicons name="shield-checkmark" size={20} color={COLORS.green} />
+            </View>
+            <Text style={styles.featureText}>Verified{'\n'}Drivers</Text>
+          </View>
+          
+          <View style={styles.featureDivider} />
+          
+          <View style={styles.featureItem}>
+            <View style={[styles.featureIcon, { backgroundColor: COLORS.blue + '30' }]}>
+              <Ionicons name="cash" size={20} color={COLORS.blue} />
+            </View>
+            <Text style={styles.featureText}>Fair{'\n'}Pricing</Text>
+          </View>
+          
+          <View style={styles.featureDivider} />
+          
+          <View style={styles.featureItem}>
+            <View style={[styles.featureIcon, { backgroundColor: COLORS.purple + '30' }]}>
+              <Ionicons name="flash" size={20} color={COLORS.purple} />
+            </View>
+            <Text style={styles.featureText}>Fast{'\n'}Pickup</Text>
+          </View>
+        </View>
+
+        {/* CTA Button - Premium Design */}
         <View style={styles.buttonContainer}>
-          <TouchableOpacity onPress={handleBeginJourney} activeOpacity={0.9}>
+          <TouchableOpacity onPress={handleBeginJourney} activeOpacity={0.9} style={styles.buttonWrapper}>
             <LinearGradient
               colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
               style={styles.ctaButton}
@@ -107,16 +176,24 @@ export default function SplashScreen() {
             >
               <Text style={styles.ctaText}>Begin Your Journey</Text>
               <View style={styles.arrowCircle}>
-                <Ionicons name="arrow-forward" size={18} color={COLORS.primary} />
+                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
               </View>
             </LinearGradient>
           </TouchableOpacity>
         </View>
-      </View>
 
-      {/* Bottom Text */}
+        {/* Secondary Options */}
+        <View style={styles.secondaryOptions}>
+          <TouchableOpacity style={styles.secondaryButton}>
+            <Ionicons name="car" size={18} color={COLORS.textSecondary} />
+            <Text style={styles.secondaryText}>Become a Driver</Text>
+          </TouchableOpacity>
+        </View>
+      </Animated.View>
+
+      {/* Bottom Branding */}
       <View style={styles.bottomContainer}>
-        <Text style={styles.bottomText}>RIDE SMART • RIDE SAFE</Text>
+        <Text style={styles.bottomText}>POWERED BY NEXRYDE TECHNOLOGIES</Text>
       </View>
     </View>
   );
@@ -129,189 +206,238 @@ const styles = StyleSheet.create({
   },
   glowTop: {
     position: 'absolute',
-    top: 50,
-    left: 20,
-    width: 100,
-    height: 100,
-    borderRadius: 50,
+    top: height * 0.1,
+    left: width * 0.1,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
     backgroundColor: COLORS.green,
     opacity: 0.15,
   },
   glowBottom: {
     position: 'absolute',
-    bottom: 150,
-    right: 30,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    bottom: height * 0.2,
+    right: width * 0.05,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     backgroundColor: COLORS.blue,
-    opacity: 0.1,
+    opacity: 0.12,
+  },
+  glowCenter: {
+    position: 'absolute',
+    top: height * 0.35,
+    left: width * 0.3,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: COLORS.purple,
+    opacity: 0.08,
   },
   mainContent: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    paddingHorizontal: 28,
   },
   logoSection: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 24,
   },
   logoContainer: {
-    width: 80,
-    height: 80,
+    width: 100,
+    height: 100,
     position: 'relative',
-    marginBottom: 16,
+    marginBottom: 20,
   },
   logoLeft: {
     position: 'absolute',
-    left: 5,
+    left: 8,
     top: 0,
-    width: 32,
-    height: 80,
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
+    width: 38,
+    height: 100,
+    borderTopLeftRadius: 10,
+    borderBottomLeftRadius: 10,
     transform: [{ skewX: '-8deg' }],
   },
   logoRight: {
     position: 'absolute',
-    right: 5,
+    right: 8,
     top: 0,
-    width: 32,
-    height: 80,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
+    width: 38,
+    height: 100,
+    borderTopRightRadius: 10,
+    borderBottomRightRadius: 10,
     transform: [{ skewX: '8deg' }],
   },
   roadLine: {
     position: 'absolute',
     left: '50%',
-    marginLeft: -2,
-    top: 12,
-    bottom: 12,
-    width: 4,
+    marginLeft: -2.5,
+    top: 15,
+    bottom: 15,
+    width: 5,
     alignItems: 'center',
     justifyContent: 'space-around',
   },
   roadDash: {
-    width: 4,
-    height: 10,
+    width: 5,
+    height: 12,
     backgroundColor: COLORS.white,
-    borderRadius: 2,
+    borderRadius: 2.5,
+  },
+  logoGlow: {
+    position: 'absolute',
+    top: -10,
+    left: -10,
+    right: -10,
+    bottom: -10,
+    borderRadius: 20,
+    backgroundColor: COLORS.green,
+    opacity: 0.15,
   },
   brandContainer: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   brandNex: {
-    fontSize: 40,
-    fontWeight: '800',
+    fontSize: 48,
+    fontWeight: '900',
     color: COLORS.white,
-    letterSpacing: 2,
+    letterSpacing: 3,
   },
   brandRyde: {
-    fontSize: 40,
-    fontWeight: '800',
+    fontSize: 48,
+    fontWeight: '900',
     color: COLORS.green,
-    letterSpacing: 2,
-  },
-  taglineContainer: {
-    alignItems: 'center',
-    marginBottom: 48,
+    letterSpacing: 3,
   },
   taglineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    paddingHorizontal: 24,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 20,
     paddingVertical: 10,
-    borderRadius: 25,
+    borderRadius: 30,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    marginBottom: 16,
+    borderColor: 'rgba(255,255,255,0.1)',
+    marginTop: 16,
+    gap: 12,
   },
-  dot: {
+  taglineDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
   },
   taglineText: {
     color: COLORS.white,
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '800',
     letterSpacing: 2,
-    marginHorizontal: 16,
   },
   subtitle: {
     color: COLORS.textSecondary,
-    fontSize: 15,
-    fontWeight: '400',
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 40,
+    letterSpacing: 0.5,
   },
-  featuresRow: {
+  featuresContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
     justifyContent: 'center',
     marginBottom: 48,
+    gap: 16,
   },
   featureItem: {
-    flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
-  featureDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 4,
+  featureIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   featureText: {
     color: COLORS.textSecondary,
-    fontSize: 13,
-    fontWeight: '500',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    lineHeight: 16,
   },
   featureDivider: {
     width: 1,
-    height: 14,
-    backgroundColor: COLORS.textMuted,
-    marginHorizontal: 16,
+    height: 50,
+    backgroundColor: 'rgba(255,255,255,0.15)',
   },
   buttonContainer: {
     width: '100%',
-    paddingHorizontal: 16,
+    paddingHorizontal: 8,
+  },
+  buttonWrapper: {
+    borderRadius: 32,
+    overflow: 'hidden',
+    shadowColor: COLORS.green,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
   },
   ctaButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
+    paddingVertical: 20,
     paddingHorizontal: 32,
-    borderRadius: 30,
+    borderRadius: 32,
   },
   ctaText: {
     color: COLORS.primary,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
     marginRight: 16,
+    letterSpacing: 0.5,
   },
   arrowCircle: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(25, 37, 63, 0.3)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(15, 23, 42, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  secondaryOptions: {
+    marginTop: 24,
+  },
+  secondaryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  secondaryText: {
+    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '600',
+  },
   bottomContainer: {
     position: 'absolute',
-    bottom: 58,
+    bottom: 48,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
   bottomText: {
     color: COLORS.textMuted,
-    fontSize: 11,
+    fontSize: 10,
     letterSpacing: 2,
-    fontWeight: '500',
+    fontWeight: '600',
   },
 });
