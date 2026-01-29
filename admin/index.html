@@ -842,19 +842,49 @@
                 if (data.payments && data.payments.length > 0) {
                     document.getElementById('paymentsTable').innerHTML = data.payments.map(p => `
                         <tr>
-                            <td>${p.driver_name || 'N/A'}</td>
+                            <td><strong>${p.driver_name || 'N/A'}</strong></td>
                             <td>₦${(p.amount || 25000).toLocaleString()}</td>
-                            <td>${p.screenshot ? '<a href="#" onclick="viewScreenshot(\'' + p.screenshot + '\')">View</a>' : 'N/A'}</td>
+                            <td>${p.screenshot ? '<a href="javascript:void(0)" onclick="viewScreenshot(\'' + p.id + '\')" style="color: #6366F1;">View Proof</a>' : '<span style="color:#64748B;">N/A</span>'}</td>
                             <td>${new Date(p.created_at).toLocaleDateString()}</td>
-                            <td><span class="badge green">Auto-Approved</span></td>
+                            <td><span class="badge ${p.status === 'active' || p.status === 'approved' ? 'green' : p.status === 'pending' || p.status === 'pending_verification' ? 'yellow' : 'red'}">${p.auto_approved ? '⚡ Auto-Approved' : p.status}</span></td>
                             <td>
-                                <button class="action-btn view" onclick="viewScreenshot('${p.screenshot || '#'}')">View Proof</button>
+                                ${p.status === 'pending' || p.status === 'pending_verification' ? `
+                                    <button class="action-btn approve" onclick="approvePayment('${p.id}')">Approve</button>
+                                    <button class="action-btn block" onclick="rejectPayment('${p.id}')" style="margin-left:8px;">Reject</button>
+                                ` : '<span style="color:#22C55E;">✓ Processed</span>'}
                             </td>
                         </tr>
                     `).join('');
+                } else {
+                    document.getElementById('paymentsTable').innerHTML = '<tr><td colspan="6" class="empty-state"><i class="ri-bank-card-line"></i><p>No payments yet</p></td></tr>';
                 }
             } catch (err) {
                 console.error('Load payments error:', err);
+            }
+        }
+
+        async function approvePayment(subscriptionId) {
+            if (!confirm('Approve this subscription payment?')) return;
+            try {
+                await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/approve`, { method: 'POST' });
+                loadPayments();
+                alert('Subscription approved successfully!');
+            } catch (err) {
+                console.error('Approve payment error:', err);
+                alert('Failed to approve payment');
+            }
+        }
+
+        async function rejectPayment(subscriptionId) {
+            const reason = prompt('Enter rejection reason:', 'Payment verification failed');
+            if (!reason) return;
+            try {
+                await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                loadPayments();
+                alert('Subscription rejected');
+            } catch (err) {
+                console.error('Reject payment error:', err);
+                alert('Failed to reject payment');
             }
         }
 
