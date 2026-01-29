@@ -51,14 +51,14 @@ class NEXRYDEAPITester:
             print(f"   Response: {response_data}")
         print()
     
-    async def make_request(self, method, endpoint, data=None, headers=None):
+    async def make_request(self, method, endpoint, data=None, headers=None, params=None):
         """Make HTTP request to API"""
         url = f"{BACKEND_URL}{endpoint}"
         try:
             if headers is None:
                 headers = {"Content-Type": "application/json"}
             
-            async with self.session.request(method, url, json=data, headers=headers) as response:
+            async with self.session.request(method, url, json=data, headers=headers, params=params) as response:
                 try:
                     response_data = await response.json()
                 except:
