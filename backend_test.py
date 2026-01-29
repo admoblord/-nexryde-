@@ -1112,6 +1112,24 @@ class NEXRYDEAPITester:
         await self.test_trigger_sos()
         await self.test_share_trip()
         
+        # NEW POWERFUL FEATURES TESTS
+        print("\n🔥 NEW POWERFUL FEATURES TESTS")
+        print("-" * 40)
+        await self.test_surge_pricing()
+        await self.test_ride_bidding_create()
+        await self.test_ride_bidding_open()
+        await self.test_scheduled_rides_create()
+        await self.test_scheduled_rides_get()
+        await self.test_package_delivery()
+        await self.test_driver_heatmap()
+        await self.test_wallet_balance()
+        await self.test_wallet_topup()
+        await self.test_referral_code()
+        await self.test_languages()
+        await self.test_translations_pidgin()
+        await self.test_user_preferences()
+        await self.test_trip_receipt()
+        
         # Summary
         print("\n" + "=" * 60)
         print("📊 TEST SUMMARY")
