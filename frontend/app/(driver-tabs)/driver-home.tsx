@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,20 +6,92 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 const { width } = Dimensions.get('window');
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+const COLORS = {
+  background: '#F8FAFC',
+  card: '#FFFFFF',
+  primary: '#0F172A',
+  green: '#22C55E',
+  greenLight: '#4ADE80',
+  blue: '#3B82F6',
+  purple: '#8B5CF6',
+  orange: '#F59E0B',
+  red: '#EF4444',
+  textPrimary: '#0F172A',
+  textSecondary: '#475569',
+  textMuted: '#94A3B8',
+  border: '#E2E8F0',
+};
 
 export default function DriverHomeScreen() {
   const router = useRouter();
   const { user } = useAppStore();
   const [isOnline, setIsOnline] = useState(false);
+  const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
+  const [subscription, setSubscription] = useState<any>(null);
+
+  useEffect(() => {
+    loadDriverData();
+  }, []);
+
+  const loadDriverData = async () => {
+    if (!user?.id) return;
+    try {
+      // Load earnings
+      const earningsRes = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/earnings`);
+      if (earningsRes.ok) {
+        const data = await earningsRes.json();
+        setEarnings(data);
+      }
+      
+      // Load subscription
+      const subRes = await fetch(`${BACKEND_URL}/api/subscriptions/${user.id}`);
+      if (subRes.ok) {
+        const subData = await subRes.json();
+        setSubscription(subData);
+      }
+    } catch (e) {
+      console.error('Load driver data error:', e);
+    }
+  };
+
+  const toggleOnline = async () => {
+    if (!user?.id) return;
+    
+    // Check subscription status
+    if (!subscription || subscription.status !== 'active') {
+      Alert.alert(
+        'Subscription Required',
+        'You need an active subscription to go online. Subscribe now to start earning!',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Subscribe', onPress: () => router.push('/driver/subscription') }
+        ]
+      );
+      return;
+    }
+    
+    try {
+      await fetch(`${BACKEND_URL}/api/drivers/${user.id}/toggle-online`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_online: !isOnline }),
+      });
+      setIsOnline(!isOnline);
+    } catch (e) {
+      console.error('Toggle online error:', e);
+    }
+  };
 
   return (
     <View style={styles.container}>
@@ -29,14 +101,14 @@ export default function DriverHomeScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.greeting}>Hello,</Text>
-              <Text style={styles.userName}>{user?.name || 'Driver'}</Text>
+              <Text style={styles.userName}>{user?.name || 'Driver'} 🚗</Text>
             </View>
             <TouchableOpacity 
               style={styles.profileButton}
               onPress={() => router.push('/profile')}
             >
               <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                colors={[COLORS.green, COLORS.blue]}
                 style={styles.profileGradient}
               >
                 <Text style={styles.profileInitial}>{user?.name?.charAt(0) || 'D'}</Text>
@@ -46,366 +118,538 @@ export default function DriverHomeScreen() {
 
           {/* Driver Mode Badge */}
           <View style={styles.modeBadge}>
-            <View style={[styles.modeDot, { backgroundColor: COLORS.accentGreen }]} />
-            <Text style={styles.modeText}>Driver Mode</Text>
+            <View style={styles.modeDotOuter}>
+              <View style={styles.modeDot} />
+            </View>
+            <Text style={styles.modeText}>DRIVER MODE</Text>
           </View>
 
-          {/* Online/Offline Toggle Card */}
-          <View style={styles.statusCard}>
-            <View style={styles.statusLeft}>
-              <View style={[styles.statusIcon, { backgroundColor: isOnline ? COLORS.accentGreenSoft : COLORS.lightSurface }]}>
-                <Ionicons 
-                  name={isOnline ? "radio" : "radio-outline"} 
-                  size={26} 
-                  color={isOnline ? COLORS.accentGreen : COLORS.lightTextMuted} 
-                />
-              </View>
-              <View>
-                <Text style={styles.statusTitle}>
-                  {isOnline ? "You're Online" : "You're Offline"}
-                </Text>
-                <Text style={styles.statusDesc}>
-                  {isOnline ? 'Accepting ride requests' : 'Go online to start earning'}
-                </Text>
-              </View>
-            </View>
-            <TouchableOpacity 
-              style={[styles.toggleButton, isOnline && styles.toggleButtonOnline]}
-              onPress={() => setIsOnline(!isOnline)}
-            >
-              <LinearGradient
-                colors={isOnline ? [COLORS.error, '#FF6B6B'] : [COLORS.accentGreen, COLORS.accentBlue]}
-                style={styles.toggleGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={styles.toggleText}>{isOnline ? 'Stop' : 'Start'}</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-
-          {/* Stats Cards */}
-          <View style={styles.statsGrid}>
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                <Ionicons name="cash" size={22} color={COLORS.accentGreen} />
-              </View>
-              <Text style={styles.statLabel}>Today</Text>
-              <Text style={styles.statValue}>{CURRENCY}0</Text>
-            </View>
-            <View style={styles.statCard}>
-              <View style={[styles.statIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                <Ionicons name="car" size={22} color={COLORS.accentBlue} />
-              </View>
-              <Text style={styles.statLabel}>Trips</Text>
-              <Text style={styles.statValue}>0</Text>
-            </View>
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.actionsSection}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
-            <View style={styles.actionsGrid}>
-              <ActionCard 
-                icon="trophy" 
-                title="Challenges" 
-                color={COLORS.accentGreen}
-                onPress={() => router.push('/driver/challenges')}
-              />
-              <ActionCard 
-                icon="stats-chart" 
-                title="Earnings" 
-                color={COLORS.accentBlue}
-                onPress={() => router.push('/driver/earnings-dashboard')}
-              />
-              <ActionCard 
-                icon="ribbon" 
-                title="Tiers" 
-                color={COLORS.gold}
-                onPress={() => router.push('/driver/tiers')}
-              />
-              <ActionCard 
-                icon="card" 
-                title="Subscribe" 
-                color={COLORS.info}
-                onPress={() => router.push('/driver/subscription')}
-              />
-            </View>
-          </View>
-
-          {/* Subscription CTA */}
+          {/* Online/Offline Toggle Card - Premium Design */}
           <TouchableOpacity 
-            style={styles.subscriptionCard}
-            onPress={() => router.push('/driver/subscription')}
-            activeOpacity={0.9}
+            style={styles.statusCard}
+            onPress={toggleOnline}
+            activeOpacity={0.95}
           >
             <LinearGradient
-              colors={[COLORS.accentGreen, COLORS.accentBlue]}
-              style={styles.subscriptionGradient}
+              colors={isOnline ? [COLORS.green, '#16A34A'] : ['#475569', '#334155']}
+              style={styles.statusGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <View style={styles.subscriptionLeft}>
-                <Ionicons name="diamond" size={30} color={COLORS.white} />
-                <View>
-                  <Text style={styles.subscriptionTitle}>Go Premium</Text>
-                  <Text style={styles.subscriptionDesc}>Keep 100% of your earnings</Text>
+              {/* Decorative circles */}
+              <View style={[styles.decorCircle, { top: -20, right: -20 }]} />
+              <View style={[styles.decorCircle, { bottom: -30, left: 30, width: 80, height: 80 }]} />
+              
+              <View style={styles.statusContent}>
+                <View style={styles.statusLeft}>
+                  <View style={styles.statusIconOuter}>
+                    <View style={[styles.statusIcon, isOnline && styles.statusIconOnline]}>
+                      <Ionicons 
+                        name={isOnline ? "radio" : "radio-outline"} 
+                        size={32} 
+                        color="#FFFFFF" 
+                      />
+                    </View>
+                  </View>
+                  <View>
+                    <Text style={styles.statusTitle}>
+                      {isOnline ? "You're Online" : "You're Offline"}
+                    </Text>
+                    <Text style={styles.statusDesc}>
+                      {isOnline ? 'Tap to go offline' : 'Tap to start accepting rides'}
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.statusArrow}>
+                  <Ionicons name="power" size={24} color="rgba(255,255,255,0.9)" />
                 </View>
               </View>
-              <Ionicons name="chevron-forward" size={26} color={COLORS.white} />
+              
+              {isOnline && (
+                <View style={styles.pulseIndicator}>
+                  <View style={styles.pulseDot} />
+                  <Text style={styles.pulseText}>LIVE</Text>
+                </View>
+              )}
             </LinearGradient>
           </TouchableOpacity>
-          
-          <View style={styles.bottomSpacer} />
+
+          {/* Earnings Card */}
+          <View style={styles.earningsCard}>
+            <View style={styles.earningsHeader}>
+              <Text style={styles.earningsTitle}>Today's Earnings</Text>
+              <TouchableOpacity style={styles.viewAllBtn}>
+                <Text style={styles.viewAllText}>View All</Text>
+                <Ionicons name="chevron-forward" size={16} color={COLORS.blue} />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.earningsGrid}>
+              <View style={styles.earningItem}>
+                <View style={[styles.earningIcon, { backgroundColor: COLORS.green + '15' }]}>
+                  <Ionicons name="wallet" size={24} color={COLORS.green} />
+                </View>
+                <Text style={styles.earningValue}>₦{earnings.today.toLocaleString()}</Text>
+                <Text style={styles.earningLabel}>Today</Text>
+              </View>
+              
+              <View style={styles.earningDivider} />
+              
+              <View style={styles.earningItem}>
+                <View style={[styles.earningIcon, { backgroundColor: COLORS.blue + '15' }]}>
+                  <Ionicons name="trending-up" size={24} color={COLORS.blue} />
+                </View>
+                <Text style={styles.earningValue}>₦{earnings.week.toLocaleString()}</Text>
+                <Text style={styles.earningLabel}>This Week</Text>
+              </View>
+              
+              <View style={styles.earningDivider} />
+              
+              <View style={styles.earningItem}>
+                <View style={[styles.earningIcon, { backgroundColor: COLORS.purple + '15' }]}>
+                  <Ionicons name="car" size={24} color={COLORS.purple} />
+                </View>
+                <Text style={styles.earningValue}>{earnings.trips}</Text>
+                <Text style={styles.earningLabel}>Trips</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Subscription Status */}
+          <TouchableOpacity 
+            style={styles.subscriptionCard}
+            onPress={() => router.push('/driver/subscription')}
+          >
+            <LinearGradient
+              colors={subscription?.status === 'active' 
+                ? [COLORS.green + '20', COLORS.green + '10'] 
+                : [COLORS.orange + '20', COLORS.orange + '10']}
+              style={styles.subscriptionGradient}
+            >
+              <View style={styles.subscriptionContent}>
+                <View style={[styles.subscriptionIcon, { 
+                  backgroundColor: subscription?.status === 'active' ? COLORS.green : COLORS.orange 
+                }]}>
+                  <Ionicons 
+                    name={subscription?.status === 'active' ? "checkmark-circle" : "alert-circle"} 
+                    size={24} 
+                    color="#FFFFFF" 
+                  />
+                </View>
+                <View style={styles.subscriptionInfo}>
+                  <Text style={styles.subscriptionTitle}>
+                    {subscription?.status === 'active' ? 'Subscription Active' : 'Subscribe Now'}
+                  </Text>
+                  <Text style={styles.subscriptionDesc}>
+                    {subscription?.status === 'active' 
+                      ? `${subscription.days_remaining || 0} days remaining` 
+                      : 'Activate to start earning'}
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Quick Actions */}
+          <View style={styles.quickSection}>
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.quickGrid}>
+              <QuickAction 
+                icon="time" 
+                label="History" 
+                color={COLORS.blue}
+                onPress={() => router.push('/ride-history')} 
+              />
+              <QuickAction 
+                icon="map" 
+                label="Heatmap" 
+                color={COLORS.orange}
+                onPress={() => router.push('/driver/heatmap')} 
+              />
+              <QuickAction 
+                icon="settings" 
+                label="Settings" 
+                color={COLORS.purple}
+                onPress={() => router.push('/settings')} 
+              />
+              <QuickAction 
+                icon="help-circle" 
+                label="Support" 
+                color={COLORS.green}
+                onPress={() => router.push('/chat')} 
+              />
+            </View>
+          </View>
+
+          {/* Zero Commission Banner */}
+          <View style={styles.bannerCard}>
+            <LinearGradient
+              colors={[COLORS.purple, '#6366F1']}
+              style={styles.bannerGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <View style={styles.bannerContent}>
+                <Ionicons name="trophy" size={28} color="#FFFFFF" />
+                <View style={styles.bannerText}>
+                  <Text style={styles.bannerTitle}>100% Earnings</Text>
+                  <Text style={styles.bannerDesc}>Keep everything you earn with NEXRYDE</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </View>
+
+          <View style={{ height: 40 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
   );
 }
 
-const ActionCard = ({ icon, title, color, onPress }: { icon: string; title: string; color: string; onPress: () => void }) => (
-  <TouchableOpacity style={styles.actionCard} onPress={onPress} activeOpacity={0.8}>
-    <View style={[styles.actionIcon, { backgroundColor: color + '20' }]}>
-      <Ionicons name={icon as any} size={24} color={color} />
+const QuickAction = ({ icon, label, color, onPress }: any) => (
+  <TouchableOpacity style={styles.quickAction} onPress={onPress}>
+    <View style={[styles.quickIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon} size={24} color={color} />
     </View>
-    <Text style={styles.actionTitle}>{title}</Text>
+    <Text style={styles.quickLabel}>{label}</Text>
   </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: COLORS.background,
   },
   safeArea: {
     flex: 1,
   },
   scrollContent: {
-    paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xxl,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: SPACING.md,
-    marginBottom: SPACING.sm,
+    paddingTop: 12,
+    marginBottom: 8,
   },
   greeting: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontSize: 16,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
   },
   userName: {
-    fontSize: FONT_SIZE.xxl,
+    fontSize: 28,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: COLORS.textPrimary,
+    letterSpacing: -0.5,
   },
   profileButton: {
-    borderRadius: 25,
+    borderRadius: 26,
     overflow: 'hidden',
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowColor: COLORS.green,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   profileGradient: {
-    width: 50,
-    height: 50,
+    width: 52,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
   },
   profileInitial: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: 22,
     fontWeight: '800',
-    color: COLORS.white,
+    color: '#FFFFFF',
   },
   modeBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
-    backgroundColor: COLORS.accentGreenSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs + 2,
-    borderRadius: BORDER_RADIUS.full,
-    marginBottom: SPACING.lg,
-    gap: SPACING.xs,
+    backgroundColor: COLORS.green + '15',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginBottom: 20,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: COLORS.green + '30',
+  },
+  modeDotOuter: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: COLORS.green + '30',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modeDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.green,
   },
   modeText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.green,
+    letterSpacing: 1.5,
   },
   statusCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.lg,
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  statusGradient: {
+    padding: 24,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  decorCircle: {
+    position: 'absolute',
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  statusContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+  },
+  statusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  statusIconOuter: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusIconOnline: {
+    backgroundColor: 'rgba(255,255,255,0.3)',
+  },
+  statusTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  statusDesc: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: 'rgba(255,255,255,0.8)',
+  },
+  statusArrow: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pulseIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 6,
+  },
+  pulseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+  },
+  pulseText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  earningsCard: {
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 3,
   },
-  statusLeft: {
+  earningsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  earningsTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+  },
+  viewAllBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.md,
-    flex: 1,
+    gap: 4,
   },
-  statusIcon: {
+  viewAllText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.blue,
+  },
+  earningsGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  earningItem: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  earningIcon: {
     width: 52,
     height: 52,
-    borderRadius: 26,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 10,
   },
-  statusTitle: {
-    fontSize: FONT_SIZE.md,
+  earningValue: {
+    fontSize: 20,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: COLORS.textPrimary,
+    marginBottom: 4,
   },
-  statusDesc: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
-    color: COLORS.lightTextSecondary,
+  earningLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
   },
-  toggleButton: {
-    borderRadius: BORDER_RADIUS.full,
+  earningDivider: {
+    width: 1,
+    height: 60,
+    backgroundColor: COLORS.border,
+  },
+  subscriptionCard: {
+    borderRadius: 16,
     overflow: 'hidden',
+    marginBottom: 20,
   },
-  toggleButtonOnline: {},
-  toggleGradient: {
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm + 2,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  toggleText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: COLORS.white,
-  },
-  statsGrid: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    alignItems: 'center',
+  subscriptionGradient: {
+    padding: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    borderColor: COLORS.border,
   },
-  statIcon: {
+  subscriptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  subscriptionIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.sm,
   },
-  statLabel: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-  },
-  actionsSection: {
-    marginBottom: SPACING.lg,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-    marginBottom: SPACING.md,
-  },
-  actionsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.md,
-  },
-  actionCard: {
-    width: (width - SPACING.lg * 2 - SPACING.md) / 2 - SPACING.md / 2,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
-  },
-  actionIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: BORDER_RADIUS.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.sm,
-  },
-  actionTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
-  },
-  subscriptionCard: {
-    borderRadius: BORDER_RADIUS.xxl,
-    overflow: 'hidden',
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  subscriptionGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.lg,
-  },
-  subscriptionLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.md,
+  subscriptionInfo: {
+    flex: 1,
   },
   subscriptionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    marginBottom: 2,
   },
   subscriptionDesc: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.85)',
+    fontSize: 13,
+    color: COLORS.textMuted,
   },
-  bottomSpacer: {
-    height: SPACING.xl,
+  quickSection: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    marginBottom: 16,
+  },
+  quickGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  quickAction: {
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  bannerCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: COLORS.purple,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  bannerGradient: {
+    padding: 20,
+  },
+  bannerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  bannerText: {
+    flex: 1,
+  },
+  bannerTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  bannerDesc: {
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.85)',
   },
 });
