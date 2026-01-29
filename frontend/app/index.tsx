@@ -70,7 +70,7 @@ export default function SplashScreen() {
   }, []);
 
   const handleBeginJourney = () => {
-    router.push('/(auth)/login');
+    router.replace('/(auth)/login');
   };
 
   return (
