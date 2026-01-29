@@ -643,11 +643,26 @@ frontend:
     file: "app/(tabs)/home.tsx"
     stuck_count: 0
     priority: "medium"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
         - comment: "NEW: Added AI Assistant and Leaderboard quick access buttons for drivers, AI card for riders"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ TESTED ON MOBILE (390x844): Driver home screen at /(driver-tabs)/driver-home displays correctly. 'Hello, Driver' header, 'Driver Mode' badge, offline status with 'You're Offline' message and 'Start' button, Today earnings (₦0), Trips count (0), Quick Actions section with Challenges, Earnings, Tiers, Subscribe buttons all visible and properly laid out for mobile. Clean design with good contrast and mobile-optimized spacing."
+
+  - task: "Driver Subscription Screen Loading"
+    implemented: true
+    working: false
+    file: "app/driver/subscription.tsx"
+    stuck_count: 1
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: false
+        - agent: "testing"
+        - comment: "❌ LOADING ISSUE ON MOBILE (390x844): Driver subscription screen at /driver/subscription shows 'Loading subscription...' indefinitely and never completes loading. Screen gets stuck in loading state and doesn't display subscription status, bank details (UBA, ADMOBLORDGROUP LIMITED, 1028400669), or ₦25,000 price information. Likely requires authentication or proper driver ID to load subscription data. Backend subscription APIs are working but frontend screen cannot access or display the data."
 
 metadata:
   created_by: "main_agent"
