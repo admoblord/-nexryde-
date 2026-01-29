@@ -5204,6 +5204,43 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+# ==================== ADMIN ENDPOINTS ====================
+
+@api_router.post("/admin/promo/create")
+async def create_promo_code(code: str, discount_percent: int = 10, max_uses: int = 1000):
+    """Create a new promo code"""
+    promo = {
+        "code": code.upper(),
+        "discount_percent": discount_percent,
+        "max_uses": max_uses,
+        "active": True,
+        "used_by": [],
+        "created_at": datetime.utcnow()
+    }
+    await db.promo_codes.update_one(
+        {"code": code.upper()},
+        {"$set": promo},
+        upsert=True
+    )
+    return {"success": True, "code": code.upper(), "discount_percent": discount_percent}
+
+# Seed default promo codes on startup
+@app.on_event("startup")
+async def seed_promo_codes():
+    """Seed default promo codes"""
+    default_promos = [
+        {"code": "FIRST10", "discount_percent": 10, "max_uses": 10000},
+        {"code": "WELCOME20", "discount_percent": 20, "max_uses": 5000},
+        {"code": "NEXRYDE50", "discount_percent": 50, "max_uses": 100},
+    ]
+    for promo in default_promos:
+        await db.promo_codes.update_one(
+            {"code": promo["code"]},
+            {"$setOnInsert": {**promo, "active": True, "used_by": [], "created_at": datetime.utcnow()}},
+            upsert=True
+        )
+    logger.info("Default promo codes seeded")
+
 # Include router
 app.include_router(api_router)
 
