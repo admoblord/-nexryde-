@@ -2471,24 +2471,24 @@ async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertReque
 # ==================== WALLET ENDPOINTS ====================
 
 @api_router.get("/wallet/{user_id}")
-async def get_wallet(user_id: str):
-    wallet = await db.wallets.find_one({"user_id": user_id})
-    if not wallet:
-        wallet = Wallet(user_id=user_id)
-        await db.wallets.insert_one(wallet.dict())
-    wallet["_id"] = str(wallet["_id"])
-    return wallet
+async def get_wallet_balance(user_id: str):
+    """Get user wallet balance"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        # Create user wallet with 0 balance
+        return {"balance": 0, "currency": "NGN", "user_id": user_id}
+    return {"balance": user.get("wallet_balance", 0), "currency": "NGN", "user_id": user_id}
 
 @api_router.post("/wallet/{user_id}/topup")
-async def topup_wallet(user_id: str, amount: float):
-    result = await db.wallets.update_one({"user_id": user_id}, {"$inc": {"balance": amount}})
-    if result.modified_count == 0:
-        wallet = Wallet(user_id=user_id, balance=amount)
-        await db.wallets.insert_one(wallet.dict())
+async def topup_wallet_balance(user_id: str, amount: float):
+    """Top up wallet"""
+    if amount < 100:
+        raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
     
-    wallet = await db.wallets.find_one({"user_id": user_id})
-    wallet["_id"] = str(wallet["_id"])
-    return wallet
+    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}}, upsert=True)
+    user = await db.users.find_one({"id": user_id})
+    new_balance = user.get("wallet_balance", amount) if user else amount
+    return {"success": True, "new_balance": new_balance, "amount_added": amount}
 
 # ==================== CHALLENGES & GAMIFICATION ====================
 
