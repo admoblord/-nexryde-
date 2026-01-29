@@ -1442,11 +1442,31 @@ async def google_sign_in(request: GoogleSignInRequest):
 
 @api_router.post("/auth/register")
 async def register(request: RegisterRequest):
-    existing = await db.users.find_one({"phone": request.phone})
-    if existing:
-        raise HTTPException(status_code=400, detail="User already exists")
+    # Check for existing user by phone or email
+    if request.phone:
+        existing = await db.users.find_one({"phone": request.phone})
+        if existing:
+            raise HTTPException(status_code=400, detail="User with this phone already exists")
     
-    user = User(phone=request.phone, name=request.name, email=request.email, role=request.role, is_verified=True)
+    if request.email:
+        existing = await db.users.find_one({"email": request.email})
+        if existing:
+            raise HTTPException(status_code=400, detail="User with this email already exists")
+    
+    if request.google_id:
+        existing = await db.users.find_one({"google_id": request.google_id})
+        if existing:
+            raise HTTPException(status_code=400, detail="User with this Google account already exists")
+    
+    user = User(
+        phone=request.phone or "",
+        name=request.name, 
+        email=request.email, 
+        role=request.role, 
+        is_verified=True,
+        google_id=request.google_id,
+        profile_image=request.profile_image
+    )
     await db.users.insert_one(user.dict())
     
     wallet = Wallet(user_id=user.id)
