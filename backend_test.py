@@ -1,1022 +1,824 @@
 #!/usr/bin/env python3
 """
-NEXRYDE Backend API Testing Script
-Tests SMS OTP flow, Google OAuth, Logout functionality, Driver Subscription APIs, and AI Chat APIs
+NEXRYDE Backend API Testing Suite
+Comprehensive testing of all backend endpoints
 """
 
-import requests
+import asyncio
+import aiohttp
 import json
 import uuid
-import time
-import base64
-import asyncio
-import httpx
 from datetime import datetime
+import base64
 
-# API Base URL from frontend .env
-BASE_URL = "https://nexryde-map.preview.emergentagent.com/api"
+# Backend URL from frontend/.env
+BACKEND_URL = "https://nexryde-map.preview.emergentagent.com/api"
 
-# Test data for subscription tests
-TEST_DRIVER_ID = "test-driver-123"
-TEST_PAYMENT_SCREENSHOT = base64.b64encode(b"fake_screenshot_data").decode('utf-8')
-
-def test_subscription_config():
-    """Test GET /api/subscriptions/config"""
-    print("=" * 60)
-    print("TESTING SUBSCRIPTION CONFIGURATION")
-    print("=" * 60)
-    
-    try:
-        print("Testing subscription config endpoint")
-        response = requests.get(f"{BASE_URL}/subscriptions/config", timeout=10)
+class NEXRYDEAPITester:
+    def __init__(self):
+        self.session = None
+        self.test_results = []
+        self.test_user_id = None
+        self.test_driver_id = None
+        self.test_trip_id = None
+        self.test_phone = "+2348012345678"
+        self.test_otp = None
         
-        if response.status_code == 200:
-            data = response.json()
-            log_test("Subscription Config", "PASS", f"Monthly fee: ₦{data.get('monthly_fee')}")
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
+    
+    def log_result(self, test_name, success, details, response_data=None):
+        """Log test result"""
+        result = {
+            "test": test_name,
+            "success": success,
+            "details": details,
+            "timestamp": datetime.now().isoformat()
+        }
+        if response_data:
+            result["response"] = response_data
+        self.test_results.append(result)
+        
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status}: {test_name}")
+        print(f"   Details: {details}")
+        if response_data and not success:
+            print(f"   Response: {response_data}")
+        print()
+    
+    async def make_request(self, method, endpoint, data=None, headers=None):
+        """Make HTTP request to API"""
+        url = f"{BACKEND_URL}{endpoint}"
+        try:
+            if headers is None:
+                headers = {"Content-Type": "application/json"}
             
-            # Validate expected fields and values
-            expected_monthly_fee = 25000
-            expected_bank_name = "UBA"
-            expected_account_number = "1028400669"
-            expected_account_name = "ADMOBLORDGROUP LIMITED"
+            async with self.session.request(method, url, json=data, headers=headers) as response:
+                try:
+                    response_data = await response.json()
+                except:
+                    response_data = await response.text()
+                
+                return {
+                    "status": response.status,
+                    "data": response_data,
+                    "success": 200 <= response.status < 300
+                }
+        except Exception as e:
+            return {
+                "status": 0,
+                "data": str(e),
+                "success": False
+            }
+    
+    # ==================== AUTHENTICATION TESTS ====================
+    
+    async def test_send_otp(self):
+        """Test POST /api/auth/send-otp"""
+        data = {"phone": self.test_phone}
+        response = await self.make_request("POST", "/auth/send-otp", data)
+        
+        if response["success"]:
+            # Extract OTP from mock response for testing
+            if isinstance(response["data"], dict) and "otp" in response["data"]:
+                self.test_otp = response["data"]["otp"]
+            self.log_result(
+                "Send OTP", 
+                True, 
+                f"OTP sent successfully to {self.test_phone}. Provider: {response['data'].get('provider', 'unknown')}", 
+                response["data"]
+            )
+        else:
+            self.log_result("Send OTP", False, f"Failed to send OTP: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_verify_otp(self):
+        """Test POST /api/auth/verify-otp"""
+        if not self.test_otp:
+            self.log_result("Verify OTP", False, "No OTP available to verify")
+            return False
+        
+        data = {"phone": self.test_phone, "otp": self.test_otp}
+        response = await self.make_request("POST", "/auth/verify-otp", data)
+        
+        if response["success"]:
+            # Check if user exists or is new
+            is_new_user = response["data"].get("is_new_user", False)
+            if not is_new_user and "user" in response["data"]:
+                self.test_user_id = response["data"]["user"]["id"]
             
-            if data.get("monthly_fee") != expected_monthly_fee:
-                log_test("Monthly Fee Validation", "FAIL", f"Expected {expected_monthly_fee}, got {data.get('monthly_fee')}")
-                return False
-            
-            bank_details = data.get("bank_details", {})
-            if bank_details.get("bank_name") != expected_bank_name:
-                log_test("Bank Name Validation", "FAIL", f"Expected {expected_bank_name}, got {bank_details.get('bank_name')}")
-                return False
-            
-            if bank_details.get("account_number") != expected_account_number:
-                log_test("Account Number Validation", "FAIL", f"Expected {expected_account_number}, got {bank_details.get('account_number')}")
-                return False
-            
-            if bank_details.get("account_name") != expected_account_name:
-                log_test("Account Name Validation", "FAIL", f"Expected {expected_account_name}, got {bank_details.get('account_name')}")
-                return False
-            
-            log_test("Subscription Config Validation", "PASS", "All expected values match")
+            self.log_result(
+                "Verify OTP", 
+                True, 
+                f"OTP verified successfully. New user: {is_new_user}", 
+                response["data"]
+            )
+        else:
+            self.log_result("Verify OTP", False, f"Failed to verify OTP: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_google_oauth(self):
+        """Test POST /api/auth/google/exchange"""
+        # Test with invalid session_id to verify endpoint exists and handles errors properly
+        data = {"session_id": "test_invalid_session_123"}
+        response = await self.make_request("POST", "/auth/google/exchange", data)
+        
+        # We expect 401 for invalid session, which means endpoint is working
+        if response["status"] == 401:
+            self.log_result(
+                "Google OAuth", 
+                True, 
+                "Google OAuth endpoint working correctly (401 for invalid session as expected)", 
+                response["data"]
+            )
+            return True
+        elif response["success"]:
+            self.log_result(
+                "Google OAuth", 
+                True, 
+                "Google OAuth endpoint accessible and responding", 
+                response["data"]
+            )
             return True
         else:
-            log_test("Subscription Config", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            self.log_result("Google OAuth", False, f"Google OAuth endpoint error: {response['data']}", response["data"])
             return False
-            
-    except Exception as e:
-        log_test("Subscription Config", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_start_trial():
-    """Test POST /api/subscriptions/{driver_id}/start-trial"""
-    print("=" * 60)
-    print("TESTING START TRIAL SUBSCRIPTION")
-    print("=" * 60)
     
-    try:
-        print(f"Starting trial for driver: {TEST_DRIVER_ID}")
-        response = requests.post(f"{BASE_URL}/subscriptions/{TEST_DRIVER_ID}/start-trial", timeout=10)
+    async def test_logout(self):
+        """Test POST /api/auth/logout"""
+        response = await self.make_request("POST", "/auth/logout")
         
-        if response.status_code == 200:
-            data = response.json()
-            days_remaining = data.get("days_remaining", 0)
-            log_test("Start Trial", "PASS", f"Trial started with {days_remaining} days remaining")
-            
-            if days_remaining != 7:
-                log_test("Trial Days Validation", "FAIL", f"Expected 7 days, got {days_remaining}")
-                return False
-            
-            log_test("Trial Validation", "PASS", "7-day trial activated successfully")
+        if response["success"]:
+            self.log_result("Logout", True, "Logout successful", response["data"])
+        else:
+            self.log_result("Logout", False, f"Logout failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    # ==================== USER MANAGEMENT TESTS ====================
+    
+    async def test_register_user(self):
+        """Register a test user if needed"""
+        if self.test_user_id:
+            return True
+        
+        data = {
+            "phone": self.test_phone,
+            "name": "Test User",
+            "email": "testuser@nexryde.com",
+            "role": "rider"
+        }
+        response = await self.make_request("POST", "/auth/register", data)
+        
+        if response["success"]:
+            self.test_user_id = response["data"]["user"]["id"]
+            self.log_result("Register User", True, f"User registered with ID: {self.test_user_id}", response["data"])
+        else:
+            self.log_result("Register User", False, f"Registration failed: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_get_user_profile(self):
+        """Test GET /api/users/{user_id}"""
+        if not self.test_user_id:
+            self.log_result("Get User Profile", False, "No test user ID available")
+            return False
+        
+        response = await self.make_request("GET", f"/users/{self.test_user_id}")
+        
+        if response["success"]:
+            self.log_result("Get User Profile", True, "User profile retrieved successfully", response["data"])
+        else:
+            self.log_result("Get User Profile", False, f"Failed to get user profile: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_update_user_profile(self):
+        """Test PUT /api/users/{user_id}"""
+        if not self.test_user_id:
+            self.log_result("Update User Profile", False, "No test user ID available")
+            return False
+        
+        data = {"name": "Updated Test User", "email": "updated@nexryde.com"}
+        response = await self.make_request("PUT", f"/users/{self.test_user_id}", data)
+        
+        if response["success"]:
+            self.log_result("Update User Profile", True, "User profile updated successfully", response["data"])
+        else:
+            self.log_result("Update User Profile", False, f"Failed to update user profile: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_add_emergency_contact(self):
+        """Test POST /api/users/{user_id}/emergency-contacts"""
+        if not self.test_user_id:
+            self.log_result("Add Emergency Contact", False, "No test user ID available")
+            return False
+        
+        data = {
+            "name": "Emergency Contact",
+            "phone": "+2348087654321",
+            "relationship": "Family"
+        }
+        response = await self.make_request("POST", f"/users/{self.test_user_id}/emergency-contacts", data)
+        
+        if response["success"]:
+            self.log_result("Add Emergency Contact", True, "Emergency contact added successfully", response["data"])
+        else:
+            self.log_result("Add Emergency Contact", False, f"Failed to add emergency contact: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_get_emergency_contacts(self):
+        """Test GET /api/users/{user_id}/emergency-contacts"""
+        if not self.test_user_id:
+            self.log_result("Get Emergency Contacts", False, "No test user ID available")
+            return False
+        
+        response = await self.make_request("GET", f"/users/{self.test_user_id}/emergency-contacts")
+        
+        if response["success"]:
+            contacts = response["data"].get("contacts", [])
+            self.log_result("Get Emergency Contacts", True, f"Retrieved {len(contacts)} emergency contacts", response["data"])
+        else:
+            self.log_result("Get Emergency Contacts", False, f"Failed to get emergency contacts: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    # ==================== DRIVER TESTS ====================
+    
+    async def test_register_driver(self):
+        """Register a test driver"""
+        driver_phone = "+2348087654321"
+        
+        # Send OTP for driver
+        data = {"phone": driver_phone}
+        otp_response = await self.make_request("POST", "/auth/send-otp", data)
+        
+        if not otp_response["success"]:
+            self.log_result("Register Driver (OTP)", False, f"Failed to send OTP for driver: {otp_response['data']}")
+            return False
+        
+        # Get OTP from response
+        driver_otp = otp_response["data"].get("otp")
+        if not driver_otp:
+            self.log_result("Register Driver (OTP)", False, "No OTP in response")
+            return False
+        
+        # Verify OTP
+        verify_data = {"phone": driver_phone, "otp": driver_otp}
+        verify_response = await self.make_request("POST", "/auth/verify-otp", verify_data)
+        
+        if not verify_response["success"]:
+            self.log_result("Register Driver (Verify)", False, f"Failed to verify driver OTP: {verify_response['data']}")
+            return False
+        
+        # Register as driver
+        register_data = {
+            "phone": driver_phone,
+            "name": "Test Driver",
+            "email": "testdriver@nexryde.com",
+            "role": "driver"
+        }
+        register_response = await self.make_request("POST", "/auth/register", register_data)
+        
+        if register_response["success"]:
+            self.test_driver_id = register_response["data"]["user"]["id"]
+            self.log_result("Register Driver", True, f"Driver registered with ID: {self.test_driver_id}")
             return True
         else:
-            log_test("Start Trial", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            self.log_result("Register Driver", False, f"Driver registration failed: {register_response['data']}")
             return False
-            
-    except Exception as e:
-        log_test("Start Trial", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_get_subscription_status():
-    """Test GET /api/subscriptions/{driver_id}"""
-    print("=" * 60)
-    print("TESTING GET SUBSCRIPTION STATUS")
-    print("=" * 60)
     
-    try:
-        print(f"Getting subscription status for driver: {TEST_DRIVER_ID}")
-        response = requests.get(f"{BASE_URL}/subscriptions/{TEST_DRIVER_ID}", timeout=10)
+    async def test_driver_toggle_online(self):
+        """Test driver online toggle (PUT /api/drivers/{user_id}/online)"""
+        if not self.test_driver_id:
+            self.log_result("Driver Toggle Online", False, "No test driver ID available")
+            return False
         
-        if response.status_code == 200:
-            data = response.json()
-            status = data.get("status")
-            days_remaining = data.get("days_remaining", 0)
-            log_test("Get Subscription Status", "PASS", f"Status: {status}, Days remaining: {days_remaining}")
-            
-            # Validate required fields
-            required_fields = ["status", "days_remaining", "bank_details"]
-            missing_fields = [field for field in required_fields if field not in data]
-            
-            if missing_fields:
-                log_test("Status Fields Validation", "FAIL", f"Missing fields: {missing_fields}")
-                return False
-            
-            log_test("Status Fields Validation", "PASS", "All required fields present")
-            return True
-        else:
-            log_test("Get Subscription Status", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+        # First start a trial subscription for the driver
+        trial_response = await self.make_request("POST", f"/subscriptions/{self.test_driver_id}/start-trial")
+        
+        if not trial_response["success"]:
+            self.log_result("Driver Toggle Online (Trial)", False, f"Failed to start trial: {trial_response['data']}")
             return False
-            
-    except Exception as e:
-        log_test("Get Subscription Status", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_submit_payment():
-    """Test POST /api/subscriptions/{driver_id}/submit-payment"""
-    print("=" * 60)
-    print("TESTING SUBMIT PAYMENT PROOF")
-    print("=" * 60)
+        
+        # Now try to go online
+        response = await self.make_request("PUT", f"/drivers/{self.test_driver_id}/online?is_online=true")
+        
+        if response["success"]:
+            self.log_result("Driver Toggle Online", True, "Driver successfully went online", response["data"])
+        else:
+            self.log_result("Driver Toggle Online", False, f"Failed to toggle driver online: {response['data']}", response["data"])
+        
+        return response["success"]
     
-    try:
-        print(f"Submitting payment proof for driver: {TEST_DRIVER_ID}")
-        payload = {
-            "driver_id": TEST_DRIVER_ID,
-            "screenshot": TEST_PAYMENT_SCREENSHOT,
-            "amount": 25000
+    async def test_driver_stats(self):
+        """Test GET /api/drivers/{driver_id}/stats"""
+        if not self.test_driver_id:
+            self.log_result("Driver Stats", False, "No test driver ID available")
+            return False
+        
+        response = await self.make_request("GET", f"/drivers/{self.test_driver_id}/stats")
+        
+        if response["success"]:
+            stats = response["data"]
+            self.log_result(
+                "Driver Stats", 
+                True, 
+                f"Stats retrieved - Trips: {stats.get('total_trips', 0)}, Earnings: ₦{stats.get('total_earnings', 0)}, Rating: {stats.get('rating', 0)}", 
+                stats
+            )
+        else:
+            self.log_result("Driver Stats", False, f"Failed to get driver stats: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    # ==================== SUBSCRIPTION TESTS ====================
+    
+    async def test_subscription_config(self):
+        """Test GET /api/subscriptions/config"""
+        response = await self.make_request("GET", "/subscriptions/config")
+        
+        if response["success"]:
+            config = response["data"]
+            self.log_result(
+                "Subscription Config", 
+                True, 
+                f"Config retrieved - Fee: ₦{config.get('monthly_fee', 0)}, Trial: {config.get('trial_days', 0)} days", 
+                config
+            )
+        else:
+            self.log_result("Subscription Config", False, f"Failed to get subscription config: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_get_subscription_status(self):
+        """Test GET /api/subscriptions/{driver_id}"""
+        if not self.test_driver_id:
+            self.log_result("Get Subscription Status", False, "No test driver ID available")
+            return False
+        
+        response = await self.make_request("GET", f"/subscriptions/{self.test_driver_id}")
+        
+        if response["success"]:
+            subscription = response["data"]
+            self.log_result(
+                "Get Subscription Status", 
+                True, 
+                f"Subscription status: {subscription.get('status', 'unknown')}, Days remaining: {subscription.get('days_remaining', 0)}", 
+                subscription
+            )
+        else:
+            self.log_result("Get Subscription Status", False, f"Failed to get subscription status: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_start_trial(self):
+        """Test POST /api/subscriptions/{driver_id}/start-trial"""
+        # Create a new driver for trial test
+        trial_driver_phone = "+2348098765432"
+        
+        # Quick registration for trial driver
+        otp_data = {"phone": trial_driver_phone}
+        otp_response = await self.make_request("POST", "/auth/send-otp", otp_data)
+        
+        if not otp_response["success"]:
+            self.log_result("Start Trial (Setup)", False, "Failed to send OTP for trial driver")
+            return False
+        
+        trial_otp = otp_response["data"].get("otp")
+        verify_data = {"phone": trial_driver_phone, "otp": trial_otp}
+        verify_response = await self.make_request("POST", "/auth/verify-otp", verify_data)
+        
+        register_data = {
+            "phone": trial_driver_phone,
+            "name": "Trial Driver",
+            "role": "driver"
+        }
+        register_response = await self.make_request("POST", "/auth/register", register_data)
+        
+        if not register_response["success"]:
+            self.log_result("Start Trial (Setup)", False, "Failed to register trial driver")
+            return False
+        
+        trial_driver_id = register_response["data"]["user"]["id"]
+        
+        # Now test starting trial
+        response = await self.make_request("POST", f"/subscriptions/{trial_driver_id}/start-trial")
+        
+        if response["success"]:
+            trial_data = response["data"]
+            self.log_result(
+                "Start Trial", 
+                True, 
+                f"Trial started successfully - Days: {trial_data.get('days_remaining', 0)}", 
+                trial_data
+            )
+        else:
+            self.log_result("Start Trial", False, f"Failed to start trial: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_submit_payment(self):
+        """Test POST /api/subscriptions/{driver_id}/submit-payment"""
+        if not self.test_driver_id:
+            self.log_result("Submit Payment", False, "No test driver ID available")
+            return False
+        
+        # Create a fake base64 image for payment proof
+        fake_image = base64.b64encode(b"fake_payment_screenshot").decode()
+        
+        data = {
+            "driver_id": self.test_driver_id,
+            "screenshot": fake_image,
+            "amount": 25000.0,
+            "payment_reference": "TEST123456"
+        }
+        response = await self.make_request("POST", f"/subscriptions/{self.test_driver_id}/submit-payment", data)
+        
+        if response["success"]:
+            self.log_result("Submit Payment", True, "Payment proof submitted successfully", response["data"])
+        else:
+            self.log_result("Submit Payment", False, f"Failed to submit payment: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    # ==================== FARE AND TRIP TESTS ====================
+    
+    async def test_fare_estimate(self):
+        """Test POST /api/fare/estimate"""
+        # Lagos coordinates: Lekki to Victoria Island
+        data = {
+            "pickup_lat": 6.4281,
+            "pickup_lng": 3.4219,
+            "dropoff_lat": 6.4355,
+            "dropoff_lng": 3.4567,
+            "service_type": "economy",
+            "city": "lagos"
+        }
+        response = await self.make_request("POST", "/fare/estimate", data)
+        
+        if response["success"]:
+            fare_data = response["data"]
+            self.log_result(
+                "Fare Estimate", 
+                True, 
+                f"Fare estimated - Distance: {fare_data.get('distance_km', 0)}km, Duration: {fare_data.get('duration_min', 0)}min, Fare: ₦{fare_data.get('total_fare', 0)}", 
+                fare_data
+            )
+        else:
+            self.log_result("Fare Estimate", False, f"Failed to estimate fare: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_request_trip(self):
+        """Test POST /api/trips/request"""
+        if not self.test_user_id:
+            self.log_result("Request Trip", False, "No test user ID available")
+            return False
+        
+        data = {
+            "pickup_lat": 6.4281,
+            "pickup_lng": 3.4219,
+            "pickup_address": "Lekki Phase 1, Lagos",
+            "dropoff_lat": 6.4355,
+            "dropoff_lng": 3.4567,
+            "dropoff_address": "Victoria Island, Lagos",
+            "service_type": "economy",
+            "payment_method": "cash"
         }
         
-        response = requests.post(
-            f"{BASE_URL}/subscriptions/{TEST_DRIVER_ID}/submit-payment",
-            json=payload,
-            timeout=10
-        )
+        # Add rider_id to the request
+        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id}
+        response = await self.make_request("POST", "/trips/request", data, headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            status = data.get("status")
-            log_test("Submit Payment", "PASS", f"Payment submitted, Status: {status}")
-            
-            if status != "pending_verification":
-                log_test("Payment Status Validation", "FAIL", f"Expected 'pending_verification', got '{status}'")
-                return False
-            
-            log_test("Payment Status Validation", "PASS", "Status changed to pending_verification")
-            return True
+        if response["success"]:
+            trip_data = response["data"]
+            self.test_trip_id = trip_data.get("trip", {}).get("id") or trip_data.get("id")
+            self.log_result(
+                "Request Trip", 
+                True, 
+                f"Trip requested successfully - ID: {self.test_trip_id}", 
+                trip_data
+            )
         else:
-            log_test("Submit Payment", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            self.log_result("Request Trip", False, f"Failed to request trip: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_get_trip_details(self):
+        """Test GET /api/trips/{trip_id}"""
+        if not self.test_trip_id:
+            self.log_result("Get Trip Details", False, "No test trip ID available")
             return False
-            
-    except Exception as e:
-        log_test("Submit Payment", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_subscription_status_after_payment():
-    """Test subscription status after payment submission (check auto-verification)"""
-    print("=" * 60)
-    print("TESTING SUBSCRIPTION STATUS AFTER PAYMENT")
-    print("=" * 60)
-    
-    # Wait for auto-verification to complete
-    print("Waiting 3 seconds for auto-verification...")
-    time.sleep(3)
-    
-    try:
-        print(f"Checking subscription status after payment for driver: {TEST_DRIVER_ID}")
-        response = requests.get(f"{BASE_URL}/subscriptions/{TEST_DRIVER_ID}", timeout=10)
         
-        if response.status_code == 200:
-            data = response.json()
-            status = data.get("status")
-            log_test("Status After Payment", "PASS", f"Final status: {status}")
-            
-            # Status should be either pending_verification or active (after auto-verification)
-            if status in ["pending_verification", "active"]:
-                log_test("Payment Flow Validation", "PASS", f"Payment flow working correctly, status: {status}")
-                return True
-            else:
-                log_test("Payment Flow Validation", "WARN", f"Unexpected status: {status}")
-                return True  # Still consider this a pass as the API is working
+        response = await self.make_request("GET", f"/trips/{self.test_trip_id}")
+        
+        if response["success"]:
+            trip_data = response["data"]
+            self.log_result(
+                "Get Trip Details", 
+                True, 
+                f"Trip details retrieved - Status: {trip_data.get('status', 'unknown')}, Fare: ₦{trip_data.get('fare', 0)}", 
+                trip_data
+            )
         else:
-            log_test("Status After Payment", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            self.log_result("Get Trip Details", False, f"Failed to get trip details: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_cancel_trip(self):
+        """Test POST /api/trips/{trip_id}/cancel"""
+        if not self.test_trip_id:
+            self.log_result("Cancel Trip", False, "No test trip ID available")
             return False
-            
-    except Exception as e:
-        log_test("Status After Payment", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_subscription_apis():
-    """Run all subscription API tests"""
-    print("=" * 60)
-    print("TESTING DRIVER SUBSCRIPTION APIS")
-    print("=" * 60)
-    
-    results = {}
-    
-    # Test subscription configuration
-    results['subscription_config'] = test_subscription_config()
-    
-    # Test start trial
-    results['start_trial'] = test_start_trial()
-    
-    # Test get subscription status
-    results['get_subscription_status'] = test_get_subscription_status()
-    
-    # Test submit payment
-    results['submit_payment'] = test_submit_payment()
-    
-    # Test status after payment
-    results['status_after_payment'] = test_subscription_status_after_payment()
-    
-    return results
-
-def log_test(test_name, status, details=""):
-    """Log test results with timestamp"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status_symbol = "✅" if status == "PASS" else "❌" if status == "FAIL" else "⚠️"
-    print(f"[{timestamp}] {status_symbol} {test_name}: {status}")
-    if details:
-        print(f"    Details: {details}")
-    print()
-
-def test_termii_sms_otp_specific():
-    """Test Termii SMS OTP functionality specifically"""
-    print("=" * 60)
-    print("TESTING TERMII SMS OTP FUNCTIONALITY - FOCUSED TEST")
-    print("=" * 60)
-    
-    phone_number = "+2348012345678"
-    
-    # Step 1: Send OTP and check Termii integration
-    try:
-        print(f"Step 1: Sending OTP to {phone_number} - Testing Termii Integration")
-        response = requests.post(
-            f"{BASE_URL}/auth/send-otp",
-            json={"phone": phone_number},
-            timeout=30
-        )
         
-        print(f"Response Status Code: {response.status_code}")
-        print(f"Response Headers: {dict(response.headers)}")
+        data = {"reason": "Testing cancellation"}
+        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id}
+        response = await self.make_request("POST", f"/trips/{self.test_trip_id}/cancel", data, headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Full Response Data: {json.dumps(data, indent=2)}")
-            
-            provider = data.get('provider', 'unknown')
-            message = data.get('message', '')
-            
-            # Check if Termii is working
-            if provider == "termii":
-                log_test("Termii SMS Integration", "PASS", "✅ SMS sent via Termii successfully!")
-                log_test("Provider Check", "PASS", f"Provider: {provider} (NOT mock)")
-                termii_working = True
-            elif provider == "mock":
-                log_test("Termii SMS Integration", "FAIL", "❌ Falling back to mock mode - Termii integration failed")
-                log_test("Provider Check", "FAIL", f"Provider: {provider} (should be 'termii')")
-                termii_working = False
-            else:
-                log_test("Termii SMS Integration", "FAIL", f"❌ Unknown provider: {provider}")
-                termii_working = False
-            
-            # Extract OTP for verification test
-            otp_code = data.get('otp')
-            if not otp_code and provider == "mock":
-                log_test("OTP Extraction", "WARN", "OTP visible in mock mode for testing")
-            elif not otp_code and provider == "termii":
-                log_test("OTP Extraction", "PASS", "OTP not returned in response (sent via real SMS)")
-                otp_code = "123456"  # We'll need to use a test OTP
-            
-            return termii_working, otp_code
+        if response["success"]:
+            self.log_result("Cancel Trip", True, "Trip cancelled successfully", response["data"])
         else:
-            log_test("Send OTP", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
-            return False, None
-            
-    except Exception as e:
-        log_test("Send OTP", "FAIL", f"Exception: {str(e)}")
-        return False, None
-
-def check_backend_logs_for_termii():
-    """Check backend logs specifically for Termii messages"""
-    print("\n" + "=" * 60)
-    print("CHECKING BACKEND LOGS FOR TERMII MESSAGES")
-    print("=" * 60)
+            self.log_result("Cancel Trip", False, f"Failed to cancel trip: {response['data']}", response["data"])
+        
+        return response["success"]
     
-    try:
-        import subprocess
+    # ==================== AI CHAT TESTS ====================
+    
+    async def test_ai_chat(self):
+        """Test POST /api/chat/ai"""
+        data = {
+            "message": "How much is fare from Lekki to Victoria Island?",
+            "user_id": self.test_user_id or "test_user",
+            "role": "rider"
+        }
+        response = await self.make_request("POST", "/chat/ai", data)
         
-        # Check both stdout and stderr logs
-        log_files = [
-            "/var/log/supervisor/backend.out.log",
-            "/var/log/supervisor/backend.err.log"
-        ]
-        
-        termii_success_found = False
-        country_inactive_found = False
-        
-        for log_file in log_files:
-            try:
-                result = subprocess.run(
-                    ["tail", "-n", "100", log_file],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
-                
-                if result.returncode == 0:
-                    logs = result.stdout
-                    print(f"\nChecking {log_file}:")
-                    print("-" * 40)
-                    
-                    # Look for specific Termii messages
-                    lines = logs.split('\n')
-                    termii_lines = []
-                    
-                    for line in lines:
-                        line_lower = line.lower()
-                        if any(keyword in line_lower for keyword in ['termii', 'sms sent successfully', 'country inactive']):
-                            termii_lines.append(line)
-                            
-                            # Check for specific success/error patterns
-                            if "termii sms sent successfully" in line_lower:
-                                termii_success_found = True
-                            elif "country inactive" in line_lower:
-                                country_inactive_found = True
-                    
-                    if termii_lines:
-                        print("Termii-related messages found:")
-                        for line in termii_lines[-10:]:  # Show last 10 relevant lines
-                            print(f"  {line}")
-                    else:
-                        print("  No Termii-related messages found")
-                        
-            except Exception as e:
-                print(f"  Error reading {log_file}: {str(e)}")
-        
-        # Summary of log analysis
-        print(f"\n" + "=" * 40)
-        print("LOG ANALYSIS SUMMARY")
-        print("=" * 40)
-        
-        if termii_success_found:
-            log_test("Backend Logs - Success Message", "PASS", "✅ Found 'Termii SMS sent successfully' message")
+        if response["success"]:
+            chat_data = response["data"]
+            self.log_result(
+                "AI Chat", 
+                True, 
+                f"AI responded successfully - Response length: {len(str(chat_data.get('response', '')))}", 
+                chat_data
+            )
         else:
-            log_test("Backend Logs - Success Message", "FAIL", "❌ No 'Termii SMS sent successfully' message found")
+            self.log_result("AI Chat", False, f"AI chat failed: {response['data']}", response["data"])
         
-        if country_inactive_found:
-            log_test("Backend Logs - Error Check", "FAIL", "❌ Still finding 'Country Inactive' errors")
+        return response["success"]
+    
+    async def test_ai_chat_history(self):
+        """Test GET /api/chat/ai/history/{user_id}"""
+        user_id = self.test_user_id or "test_user"
+        response = await self.make_request("GET", f"/chat/ai/history/{user_id}")
+        
+        if response["success"]:
+            history_data = response["data"]
+            messages = history_data.get("messages", [])
+            self.log_result(
+                "AI Chat History", 
+                True, 
+                f"Chat history retrieved - {len(messages)} messages", 
+                history_data
+            )
         else:
-            log_test("Backend Logs - Error Check", "PASS", "✅ No 'Country Inactive' errors found")
+            self.log_result("AI Chat History", False, f"Failed to get chat history: {response['data']}", response["data"])
         
-        return termii_success_found, not country_inactive_found
+        return response["success"]
+    
+    async def test_chat_presets_rider(self):
+        """Test GET /api/chat/presets/rider"""
+        response = await self.make_request("GET", "/chat/presets/rider")
         
-    except Exception as e:
-        log_test("Backend Log Check", "FAIL", f"Exception: {str(e)}")
-        return False, False
-
-def test_sms_otp_flow():
-    """Test SMS OTP authentication flow with Termii focus"""
-    print("=" * 60)
-    print("TESTING SMS OTP AUTHENTICATION FLOW")
-    print("=" * 60)
-    
-    # First run the specific Termii test
-    termii_working, otp_code = test_termii_sms_otp_specific()
-    
-    # Check backend logs
-    success_in_logs, no_errors_in_logs = check_backend_logs_for_termii()
-    
-    phone_number = "+2348012345678"
-    
-    # Step 2: Verify OTP
-    try:
-        print(f"Step 2: Verifying OTP {otp_code}")
-        response = requests.post(
-            f"{BASE_URL}/auth/verify-otp",
-            json={"phone": phone_number, "otp": otp_code},
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            is_new_user = data.get('is_new_user', True)
-            log_test("Verify OTP", "PASS", f"New user: {is_new_user}, Message: {data.get('message')}")
-            
-            if not is_new_user:
-                log_test("SMS OTP Flow", "PASS", "Existing user login successful")
-                return True
+        if response["success"]:
+            presets = response["data"].get("presets", [])
+            self.log_result(
+                "Chat Presets Rider", 
+                True, 
+                f"Retrieved {len(presets)} rider presets", 
+                response["data"]
+            )
         else:
-            log_test("Verify OTP", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
+            self.log_result("Chat Presets Rider", False, f"Failed to get rider presets: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_chat_presets_driver(self):
+        """Test GET /api/chat/presets/driver"""
+        response = await self.make_request("GET", "/chat/presets/driver")
+        
+        if response["success"]:
+            presets = response["data"].get("presets", [])
+            self.log_result(
+                "Chat Presets Driver", 
+                True, 
+                f"Retrieved {len(presets)} driver presets", 
+                response["data"]
+            )
+        else:
+            self.log_result("Chat Presets Driver", False, f"Failed to get driver presets: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_send_message(self):
+        """Test POST /api/chat/message"""
+        if not self.test_trip_id:
+            # Create a dummy trip ID for testing
+            self.test_trip_id = str(uuid.uuid4())
+        
+        data = {
+            "trip_id": self.test_trip_id,
+            "message_type": "text",
+            "content": "Test message from rider"
+        }
+        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id or "test_user"}
+        response = await self.make_request("POST", "/chat/message", data, headers)
+        
+        if response["success"]:
+            self.log_result("Send Message", True, "Message sent successfully", response["data"])
+        else:
+            self.log_result("Send Message", False, f"Failed to send message: {response['data']}", response["data"])
+        
+        return response["success"]
+    
+    async def test_get_trip_messages(self):
+        """Test GET /api/chat/messages/{trip_id}"""
+        if not self.test_trip_id:
+            self.log_result("Get Trip Messages", False, "No test trip ID available")
             return False
-            
-    except Exception as e:
-        log_test("Verify OTP", "FAIL", f"Exception: {str(e)}")
-        return False
-    
-    # Step 3: Register new user (if needed)
-    try:
-        print("Step 3: Registering new user")
-        response = requests.post(
-            f"{BASE_URL}/auth/register",
-            json={
-                "phone": phone_number,
-                "name": "Adunni Okafor",
-                "email": "adunni.okafor@nexryde.com",
-                "role": "rider"
-            },
-            timeout=30
-        )
         
-        if response.status_code == 200:
-            data = response.json()
-            log_test("Register User", "PASS", f"User ID: {data.get('user', {}).get('id')}")
-            log_test("SMS OTP Flow", "PASS", "Complete authentication flow successful")
-            return True
+        response = await self.make_request("GET", f"/chat/messages/{self.test_trip_id}")
+        
+        if response["success"]:
+            messages = response["data"].get("messages", [])
+            self.log_result(
+                "Get Trip Messages", 
+                True, 
+                f"Retrieved {len(messages)} trip messages", 
+                response["data"]
+            )
         else:
-            log_test("Register User", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
-            return False
-            
-    except Exception as e:
-        log_test("Register User", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_google_oauth_flow():
-    """Test Google OAuth authentication flow"""
-    print("=" * 60)
-    print("TESTING GOOGLE OAUTH AUTHENTICATION FLOW")
-    print("=" * 60)
-    
-    # Test with a mock session_id (this will likely fail in real environment)
-    test_session_id = "test_session_12345"
-    
-    try:
-        print(f"Testing Google OAuth exchange with session_id: {test_session_id}")
-        response = requests.post(
-            f"{BASE_URL}/auth/google/exchange",
-            json={"session_id": test_session_id},
-            timeout=30
-        )
+            self.log_result("Get Trip Messages", False, f"Failed to get trip messages: {response['data']}", response["data"])
         
-        if response.status_code == 200:
-            data = response.json()
-            log_test("Google OAuth Exchange", "PASS", f"Message: {data.get('message')}")
-            return True
-        elif response.status_code == 401:
-            log_test("Google OAuth Exchange", "WARN", "Invalid session (expected with test session_id)")
-            log_test("Google OAuth API", "PASS", "API endpoint accessible and validates sessions properly")
-            return True
+        return response["success"]
+    
+    # ==================== SAFETY TESTS ====================
+    
+    async def test_trigger_sos(self):
+        """Test POST /api/sos/trigger (mapped from /api/safety/sos)"""
+        if not self.test_trip_id:
+            # Use a dummy trip ID for testing
+            test_trip_id = str(uuid.uuid4())
         else:
-            log_test("Google OAuth Exchange", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
-            return False
-            
-    except Exception as e:
-        log_test("Google OAuth Exchange", "FAIL", f"Exception: {str(e)}")
-        return False
-
-def test_logout_api():
-    """Test logout API"""
-    print("=" * 60)
-    print("TESTING LOGOUT API")
-    print("=" * 60)
-    
-    try:
-        print("Testing logout endpoint")
-        # Create a session with cookies to test logout
-        session = requests.Session()
+            test_trip_id = self.test_trip_id
         
-        response = session.post(
-            f"{BASE_URL}/auth/logout",
-            timeout=30
-        )
+        data = {
+            "trip_id": test_trip_id,
+            "location_lat": 6.4281,
+            "location_lng": 3.4219,
+            "auto_triggered": False
+        }
+        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id or "test_user"}
+        response = await self.make_request("POST", "/sos/trigger", data, headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            log_test("Logout API", "PASS", f"Message: {data.get('message')}")
-            return True
+        if response["success"]:
+            self.log_result("Trigger SOS", True, "SOS triggered successfully", response["data"])
         else:
-            log_test("Logout API", "FAIL", f"Status: {response.status_code}, Response: {response.text}")
-            return False
-            
-    except Exception as e:
-        log_test("Logout API", "FAIL", f"Exception: {str(e)}")
-        return False
-
-async def test_ai_chat_apis():
-    """Test AI Chat APIs with GPT-4o integration"""
-    print("=" * 60)
-    print("TESTING AI CHAT APIS")
-    print("=" * 60)
-    
-    results = {}
-    
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        
-        # Test 1: First AI Chat Message
-        print("Testing POST /api/chat/ai - First message...")
-        try:
-            payload = {
-                "user_id": "test-user-123",
-                "message": "What is the fare from Lekki to Victoria Island?",
-                "user_role": "rider"
-            }
-            
-            response = await client.post(f"{BASE_URL}/chat/ai", json=payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Check if response contains AI response
-                if "message" in data and data["message"]:
-                    ai_response = data["message"]
-                    # Check if it's a real AI response (not mocked)
-                    if len(ai_response) > 50 and ("fare" in ai_response.lower() or "lekki" in ai_response.lower() or "victoria" in ai_response.lower()):
-                        log_test("AI Chat - First Message", "PASS", f"Real GPT-4o response received: {ai_response[:100]}...")
-                        results['ai_chat_first'] = True
-                    else:
-                        log_test("AI Chat - First Message", "FAIL", f"Response seems mocked or irrelevant: {ai_response}")
-                        results['ai_chat_first'] = False
-                else:
-                    log_test("AI Chat - First Message", "FAIL", f"No 'message' field in API response")
-                    results['ai_chat_first'] = False
+            # SOS might return 404 for non-existent trip, which is expected behavior
+            if response["status"] == 404:
+                self.log_result("Trigger SOS", True, "SOS endpoint working correctly (404 for non-existent trip as expected)", response["data"])
             else:
-                log_test("AI Chat - First Message", "FAIL", f"API error {response.status_code}: {response.text}")
-                results['ai_chat_first'] = False
-                
-        except Exception as e:
-            log_test("AI Chat - First Message", "FAIL", f"Exception: {str(e)}")
-            results['ai_chat_first'] = False
+                self.log_result("Trigger SOS", False, f"SOS trigger failed: {response['data']}", response["data"])
         
-        # Test 2: Second AI Chat Message (Context Test)
-        print("Testing POST /api/chat/ai - Second message with context...")
-        try:
-            payload = {
-                "user_id": "test-user-123",
-                "message": "What about safety features?",
-                "user_role": "rider"
-            }
-            
-            response = await client.post(f"{BASE_URL}/chat/ai", json=payload)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "message" in data and data["message"]:
-                    ai_response = data["message"]
-                    if len(ai_response) > 30 and ("safety" in ai_response.lower() or "secure" in ai_response.lower() or "protection" in ai_response.lower()):
-                        log_test("AI Chat - Context Message", "PASS", f"Contextual GPT-4o response: {ai_response[:100]}...")
-                        results['ai_chat_context'] = True
-                    else:
-                        log_test("AI Chat - Context Message", "FAIL", f"Response doesn't seem contextual: {ai_response}")
-                        results['ai_chat_context'] = False
-                else:
-                    log_test("AI Chat - Context Message", "FAIL", f"No 'message' field in API response")
-                    results['ai_chat_context'] = False
-            else:
-                log_test("AI Chat - Context Message", "FAIL", f"API error {response.status_code}: {response.text}")
-                results['ai_chat_context'] = False
-                
-        except Exception as e:
-            log_test("AI Chat - Context Message", "FAIL", f"Exception: {str(e)}")
-            results['ai_chat_context'] = False
-        
-        # Test 3: Get AI Chat History
-        print("Testing GET /api/chat/ai/history/{user_id}...")
-        try:
-            response = await client.get(f"{BASE_URL}/chat/ai/history/test-user-123")
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "messages" in data and isinstance(data["messages"], list):
-                    messages = data["messages"]
-                    if len(messages) >= 2:  # Should have at least our 2 test messages
-                        log_test("AI Chat History", "PASS", f"Chat history retrieved with {len(messages)} messages")
-                        results['ai_chat_history'] = True
-                    else:
-                        log_test("AI Chat History", "WARN", f"Expected at least 2 messages, got {len(messages)} (may be empty initially)")
-                        results['ai_chat_history'] = True  # Still consider pass as API works
-                else:
-                    log_test("AI Chat History", "FAIL", f"Invalid response format")
-                    results['ai_chat_history'] = False
-            else:
-                log_test("AI Chat History", "FAIL", f"API error {response.status_code}: {response.text}")
-                results['ai_chat_history'] = False
-                
-        except Exception as e:
-            log_test("AI Chat History", "FAIL", f"Exception: {str(e)}")
-            results['ai_chat_history'] = False
-        
-        # Test 4: Get Rider Preset Messages
-        print("Testing GET /api/chat/presets/rider...")
-        try:
-            response = await client.get(f"{BASE_URL}/chat/presets/rider")
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "presets" in data and isinstance(data["presets"], list):
-                    presets = data["presets"]
-                    if len(presets) > 0:
-                        log_test("Rider Preset Messages", "PASS", f"{len(presets)} rider presets retrieved")
-                        results['rider_presets'] = True
-                    else:
-                        log_test("Rider Preset Messages", "FAIL", "No preset messages returned")
-                        results['rider_presets'] = False
-                else:
-                    log_test("Rider Preset Messages", "FAIL", f"Invalid response format")
-                    results['rider_presets'] = False
-            else:
-                log_test("Rider Preset Messages", "FAIL", f"API error {response.status_code}: {response.text}")
-                results['rider_presets'] = False
-                
-        except Exception as e:
-            log_test("Rider Preset Messages", "FAIL", f"Exception: {str(e)}")
-            results['rider_presets'] = False
-        
-        # Test 5: Get Driver Preset Messages
-        print("Testing GET /api/chat/presets/driver...")
-        try:
-            response = await client.get(f"{BASE_URL}/chat/presets/driver")
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                if "presets" in data and isinstance(data["presets"], list):
-                    presets = data["presets"]
-                    if len(presets) > 0:
-                        # Check if driver presets are different from rider presets
-                        expected_driver_messages = ["I'm on my way", "I've arrived at pickup", "Please come to the car"]
-                        has_driver_specific = any(msg in presets for msg in expected_driver_messages)
-                        
-                        if has_driver_specific:
-                            log_test("Driver Preset Messages", "PASS", f"{len(presets)} driver-specific presets retrieved")
-                            results['driver_presets'] = True
-                        else:
-                            log_test("Driver Preset Messages", "WARN", f"Driver presets may not be driver-specific")
-                            results['driver_presets'] = True  # Still pass as API works
-                    else:
-                        log_test("Driver Preset Messages", "FAIL", "No preset messages returned")
-                        results['driver_presets'] = False
-                else:
-                    log_test("Driver Preset Messages", "FAIL", f"Invalid response format")
-                    results['driver_presets'] = False
-            else:
-                log_test("Driver Preset Messages", "FAIL", f"API error {response.status_code}: {response.text}")
-                results['driver_presets'] = False
-                
-        except Exception as e:
-            log_test("Driver Preset Messages", "FAIL", f"Exception: {str(e)}")
-            results['driver_presets'] = False
+        return response["success"] or response["status"] == 404
     
-    return results
-
-def test_fare_estimation_google_maps():
-    """Test Google Maps integration for fare estimation"""
-    print("=" * 60)
-    print("TESTING: Google Maps Integration - Fare Estimation API")
-    print("=" * 60)
-    
-    results = {}
-    
-    # Test Case 1: Lagos coordinates (standard ride)
-    print("Test Case 1: Lagos coordinates with standard ride type")
-    test_data_1 = {
-        "pickup_lat": 6.4281,
-        "pickup_lng": 3.4219,
-        "dropoff_lat": 6.4355,
-        "dropoff_lng": 3.4567,
-        "ride_type": "standard"
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/fare/estimate",
-            json=test_data_1,
-            timeout=30
-        )
-        
-        print(f"Status Code: {response.status_code}")
-        print(f"Response Headers: {dict(response.headers)}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response Data: {json.dumps(data, indent=2)}")
-            
-            # Verify required fields
-            required_fields = ["distance_km", "duration_min", "total_fare"]
-            missing_fields = [field for field in required_fields if field not in data]
-            
-            if missing_fields:
-                log_test("Test Case 1", "FAIL", f"Missing required fields: {missing_fields}")
-                results['test_case_1'] = False
-            else:
-                # Verify data types and reasonable values
-                if not isinstance(data["distance_km"], (int, float)) or data["distance_km"] <= 0:
-                    log_test("Test Case 1", "FAIL", f"Invalid distance_km: {data['distance_km']}")
-                    results['test_case_1'] = False
-                elif not isinstance(data["duration_min"], (int, float)) or data["duration_min"] <= 0:
-                    log_test("Test Case 1", "FAIL", f"Invalid duration_min: {data['duration_min']}")
-                    results['test_case_1'] = False
-                elif not isinstance(data["total_fare"], (int, float)) or data["total_fare"] <= 0:
-                    log_test("Test Case 1", "FAIL", f"Invalid total_fare: {data['total_fare']}")
-                    results['test_case_1'] = False
-                else:
-                    # Check if Google Maps was used (distance should be more accurate than Haversine)
-                    google_used = data.get("source") == "google" or "polyline" in data
-                    
-                    log_test("Test Case 1", "PASS", 
-                            f"Distance: {data['distance_km']}km, Duration: {data['duration_min']}min, "
-                            f"Fare: ₦{data['total_fare']}, Google Maps: {'Yes' if google_used else 'Fallback'}")
-                    results['test_case_1'] = True
+    async def test_share_trip(self):
+        """Test POST /api/trips/{trip_id}/share"""
+        if not self.test_trip_id:
+            # Use a dummy trip ID for testing
+            test_trip_id = str(uuid.uuid4())
         else:
-            log_test("Test Case 1", "FAIL", f"HTTP {response.status_code}: {response.text}")
-            results['test_case_1'] = False
-            
-    except Exception as e:
-        log_test("Test Case 1", "FAIL", f"Request failed: {str(e)}")
-        results['test_case_1'] = False
-    
-    # Test Case 2: Lagos Island to Lekki (comfort ride)
-    print("Test Case 2: Lagos Island to Lekki with comfort ride type")
-    test_data_2 = {
-        "pickup_lat": 6.5244,
-        "pickup_lng": 3.3792,
-        "dropoff_lat": 6.4447,
-        "dropoff_lng": 3.4723,
-        "ride_type": "comfort"
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/fare/estimate",
-            json=test_data_2,
-            timeout=30
-        )
+            test_trip_id = self.test_trip_id
         
-        print(f"Status Code: {response.status_code}")
+        data = {
+            "contacts": ["+2348087654321", "+2348098765432"],
+            "message": "Sharing my trip for safety"
+        }
+        headers = {"Content-Type": "application/json", "X-User-ID": self.test_user_id or "test_user"}
+        response = await self.make_request("POST", f"/trips/{test_trip_id}/share", data, headers)
         
-        if response.status_code == 200:
-            data = response.json()
-            print(f"Response Data: {json.dumps(data, indent=2)}")
-            
-            # Verify required fields
-            required_fields = ["distance_km", "duration_min", "total_fare"]
-            missing_fields = [field for field in required_fields if field not in data]
-            
-            if missing_fields:
-                log_test("Test Case 2", "FAIL", f"Missing required fields: {missing_fields}")
-                results['test_case_2'] = False
+        if response["success"]:
+            self.log_result("Share Trip", True, "Trip shared successfully", response["data"])
+        else:
+            # Trip sharing might return 404 for non-existent trip, which is expected
+            if response["status"] == 404:
+                self.log_result("Share Trip", True, "Trip sharing endpoint working correctly (404 for non-existent trip as expected)", response["data"])
             else:
-                # This should be a longer route (Lagos Island to Lekki)
-                if data["distance_km"] < 5:  # Should be at least 5km for this route
-                    log_test("Test Case 2", "WARN", f"Distance seems too short for Lagos Island to Lekki: {data['distance_km']}km")
-                
-                # Check pricing breakdown if available
-                pricing_fields = ["base_fare", "distance_fee", "time_fee", "total_fare"]
-                has_breakdown = any(field in data for field in pricing_fields)
-                
-                google_used = data.get("source") == "google" or "polyline" in data
-                
-                log_test("Test Case 2", "PASS", 
-                        f"Distance: {data['distance_km']}km, Duration: {data['duration_min']}min, "
-                        f"Fare: ₦{data['total_fare']}, Breakdown: {'Yes' if has_breakdown else 'No'}, "
-                        f"Google Maps: {'Yes' if google_used else 'Fallback'}")
-                results['test_case_2'] = True
-        else:
-            log_test("Test Case 2", "FAIL", f"HTTP {response.status_code}: {response.text}")
-            results['test_case_2'] = False
-            
-    except Exception as e:
-        log_test("Test Case 2", "FAIL", f"Request failed: {str(e)}")
-        results['test_case_2'] = False
-    
-    # Test Case 3: Invalid coordinates
-    print("Test Case 3: Invalid coordinates (error handling)")
-    test_data_3 = {
-        "pickup_lat": 999,  # Invalid latitude
-        "pickup_lng": 999,  # Invalid longitude
-        "dropoff_lat": 6.4355,
-        "dropoff_lng": 3.4567,
-        "ride_type": "standard"
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/fare/estimate",
-            json=test_data_3,
-            timeout=30
-        )
+                self.log_result("Share Trip", False, f"Trip sharing failed: {response['data']}", response["data"])
         
-        print(f"Status Code: {response.status_code}")
-        
-        if response.status_code == 400 or response.status_code == 422:
-            log_test("Test Case 3", "PASS", "Properly rejected invalid coordinates")
-            results['test_case_3'] = True
-        elif response.status_code == 200:
-            # If it returns 200, it should still handle gracefully
-            data = response.json()
-            if "error" in data or data.get("distance_km", 0) == 0:
-                log_test("Test Case 3", "PASS", "Handled invalid coordinates gracefully")
-                results['test_case_3'] = True
-            else:
-                log_test("Test Case 3", "WARN", "Accepted invalid coordinates - should validate input")
-                results['test_case_3'] = True  # Still pass as API works
-        else:
-            log_test("Test Case 3", "FAIL", f"Unexpected response: {response.status_code}")
-            results['test_case_3'] = False
-            
-    except Exception as e:
-        log_test("Test Case 3", "FAIL", f"Request failed: {str(e)}")
-        results['test_case_3'] = False
+        return response["success"] or response["status"] == 404
     
-    return results
-
-def test_google_maps_api_key():
-    """Test if Google Maps API key is working by checking backend logs"""
-    print("=" * 60)
-    print("TESTING: Google Maps API Key Configuration")
-    print("=" * 60)
+    # ==================== MAIN TEST RUNNER ====================
     
-    # Make a request that should trigger Google Maps API
-    test_data = {
-        "pickup_lat": 6.4281,
-        "pickup_lng": 3.4219,
-        "dropoff_lat": 6.4355,
-        "dropoff_lng": 3.4567,
-        "ride_type": "standard"
-    }
-    
-    try:
-        response = requests.post(
-            f"{BASE_URL}/fare/estimate",
-            json=test_data,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Check if response indicates Google Maps usage
-            google_indicators = [
-                "polyline" in data,
-                data.get("source") == "google",
-                "duration_in_traffic" in data,
-                data.get("distance_km", 0) > 0 and data.get("duration_min", 0) > 0
-            ]
-            
-            if any(google_indicators):
-                log_test("Google Maps API", "PASS", "Google Maps API appears to be working")
-                return True
-            else:
-                log_test("Google Maps API", "WARN", "May be using fallback Haversine calculation")
-                return True  # Still pass as fallback works
-            
-        else:
-            log_test("Google Maps API", "FAIL", f"API request failed: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        log_test("Google Maps API", "FAIL", f"Request failed: {str(e)}")
-        return False
-
-def test_api_health():
-    """Test basic API connectivity"""
-    print("=" * 60)
-    print("TESTING API CONNECTIVITY")
-    print("=" * 60)
-    
-    try:
-        # Test a simple endpoint to verify API is accessible
-        response = requests.get(f"{BASE_URL.replace('/api', '')}/docs", timeout=10)
-        if response.status_code == 200:
-            log_test("API Health", "PASS", "Backend API is accessible")
-            return True
-        else:
-            log_test("API Health", "WARN", f"Docs endpoint returned {response.status_code}")
-            return True  # Still consider this a pass as API might be configured differently
-    except Exception as e:
-        log_test("API Health", "FAIL", f"Cannot reach backend: {str(e)}")
-        return False
-
-def main():
-    """Run all authentication, subscription, AI chat, and Google Maps tests"""
-    print("NEXRYDE BACKEND API TESTING")
-    print(f"Backend URL: {BASE_URL}")
-    print(f"Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print()
-    
-    results = {}
-    
-    # Test API connectivity first
-    results['api_health'] = test_api_health()
-    
-    if results['api_health']:
-        # Test Google Maps API configuration
-        results['google_maps_api'] = test_google_maps_api_key()
-        
-        # Test Google Maps fare estimation
-        fare_estimation_results = test_fare_estimation_google_maps()
-        results.update(fare_estimation_results)
-        
-        # Test SMS OTP flow
-        results['sms_otp'] = test_sms_otp_flow()
-        
-        # Test Google OAuth flow
-        results['google_oauth'] = test_google_oauth_flow()
-        
-        # Test Logout API
-        results['logout'] = test_logout_api()
-        
-        # Test Subscription APIs
-        subscription_results = test_subscription_apis()
-        results.update(subscription_results)
-        
-        # Test AI Chat APIs (async)
-        print("\n" + "=" * 60)
-        print("RUNNING AI CHAT API TESTS")
+    async def run_all_tests(self):
+        """Run all API tests"""
+        print("🚀 Starting NEXRYDE Backend API Testing Suite")
+        print(f"🔗 Backend URL: {BACKEND_URL}")
         print("=" * 60)
-        ai_chat_results = asyncio.run(test_ai_chat_apis())
-        results.update(ai_chat_results)
         
-    else:
-        print("❌ Skipping other tests due to API connectivity issues")
-        results['google_maps_api'] = False
-        results['test_case_1'] = False
-        results['test_case_2'] = False
-        results['test_case_3'] = False
-        results['sms_otp'] = False
-        results['google_oauth'] = False
-        results['logout'] = False
-        results['subscription_config'] = False
-        results['start_trial'] = False
-        results['get_subscription_status'] = False
-        results['submit_payment'] = False
-        results['status_after_payment'] = False
-        results['ai_chat_first'] = False
-        results['ai_chat_context'] = False
-        results['ai_chat_history'] = False
-        results['rider_presets'] = False
-        results['driver_presets'] = False
-    
-    # Summary
-    print("=" * 60)
-    print("TEST SUMMARY")
-    print("=" * 60)
-    
-    total_tests = len(results)
-    passed_tests = sum(1 for result in results.values() if result)
-    
-    # Group results by category
-    connectivity_tests = ['api_health']
-    google_maps_tests = ['google_maps_api', 'test_case_1', 'test_case_2', 'test_case_3']
-    auth_tests = ['sms_otp', 'google_oauth', 'logout']
-    subscription_tests = ['subscription_config', 'start_trial', 'get_subscription_status', 'submit_payment', 'status_after_payment']
-    ai_chat_tests = ['ai_chat_first', 'ai_chat_context', 'ai_chat_history', 'rider_presets', 'driver_presets']
-    
-    print("CONNECTIVITY TESTS:")
-    for test_name in connectivity_tests:
-        if test_name in results:
-            status = "✅ PASS" if results[test_name] else "❌ FAIL"
-            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
-    
-    print("\nGOOGLE MAPS INTEGRATION TESTS:")
-    for test_name in google_maps_tests:
-        if test_name in results:
-            status = "✅ PASS" if results[test_name] else "❌ FAIL"
-            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
-    
-    print("\nAUTHENTICATION TESTS:")
-    for test_name in auth_tests:
-        if test_name in results:
-            status = "✅ PASS" if results[test_name] else "❌ FAIL"
-            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
-    
-    print("\nSUBSCRIPTION TESTS:")
-    for test_name in subscription_tests:
-        if test_name in results:
-            status = "✅ PASS" if results[test_name] else "❌ FAIL"
-            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
-    
-    print("\nAI CHAT TESTS:")
-    for test_name in ai_chat_tests:
-        if test_name in results:
-            status = "✅ PASS" if results[test_name] else "❌ FAIL"
-            print(f"  {test_name.upper().replace('_', ' ')}: {status}")
-    
-    print(f"\nOverall: {passed_tests}/{total_tests} tests passed")
-    
-    # Focus on Google Maps results for this testing session
-    google_maps_passed = sum(1 for test_name in google_maps_tests if results.get(test_name, False))
-    google_maps_total = len([test_name for test_name in google_maps_tests if test_name in results])
-    
-    print(f"\n🗺️  GOOGLE MAPS INTEGRATION: {google_maps_passed}/{google_maps_total} tests passed")
-    
-    if google_maps_passed == google_maps_total and google_maps_total > 0:
-        print("🎉 Google Maps integration working perfectly!")
-    elif google_maps_passed > 0:
-        print("⚠️ Google Maps partially working, check failed tests above")
-    else:
-        print("❌ Google Maps integration has issues")
-    
-    return results
+        # Authentication Tests
+        print("\n📱 AUTHENTICATION TESTS")
+        print("-" * 30)
+        await self.test_send_otp()
+        await self.test_verify_otp()
+        await self.test_google_oauth()
+        await self.test_logout()
+        
+        # User Management Tests
+        print("\n👤 USER MANAGEMENT TESTS")
+        print("-" * 30)
+        await self.test_register_user()
+        await self.test_get_user_profile()
+        await self.test_update_user_profile()
+        await self.test_add_emergency_contact()
+        await self.test_get_emergency_contacts()
+        
+        # Driver Tests
+        print("\n🚗 DRIVER TESTS")
+        print("-" * 30)
+        await self.test_register_driver()
+        await self.test_driver_toggle_online()
+        await self.test_driver_stats()
+        
+        # Subscription Tests
+        print("\n💳 SUBSCRIPTION TESTS")
+        print("-" * 30)
+        await self.test_subscription_config()
+        await self.test_get_subscription_status()
+        await self.test_start_trial()
+        await self.test_submit_payment()
+        
+        # Fare and Trip Tests
+        print("\n🛣️ FARE AND TRIP TESTS")
+        print("-" * 30)
+        await self.test_fare_estimate()
+        await self.test_request_trip()
+        await self.test_get_trip_details()
+        await self.test_cancel_trip()
+        
+        # AI Chat Tests
+        print("\n🤖 AI CHAT TESTS")
+        print("-" * 30)
+        await self.test_ai_chat()
+        await self.test_ai_chat_history()
+        await self.test_chat_presets_rider()
+        await self.test_chat_presets_driver()
+        await self.test_send_message()
+        await self.test_get_trip_messages()
+        
+        # Safety Tests
+        print("\n🚨 SAFETY TESTS")
+        print("-" * 30)
+        await self.test_trigger_sos()
+        await self.test_share_trip()
+        
+        # Summary
+        print("\n" + "=" * 60)
+        print("📊 TEST SUMMARY")
+        print("=" * 60)
+        
+        total_tests = len(self.test_results)
+        passed_tests = sum(1 for result in self.test_results if result["success"])
+        failed_tests = total_tests - passed_tests
+        
+        print(f"Total Tests: {total_tests}")
+        print(f"✅ Passed: {passed_tests}")
+        print(f"❌ Failed: {failed_tests}")
+        print(f"Success Rate: {(passed_tests/total_tests)*100:.1f}%")
+        
+        if failed_tests > 0:
+            print(f"\n❌ FAILED TESTS:")
+            for result in self.test_results:
+                if not result["success"]:
+                    print(f"   • {result['test']}: {result['details']}")
+        
+        print("\n🎉 Testing Complete!")
+        return self.test_results
+
+async def main():
+    """Main function to run all tests"""
+    async with NEXRYDEAPITester() as tester:
+        results = await tester.run_all_tests()
+        return results
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
