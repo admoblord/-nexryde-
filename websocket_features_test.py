@@ -163,9 +163,9 @@ class WebSocketFeaturesTester:
         success, result = self.test_endpoint("GET", "/surge/check", params=params)
         
         if success:
-            if isinstance(result, dict) and "surge_multiplier" in result:
-                multiplier = result.get('surge_multiplier', 'unknown')
-                is_active = result.get('is_surge_active', False)
+            if isinstance(result, dict) and "multiplier" in result:
+                multiplier = result.get('multiplier', 'unknown')
+                is_active = result.get('is_surge', False)
                 self.log_test(
                     "Surge Pricing Check", 
                     True, 
