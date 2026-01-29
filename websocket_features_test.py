@@ -407,14 +407,6 @@ class WebSocketFeaturesTester:
                 result
             )
             return True, "Package delivery request endpoint working"
-            else:
-                self.log_test(
-                    "Get Delivery Status", 
-                    False, 
-                    "Failed to get delivery status",
-                    result2
-                )
-                return False, f"Get delivery status failed: {result2}"
         else:
             self.log_test(
                 "Request Package Delivery", 
