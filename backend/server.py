@@ -5686,15 +5686,6 @@ async def serve_admin():
         return FileResponse(admin_file, media_type="text/html")
     raise HTTPException(status_code=404, detail="Admin panel not found")
 
-# Also serve admin panel via /api/admin for external access through ingress
-@api_router.get("/admin-panel")
-async def serve_admin_via_api():
-    """Serve admin panel via API route"""
-    admin_file = ADMIN_DIR / "index.html"
-    if admin_file.exists():
-        return FileResponse(admin_file, media_type="text/html")
-    raise HTTPException(status_code=404, detail="Admin panel not found")
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
