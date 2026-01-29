@@ -1,566 +1,440 @@
 #!/usr/bin/env python3
 """
-NEXRYDE Backend API Comprehensive Testing
-Tests all 27 endpoints as specified in the review request
+NEXRYDE Admin API Testing Suite
+Tests all NEW admin API endpoints that were just added to the backend.
 """
 
 import requests
 import json
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Dict, Any, Optional
 
-# Backend URL from frontend/.env
-BACKEND_URL = "https://nexryde-admin.preview.emergentagent.com/api"
+# Configuration
+BASE_URL = "https://nexryde-admin.preview.emergentagent.com/api"
+ADMIN_CREDENTIALS = {
+    "email": "admin@nexryde.com",
+    "password": "nexryde2025"
+}
 
-class NEXRYDEAPITester:
+class AdminAPITester:
     def __init__(self):
+        self.base_url = BASE_URL
         self.session = requests.Session()
+        self.admin_token = None
         self.test_results = []
-        self.passed = 0
-        self.failed = 0
         
-    def log_result(self, test_name, success, details="", response_data=None):
+    def log_test(self, endpoint: str, method: str, success: bool, details: str, response_data: Any = None):
         """Log test result"""
-        status = "✅ PASS" if success else "❌ FAIL"
         result = {
-            "test": test_name,
-            "status": status,
+            "endpoint": endpoint,
+            "method": method,
+            "success": success,
             "details": details,
+            "timestamp": datetime.now().isoformat(),
             "response_data": response_data
         }
         self.test_results.append(result)
         
-        if success:
-            self.passed += 1
-        else:
-            self.failed += 1
-            
-        print(f"{status}: {test_name}")
-        if details:
-            print(f"   Details: {details}")
-        if response_data and not success:
-            print(f"   Response: {response_data}")
-        print()
-
-    def test_endpoint(self, method, endpoint, data=None, params=None, expected_status=200):
-        """Generic endpoint tester"""
-        url = f"{BACKEND_URL}{endpoint}"
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status} {method} {endpoint} - {details}")
+        
+        if response_data and isinstance(response_data, dict):
+            if success:
+                # Show key response fields for successful tests
+                if "total_riders" in response_data:
+                    print(f"    📊 Stats: {response_data.get('total_riders', 0)} riders, {response_data.get('total_drivers', 0)} drivers")
+                elif "riders" in response_data:
+                    print(f"    👥 Found {len(response_data['riders'])} riders")
+                elif "drivers" in response_data:
+                    print(f"    🚗 Found {len(response_data['drivers'])} drivers")
+                elif "trips" in response_data:
+                    print(f"    🚕 Found {len(response_data['trips'])} trips")
+                elif "payments" in response_data:
+                    print(f"    💳 Found {len(response_data['payments'])} payments")
+                elif "promos" in response_data:
+                    print(f"    🎫 Found {len(response_data['promos'])} promo codes")
+                elif "alerts" in response_data:
+                    print(f"    🚨 Found {len(response_data['alerts'])} SOS alerts")
+                elif "activities" in response_data:
+                    print(f"    📋 Found {len(response_data['activities'])} activities")
+            else:
+                # Show error details for failed tests
+                error_msg = response_data.get('detail', response_data.get('message', 'Unknown error'))
+                print(f"    ❌ Error: {error_msg}")
+    
+    def make_request(self, method: str, endpoint: str, **kwargs) -> tuple[bool, Any]:
+        """Make HTTP request and return (success, response_data)"""
+        url = f"{self.base_url}{endpoint}"
         
         try:
-            if method.upper() == "GET":
-                response = self.session.get(url, params=params, timeout=30)
-            elif method.upper() == "POST":
-                response = self.session.post(url, json=data, params=params, timeout=30)
-            elif method.upper() == "PUT":
-                response = self.session.put(url, json=data, params=params, timeout=30)
-            else:
-                return False, f"Unsupported method: {method}", None
+            response = self.session.request(method, url, timeout=30, **kwargs)
             
-            success = response.status_code == expected_status
-            
+            # Try to parse JSON response
             try:
-                response_data = response.json()
+                data = response.json()
             except:
-                response_data = response.text
-                
-            return success, response_data, response.status_code
+                data = {"raw_response": response.text}
+            
+            success = response.status_code in [200, 201]
+            return success, data
             
         except requests.exceptions.RequestException as e:
-            return False, f"Request failed: {str(e)}", None
-
-    def run_comprehensive_tests(self):
-        """Run all 27 endpoint tests as specified in review request"""
+            return False, {"error": str(e)}
+    
+    def test_admin_login(self) -> bool:
+        """Test admin authentication"""
+        print("\n🔐 Testing Admin Authentication...")
         
-        print("🚀 Starting NEXRYDE Backend API Comprehensive Testing")
-        print("=" * 60)
-        
-        # 1. AUTHENTICATION TESTS
-        print("\n📱 AUTHENTICATION ENDPOINTS")
-        print("-" * 30)
-        
-        # Test 1: Send OTP
-        success, response, status = self.test_endpoint(
-            "POST", "/auth/send-otp",
-            data={"phone": "+2348108899392"}
-        )
-        self.log_result(
-            "1. POST /api/auth/send-otp",
-            success,
-            f"Status: {status}, SMS OTP system" if success else f"Failed with status {status}",
-            response if not success else None
+        # Test with correct credentials
+        success, data = self.make_request(
+            "POST", 
+            "/admin/login",
+            json=ADMIN_CREDENTIALS
         )
         
-        # Test 2: Verify OTP
-        success, response, status = self.test_endpoint(
-            "POST", "/auth/verify-otp",
-            data={"phone": "+2348108899392", "code": "123456"}
-        )
-        self.log_result(
-            "2. POST /api/auth/verify-otp",
-            success,
-            f"Status: {status}, OTP verification" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 2. USER & PREFERENCES TESTS
-        print("\n👤 USER & PREFERENCES ENDPOINTS")
-        print("-" * 35)
-        
-        # Test 3: Get User Preferences
-        success, response, status = self.test_endpoint(
-            "GET", "/users/test-user-123/preferences"
-        )
-        self.log_result(
-            "3. GET /api/users/test-user-123/preferences",
-            success,
-            f"Status: {status}, User preferences" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 4: Update Theme
-        success, response, status = self.test_endpoint(
-            "PUT", "/users/test-user-123/theme",
-            params={"theme": "dark"}
-        )
-        self.log_result(
-            "4. PUT /api/users/test-user-123/theme?theme=dark",
-            success,
-            f"Status: {status}, Theme update" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 5: Get Languages
-        success, response, status = self.test_endpoint(
-            "GET", "/languages"
-        )
-        self.log_result(
-            "5. GET /api/languages",
-            success,
-            f"Status: {status}, Languages list" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 6: Get Translations
-        success, response, status = self.test_endpoint(
-            "GET", "/translations/pcm"
-        )
-        self.log_result(
-            "6. GET /api/translations/pcm",
-            success,
-            f"Status: {status}, Pidgin translations" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 3. WALLET & REFERRALS TESTS
-        print("\n💰 WALLET & REFERRALS ENDPOINTS")
-        print("-" * 35)
-        
-        # Test 7: Get Wallet Balance
-        success, response, status = self.test_endpoint(
-            "GET", "/wallet/test-user-123"
-        )
-        self.log_result(
-            "7. GET /api/wallet/test-user-123",
-            success,
-            f"Status: {status}, Wallet balance" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 8: Wallet Top-up
-        success, response, status = self.test_endpoint(
-            "POST", "/wallet/test-user-123/topup",
-            params={"amount": "1000"}
-        )
-        self.log_result(
-            "8. POST /api/wallet/test-user-123/topup?amount=1000",
-            success,
-            f"Status: {status}, Wallet top-up" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 9: Get Referral Code
-        success, response, status = self.test_endpoint(
-            "GET", "/referral/code/test-user-123"
-        )
-        self.log_result(
-            "9. GET /api/referral/code/test-user-123",
-            success,
-            f"Status: {status}, Referral code" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 10: Apply Promo Code
-        success, response, status = self.test_endpoint(
-            "POST", "/promo/apply",
-            params={"rider_id": "test-user-123", "code": "FIRST10"}
-        )
-        self.log_result(
-            "10. POST /api/promo/apply?rider_id=test-user-123&code=FIRST10",
-            success,
-            f"Status: {status}, Promo code application" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 4. FARE & TRIPS TESTS
-        print("\n🚗 FARE & TRIPS ENDPOINTS")
-        print("-" * 30)
-        
-        # Test 11: Fare Estimation
-        success, response, status = self.test_endpoint(
-            "POST", "/fare/estimate",
-            data={
-                "pickup_lat": 6.4281,
-                "pickup_lng": 3.4219,
-                "dropoff_lat": 6.4355,
-                "dropoff_lng": 3.4567,
-                "ride_type": "economy"
-            }
-        )
-        self.log_result(
-            "11. POST /api/fare/estimate",
-            success,
-            f"Status: {status}, Fare estimation with Google Maps" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 12: Surge Check
-        success, response, status = self.test_endpoint(
-            "GET", "/surge/check",
-            params={"lat": "6.4281", "lng": "3.4219"}
-        )
-        self.log_result(
-            "12. GET /api/surge/check?lat=6.4281&lng=3.4219",
-            success,
-            f"Status: {status}, Surge pricing check" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 5. RIDE BIDDING TESTS
-        print("\n🎯 RIDE BIDDING ENDPOINTS")
-        print("-" * 30)
-        
-        # Test 13: Create Ride Bid
-        success, response, status = self.test_endpoint(
-            "POST", "/rides/bid/create",
-            params={"rider_id": "test-rider-123"},
-            data={
-                "rider_offered_price": 1500,
-                "pickup_lat": 6.4281,
-                "pickup_lng": 3.4219,
-                "dropoff_lat": 6.4355,
-                "dropoff_lng": 3.4567,
-                "pickup_address": "VI",
-                "dropoff_address": "Lekki",
-                "ride_type": "economy"
-            }
-        )
-        self.log_result(
-            "13. POST /api/rides/bid/create?rider_id=test-rider-123",
-            success,
-            f"Status: {status}, InDrive-style ride bidding" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 14: Get Open Bids
-        success, response, status = self.test_endpoint(
-            "GET", "/rides/bid/open",
-            params={"lat": "6.4281", "lng": "3.4219"}
-        )
-        self.log_result(
-            "14. GET /api/rides/bid/open?lat=6.4281&lng=3.4219",
-            success,
-            f"Status: {status}, Open ride bids" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 6. SCHEDULED RIDES TESTS
-        print("\n⏰ SCHEDULED RIDES ENDPOINTS")
-        print("-" * 35)
-        
-        # Test 15: Schedule Ride
-        future_time = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
-        success, response, status = self.test_endpoint(
-            "POST", "/rides/schedule",
-            params={"rider_id": "test-rider-123"},
-            data={
-                "pickup_lat": 6.4281,
-                "pickup_lng": 3.4219,
-                "pickup_address": "VI",
-                "dropoff_lat": 6.4355,
-                "dropoff_lng": 3.4567,
-                "dropoff_address": "Lekki",
-                "scheduled_time": future_time,
-                "ride_type": "economy"
-            }
-        )
-        self.log_result(
-            "15. POST /api/rides/schedule?rider_id=test-rider-123",
-            success,
-            f"Status: {status}, Scheduled ride creation" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 16: Get Scheduled Rides
-        success, response, status = self.test_endpoint(
-            "GET", "/rides/scheduled/test-rider-123"
-        )
-        self.log_result(
-            "16. GET /api/rides/scheduled/test-rider-123",
-            success,
-            f"Status: {status}, Scheduled rides list" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 7. PACKAGE DELIVERY TESTS
-        print("\n📦 PACKAGE DELIVERY ENDPOINTS")
-        print("-" * 35)
-        
-        # Test 17: Package Delivery Request
-        success, response, status = self.test_endpoint(
-            "POST", "/delivery/request",
-            params={"sender_id": "test-user-123"},
-            data={
-                "pickup_lat": 6.4281,
-                "pickup_lng": 3.4219,
-                "pickup_address": "VI",
-                "dropoff_lat": 6.4355,
-                "dropoff_lng": 3.4567,
-                "dropoff_address": "Lekki",
-                "recipient_name": "John",
-                "recipient_phone": "+2348012345678",
-                "package_description": "Documents",
-                "package_size": "small"
-            }
-        )
-        self.log_result(
-            "17. POST /api/delivery/request?sender_id=test-user-123",
-            success,
-            f"Status: {status}, Package delivery request" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 8. DRIVER FEATURES TESTS
-        print("\n🚛 DRIVER FEATURES ENDPOINTS")
-        print("-" * 35)
-        
-        # Test 18: Driver Heatmap
-        success, response, status = self.test_endpoint(
-            "GET", "/driver/heatmap"
-        )
-        self.log_result(
-            "18. GET /api/driver/heatmap",
-            success,
-            f"Status: {status}, Driver demand heatmap" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 19: Get Driver Subscriptions
-        success, response, status = self.test_endpoint(
-            "GET", "/subscriptions/test-driver-123"
-        )
-        self.log_result(
-            "19. GET /api/subscriptions/test-driver-123",
-            success,
-            f"Status: {status}, Driver subscription status" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 20: Start Trial Subscription
-        success, response, status = self.test_endpoint(
-            "POST", "/subscriptions/test-driver-123/start-trial"
-        )
-        self.log_result(
-            "20. POST /api/subscriptions/test-driver-123/start-trial",
-            success,
-            f"Status: {status}, Start 7-day trial" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 9. AI CHAT TESTS
-        print("\n🤖 AI CHAT ENDPOINTS")
-        print("-" * 25)
-        
-        # Test 21: AI Chat
-        success, response, status = self.test_endpoint(
-            "POST", "/chat/ai",
-            data={
-                "user_id": "test-user-123",
-                "message": "What is the fare from Lekki to Victoria Island?",
-                "user_role": "rider"
-            }
-        )
-        self.log_result(
-            "21. POST /api/chat/ai",
-            success,
-            f"Status: {status}, GPT-4o AI chat" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 22: AI Chat History
-        success, response, status = self.test_endpoint(
-            "GET", "/chat/ai/history/test-user-123"
-        )
-        self.log_result(
-            "22. GET /api/chat/ai/history/test-user-123",
-            success,
-            f"Status: {status}, AI chat history" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 23: Rider Chat Presets
-        success, response, status = self.test_endpoint(
-            "GET", "/chat/presets/rider"
-        )
-        self.log_result(
-            "23. GET /api/chat/presets/rider",
-            success,
-            f"Status: {status}, Rider chat presets" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # Test 24: Driver Chat Presets
-        success, response, status = self.test_endpoint(
-            "GET", "/chat/presets/driver"
-        )
-        self.log_result(
-            "24. GET /api/chat/presets/driver",
-            success,
-            f"Status: {status}, Driver chat presets" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 10. DRIVER-RIDER MESSAGING TESTS
-        print("\n💬 DRIVER-RIDER MESSAGING ENDPOINTS")
-        print("-" * 40)
-        
-        # Test 25: Send Message
-        success, response, status = self.test_endpoint(
-            "POST", "/chat/message",
-            data={
-                "trip_id": "test-trip-123",
-                "sender_id": "test-user-123",
-                "sender_role": "rider",
-                "message": "I am waiting at the gate"
-            }
-        )
-        self.log_result(
-            "25. POST /api/chat/message",
-            success,
-            f"Status: {status}, Driver-rider messaging" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 11. SAFETY TESTS
-        print("\n🚨 SAFETY ENDPOINTS")
-        print("-" * 20)
-        
-        # Test 26: SOS Trigger
-        success, response, status = self.test_endpoint(
-            "POST", "/sos/trigger",
-            data={
-                "user_id": "test-user-123",
-                "location": {"lat": 6.4281, "lng": 3.4219}
-            }
-        )
-        self.log_result(
-            "26. POST /api/sos/trigger",
-            success,
-            f"Status: {status}, Emergency SOS system" if success else f"Failed with status {status}",
-            response if not success else None
-        )
-        
-        # 12. TRIP RECEIPTS TESTS
-        print("\n🧾 TRIP RECEIPTS ENDPOINTS")
-        print("-" * 30)
-        
-        # Test 27: Trip Receipt (need to create a trip first)
-        # First create a trip
-        trip_success, trip_response, trip_status = self.test_endpoint(
-            "POST", "/trips/request",
-            data={
-                "rider_id": "test-user-123",
-                "pickup_lat": 6.4281,
-                "pickup_lng": 3.4219,
-                "pickup_address": "Victoria Island",
-                "dropoff_lat": 6.4355,
-                "dropoff_lng": 3.4567,
-                "dropoff_address": "Lekki",
-                "service_type": "economy",
-                "payment_method": "cash"
-            }
-        )
-        
-        if trip_success and isinstance(trip_response, dict) and "trip_id" in trip_response:
-            trip_id = trip_response["trip_id"]
-            success, response, status = self.test_endpoint(
-                "GET", f"/trips/{trip_id}/receipt"
-            )
-            self.log_result(
-                f"27. GET /api/trips/{trip_id}/receipt",
-                success,
-                f"Status: {status}, Trip receipt generation" if success else f"Failed with status {status}",
-                response if not success else None
-            )
+        if success and data.get("success"):
+            self.admin_token = data.get("token")
+            self.log_test("/admin/login", "POST", True, "Admin login successful", data)
+            
+            # Test with invalid credentials
+            invalid_creds = {"email": "wrong@email.com", "password": "wrongpass"}
+            success2, data2 = self.make_request("POST", "/admin/login", json=invalid_creds)
+            
+            if not success2 or not data2.get("success"):
+                self.log_test("/admin/login", "POST", True, "Invalid credentials correctly rejected", data2)
+                return True
+            else:
+                self.log_test("/admin/login", "POST", False, "Invalid credentials were accepted (security issue)", data2)
+                return False
         else:
-            # Use a test trip ID
-            success, response, status = self.test_endpoint(
-                "GET", "/trips/test-trip-123/receipt"
-            )
-            self.log_result(
-                "27. GET /api/trips/test-trip-123/receipt",
-                success,
-                f"Status: {status}, Trip receipt generation" if success else f"Failed with status {status}",
-                response if not success else None
-            )
-
-    def print_summary(self):
-        """Print test summary"""
-        print("\n" + "=" * 60)
-        print("🏁 NEXRYDE BACKEND API TEST SUMMARY")
-        print("=" * 60)
+            self.log_test("/admin/login", "POST", False, "Admin login failed with correct credentials", data)
+            return False
+    
+    def test_admin_overview(self) -> bool:
+        """Test dashboard overview stats"""
+        print("\n📊 Testing Admin Dashboard Overview...")
         
-        total_tests = self.passed + self.failed
-        success_rate = (self.passed / total_tests * 100) if total_tests > 0 else 0
+        success, data = self.make_request("GET", "/admin/overview")
         
-        print(f"Total Tests: {total_tests}")
-        print(f"✅ Passed: {self.passed}")
-        print(f"❌ Failed: {self.failed}")
+        if success:
+            required_fields = [
+                "total_riders", "total_drivers", "total_trips", "completed_trips",
+                "total_revenue", "subscription_revenue", "active_subscriptions",
+                "today_trips", "today_signups"
+            ]
+            
+            missing_fields = [field for field in required_fields if field not in data]
+            
+            if not missing_fields:
+                self.log_test("/admin/overview", "GET", True, "All required dashboard stats returned", data)
+                return True
+            else:
+                self.log_test("/admin/overview", "GET", False, f"Missing fields: {missing_fields}", data)
+                return False
+        else:
+            self.log_test("/admin/overview", "GET", False, "Failed to get dashboard overview", data)
+            return False
+    
+    def test_admin_riders(self) -> bool:
+        """Test riders list endpoint"""
+        print("\n👥 Testing Admin Riders List...")
+        
+        success, data = self.make_request("GET", "/admin/riders")
+        
+        if success and "riders" in data:
+            riders = data["riders"]
+            
+            # Check if riders have required fields
+            if riders:
+                sample_rider = riders[0]
+                required_fields = ["id", "name", "phone", "total_trips", "blocked"]
+                missing_fields = [field for field in required_fields if field not in sample_rider]
+                
+                if not missing_fields:
+                    self.log_test("/admin/riders", "GET", True, f"Riders list returned with proper structure", data)
+                    return True
+                else:
+                    self.log_test("/admin/riders", "GET", False, f"Rider missing fields: {missing_fields}", data)
+                    return False
+            else:
+                self.log_test("/admin/riders", "GET", True, "Riders list returned (empty)", data)
+                return True
+        else:
+            self.log_test("/admin/riders", "GET", False, "Failed to get riders list", data)
+            return False
+    
+    def test_admin_drivers(self) -> bool:
+        """Test drivers list endpoint"""
+        print("\n🚗 Testing Admin Drivers List...")
+        
+        success, data = self.make_request("GET", "/admin/drivers")
+        
+        if success and "drivers" in data:
+            drivers = data["drivers"]
+            
+            # Check if drivers have required fields
+            if drivers:
+                sample_driver = drivers[0]
+                required_fields = ["id", "name", "vehicle", "subscription_status", "is_online", "total_trips"]
+                missing_fields = [field for field in required_fields if field not in sample_driver]
+                
+                if not missing_fields:
+                    self.log_test("/admin/drivers", "GET", True, f"Drivers list returned with proper structure", data)
+                    return True
+                else:
+                    self.log_test("/admin/drivers", "GET", False, f"Driver missing fields: {missing_fields}", data)
+                    return False
+            else:
+                self.log_test("/admin/drivers", "GET", True, "Drivers list returned (empty)", data)
+                return True
+        else:
+            self.log_test("/admin/drivers", "GET", False, "Failed to get drivers list", data)
+            return False
+    
+    def test_admin_trips(self) -> bool:
+        """Test trips list endpoint"""
+        print("\n🚕 Testing Admin Trips List...")
+        
+        success, data = self.make_request("GET", "/admin/trips")
+        
+        if success and "trips" in data:
+            trips = data["trips"]
+            
+            # Check if trips have required fields
+            if trips:
+                sample_trip = trips[0]
+                required_fields = ["id", "rider_name", "driver_name", "pickup", "dropoff", "fare", "status"]
+                missing_fields = [field for field in required_fields if field not in sample_trip]
+                
+                if not missing_fields:
+                    self.log_test("/admin/trips", "GET", True, f"Trips list returned with proper structure", data)
+                    return True
+                else:
+                    self.log_test("/admin/trips", "GET", False, f"Trip missing fields: {missing_fields}", data)
+                    return False
+            else:
+                self.log_test("/admin/trips", "GET", True, "Trips list returned (empty)", data)
+                return True
+        else:
+            self.log_test("/admin/trips", "GET", False, "Failed to get trips list", data)
+            return False
+    
+    def test_admin_payments(self) -> bool:
+        """Test subscription payments endpoint"""
+        print("\n💳 Testing Admin Payments List...")
+        
+        success, data = self.make_request("GET", "/admin/payments")
+        
+        if success:
+            required_fields = ["payments", "approved_count", "pending_count", "total_revenue"]
+            missing_fields = [field for field in required_fields if field not in data]
+            
+            if not missing_fields:
+                payments = data["payments"]
+                
+                # Check payment structure if any exist
+                if payments:
+                    sample_payment = payments[0]
+                    payment_fields = ["driver_name", "amount", "screenshot", "status", "auto_approved"]
+                    missing_payment_fields = [field for field in payment_fields if field not in sample_payment]
+                    
+                    if not missing_payment_fields:
+                        self.log_test("/admin/payments", "GET", True, f"Payments returned with proper structure", data)
+                        return True
+                    else:
+                        self.log_test("/admin/payments", "GET", False, f"Payment missing fields: {missing_payment_fields}", data)
+                        return False
+                else:
+                    self.log_test("/admin/payments", "GET", True, "Payments list returned (empty)", data)
+                    return True
+            else:
+                self.log_test("/admin/payments", "GET", False, f"Missing fields: {missing_fields}", data)
+                return False
+        else:
+            self.log_test("/admin/payments", "GET", False, "Failed to get payments list", data)
+            return False
+    
+    def test_subscription_actions(self) -> bool:
+        """Test subscription approve/reject actions"""
+        print("\n⚡ Testing Subscription Actions...")
+        
+        # Test with a dummy subscription ID (should return not found)
+        test_sub_id = "test-subscription-123"
+        
+        # Test approve
+        success1, data1 = self.make_request("POST", f"/admin/subscriptions/{test_sub_id}/approve")
+        
+        if not success1 or not data1.get("success"):
+            self.log_test(f"/admin/subscriptions/{test_sub_id}/approve", "POST", True, "Correctly returned 'not found' for non-existent subscription", data1)
+        else:
+            self.log_test(f"/admin/subscriptions/{test_sub_id}/approve", "POST", False, "Approved non-existent subscription", data1)
+            return False
+        
+        # Test reject
+        success2, data2 = self.make_request("POST", f"/admin/subscriptions/{test_sub_id}/reject")
+        
+        if not success2 or not data2.get("success"):
+            self.log_test(f"/admin/subscriptions/{test_sub_id}/reject", "POST", True, "Correctly returned 'not found' for non-existent subscription", data2)
+            return True
+        else:
+            self.log_test(f"/admin/subscriptions/{test_sub_id}/reject", "POST", False, "Rejected non-existent subscription", data2)
+            return False
+    
+    def test_user_blocking(self) -> bool:
+        """Test user block/unblock functionality"""
+        print("\n🚫 Testing User Block/Unblock...")
+        
+        # Test with a dummy user ID (should return not found)
+        test_user_id = "test-user-123"
+        
+        # Test block user
+        success1, data1 = self.make_request("POST", f"/admin/users/{test_user_id}/block?block=true")
+        
+        if not success1 or not data1.get("success"):
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly returned 'not found' for non-existent user (block)", data1)
+        else:
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", False, "Blocked non-existent user", data1)
+            return False
+        
+        # Test unblock user
+        success2, data2 = self.make_request("POST", f"/admin/users/{test_user_id}/block?block=false")
+        
+        if not success2 or not data2.get("success"):
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", True, "Correctly returned 'not found' for non-existent user (unblock)", data2)
+            return True
+        else:
+            self.log_test(f"/admin/users/{test_user_id}/block", "POST", False, "Unblocked non-existent user", data2)
+            return False
+    
+    def test_promo_codes(self) -> bool:
+        """Test promo code management"""
+        print("\n🎫 Testing Promo Code Management...")
+        
+        # Test get promos
+        success1, data1 = self.make_request("GET", "/admin/promos")
+        
+        if success1 and "promos" in data1:
+            self.log_test("/admin/promos", "GET", True, "Promo codes list retrieved", data1)
+        else:
+            self.log_test("/admin/promos", "GET", False, "Failed to get promo codes", data1)
+            return False
+        
+        # Test create promo
+        success2, data2 = self.make_request("POST", "/admin/promo/create?code=TEST20&discount_percent=20&max_uses=100")
+        
+        if success2 and data2.get("success"):
+            self.log_test("/admin/promo/create", "POST", True, "Promo code created successfully", data2)
+            
+            # Test toggle promo
+            success3, data3 = self.make_request("POST", "/admin/promo/TEST20/toggle")
+            
+            if success3 and data3.get("success"):
+                self.log_test("/admin/promo/TEST20/toggle", "POST", True, "Promo code toggled successfully", data3)
+                return True
+            else:
+                self.log_test("/admin/promo/TEST20/toggle", "POST", False, "Failed to toggle promo code", data3)
+                return False
+        else:
+            self.log_test("/admin/promo/create", "POST", False, "Failed to create promo code", data2)
+            return False
+    
+    def test_sos_alerts(self) -> bool:
+        """Test SOS alerts endpoint"""
+        print("\n🚨 Testing SOS Alerts...")
+        
+        success, data = self.make_request("GET", "/admin/sos-alerts")
+        
+        if success and "alerts" in data:
+            self.log_test("/admin/sos-alerts", "GET", True, "SOS alerts retrieved", data)
+            return True
+        else:
+            self.log_test("/admin/sos-alerts", "GET", False, "Failed to get SOS alerts", data)
+            return False
+    
+    def test_activity_log(self) -> bool:
+        """Test activity log endpoint"""
+        print("\n📋 Testing Activity Log...")
+        
+        success, data = self.make_request("GET", "/admin/activity-log")
+        
+        if success and "activities" in data:
+            self.log_test("/admin/activity-log", "GET", True, "Activity log retrieved", data)
+            return True
+        else:
+            self.log_test("/admin/activity-log", "GET", False, "Failed to get activity log", data)
+            return False
+    
+    def run_all_tests(self) -> Dict[str, Any]:
+        """Run all admin API tests"""
+        print("🚀 Starting NEXRYDE Admin API Testing Suite...")
+        print(f"🌐 Testing against: {self.base_url}")
+        print(f"👤 Admin credentials: {ADMIN_CREDENTIALS['email']}")
+        
+        test_functions = [
+            ("Admin Login", self.test_admin_login),
+            ("Dashboard Overview", self.test_admin_overview),
+            ("Riders List", self.test_admin_riders),
+            ("Drivers List", self.test_admin_drivers),
+            ("Trips List", self.test_admin_trips),
+            ("Payments List", self.test_admin_payments),
+            ("Subscription Actions", self.test_subscription_actions),
+            ("User Blocking", self.test_user_blocking),
+            ("Promo Codes", self.test_promo_codes),
+            ("SOS Alerts", self.test_sos_alerts),
+            ("Activity Log", self.test_activity_log),
+        ]
+        
+        passed = 0
+        failed = 0
+        
+        for test_name, test_func in test_functions:
+            try:
+                if test_func():
+                    passed += 1
+                else:
+                    failed += 1
+            except Exception as e:
+                print(f"❌ FAIL {test_name} - Exception: {str(e)}")
+                self.log_test(test_name, "TEST", False, f"Exception: {str(e)}")
+                failed += 1
+        
+        # Summary
+        total = passed + failed
+        success_rate = (passed / total * 100) if total > 0 else 0
+        
+        print(f"\n{'='*60}")
+        print(f"🏁 NEXRYDE ADMIN API TESTING COMPLETE")
+        print(f"{'='*60}")
+        print(f"✅ Passed: {passed}/{total}")
+        print(f"❌ Failed: {failed}/{total}")
         print(f"📊 Success Rate: {success_rate:.1f}%")
         
-        if self.failed > 0:
-            print(f"\n❌ FAILED TESTS ({self.failed}):")
-            print("-" * 30)
+        if failed > 0:
+            print(f"\n❌ FAILED TESTS:")
             for result in self.test_results:
-                if "❌ FAIL" in result["status"]:
-                    print(f"• {result['test']}")
-                    if result["details"]:
-                        print(f"  └─ {result['details']}")
+                if not result["success"]:
+                    print(f"   • {result['method']} {result['endpoint']} - {result['details']}")
         
-        print(f"\n✅ WORKING TESTS ({self.passed}):")
-        print("-" * 30)
-        for result in self.test_results:
-            if "✅ PASS" in result["status"]:
-                print(f"• {result['test']}")
-        
-        return success_rate, self.passed, self.failed
+        return {
+            "total_tests": total,
+            "passed": passed,
+            "failed": failed,
+            "success_rate": success_rate,
+            "test_results": self.test_results
+        }
 
 def main():
-    """Main test execution"""
-    print("🚀 NEXRYDE Backend API Comprehensive Testing")
-    print(f"🌐 Backend URL: {BACKEND_URL}")
-    print(f"📅 Test Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    """Main function to run the tests"""
+    tester = AdminAPITester()
+    results = tester.run_all_tests()
     
-    tester = NEXRYDEAPITester()
-    tester.run_comprehensive_tests()
-    success_rate, passed, failed = tester.print_summary()
-    
-    # Exit with appropriate code
-    if failed == 0:
-        print("\n🎉 All tests passed!")
-        sys.exit(0)
-    else:
-        print(f"\n⚠️  {failed} test(s) failed. Check details above.")
+    # Exit with error code if tests failed
+    if results["failed"] > 0:
         sys.exit(1)
+    else:
+        print(f"\n🎉 All admin API tests passed successfully!")
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
