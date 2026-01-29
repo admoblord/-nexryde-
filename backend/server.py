@@ -1749,8 +1749,9 @@ async def ai_verify_driver_documents(verification_id: str, user_id: str, persona
             try:
                 chat = LlmChat(
                     api_key=EMERGENT_LLM_KEY,
-                    model="gpt-4o"
-                )
+                    session_id=f"ai-verifier-{user_id}",
+                    system_message="You are an AI Document Verification Agent for NEXRYDE ride-hailing platform."
+                ).with_model("openai", "gpt-4o")
                 
                 # Prepare verification prompt
                 verification_prompt = f"""
