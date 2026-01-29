@@ -21,21 +21,26 @@ import { useAppStore } from '@/src/store/appStore';
 const { width } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// BRIGHTER, BOLDER COLORS
 const COLORS = {
-  background: '#F8FAFC',
+  background: '#FFFFFF',
   card: '#FFFFFF',
-  primary: '#0F172A',
-  green: '#22C55E',
-  greenLight: '#4ADE80',
-  blue: '#3B82F6',
-  purple: '#8B5CF6',
-  orange: '#F59E0B',
-  red: '#EF4444',
-  cyan: '#06B6D4',
-  textPrimary: '#0F172A',
-  textSecondary: '#475569',
-  textMuted: '#94A3B8',
-  border: '#E2E8F0',
+  primary: '#000000',
+  green: '#00D26A',
+  greenLight: '#00FF85',
+  greenBright: '#00FF7F',
+  blue: '#0066FF',
+  blueBright: '#00A3FF',
+  purple: '#8B00FF',
+  purpleBright: '#A855F7',
+  orange: '#FF6B00',
+  orangeBright: '#FF9500',
+  red: '#FF0000',
+  cyan: '#00D4FF',
+  textPrimary: '#000000',
+  textSecondary: '#333333',
+  textMuted: '#666666',
+  border: '#E0E0E0',
 };
 
 export default function ProfileScreen() {
@@ -46,45 +51,61 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [phone, setPhone] = useState(user?.phone || '');
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(30)).current;
-  const scaleAnim = useRef(new Animated.Value(0.9)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const glowAnim = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
     // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
         toValue: 1,
-        duration: 600,
+        duration: 500,
         useNativeDriver: true,
       }),
-      Animated.timing(slideAnim, {
+      Animated.spring(slideAnim, {
         toValue: 0,
-        duration: 600,
+        friction: 6,
         useNativeDriver: true,
       }),
       Animated.spring(scaleAnim, {
         toValue: 1,
-        friction: 8,
+        friction: 5,
         useNativeDriver: true,
       }),
     ]).start();
 
-    // Continuous pulse for avatar glow
+    // Continuous glow animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: 1,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: 0.5,
+          duration: 1200,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+
+    // Pulse animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnim, {
-          toValue: 1.1,
-          duration: 1500,
+          toValue: 1.08,
+          duration: 1000,
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 1500,
+          duration: 1000,
           useNativeDriver: true,
         }),
       ])
@@ -100,8 +121,7 @@ export default function ProfileScreen() {
     });
 
     if (!result.canceled) {
-      // Handle image upload
-      Alert.alert('Success', 'Profile photo updated!');
+      Alert.alert('✅ Success', 'Profile photo updated!');
     }
   };
 
@@ -119,7 +139,7 @@ export default function ProfileScreen() {
       if (res.ok) {
         setUser({ ...user, name, email });
         setIsEditing(false);
-        Alert.alert('Success', 'Profile updated successfully!');
+        Alert.alert('✅ Success', 'Profile updated successfully!');
       }
     } catch (e) {
       Alert.alert('Error', 'Failed to update profile');
@@ -128,30 +148,28 @@ export default function ProfileScreen() {
   };
 
   const stats = [
-    { label: 'Trips', value: '47', icon: 'car', color: COLORS.green },
-    { label: 'Rating', value: '4.9', icon: 'star', color: COLORS.orange },
-    { label: 'Rewards', value: '₦2.5k', icon: 'gift', color: COLORS.purple },
+    { label: 'TRIPS', value: '47', icon: 'car', color: COLORS.green },
+    { label: 'RATING', value: '4.9', icon: 'star', color: COLORS.orange },
+    { label: 'REWARDS', value: '₦2.5k', icon: 'gift', color: COLORS.purple },
   ];
 
   return (
     <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        {/* Animated Header Background */}
-        <Animated.View style={[styles.headerBg, { transform: [{ scale: pulseAnim }] }]}>
-          <LinearGradient
-            colors={[COLORS.green, COLORS.blue, COLORS.purple]}
-            style={styles.headerGradient}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-          />
-        </Animated.View>
+      {/* BRIGHT Gradient Background */}
+      <LinearGradient
+        colors={[COLORS.greenBright, COLORS.green, COLORS.blueBright, COLORS.blue]}
+        style={styles.headerBg}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+      />
 
+      <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#FFFFFF" />
+            <Ionicons name="arrow-back" size={26} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Profile</Text>
+          <Text style={styles.headerTitle}>MY PROFILE</Text>
           <TouchableOpacity 
             style={styles.editButton}
             onPress={() => isEditing ? saveProfile() : setIsEditing(true)}
@@ -159,13 +177,13 @@ export default function ProfileScreen() {
             {loading ? (
               <ActivityIndicator size="small" color="#FFFFFF" />
             ) : (
-              <Ionicons name={isEditing ? "checkmark" : "create-outline"} size={24} color="#FFFFFF" />
+              <Ionicons name={isEditing ? "checkmark" : "create"} size={26} color="#FFFFFF" />
             )}
           </TouchableOpacity>
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Avatar Section with Animation */}
+          {/* Avatar Section - BIGGER & BOLDER */}
           <Animated.View style={[
             styles.avatarSection,
             {
@@ -174,36 +192,57 @@ export default function ProfileScreen() {
             }
           ]}>
             <TouchableOpacity style={styles.avatarContainer} onPress={pickImage}>
-              <Animated.View style={[styles.avatarGlow, { transform: [{ scale: pulseAnim }] }]} />
+              {/* Animated Glow Ring */}
+              <Animated.View style={[
+                styles.avatarGlowOuter,
+                { opacity: glowAnim, transform: [{ scale: pulseAnim }] }
+              ]} />
+              <Animated.View style={[
+                styles.avatarGlow,
+                { transform: [{ scale: pulseAnim }] }
+              ]} />
+              
               <LinearGradient
-                colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
+                colors={[COLORS.greenBright, COLORS.green, COLORS.blue]}
                 style={styles.avatar}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <Text style={styles.avatarText}>{user?.name?.charAt(0) || 'U'}</Text>
+                <Text style={styles.avatarText}>{user?.name?.charAt(0)?.toUpperCase() || 'U'}</Text>
               </LinearGradient>
+              
               <View style={styles.cameraButton}>
-                <Ionicons name="camera" size={16} color="#FFFFFF" />
+                <LinearGradient
+                  colors={[COLORS.orange, COLORS.orangeBright]}
+                  style={styles.cameraGradient}
+                >
+                  <Ionicons name="camera" size={18} color="#FFFFFF" />
+                </LinearGradient>
               </View>
             </TouchableOpacity>
             
-            <Text style={styles.userName}>{user?.name || 'User'}</Text>
+            <Text style={styles.userName}>{user?.name?.toUpperCase() || 'USER'}</Text>
+            
             <View style={styles.memberBadge}>
-              <Ionicons name="shield-checkmark" size={14} color={COLORS.green} />
-              <Text style={styles.memberText}>Verified Member</Text>
+              <LinearGradient
+                colors={[COLORS.green, COLORS.greenBright]}
+                style={styles.memberGradient}
+              >
+                <Ionicons name="shield-checkmark" size={16} color="#FFFFFF" />
+                <Text style={styles.memberText}>VERIFIED MEMBER</Text>
+              </LinearGradient>
             </View>
           </Animated.View>
 
-          {/* Stats Row with Animation */}
+          {/* Stats Row - BOLDER */}
           <Animated.View style={[
             styles.statsRow,
             { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
           ]}>
             {stats.map((stat, index) => (
               <View key={stat.label} style={styles.statItem}>
-                <View style={[styles.statIcon, { backgroundColor: stat.color + '20' }]}>
-                  <Ionicons name={stat.icon as any} size={22} color={stat.color} />
+                <View style={[styles.statIcon, { backgroundColor: stat.color }]}>
+                  <Ionicons name={stat.icon as any} size={26} color="#FFFFFF" />
                 </View>
                 <Text style={styles.statValue}>{stat.value}</Text>
                 <Text style={styles.statLabel}>{stat.label}</Text>
@@ -211,25 +250,26 @@ export default function ProfileScreen() {
             ))}
           </Animated.View>
 
-          {/* Profile Info Card */}
+          {/* Profile Info Card - SHARPER */}
           <Animated.View style={[
             styles.infoCard,
             { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
           ]}>
-            <Text style={styles.cardTitle}>Personal Information</Text>
+            <Text style={styles.cardTitle}>PERSONAL INFORMATION</Text>
             
             <View style={styles.infoRow}>
-              <View style={[styles.infoIcon, { backgroundColor: COLORS.blue + '15' }]}>
-                <Ionicons name="person" size={20} color={COLORS.blue} />
+              <View style={[styles.infoIcon, { backgroundColor: COLORS.blue }]}>
+                <Ionicons name="person" size={22} color="#FFFFFF" />
               </View>
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Full Name</Text>
+                <Text style={styles.infoLabel}>FULL NAME</Text>
                 {isEditing ? (
                   <TextInput
                     style={styles.infoInput}
                     value={name}
                     onChangeText={setName}
                     placeholder="Enter your name"
+                    placeholderTextColor="#999"
                   />
                 ) : (
                   <Text style={styles.infoValue}>{user?.name || 'Not set'}</Text>
@@ -240,32 +280,33 @@ export default function ProfileScreen() {
             <View style={styles.infoDivider} />
 
             <View style={styles.infoRow}>
-              <View style={[styles.infoIcon, { backgroundColor: COLORS.green + '15' }]}>
-                <Ionicons name="call" size={20} color={COLORS.green} />
+              <View style={[styles.infoIcon, { backgroundColor: COLORS.green }]}>
+                <Ionicons name="call" size={22} color="#FFFFFF" />
               </View>
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Phone Number</Text>
+                <Text style={styles.infoLabel}>PHONE NUMBER</Text>
                 <Text style={styles.infoValue}>{user?.phone || 'Not set'}</Text>
               </View>
               <View style={styles.verifiedBadge}>
-                <Ionicons name="checkmark-circle" size={18} color={COLORS.green} />
+                <Ionicons name="checkmark-circle" size={24} color={COLORS.green} />
               </View>
             </View>
 
             <View style={styles.infoDivider} />
 
             <View style={styles.infoRow}>
-              <View style={[styles.infoIcon, { backgroundColor: COLORS.purple + '15' }]}>
-                <Ionicons name="mail" size={20} color={COLORS.purple} />
+              <View style={[styles.infoIcon, { backgroundColor: COLORS.purple }]}>
+                <Ionicons name="mail" size={22} color="#FFFFFF" />
               </View>
               <View style={styles.infoContent}>
-                <Text style={styles.infoLabel}>Email Address</Text>
+                <Text style={styles.infoLabel}>EMAIL ADDRESS</Text>
                 {isEditing ? (
                   <TextInput
                     style={styles.infoInput}
                     value={email}
                     onChangeText={setEmail}
                     placeholder="Enter your email"
+                    placeholderTextColor="#999"
                     keyboardType="email-address"
                   />
                 ) : (
@@ -275,55 +316,61 @@ export default function ProfileScreen() {
             </View>
           </Animated.View>
 
-          {/* Quick Actions */}
+          {/* Quick Actions - BRIGHTER */}
           <View style={styles.actionsSection}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <Text style={styles.sectionTitle}>QUICK ACTIONS</Text>
             
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/wallet')}>
               <LinearGradient
-                colors={[COLORS.orange + '15', COLORS.orange + '08']}
+                colors={[COLORS.orange, COLORS.orangeBright]}
                 style={styles.actionGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
               >
-                <View style={[styles.actionIcon, { backgroundColor: COLORS.orange }]}>
-                  <Ionicons name="gift" size={22} color="#FFFFFF" />
+                <View style={styles.actionIconCircle}>
+                  <Ionicons name="gift" size={28} color="#FFFFFF" />
                 </View>
                 <View style={styles.actionContent}>
-                  <Text style={styles.actionTitle}>Rewards</Text>
+                  <Text style={styles.actionTitle}>REWARDS</Text>
                   <Text style={styles.actionDesc}>View your rewards balance</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                <Ionicons name="chevron-forward" size={28} color="#FFFFFF" />
               </LinearGradient>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/safety')}>
               <LinearGradient
-                colors={[COLORS.red + '15', COLORS.red + '08']}
+                colors={[COLORS.red, '#FF4444']}
                 style={styles.actionGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
               >
-                <View style={[styles.actionIcon, { backgroundColor: COLORS.red }]}>
-                  <Ionicons name="shield" size={22} color="#FFFFFF" />
+                <View style={styles.actionIconCircle}>
+                  <Ionicons name="shield" size={28} color="#FFFFFF" />
                 </View>
                 <View style={styles.actionContent}>
-                  <Text style={styles.actionTitle}>Safety Center</Text>
+                  <Text style={styles.actionTitle}>SAFETY CENTER</Text>
                   <Text style={styles.actionDesc}>Emergency contacts & SOS</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                <Ionicons name="chevron-forward" size={28} color="#FFFFFF" />
               </LinearGradient>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/ride-history')}>
               <LinearGradient
-                colors={[COLORS.cyan + '15', COLORS.cyan + '08']}
+                colors={[COLORS.cyan, COLORS.blue]}
                 style={styles.actionGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
               >
-                <View style={[styles.actionIcon, { backgroundColor: COLORS.cyan }]}>
-                  <Ionicons name="time" size={22} color="#FFFFFF" />
+                <View style={styles.actionIconCircle}>
+                  <Ionicons name="time" size={28} color="#FFFFFF" />
                 </View>
                 <View style={styles.actionContent}>
-                  <Text style={styles.actionTitle}>Ride History</Text>
+                  <Text style={styles.actionTitle}>RIDE HISTORY</Text>
                   <Text style={styles.actionDesc}>View all your past trips</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+                <Ionicons name="chevron-forward" size={28} color="#FFFFFF" />
               </LinearGradient>
             </TouchableOpacity>
           </View>
@@ -338,24 +385,17 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: '#F5F5F5',
   },
   safeArea: {
     flex: 1,
   },
   headerBg: {
     position: 'absolute',
-    top: -50,
-    left: -50,
-    right: -50,
-    height: 280,
-    borderBottomLeftRadius: 100,
-    borderBottomRightRadius: 100,
-    overflow: 'hidden',
-  },
-  headerGradient: {
-    flex: 1,
-    opacity: 0.9,
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 320,
   },
   header: {
     flexDirection: 'row',
@@ -365,23 +405,24 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
     color: '#FFFFFF',
+    letterSpacing: 2,
   },
   editButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -390,131 +431,150 @@ const styles = StyleSheet.create({
   },
   avatarSection: {
     alignItems: 'center',
-    marginTop: 20,
+    marginTop: 10,
     marginBottom: 24,
   },
   avatarContainer: {
     position: 'relative',
     marginBottom: 16,
   },
+  avatarGlowOuter: {
+    position: 'absolute',
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: '#FFFFFF',
+    top: -10,
+    left: -10,
+  },
   avatarGlow: {
     position: 'absolute',
-    width: 130,
-    height: 130,
-    borderRadius: 65,
-    backgroundColor: COLORS.green,
-    opacity: 0.3,
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    backgroundColor: 'rgba(255,255,255,0.5)',
     top: -5,
     left: -5,
   },
   avatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
+    width: 140,
+    height: 140,
+    borderRadius: 70,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 4,
+    borderWidth: 5,
     borderColor: '#FFFFFF',
   },
   avatarText: {
-    fontSize: 48,
-    fontWeight: '800',
+    fontSize: 64,
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   cameraButton: {
     position: 'absolute',
-    bottom: 0,
-    right: 0,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    bottom: 5,
+    right: 5,
+    borderRadius: 22,
+    overflow: 'hidden',
     borderWidth: 3,
     borderColor: '#FFFFFF',
   },
+  cameraGradient: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   userName: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginBottom: 8,
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 2,
+    marginBottom: 12,
+    textShadowColor: 'rgba(0,0,0,0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   memberBadge: {
+    borderRadius: 25,
+    overflow: 'hidden',
+  },
+  memberGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.green + '15',
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderRadius: 20,
-    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    gap: 8,
   },
   memberText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.green,
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    letterSpacing: 1,
   },
   statsRow: {
     flexDirection: 'row',
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
   },
   statItem: {
     flex: 1,
     alignItems: 'center',
   },
   statIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   statValue: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: COLORS.primary,
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#000000',
     marginBottom: 4,
   },
   statLabel: {
     fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textMuted,
+    fontWeight: '800',
+    color: '#666666',
+    letterSpacing: 1,
   },
   infoCard: {
-    backgroundColor: COLORS.card,
-    borderRadius: 20,
-    padding: 20,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 24,
+    padding: 24,
     marginBottom: 20,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 10,
   },
   cardTitle: {
     fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginBottom: 20,
+    fontWeight: '900',
+    color: '#000000',
+    letterSpacing: 1,
+    marginBottom: 24,
   },
   infoRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 16,
   },
   infoIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -522,29 +582,30 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#999999',
+    letterSpacing: 1,
     marginBottom: 4,
   },
   infoValue: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.primary,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#000000',
   },
   infoInput: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.primary,
-    borderBottomWidth: 1,
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#000000',
+    borderBottomWidth: 2,
     borderBottomColor: COLORS.blue,
     paddingVertical: 4,
   },
   infoDivider: {
     height: 1,
-    backgroundColor: COLORS.border,
-    marginVertical: 14,
-    marginLeft: 58,
+    backgroundColor: '#EEEEEE',
+    marginVertical: 16,
+    marginLeft: 68,
   },
   verifiedBadge: {
     marginLeft: 'auto',
@@ -554,28 +615,32 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '800',
-    color: COLORS.primary,
-    marginBottom: 14,
+    fontWeight: '900',
+    color: '#000000',
+    letterSpacing: 1,
+    marginBottom: 16,
   },
   actionCard: {
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
-    marginBottom: 10,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 6,
   },
   actionGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    gap: 14,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+    padding: 18,
+    gap: 16,
   },
-  actionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
+  actionIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -583,13 +648,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   actionTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: COLORS.primary,
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   actionDesc: {
-    fontSize: 12,
-    color: COLORS.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
     marginTop: 2,
   },
 });
