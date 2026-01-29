@@ -5667,11 +5667,20 @@ async def seed_promo_codes():
 # Include router
 app.include_router(api_router)
 
-# Serve admin panel at /admin
+# Serve admin panel at /admin (local access)
 @app.get("/admin")
 @app.get("/admin/")
 async def serve_admin():
     """Serve admin panel"""
+    admin_file = ADMIN_DIR / "index.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Admin panel not found")
+
+# Also serve admin panel via /api/admin for external access through ingress
+@api_router.get("/admin-panel")
+async def serve_admin_via_api():
+    """Serve admin panel via API route"""
     admin_file = ADMIN_DIR / "index.html"
     if admin_file.exists():
         return FileResponse(admin_file, media_type="text/html")
