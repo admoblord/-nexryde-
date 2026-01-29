@@ -10,7 +10,7 @@ import sys
 from datetime import datetime, timedelta
 
 # Backend URL from frontend/.env
-BACKEND_URL = "https://nexryde-map.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-admin.preview.emergentagent.com/api"
 
 class NEXRYDEAPITester:
     def __init__(self):
