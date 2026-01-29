@@ -666,15 +666,18 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.1"
-  test_sequence: 3
+  version: "2.2"
+  test_sequence: 4
   run_ui: false
 
 test_plan:
   current_focus:
-    - "Map and Location Features - Booking Screen"
+    - "Pressable Click Handler Issues - Booking Screen"
+    - "Splash Screen Navigation Fix"
   stuck_tasks:
     - "Rider Booking Screen"
+    - "Splash Screen"
+    - "Driver Subscription Screen Loading"
   test_all: false
   test_priority: "high_first"
 
