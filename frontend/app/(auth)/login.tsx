@@ -463,29 +463,6 @@ export default function LoginScreen() {
                 <Text style={styles.linkText}>Terms of Service</Text> and{' '}
                 <Text style={styles.linkText}>Privacy Policy</Text>
               </Text>
-
-              {/* Dev Login Bypass - for testing */}
-              <TouchableOpacity
-                style={styles.devLoginButton}
-                onPress={async () => {
-                  // Create a test user and login directly
-                  const testUser = {
-                    id: 'dev-user-' + Date.now(),
-                    phone: '+2348108899392',
-                    name: 'Test User',
-                    email: 'test@nexryde.com',
-                    role: 'rider',
-                    is_verified: true,
-                    created_at: new Date().toISOString(),
-                  };
-                  setUser(testUser);
-                  setIsAuthenticated(true);
-                  router.replace('/(tabs)/home');
-                }}
-              >
-                <Ionicons name="flash" size={16} color={COLORS.gold} />
-                <Text style={styles.devLoginText}>Quick Dev Login (Bypass OTP)</Text>
-              </TouchableOpacity>
             </View>
 
             {/* Features */}
