@@ -493,14 +493,6 @@ export default function LoginScreen() {
                 />
               </View>
 
-              {/* Error Message Display */}
-              {errorMessage && (
-                <View style={styles.errorContainer}>
-                  <Ionicons name="warning" size={18} color="#FF6B6B" style={{ marginRight: 8 }} />
-                  <Text style={styles.errorText}>{errorMessage}</Text>
-                </View>
-              )}
-
               <TouchableOpacity
                 style={[
                   styles.continueButton,
