@@ -1101,8 +1101,8 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   
@@ -1118,8 +1118,8 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   verifyingText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#F59E0B',
   },
   
@@ -1145,8 +1145,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   modalContent: {
@@ -1154,9 +1154,9 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalSectionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94A3B8',
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#CBD5E1',
     marginBottom: 12,
     marginTop: 8,
   },
@@ -1182,8 +1182,8 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   uploadOptionText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#FFFFFF',
     marginTop: 10,
   },
