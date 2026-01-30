@@ -77,16 +77,13 @@ export default function LoginScreen() {
     
     const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
     const fullPhone = `+234${phone}`;
-    const endpoint = `${BASE_URL}/auth/request-otp`;
     
-    // Log request details
-    console.log('=== OTP Request ===');
-    console.log('BASE_URL:', BASE_URL);
-    console.log('Endpoint:', endpoint);
-    console.log('Phone:', fullPhone);
+    // Logs right before fetch
+    console.log("BASE_URL:", BASE_URL);
+    console.log("OTP URL:", `${BASE_URL}/auth/request-otp`);
     
     try {
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${BASE_URL}/auth/request-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone }),
