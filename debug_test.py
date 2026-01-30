@@ -2,7 +2,7 @@
 import requests
 
 def test_user_blocking():
-    base_url = "https://nexryde-test.preview.emergentagent.com/api"
+    base_url = "https://docs-hub-7.preview.emergentagent.com/api"
     test_user_id = "test-user-123"
     
     # Test unblock user

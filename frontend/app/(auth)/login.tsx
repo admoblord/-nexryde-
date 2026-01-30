@@ -47,7 +47,7 @@ const COLORS = {
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
 // Backend URL - HARDCODED for reliability
-const BACKEND_URL = 'https://nexryde-test.preview.emergentagent.com';
+const BACKEND_URL = 'https://docs-hub-7.preview.emergentagent.com';
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
