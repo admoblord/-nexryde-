@@ -175,7 +175,7 @@ export default function LoginScreen() {
         return;
       }
       
-      addLog("SUCCESS: WhatsApp OTP sent");
+      console.log('WhatsApp: success, navigating');
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -185,15 +185,15 @@ export default function LoginScreen() {
       });
       
     } catch (e: any) {
-      addLog(`ERROR: ${String(e)}`);
-      setErrorMessage('Network error. Please try SMS instead.');
+      console.log('WhatsApp: error', String(e));
+      Alert.alert('Network error', 'Could not reach server. Please try SMS instead.');
     } finally {
       setWhatsappLoading(false);
     }
   };
 
   // Get backend URL for Google auth
-  const getBackendUrl = () => BACKEND_URL;
+  const getBackendUrl = () => process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
 
   // Extract session_id from URL (supports both hash and query params)
   const extractSessionId = (url: string): string | null => {
