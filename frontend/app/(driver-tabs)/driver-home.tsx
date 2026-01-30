@@ -18,19 +18,19 @@ const { width } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
-  background: '#F8FAFC',
+  background: '#FFFFFF',
   card: '#FFFFFF',
-  primary: '#0F172A',
-  green: '#22C55E',
-  greenLight: '#4ADE80',
-  blue: '#3B82F6',
-  purple: '#8B5CF6',
-  orange: '#F59E0B',
-  red: '#EF4444',
-  textPrimary: '#0F172A',
-  textSecondary: '#475569',
-  textMuted: '#94A3B8',
-  border: '#E2E8F0',
+  primary: '#000000',
+  green: '#00C853',
+  greenLight: '#69F0AE',
+  blue: '#2979FF',
+  purple: '#7C4DFF',
+  orange: '#FF9100',
+  red: '#FF1744',
+  textPrimary: '#000000',
+  textSecondary: '#212121',
+  textMuted: '#424242',
+  border: '#E0E0E0',
 };
 
 export default function DriverHomeScreen() {
