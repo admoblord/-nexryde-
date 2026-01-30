@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Backend URL - HARDCODED for reliability
-const API_URL = 'https://ride-location-fix.preview.emergentagent.com';
+const API_URL = 'https://login-bugfix-3.preview.emergentagent.com';
 
 // Export for other components to use
 export const BACKEND_URL = API_URL;

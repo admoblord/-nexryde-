@@ -13,7 +13,7 @@ import uuid
 import sys
 
 # Backend URL from frontend .env
-BACKEND_URL = "https://ride-location-fix.preview.emergentagent.com/api"
+BACKEND_URL = "https://login-bugfix-3.preview.emergentagent.com/api"
 WS_URL = "wss://nexryde-admin.preview.emergentagent.com/ws"
 
 class WebSocketFeaturesTester:

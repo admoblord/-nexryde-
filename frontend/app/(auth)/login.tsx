@@ -46,7 +46,7 @@ const COLORS = {
 // Backend URL - includes /api
 const getBackendUrl = () => {
   const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 
-                 'https://ride-location-fix.preview.emergentagent.com/api';
+                 'https://login-bugfix-3.preview.emergentagent.com/api';
   return envUrl;
 };
 
@@ -79,7 +79,7 @@ export default function LoginScreen() {
 
     try {
       // HARDCODED URL - DO NOT USE process.env
-      const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
+      const BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api";
       const fullPhone = `+234${phone}`;
       const endpoint = `${BASE_URL}/auth/request-otp`;
       
@@ -133,7 +133,7 @@ export default function LoginScreen() {
     storePhone(phone);
     
     // HARDCODED URL - DO NOT USE process.env
-    const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
+    const BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api";
     const fullPhone = `+234${phone}`;
     
     console.log("WhatsApp: BASE_URL", BASE_URL);
