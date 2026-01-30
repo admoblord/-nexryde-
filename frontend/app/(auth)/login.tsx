@@ -46,26 +46,8 @@ const COLORS = {
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
-// Backend URL - use multiple fallbacks for reliability
-const getBackendUrl = () => {
-  // Try process.env first (works in development)
-  if (process.env.EXPO_PUBLIC_BACKEND_URL) {
-    return process.env.EXPO_PUBLIC_BACKEND_URL;
-  }
-  // Try expo-constants (works in production builds)
-  const expoConfig = Constants.expoConfig as any;
-  if (expoConfig?.extra?.EXPO_PUBLIC_BACKEND_URL) {
-    return expoConfig.extra.EXPO_PUBLIC_BACKEND_URL;
-  }
-  // Fallback for web - use current origin
-  if (typeof window !== 'undefined' && window.location) {
-    return window.location.origin;
-  }
-  // Last resort - hardcoded production URL
-  return 'https://nexryde-test.preview.emergentagent.com';
-};
-
-const BACKEND_URL = getBackendUrl();
+// Backend URL - HARDCODED for reliability
+const BACKEND_URL = 'https://nexryde-test.preview.emergentagent.com';
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
