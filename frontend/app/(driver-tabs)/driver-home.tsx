@@ -28,8 +28,8 @@ const COLORS = {
   orange: '#FF9100',
   red: '#FF1744',
   textPrimary: '#000000',
-  textSecondary: '#212121',
-  textMuted: '#424242',
+  textSecondary: '#1A1A1A',  // Darker for better readability
+  textMuted: '#333333',      // Darker for better readability
   border: '#E0E0E0',
 };
 
@@ -336,12 +336,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   greeting: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
   },
   userName: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: COLORS.textPrimary,
     letterSpacing: -0.5,
@@ -394,8 +394,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.green,
   },
   modeText: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
     color: COLORS.green,
     letterSpacing: 1.5,
   },
@@ -451,15 +451,15 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.3)',
   },
   statusTitle: {
-    fontSize: 22,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: '900',
     color: '#FFFFFF',
     marginBottom: 4,
   },
   statusDesc: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.8)',
+    fontSize: 15,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
   },
   statusArrow: {
     width: 48,
@@ -511,9 +511,10 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   earningsTitle: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
     color: COLORS.textPrimary,
+    letterSpacing: -0.3,
   },
   viewAllBtn: {
     flexDirection: 'row',
@@ -542,15 +543,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   earningValue: {
-    fontSize: 24,
+    fontSize: 26,
     fontWeight: '900',
     color: COLORS.textPrimary,
     marginBottom: 4,
   },
   earningLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
   },
   earningDivider: {
     width: 1,
@@ -584,23 +585,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   subscriptionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '800',
     color: COLORS.textPrimary,
     marginBottom: 2,
   },
   subscriptionDesc: {
-    fontSize: 13,
-    color: COLORS.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
   },
   quickSection: {
     marginBottom: 20,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 20,
+    fontWeight: '900',
     color: COLORS.textPrimary,
     marginBottom: 16,
+    letterSpacing: -0.3,
   },
   quickGrid: {
     flexDirection: 'row',
@@ -618,9 +621,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   quickLabel: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
   },
   bannerCard: {
     borderRadius: 20,
