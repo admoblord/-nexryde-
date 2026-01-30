@@ -161,8 +161,8 @@ export default function LoginScreen() {
     setWhatsappLoading(true);
     storePhone(phone);
     
-    // Use the proper getBackendUrl() function which reads from app.json extra
-    const BASE_URL = getBackendUrl();
+    // HARDCODED PRODUCTION URL - no env vars
+    const BASE_URL = "https://nexryde-ui.emergent.host/api";
     const fullPhone = `+234${phone}`;
     
     console.log("WhatsApp: BASE_URL", BASE_URL);
