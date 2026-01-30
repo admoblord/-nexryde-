@@ -684,6 +684,39 @@ export default function LoginScreen() {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+
+        {/* Debug Panel - Only visible when DEBUG_MODE is true */}
+        {DEBUG_MODE && showDebugPanel && (
+          <View style={styles.debugPanel}>
+            <View style={styles.debugHeader}>
+              <Text style={styles.debugTitle}>DEBUG LOGS</Text>
+              <TouchableOpacity onPress={() => setDebugLogs([])}>
+                <Text style={styles.debugClear}>CLEAR</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowDebugPanel(false)}>
+                <Text style={styles.debugClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={styles.debugScroll}>
+              {debugLogs.map((log, index) => (
+                <Text key={index} style={styles.debugLog}>{log}</Text>
+              ))}
+              {debugLogs.length === 0 && (
+                <Text style={styles.debugLog}>No logs yet. Tap "Continue with SMS" to test.</Text>
+              )}
+            </ScrollView>
+          </View>
+        )}
+        
+        {/* Debug Panel Toggle Button */}
+        {DEBUG_MODE && !showDebugPanel && (
+          <TouchableOpacity 
+            style={styles.debugToggle}
+            onPress={() => setShowDebugPanel(true)}
+          >
+            <Text style={styles.debugToggleText}>DEBUG</Text>
+          </TouchableOpacity>
+        )}
       </SafeAreaView>
     </View>
   );
