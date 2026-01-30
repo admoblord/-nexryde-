@@ -733,6 +733,10 @@ const styles = StyleSheet.create({
   stopInputActive: {
     borderColor: COLORS.accentGreen,
   },
+  stopInputPressed: {
+    opacity: 0.7,
+    backgroundColor: COLORS.lightSurface,
+  },
   stopInputText: {
     flex: 1,
     fontSize: FONT_SIZE.md,
