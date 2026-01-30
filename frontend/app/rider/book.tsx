@@ -67,11 +67,6 @@ export default function BookScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
-  
-  // Debug log for state changes
-  useEffect(() => {
-    console.log('showMapPicker state changed to:', showMapPicker);
-  }, [showMapPicker]);
 
   // Get current location on mount
   useEffect(() => {
