@@ -92,6 +92,9 @@ export default function LoginScreen() {
       console.log("OTP status:", res.status);
       console.log("OTP raw:", text);
       
+      // DEBUG ALERT - show values on device
+      Alert.alert("DEBUG", `Endpoint: ${BASE_URL}/auth/request-otp\nStatus: ${res.status}\nResponse: ${text.slice(0, 300)}`);
+      
       let data = null;
       try { data = JSON.parse(text); } catch (e) {}
       
