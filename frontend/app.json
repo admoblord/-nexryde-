@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {
-      "BACKEND_URL": "https://login-bugfix-3.preview.emergentagent.com/api"
+      "BACKEND_URL": "${EXPO_PUBLIC_BACKEND_URL}/api"
     },
     "ios": {
       "supportsTablet": true,
