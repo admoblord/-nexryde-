@@ -1182,6 +1182,88 @@ async def send_otp(request: OTPRequest):
             "provider": "mock"
         }
 
+@api_router.post("/auth/request-otp-whatsapp")
+async def send_otp_whatsapp(request: OTPRequest):
+    """Send OTP via WhatsApp using Termii"""
+    try:
+        # Normalize phone number
+        normalized_phone = request.phone.replace('+', '').replace(' ', '').replace('-', '')
+        if normalized_phone.startswith('0'):
+            normalized_phone = '234' + normalized_phone[1:]
+        elif not normalized_phone.startswith('234'):
+            normalized_phone = '234' + normalized_phone
+        
+        # Generate OTP
+        otp_code = str(random.randint(100000, 999999))
+        
+        # Store OTP
+        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+        otp_store[request.phone] = {
+            "otp": otp_code,
+            "expires": expires_at,
+            "attempts": 0
+        }
+        await store_otp_record(request.phone, otp_code, expires_at)
+        
+        # Try WhatsApp via Termii
+        if TERMII_API_KEY:
+            try:
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "to": normalized_phone,
+                    "from": TERMII_FROM_ID,
+                    "channel": "whatsapp",
+                    "type": "plain",
+                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
+                }
+                
+                logger.info(f"Sending WhatsApp OTP to {normalized_phone}")
+                
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.post(
+                        f"{TERMII_BASE_URL}/api/sms/send",
+                        json=payload
+                    )
+                    
+                    logger.info(f"WhatsApp Termii response: {response.text}")
+                    
+                    if response.status_code == 200:
+                        result = response.json()
+                        if result.get("code") == "ok":
+                            logger.info(f"WhatsApp OTP sent successfully to {normalized_phone}")
+                            return {
+                                "success": True,
+                                "message": "OTP sent successfully via WhatsApp",
+                                "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                                "provider": "whatsapp"
+                            }
+                    
+                    # WhatsApp failed - return error with details
+                    error_msg = response.text
+                    logger.error(f"WhatsApp delivery failed: {error_msg}")
+                    return {
+                        "success": False,
+                        "message": "WhatsApp not available. Please use SMS instead."
+                    }
+                    
+            except Exception as e:
+                logger.error(f"WhatsApp error: {str(e)}")
+                return {
+                    "success": False,
+                    "message": "WhatsApp service unavailable. Please use SMS instead."
+                }
+        
+        # Termii not configured
+        return {
+            "success": False,
+            "message": "WhatsApp service not configured. Please use SMS instead."
+        }
+        
+    except Exception as e:
+        logger.error(f"WhatsApp OTP error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Failed to send WhatsApp OTP")
+
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify):
     """Verify OTP with retry limiting"""
