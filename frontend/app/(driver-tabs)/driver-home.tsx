@@ -336,13 +336,13 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   greeting: {
-    fontSize: 16,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   userName: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
     color: COLORS.textPrimary,
     letterSpacing: -0.5,
   },
