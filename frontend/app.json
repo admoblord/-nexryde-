@@ -8,6 +8,9 @@
     "scheme": "nexryde",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "extra": {
+      "BACKEND_URL": "https://login-bugfix-3.preview.emergentagent.com/api"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nexryde.app",
