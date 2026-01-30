@@ -43,16 +43,12 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Backend URL - Use relative path for API calls (works with proxy)
+// Backend URL - Use the correct URL for each platform
 const getBackendUrl = () => {
-  // In development/preview, use relative path which goes through the proxy
-  if (Platform.OS === 'web') {
-    return ''; // Relative path - proxy handles routing to backend
-  }
-  // For native apps, use the environment variable or fallback
-  const envUrl = Constants.expoConfig?.extra?.backendUrl || 
-                 process.env.EXPO_PUBLIC_BACKEND_URL || 
-                 '';
+  // Always use the full URL for API calls
+  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 
+                 'https://ride-location-fix.preview.emergentagent.com';
+  console.log('Using backend URL:', envUrl);
   return envUrl;
 };
 
