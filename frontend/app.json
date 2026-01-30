@@ -9,7 +9,7 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {
-      "BACKEND_URL": "${EXPO_PUBLIC_BACKEND_URL}/api"
+      "BACKEND_URL": "https://nexryde-ui.emergent.host/api"
     },
     "ios": {
       "supportsTablet": true,

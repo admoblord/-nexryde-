@@ -58,8 +58,8 @@ const getBackendUrl = () => {
   if (envUrl) {
     return envUrl;
   }
-  // Priority 3: Hardcoded fallback (guaranteed to work)
-  return 'https://login-bugfix-3.preview.emergentagent.com/api';
+  // Priority 3: Production URL (guaranteed to work)
+  return 'https://nexryde-ui.emergent.host/api';
 };
 
 // Emergent Auth URL

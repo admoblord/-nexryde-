@@ -14,8 +14,8 @@ const getApiUrl = () => {
   if (envUrl) {
     return envUrl.replace(/\/api$/, '');
   }
-  // Priority 3: Fallback (will be updated after deployment)
-  return 'https://login-bugfix-3.preview.emergentagent.com';
+  // Priority 3: Production fallback
+  return 'https://nexryde-ui.emergent.host';
 };
 
 const API_URL = getApiUrl();
