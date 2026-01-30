@@ -1152,6 +1152,7 @@ async def send_otp(request: OTPRequest):
         
         logger.info(f"Mock OTP for {request.phone}: {otp_code}")
         return {
+            "success": True,
             "message": "OTP sent successfully (test mode)",
             "otp": otp_code,  # Only shown in mock mode for testing
             "expires_in_minutes": OTP_EXPIRY_MINUTES,
