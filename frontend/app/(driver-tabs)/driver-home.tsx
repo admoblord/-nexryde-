@@ -542,15 +542,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   earningValue: {
-    fontSize: 20,
-    fontWeight: '800',
+    fontSize: 24,
+    fontWeight: '900',
     color: COLORS.textPrimary,
     marginBottom: 4,
   },
   earningLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.textMuted,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
   },
   earningDivider: {
     width: 1,
