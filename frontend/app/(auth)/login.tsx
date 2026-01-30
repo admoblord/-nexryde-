@@ -76,7 +76,7 @@ export default function LoginScreen() {
     
     // Navigate immediately to verify screen
     // OTP will be sent in background
-    const backendUrl = 'https://ride-location-fix.preview.emergentagent.com';
+    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com';
     const fullPhone = `+234${phone}`;
     
     // Send OTP request in background (don't wait for response)
