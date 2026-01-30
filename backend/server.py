@@ -1203,7 +1203,6 @@ async def send_otp_whatsapp(request: OTPRequest):
             "expires": expires_at,
             "attempts": 0
         }
-        await store_otp_record(request.phone, otp_code, expires_at)
         
         # Try WhatsApp via Termii
         if TERMII_API_KEY:
