@@ -6279,16 +6279,6 @@ async def direct_send_otp(request: OTPRequest):
     """Direct OTP endpoint without /api prefix"""
     return await send_otp(request)
 
-@app.post("/auth/verify-otp")
-async def direct_verify_otp(request: VerifyOTPRequest):
-    """Direct verify OTP endpoint without /api prefix"""
-    return await verify_otp(request)
-
-@app.post("/auth/google/exchange")
-async def direct_google_exchange(request: GoogleAuthRequest):
-    """Direct Google auth endpoint without /api prefix"""
-    return await exchange_google_token(request)
-
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
