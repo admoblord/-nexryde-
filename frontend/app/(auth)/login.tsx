@@ -78,12 +78,13 @@ export default function LoginScreen() {
     const t = setTimeout(() => controller.abort(), 10000);
 
     try {
-      const base = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
+      // HARDCODED URL - DO NOT USE process.env
+      const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
       const fullPhone = `+234${phone}`;
-      const endpoint = `${base}/auth/request-otp`;
+      const endpoint = `${BASE_URL}/auth/request-otp`;
       
       console.log("OTP: fullPhone", fullPhone);
-      console.log("OTP: BASE_URL", base);
+      console.log("OTP: BASE_URL", BASE_URL);
       console.log("OTP: endpoint", endpoint);
 
       const res = await fetch(endpoint, {
