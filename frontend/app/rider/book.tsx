@@ -357,6 +357,7 @@ export default function BookScreen() {
                     console.log('=== Location field pressed ===');
                     openLocationPicker(stop.id);
                   }}
+                  testID={`location-input-${stop.id}`}
                 >
                   <View style={styles.locationContent}>
                     <Text 
@@ -376,6 +377,7 @@ export default function BookScreen() {
                   <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={addStop}
+                    testID="add-stop-button"
                   >
                     <Ionicons name="add" size={22} color={COLORS.lightTextPrimary} />
                   </TouchableOpacity>
