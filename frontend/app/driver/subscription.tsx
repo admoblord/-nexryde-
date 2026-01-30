@@ -759,9 +759,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '900',
     color: '#FFFFFF',
+    letterSpacing: -0.3,
   },
   helpButton: {
     width: 40,
