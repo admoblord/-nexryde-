@@ -23,6 +23,9 @@ import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 
+// DEBUG MODE - set to false for production builds
+const DEBUG_MODE = true;
+
 // Colors based on NEXRYDE logo
 const COLORS = {
   background: '#0D1420',
@@ -41,26 +44,12 @@ const COLORS = {
   gray700: '#2D3748',
   google: '#4285F4',
   googleSoft: 'rgba(66, 133, 244, 0.15)',
+  debugBg: 'rgba(0,0,0,0.9)',
+  debugText: '#00FF00',
 };
 
-// Backend URL - uses app.json extra config (works in built apps)
-const getBackendUrl = () => {
-  // Priority 1: Use expo-constants to read from app.json extra (works in APK builds)
-  const expoUrl = Constants.expoConfig?.extra?.BACKEND_URL;
-  if (expoUrl) {
-    return expoUrl;
-  }
-  // Priority 2: Use environment variable (works in development)
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
-  if (envUrl && !envUrl.endsWith('/api')) {
-    return `${envUrl}/api`;
-  }
-  if (envUrl) {
-    return envUrl;
-  }
-  // Priority 3: Production URL (guaranteed to work)
-  return 'https://nexryde-ui.emergent.host/api';
-};
+// HARDCODED PRODUCTION BACKEND URL
+const BACKEND_URL = "https://nexryde-ui.emergent.host/api";
 
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
@@ -68,69 +57,130 @@ const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
 
+// Format phone number to +234 format
+const formatPhoneNumber = (phone: string): string => {
+  // Remove all non-digits
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Handle Nigerian numbers
+  if (cleaned.startsWith('234')) {
+    return `+${cleaned}`;
+  }
+  if (cleaned.startsWith('0')) {
+    return `+234${cleaned.substring(1)}`;
+  }
+  if (cleaned.length === 10) {
+    return `+234${cleaned}`;
+  }
+  // Default: assume it's already without country code
+  return `+234${cleaned}`;
+};
+
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [debugLogs, setDebugLogs] = useState<string[]>([]);
+  const [showDebugPanel, setShowDebugPanel] = useState(DEBUG_MODE);
   const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
   
   // CRITICAL: Ref to prevent double processing of session_id
   const isProcessingSession = useRef(false);
   const processedSessionIds = useRef<Set<string>>(new Set());
 
-  // Single OTP request function with proper logging
+  // Add debug log
+  const addLog = (message: string) => {
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message}`;
+    console.log(logEntry);
+    if (DEBUG_MODE) {
+      setDebugLogs(prev => [...prev.slice(-20), logEntry]); // Keep last 20 logs
+    }
+  };
+
+  // Clear error after 5 seconds
+  useEffect(() => {
+    if (errorMessage) {
+      const timer = setTimeout(() => setErrorMessage(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [errorMessage]);
+
+  // OTP request function with 30-second timeout and debug logging
   const handleContinue = async () => {
-    console.log("OTP: pressed");
-    if (phone.length < 10) return;
+    addLog("=== OTP REQUEST STARTED ===");
+    
+    if (phone.length < 10) {
+      setErrorMessage("Please enter a valid phone number");
+      addLog("ERROR: Phone number too short");
+      return;
+    }
+    
     setLoading(true);
+    setErrorMessage(null);
     storePhone(phone);
 
+    // 30 second timeout
     const controller = new AbortController();
     const timeoutId = setTimeout(() => {
+      addLog("TIMEOUT: 30 seconds exceeded, aborting request");
       controller.abort();
-    }, 10000);
+    }, 30000);
 
-    // HARDCODED PRODUCTION URL - stable Emergent deployment
-    const BASE_URL = "https://nexryde-ui.emergent.host/api";
-    const fullPhone = `+234${phone}`;
-    const endpoint = `${BASE_URL}/auth/request-otp`;
+    const fullPhone = formatPhoneNumber(phone);
+    const endpoint = `${BACKEND_URL}/auth/request-otp`;
+    const requestBody = { phone: fullPhone };
+
+    addLog(`URL: ${endpoint}`);
+    addLog(`Method: POST`);
+    addLog(`Phone (formatted): ${fullPhone}`);
+    addLog(`Body: ${JSON.stringify(requestBody)}`);
+    addLog("Sending request...");
 
     try {
-      console.log("OTP: endpoint", endpoint);
-      console.log("OTP: fullPhone", fullPhone);
-
+      const startTime = Date.now();
+      
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: fullPhone }),
+        body: JSON.stringify(requestBody),
         signal: controller.signal,
       });
 
       clearTimeout(timeoutId);
+      const elapsed = Date.now() - startTime;
+      
+      addLog(`Response received in ${elapsed}ms`);
+      addLog(`Status: ${res.status}`);
 
-      const status = res.status;
       const text = await res.text();
-      const rawPreview = text.substring(0, 300);
-
-      console.log("OTP: status", status);
-      console.log("OTP: raw (300 chars)", rawPreview);
-
-      // Show debug alert with endpoint, status, and raw response
-      Alert.alert(
-        "Debug Info",
-        `Endpoint: ${endpoint}\n\nStatus: ${status}\n\nRaw (300 chars):\n${rawPreview}`
-      );
+      addLog(`Response body: ${text.substring(0, 200)}`);
 
       let data = null;
-      try { data = JSON.parse(text); } catch {}
-
-      if (!res.ok || !data?.success) {
-        Alert.alert("OTP failed", data?.message || text || "Unknown error");
+      try { 
+        data = JSON.parse(text); 
+        addLog(`Parsed JSON: success=${data?.success}, provider=${data?.provider}`);
+      } catch (e) {
+        addLog(`ERROR: Failed to parse JSON response`);
+        setErrorMessage("Server returned invalid response. Please try again.");
         return;
       }
 
-      console.log("OTP: success, navigating");
+      if (!res.ok) {
+        addLog(`ERROR: HTTP ${res.status} - ${data?.message || text}`);
+        setErrorMessage(data?.message || `Request failed (${res.status}). Please try again.`);
+        return;
+      }
+      
+      if (!data?.success) {
+        addLog(`ERROR: API returned success=false - ${data?.message}`);
+        setErrorMessage(data?.message || "Failed to send verification code. Please try again.");
+        return;
+      }
+
+      addLog("SUCCESS: OTP sent, navigating to verify screen");
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -140,15 +190,17 @@ export default function LoginScreen() {
       });
     } catch (e: any) {
       clearTimeout(timeoutId);
-      console.log("OTP: error", String(e));
+      addLog(`EXCEPTION: ${e.name} - ${e.message}`);
       
       if (e.name === 'AbortError') {
-        Alert.alert("Timeout hit", `Request timed out after 10 seconds.\n\nEndpoint: ${endpoint}`);
+        setErrorMessage("Request timed out. Please check your network and try again.");
+        addLog("Request was aborted due to timeout");
       } else {
-        Alert.alert("Network error", `${String(e)}\n\nEndpoint: ${endpoint}`);
+        setErrorMessage("Network error. Please check your connection and try again.");
+        addLog(`Network error details: ${String(e)}`);
       }
     } finally {
-      console.log("OTP: finally, stop loading");
+      addLog("=== OTP REQUEST COMPLETED ===");
       setLoading(false);
     }
   };
