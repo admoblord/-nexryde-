@@ -108,79 +108,54 @@ export default function LoginScreen() {
     }
   }, [errorMessage]);
 
-  // OTP request function with 30-second timeout and debug logging
+  // OTP request function with 15-second timeout
   const handleContinue = async () => {
-    addLog("=== OTP REQUEST STARTED ===");
-    
-    if (phone.length < 10) {
-      setErrorMessage("Please enter a valid phone number");
-      addLog("ERROR: Phone number too short");
-      return;
-    }
-    
+    console.log("OTP: pressed");
+    if (phone.length < 10) return;
     setLoading(true);
-    setErrorMessage(null);
     storePhone(phone);
 
-    // 30 second timeout
+    // Add timeout controller
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      addLog("TIMEOUT: 30 seconds exceeded, aborting request");
+    const t = setTimeout(() => {
       controller.abort();
-    }, 30000);
-
-    const fullPhone = formatPhoneNumber(phone);
-    const endpoint = `${BACKEND_URL}/auth/request-otp`;
-    const requestBody = { phone: fullPhone };
-
-    addLog(`URL: ${endpoint}`);
-    addLog(`Method: POST`);
-    addLog(`Phone (formatted): ${fullPhone}`);
-    addLog(`Body: ${JSON.stringify(requestBody)}`);
-    addLog("Sending request...");
+      setLoading(false);
+      Alert.alert(
+        "Connection Timeout", 
+        "Could not reach server. Please check your internet connection and try again."
+      );
+    }, 15000); // 15 second timeout
 
     try {
-      const startTime = Date.now();
+      // USE ENVIRONMENT VARIABLE
+      const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
+      const fullPhone = `+234${phone}`;
+      const endpoint = `${BASE_URL}/api/auth/request-otp`;
       
+      console.log("OTP: fullPhone", fullPhone);
+      console.log("OTP: BASE_URL", BASE_URL);
+      console.log("OTP: endpoint", endpoint);
+
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal,
+        body: JSON.stringify({ phone: fullPhone }),
+        signal: controller.signal, // Add timeout signal
       });
 
-      clearTimeout(timeoutId);
-      const elapsed = Date.now() - startTime;
-      
-      addLog(`Response received in ${elapsed}ms`);
-      addLog(`Status: ${res.status}`);
-
+      console.log("OTP: status", res.status);
       const text = await res.text();
-      addLog(`Response body: ${text.substring(0, 200)}`);
+      console.log("OTP: raw", text);
 
       let data = null;
-      try { 
-        data = JSON.parse(text); 
-        addLog(`Parsed JSON: success=${data?.success}, provider=${data?.provider}`);
-      } catch (e) {
-        addLog(`ERROR: Failed to parse JSON response`);
-        setErrorMessage("Server returned invalid response. Please try again.");
+      try { data = JSON.parse(text); } catch {}
+
+      if (!res.ok || !data?.success) {
+        Alert.alert("OTP failed", data?.message || text || "Unknown error. Please try again.");
         return;
       }
 
-      if (!res.ok) {
-        addLog(`ERROR: HTTP ${res.status} - ${data?.message || text}`);
-        setErrorMessage(data?.message || `Request failed (${res.status}). Please try again.`);
-        return;
-      }
-      
-      if (!data?.success) {
-        addLog(`ERROR: API returned success=false - ${data?.message}`);
-        setErrorMessage(data?.message || "Failed to send verification code. Please try again.");
-        return;
-      }
-
-      addLog("SUCCESS: OTP sent, navigating to verify screen");
+      console.log("OTP: success, navigating");
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -189,18 +164,17 @@ export default function LoginScreen() {
         }
       });
     } catch (e: any) {
-      clearTimeout(timeoutId);
-      addLog(`EXCEPTION: ${e.name} - ${e.message}`);
-      
+      console.log("OTP: error", String(e));
       if (e.name === 'AbortError') {
-        setErrorMessage("Request timed out. Please check your network and try again.");
-        addLog("Request was aborted due to timeout");
-      } else {
-        setErrorMessage("Network error. Please check your connection and try again.");
-        addLog(`Network error details: ${String(e)}`);
+        return; // Timeout already handled above
       }
+      Alert.alert(
+        "Connection Error", 
+        "Cannot connect to server. Please check:\n\n1. Your internet connection\n2. Backend server is running\n3. Backend URL is correct in .env file"
+      );
     } finally {
-      addLog("=== OTP REQUEST COMPLETED ===");
+      clearTimeout(t);
+      console.log("OTP: finally, stop loading");
       setLoading(false);
     }
   };
