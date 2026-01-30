@@ -59,15 +59,6 @@ export default function LoginScreen() {
   // CRITICAL: Ref to prevent double processing of session_id
   const isProcessingSession = useRef(false);
   const processedSessionIds = useRef<Set<string>>(new Set());
-  };
-
-  // Clear error after 5 seconds
-  useEffect(() => {
-    if (errorMessage) {
-      const timer = setTimeout(() => setErrorMessage(null), 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [errorMessage]);
 
   // OTP request function with 15-second timeout
   const handleContinue = async () => {
