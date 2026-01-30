@@ -56,6 +56,9 @@ const getBackendUrl = () => {
   return envUrl;
 };
 
+// Emergent Auth URL
+const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
+
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
 
