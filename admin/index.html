@@ -1101,6 +1101,9 @@
         function viewScreenshot(subscriptionId) {
             const payment = currentPayments.find(p => p.id === subscriptionId);
             if (payment && payment.screenshot) {
+                // Store the current payment ID for approval/rejection
+                currentViewingPaymentId = subscriptionId;
+                
                 // Show modal with the screenshot
                 const modal = document.getElementById('screenshotModal');
                 const img = document.getElementById('screenshotImage');
