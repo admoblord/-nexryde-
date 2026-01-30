@@ -511,8 +511,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   earningsTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
     color: COLORS.textPrimary,
   },
   viewAllBtn: {
