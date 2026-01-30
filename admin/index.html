@@ -864,6 +864,9 @@
                 const res = await fetch(`${API_URL}/admin/payments`);
                 const data = await res.json();
                 
+                // Store payments for modal display
+                currentPayments = data.payments || [];
+                
                 document.getElementById('approvedPayments').textContent = data.approved_count || 0;
                 document.getElementById('pendingPayments').textContent = data.pending_count || 0;
                 document.getElementById('totalSubscriptionRevenue').textContent = `₦${(data.total_revenue || 0).toLocaleString()}`;
