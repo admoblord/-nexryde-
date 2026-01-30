@@ -11,7 +11,7 @@ from datetime import datetime
 import uuid
 
 # Backend URL
-BASE_URL = "https://docs-hub-7.preview.emergentagent.com/api"
+BASE_URL = "https://rideapp-admin-1.preview.emergentagent.com/api"
 
 # Test user IDs from review request
 EXISTING_DRIVER_ID = "c22684e5-b52a-46a8-9420-a6ee07679859"
