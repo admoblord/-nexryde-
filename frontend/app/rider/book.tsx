@@ -52,8 +52,7 @@ export default function BookScreen() {
   
   const [stops, setStops] = useState<RouteStop[]>([
     { id: '1', type: 'pickup', address: '', isEditing: false },
-    { id: '2', type: 'stop', address: '', isEditing: false },
-    { id: '3', type: 'dropoff', address: '', isEditing: false },
+    { id: '2', type: 'dropoff', address: '', isEditing: false },
   ]);
   
   const [activeStopId, setActiveStopId] = useState<string | null>(null);
