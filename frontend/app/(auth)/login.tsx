@@ -43,11 +43,18 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Emergent Auth URL
-const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
-
-// Backend URL - HARDCODED for reliability
-const BACKEND_URL = 'https://ride-location-fix.preview.emergentagent.com';
+// Backend URL - Use relative path for API calls (works with proxy)
+const getBackendUrl = () => {
+  // In development/preview, use relative path which goes through the proxy
+  if (Platform.OS === 'web') {
+    return ''; // Relative path - proxy handles routing to backend
+  }
+  // For native apps, use the environment variable or fallback
+  const envUrl = Constants.expoConfig?.extra?.backendUrl || 
+                 process.env.EXPO_PUBLIC_BACKEND_URL || 
+                 '';
+  return envUrl;
+};
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
