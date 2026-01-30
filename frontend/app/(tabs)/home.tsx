@@ -210,8 +210,8 @@ export default function HomeScreen() {
             <View style={styles.onlineCardWrapper}>
               <LinearGradient
                 colors={isOnline 
-                  ? [COLORS.accentGreen, COLORS.accentGreenDark]
-                  : [COLORS.surface, COLORS.surfaceLight]
+                  ? ['#10B981', '#059669']
+                  : ['#1E293B', '#334155']
                 }
                 style={styles.onlineCard}
                 start={{ x: 0, y: 0 }}
@@ -220,23 +220,23 @@ export default function HomeScreen() {
                 <View style={styles.onlineCardInner}>
                   <View style={[
                     styles.statusIndicator,
-                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.3)' : COLORS.surfaceLight }
+                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.25)' : '#475569' }
                   ]}>
                     <View style={[
                       styles.statusDotInner,
-                      { backgroundColor: isOnline ? COLORS.white : COLORS.textMuted }
+                      { backgroundColor: isOnline ? '#FFFFFF' : '#94A3B8' }
                     ]} />
                   </View>
                   <View style={styles.onlineInfo}>
                     <Text style={[
                       styles.onlineTitle,
-                      { color: isOnline ? COLORS.white : COLORS.textPrimary }
+                      { color: '#FFFFFF' }
                     ]}>
                       {isOnline ? "You're Online" : "You're Offline"}
                     </Text>
                     <Text style={[
                       styles.onlineSubtext,
-                      { color: isOnline ? 'rgba(255,255,255,0.8)' : COLORS.textSecondary }
+                      { color: isOnline ? 'rgba(255,255,255,0.85)' : '#94A3B8' }
                     ]}>
                       {isOnline ? 'Accepting ride requests' : 'Go online to start earning'}
                     </Text>
@@ -245,123 +245,157 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   style={[
                     styles.onlineToggle,
-                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.25)' : COLORS.accentGreen }
+                    { backgroundColor: isOnline ? 'rgba(255,255,255,0.25)' : '#10B981' }
                   ]}
                   onPress={handleToggleOnline}
                   disabled={loading}
                 >
                   <Ionicons 
                     name={isOnline ? 'pause' : 'play'} 
-                    size={18} 
-                    color={isOnline ? COLORS.white : COLORS.primary} 
+                    size={20} 
+                    color={'#FFFFFF'} 
                   />
-                  <Text style={[
-                    styles.onlineToggleText,
-                    { color: isOnline ? COLORS.white : COLORS.primary }
-                  ]}>
+                  <Text style={[styles.onlineToggleText, { color: '#FFFFFF' }]}>
                     {loading ? '...' : isOnline ? 'Stop' : 'Start'}
                   </Text>
                 </TouchableOpacity>
               </LinearGradient>
             </View>
 
-            {/* Stats Grid */}
+            {/* Stats Grid - Enhanced */}
             <View style={styles.statsGrid}>
-              <View style={[styles.statBox, styles.statBoxLarge]}>
-                <View style={[styles.statIconWrap, { backgroundColor: COLORS.accentGreenSoft }]}>
-                  <Ionicons name="wallet" size={24} color={COLORS.accentGreen} />
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                style={[styles.statBox, styles.statBoxLarge]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+              >
+                <View style={styles.statIconWrapWhite}>
+                  <Ionicons name="wallet" size={26} color="#10B981" />
                 </View>
-                <Text style={styles.statLabel}>Today's Earnings</Text>
+                <Text style={styles.statLabelWhite}>Today's Earnings</Text>
                 <Text style={styles.statValueLarge}>
                   {CURRENCY}{driverStats?.today_earnings?.toLocaleString() || '0'}
                 </Text>
-              </View>
+              </LinearGradient>
               <View style={styles.statBoxRow}>
                 <View style={styles.statBoxSmall}>
-                  <Ionicons name="car" size={22} color={COLORS.accentBlue} />
+                  <View style={[styles.smallStatIcon, { backgroundColor: '#3B82F620' }]}>
+                    <Ionicons name="car" size={24} color="#3B82F6" />
+                  </View>
                   <Text style={styles.statValueSmall}>{driverStats?.today_trips || 0}</Text>
                   <Text style={styles.statLabelSmall}>Trips</Text>
                 </View>
                 <View style={styles.statBoxSmall}>
-                  <Ionicons name="star" size={22} color={COLORS.gold} />
+                  <View style={[styles.smallStatIcon, { backgroundColor: '#F59E0B20' }]}>
+                    <Ionicons name="star" size={24} color="#F59E0B" />
+                  </View>
                   <Text style={styles.statValueSmall}>{driverStats?.rating?.toFixed(1) || '5.0'}</Text>
                   <Text style={styles.statLabelSmall}>Rating</Text>
                 </View>
               </View>
             </View>
 
-            {/* Subscription Status */}
+            {/* Subscription Status - Enhanced */}
             <TouchableOpacity 
               style={styles.subscriptionCard}
               onPress={() => router.push('/driver/subscription')}
               activeOpacity={0.8}
             >
-              <View style={styles.subscriptionLeft}>
-                <View style={[
-                  styles.subscriptionIcon,
-                  { backgroundColor: driverStats?.subscription_active ? COLORS.accentGreenSoft : COLORS.errorSoft }
-                ]}>
-                  <Ionicons 
-                    name="card" 
-                    size={22} 
-                    color={driverStats?.subscription_active ? COLORS.accentGreen : COLORS.error} 
-                  />
+              <LinearGradient
+                colors={driverStats?.subscription_active 
+                  ? ['#10B98120', '#10B98110']
+                  : ['#EF444420', '#EF444410']
+                }
+                style={styles.subscriptionGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <View style={styles.subscriptionLeft}>
+                  <View style={[
+                    styles.subscriptionIcon,
+                    { backgroundColor: driverStats?.subscription_active ? '#10B981' : '#EF4444' }
+                  ]}>
+                    <Ionicons 
+                      name="card" 
+                      size={24} 
+                      color="#FFFFFF" 
+                    />
+                  </View>
+                  <View>
+                    <Text style={styles.subscriptionTitle}>
+                      {driverStats?.subscription_active ? 'Subscription Active' : 'Subscribe Now'}
+                    </Text>
+                    <Text style={styles.subscriptionDays}>
+                      {driverStats?.subscription_days_left 
+                        ? `${driverStats.subscription_days_left} days remaining`
+                        : '₦25,000/month • Unlimited earnings'}
+                    </Text>
+                  </View>
                 </View>
-                <View>
-                  <Text style={styles.subscriptionTitle}>
-                    {driverStats?.subscription_active ? 'Subscription Active' : 'Subscribe Now'}
-                  </Text>
-                  <Text style={styles.subscriptionDays}>
-                    {driverStats?.subscription_days_left 
-                      ? `${driverStats.subscription_days_left} days remaining`
-                      : 'Unlock unlimited earnings'}
-                  </Text>
+                <View style={styles.subscriptionArrow}>
+                  <Ionicons name="chevron-forward" size={22} color="#64748B" />
                 </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
+              </LinearGradient>
             </TouchableOpacity>
 
-            {/* Quick Actions */}
+            {/* Quick Actions - Enhanced */}
             <Text style={styles.sectionTitle}>Quick Actions</Text>
             <View style={styles.quickActionsGrid}>
               <TouchableOpacity 
                 style={styles.quickActionCard}
                 onPress={() => router.push('/driver/challenges')}
               >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                  <Ionicons name="trophy" size={24} color={COLORS.accentBlue} />
-                </View>
+                <LinearGradient
+                  colors={['#3B82F6', '#2563EB']}
+                  style={styles.quickActionIconGradient}
+                >
+                  <Ionicons name="trophy" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.quickActionText}>Challenges</Text>
+                <Text style={styles.quickActionSubtext}>Earn bonuses</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={styles.quickActionCard}
                 onPress={() => router.push('/driver/earnings-dashboard')}
               >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                  <Ionicons name="stats-chart" size={24} color={COLORS.accentGreen} />
-                </View>
+                <LinearGradient
+                  colors={['#10B981', '#059669']}
+                  style={styles.quickActionIconGradient}
+                >
+                  <Ionicons name="stats-chart" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.quickActionText}>Earnings</Text>
+                <Text style={styles.quickActionSubtext}>View reports</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={styles.quickActionCard}
                 onPress={() => router.push('/driver/tiers')}
               >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.goldSoft }]}>
-                  <Ionicons name="ribbon" size={24} color={COLORS.gold} />
-                </View>
+                <LinearGradient
+                  colors={['#F59E0B', '#D97706']}
+                  style={styles.quickActionIconGradient}
+                >
+                  <Ionicons name="ribbon" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.quickActionText}>Driver Tier</Text>
+                <Text style={styles.quickActionSubtext}>Gold status</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
                 style={styles.quickActionCard}
-                onPress={() => router.push('/lost-found')}
+                onPress={() => router.push('/driver/heatmap')}
               >
-                <View style={[styles.quickActionIcon, { backgroundColor: COLORS.infoSoft }]}>
-                  <Ionicons name="search" size={24} color={COLORS.info} />
-                </View>
-                <Text style={styles.quickActionText}>Lost & Found</Text>
+                <LinearGradient
+                  colors={['#8B5CF6', '#7C3AED']}
+                  style={styles.quickActionIconGradient}
+                >
+                  <Ionicons name="flame" size={26} color="#FFFFFF" />
+                </LinearGradient>
+                <Text style={styles.quickActionText}>Heatmap</Text>
+                <Text style={styles.quickActionSubtext}>Busy areas</Text>
               </TouchableOpacity>
             </View>
 
@@ -373,21 +407,21 @@ export default function HomeScreen() {
                 activeOpacity={0.8}
               >
                 <LinearGradient
-                  colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                  colors={['#10B981', '#3B82F6']}
                   style={styles.rideRequestsGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 0 }}
                 >
                   <View style={styles.rideRequestsLeft}>
                     <View style={styles.rideRequestsIcon}>
-                      <Ionicons name="notifications" size={24} color={COLORS.primary} />
+                      <Ionicons name="notifications" size={26} color="#10B981" />
                     </View>
                     <View>
                       <Text style={styles.rideRequestsTitle}>View Ride Requests</Text>
-                      <Text style={styles.rideRequestsSubtext}>Tap to see available rides</Text>
+                      <Text style={styles.rideRequestsSubtext}>Tap to see available rides nearby</Text>
                     </View>
                   </View>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
+                  <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
                 </LinearGradient>
               </TouchableOpacity>
             )}
