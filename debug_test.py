@@ -2,7 +2,7 @@
 import requests
 
 def test_user_blocking():
-    base_url = "https://rideapp-admin-1.preview.emergentagent.com/api"
+    base_url = "https://ride-location-fix.preview.emergentagent.com/api"
     test_user_id = "test-user-123"
     
     # Test unblock user
