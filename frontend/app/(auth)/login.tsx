@@ -209,37 +209,43 @@ export default function LoginScreen() {
   const [whatsappLoading, setWhatsappLoading] = useState(false);
   
   const handleWhatsAppOTP = async () => {
-    if (phone.length < 10) return;
+    addLog("=== WHATSAPP OTP REQUEST STARTED ===");
+    
+    if (phone.length < 10) {
+      setErrorMessage("Please enter a valid phone number");
+      return;
+    }
+    
     setWhatsappLoading(true);
+    setErrorMessage(null);
     storePhone(phone);
     
-    // HARDCODED PRODUCTION URL - no env vars
-    const BASE_URL = "https://nexryde-ui.emergent.host/api";
-    const fullPhone = `+234${phone}`;
+    const fullPhone = formatPhoneNumber(phone);
+    const endpoint = `${BACKEND_URL}/auth/request-otp-whatsapp`;
     
-    console.log("WhatsApp: BASE_URL", BASE_URL);
-    console.log("WhatsApp: endpoint", `${BASE_URL}/auth/request-otp-whatsapp`);
+    addLog(`URL: ${endpoint}`);
+    addLog(`Phone (formatted): ${fullPhone}`);
     
     try {
-      const res = await fetch(`${BASE_URL}/auth/request-otp-whatsapp`, {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone }),
       });
       
-      console.log('WhatsApp: status', res.status);
+      addLog(`Status: ${res.status}`);
       const text = await res.text();
-      console.log('WhatsApp: raw', text);
+      addLog(`Response: ${text.substring(0, 200)}`);
       
       let data = null;
       try { data = JSON.parse(text); } catch {}
       
       if (!res.ok || !data?.success) {
-        Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
+        setErrorMessage(data?.message || 'WhatsApp not available. Try SMS instead.');
         return;
       }
       
-      console.log('WhatsApp: success, navigating');
+      addLog("SUCCESS: WhatsApp OTP sent");
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -249,12 +255,15 @@ export default function LoginScreen() {
       });
       
     } catch (e: any) {
-      console.log('WhatsApp: error', String(e));
-      Alert.alert('Network error', 'Could not reach server. Try SMS instead.');
+      addLog(`ERROR: ${String(e)}`);
+      setErrorMessage('Network error. Please try SMS instead.');
     } finally {
       setWhatsappLoading(false);
     }
   };
+
+  // Get backend URL for Google auth
+  const getBackendUrl = () => BACKEND_URL;
 
   // Extract session_id from URL (supports both hash and query params)
   const extractSessionId = (url: string): string | null => {
