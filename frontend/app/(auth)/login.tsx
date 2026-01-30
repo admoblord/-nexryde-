@@ -78,9 +78,9 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
     
-    const backendUrl = BACKEND_URL;
+    const backendUrl = getBackendUrl();
     console.log('=== Phone Login Started ===');
-    console.log('BACKEND_URL:', backendUrl);
+    console.log('BACKEND_URL:', backendUrl || '(relative path)');
     console.log('Phone:', `+234${phone}`);
     
     try {
