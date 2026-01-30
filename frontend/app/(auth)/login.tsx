@@ -47,7 +47,7 @@ const COLORS = {
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
 // Backend URL - HARDCODED for reliability
-const BACKEND_URL = 'https://rideapp-admin-1.preview.emergentagent.com';
+const BACKEND_URL = 'https://ride-location-fix.preview.emergentagent.com';
 
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();

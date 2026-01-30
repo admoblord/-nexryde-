@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # Backend URL from frontend/.env
-BACKEND_URL = "https://rideapp-admin-1.preview.emergentagent.com/api"
+BACKEND_URL = "https://ride-location-fix.preview.emergentagent.com/api"
 
 def log_test(test_name, status, details=""):
     """Log test results with timestamp"""
