@@ -1061,6 +1061,7 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
         logger.error(f"Failed to send verification notification: {e}")
 
 @api_router.post("/auth/send-otp")
+@api_router.post("/auth/request-otp")  # Alias endpoint
 async def send_otp(request: OTPRequest):
     """Send OTP via Termii SMS or fallback to mock mode"""
     try:
