@@ -502,6 +502,31 @@ export default function LoginScreen() {
                 </LinearGradient>
               </TouchableOpacity>
 
+              {/* WhatsApp OTP Button */}
+              <TouchableOpacity
+                style={[
+                  styles.whatsappButton,
+                  phone.length >= 10 && styles.whatsappButtonActive
+                ]}
+                onPress={handleWhatsAppOTP}
+                disabled={phone.length < 10 || whatsappLoading}
+                activeOpacity={0.9}
+              >
+                {whatsappLoading ? (
+                  <ActivityIndicator color="#25D366" />
+                ) : (
+                  <>
+                    <Ionicons name="logo-whatsapp" size={22} color={phone.length >= 10 ? "#25D366" : COLORS.textMuted} style={{ marginRight: 8 }} />
+                    <Text style={[
+                      styles.whatsappButtonText,
+                      phone.length >= 10 && styles.whatsappButtonTextActive
+                    ]}>
+                      Send code to WhatsApp
+                    </Text>
+                  </>
+                )}
+              </TouchableOpacity>
+
               {/* OR Divider */}
               <View style={styles.orDivider}>
                 <View style={styles.orLine} />
