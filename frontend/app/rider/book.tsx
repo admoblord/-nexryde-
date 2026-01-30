@@ -382,7 +382,7 @@ export default function BookScreen() {
                     onPress={addStop}
                   >
                     <View style={styles.addButtonInner}>
-                      <Ionicons name="add" size={20} color={COLORS.accentGreen} />
+                      <Ionicons name="add" size={20} color={COLORS.white} />
                     </View>
                   </TouchableOpacity>
                 ) : stop.type === 'stop' ? (
