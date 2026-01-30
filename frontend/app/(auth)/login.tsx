@@ -43,11 +43,23 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Backend URL - includes /api
+// Backend URL - uses app.json extra config (works in built apps)
 const getBackendUrl = () => {
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 
-                 'https://login-bugfix-3.preview.emergentagent.com/api';
-  return envUrl;
+  // Priority 1: Use expo-constants to read from app.json extra (works in APK builds)
+  const expoUrl = Constants.expoConfig?.extra?.BACKEND_URL;
+  if (expoUrl) {
+    return expoUrl;
+  }
+  // Priority 2: Use environment variable (works in development)
+  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  if (envUrl && !envUrl.endsWith('/api')) {
+    return `${envUrl}/api`;
+  }
+  if (envUrl) {
+    return envUrl;
+  }
+  // Priority 3: Hardcoded fallback (guaranteed to work)
+  return 'https://login-bugfix-3.preview.emergentagent.com/api';
 };
 
 // Emergent Auth URL
