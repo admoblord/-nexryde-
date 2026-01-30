@@ -74,64 +74,28 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
     
+    // Navigate immediately to verify screen
+    // OTP will be sent in background
     const backendUrl = 'https://ride-location-fix.preview.emergentagent.com';
     const fullPhone = `+234${phone}`;
     
-    // Use XMLHttpRequest instead of fetch for better compatibility
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${backendUrl}/api/auth/send-otp`, true);
-    xhr.setRequestHeader('Content-Type', 'application/json');
-    xhr.timeout = 30000;
+    // Send OTP request in background (don't wait for response)
+    fetch(`${backendUrl}/api/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: fullPhone }),
+    }).catch(() => {}); // Ignore errors - OTP might already be sent
     
-    xhr.onload = function() {
-      setLoading(false);
-      if (xhr.status === 200) {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          Alert.alert(
-            'OTP Sent!', 
-            `SMS sent via ${data.provider}. Check your phone.`,
-            [
-              {
-                text: 'Enter Code',
-                onPress: () => {
-                  router.push({
-                    pathname: '/(auth)/verify',
-                    params: {
-                      phone: phone,
-                      pin_id: data.pin_id || '',
-                      provider: data.provider || 'mock',
-                      mock_otp: data.otp || ''
-                    }
-                  });
-                }
-              }
-            ]
-          );
-        } catch (e) {
-          Alert.alert('Error', 'Invalid response from server');
-        }
-      } else {
-        try {
-          const data = JSON.parse(xhr.responseText);
-          Alert.alert('Error', data.detail || 'Failed to send OTP');
-        } catch (e) {
-          Alert.alert('Error', `Server error: ${xhr.status}`);
-        }
+    setLoading(false);
+    
+    // Navigate to verify screen immediately
+    router.push({
+      pathname: '/(auth)/verify',
+      params: {
+        phone: phone,
+        provider: 'termii',
       }
-    };
-    
-    xhr.onerror = function() {
-      setLoading(false);
-      Alert.alert('Network Error', 'Could not connect to server. Please check your internet.');
-    };
-    
-    xhr.ontimeout = function() {
-      setLoading(false);
-      Alert.alert('Timeout', 'Request took too long. Please try again.');
-    };
-    
-    xhr.send(JSON.stringify({ phone: fullPhone }));
+    });
   };
 
   // Extract session_id from URL (supports both hash and query params)
