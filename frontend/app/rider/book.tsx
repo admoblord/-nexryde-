@@ -352,52 +352,30 @@ export default function BookScreen() {
                 {getStopIcon(stop.type)}
 
                 <TouchableOpacity 
-                  style={[
-                    styles.stopInputContainer,
-                    activeStopId === stop.id && styles.stopInputActive
-                  ]}
+                  style={styles.locationItem}
                   onPress={() => {
-                    console.log('=== Location field pressed (TouchableOpacity) ===');
-                    console.log('Stop ID:', stop.id);
-                    openLocationPicker(stop.id);
-                  }}
-                  activeOpacity={0.7}
-                  accessibilityRole="button"
-                  // @ts-ignore - For web compatibility
-                  onClick={() => {
-                    console.log('=== onClick fired for web ===');
+                    console.log('=== Location field pressed ===');
                     openLocationPicker(stop.id);
                   }}
                 >
-                  <Text 
-                    style={[
-                      styles.stopInputText,
-                      !stop.address && styles.stopInputPlaceholder
-                    ]}
-                    numberOfLines={1}
-                  >
-                    {stop.address || getPlaceholder(stop.type)}
-                  </Text>
-                  
-                  {stop.type === 'stop' && (
-                    <View style={styles.mapButton}>
-                      <Text style={styles.mapButtonText}>Map</Text>
-                      <View style={styles.mapIconContainer}>
-                        <Ionicons name="location" size={14} color={COLORS.accentGreen} />
-                      </View>
-                    </View>
-                  )}
-                  
-                  <View style={[styles.dragHandle, { pointerEvents: 'none' }]}>
-                    <Ionicons name="reorder-three" size={20} color={COLORS.lightTextMuted} />
+                  <View style={styles.locationContent}>
+                    <Text 
+                      style={[
+                        styles.locationName,
+                        !stop.address && { color: COLORS.lightTextMuted }
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {stop.address || getPlaceholder(stop.type)}
+                    </Text>
                   </View>
+                  <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
                 </TouchableOpacity>
 
                 {stop.type === 'pickup' ? (
                   <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={addStop}
-                    activeOpacity={0.7}
                   >
                     <Ionicons name="add" size={22} color={COLORS.lightTextPrimary} />
                   </TouchableOpacity>
@@ -405,12 +383,11 @@ export default function BookScreen() {
                   <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={() => removeStop(stop.id)}
-                    activeOpacity={0.7}
                   >
                     <Ionicons 
                       name="close" 
                       size={22} 
-                      color={stop.type === 'dropoff' ? COLORS.error : COLORS.error} 
+                      color={COLORS.error} 
                     />
                   </TouchableOpacity>
                 )}
