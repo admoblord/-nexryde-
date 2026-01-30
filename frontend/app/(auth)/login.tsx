@@ -801,6 +801,32 @@ const styles = StyleSheet.create({
     borderColor: COLORS.surfaceLight,
     marginBottom: 16,
   },
+  whatsappButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 12,
+    marginBottom: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+  },
+  whatsappButtonActive: {
+    backgroundColor: 'rgba(37, 211, 102, 0.1)',
+    borderColor: '#25D366',
+  },
+  whatsappButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  whatsappButtonTextActive: {
+    color: '#25D366',
+  },
   googleButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
