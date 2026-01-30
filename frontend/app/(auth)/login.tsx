@@ -76,11 +76,11 @@ export default function LoginScreen() {
     
     // Navigate immediately to verify screen
     // OTP will be sent in background
-    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com';
+    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
     const fullPhone = `+234${phone}`;
     
     // Send OTP request in background (don't wait for response)
-    fetch(`${backendUrl}/api/auth/send-otp`, {
+    fetch(`${backendUrl}/auth/send-otp`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: fullPhone }),
