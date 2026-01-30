@@ -363,6 +363,11 @@ export default function BookScreen() {
                   }}
                   activeOpacity={0.7}
                   accessibilityRole="button"
+                  // @ts-ignore - For web compatibility
+                  onClick={() => {
+                    console.log('=== onClick fired for web ===');
+                    openLocationPicker(stop.id);
+                  }}
                 >
                   <Text 
                     style={[
