@@ -1055,9 +1055,32 @@
             }
         });
 
+        // Store current payment data for modal display
+        let currentPayments = [];
+        
         function viewScreenshot(subscriptionId) {
-            // In production, this would fetch and display the base64 image
-            alert('Payment proof for subscription: ' + subscriptionId + '\n\nNote: Screenshots are stored as base64. In production, this would open a modal with the image.');
+            const payment = currentPayments.find(p => p.id === subscriptionId);
+            if (payment && payment.screenshot) {
+                // Show modal with the screenshot
+                const modal = document.getElementById('screenshotModal');
+                const img = document.getElementById('screenshotImage');
+                const driverName = document.getElementById('screenshotDriverName');
+                const amount = document.getElementById('screenshotAmount');
+                const date = document.getElementById('screenshotDate');
+                
+                img.src = payment.screenshot;
+                driverName.textContent = payment.driver_name || 'Unknown Driver';
+                amount.textContent = `₦${(payment.amount || 25000).toLocaleString()}`;
+                date.textContent = payment.payment_submitted_at ? new Date(payment.payment_submitted_at).toLocaleString() : 'N/A';
+                
+                modal.style.display = 'flex';
+            } else {
+                alert('No payment proof available for this subscription.');
+            }
+        }
+        
+        function closeScreenshotModal() {
+            document.getElementById('screenshotModal').style.display = 'none';
         }
         
         async function viewDriver(driverId) {
