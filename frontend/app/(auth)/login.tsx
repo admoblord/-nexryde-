@@ -132,11 +132,12 @@ export default function LoginScreen() {
     setWhatsappLoading(true);
     storePhone(phone);
     
-    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
+    // HARDCODED URL - DO NOT USE process.env
+    const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
     const fullPhone = `+234${phone}`;
     
-    console.log("BASE_URL:", BASE_URL);
-    console.log("WhatsApp OTP URL:", `${BASE_URL}/auth/request-otp-whatsapp`);
+    console.log("WhatsApp: BASE_URL", BASE_URL);
+    console.log("WhatsApp: endpoint", `${BASE_URL}/auth/request-otp-whatsapp`);
     
     try {
       const res = await fetch(`${BASE_URL}/auth/request-otp-whatsapp`, {
@@ -145,19 +146,19 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: fullPhone }),
       });
       
-      console.log('WhatsApp Status:', res.status);
-      
+      console.log('WhatsApp: status', res.status);
       const text = await res.text();
-      console.log('WhatsApp Raw response:', text);
+      console.log('WhatsApp: raw', text);
       
-      const data = text ? JSON.parse(text) : null;
+      let data = null;
+      try { data = JSON.parse(text); } catch {}
       
       if (!res.ok || !data?.success) {
         Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
         return;
       }
       
-      console.log('WhatsApp OTP success - navigating to VerifyOTP');
+      console.log('WhatsApp: success, navigating');
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -167,7 +168,7 @@ export default function LoginScreen() {
       });
       
     } catch (e: any) {
-      console.log('WhatsApp Network error:', e.message);
+      console.log('WhatsApp: error', String(e));
       Alert.alert('Network error', 'Could not reach server. Try SMS instead.');
     } finally {
       setWhatsappLoading(false);
