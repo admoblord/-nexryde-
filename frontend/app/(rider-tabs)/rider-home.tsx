@@ -275,14 +275,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   greeting: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '500',
+    fontSize: FONT_SIZE.lg + 2,
+    fontWeight: '700',
     color: COLORS.lightTextSecondary,
     letterSpacing: 0.3,
   },
   userName: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
     color: COLORS.lightTextPrimary,
     letterSpacing: -0.5,
   },
@@ -330,8 +330,8 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accentGreen,
   },
   modeText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
+    fontSize: FONT_SIZE.xs + 1,
+    fontWeight: '900',
     color: COLORS.accentGreen,
     letterSpacing: 1.5,
   },
@@ -372,8 +372,8 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   whereToTitle: {
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 32,
+    fontWeight: '900',
     color: COLORS.white,
     letterSpacing: -0.5,
   },
@@ -403,8 +403,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   whereToPlaceholder: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
+    fontSize: FONT_SIZE.md + 1,
+    fontWeight: '700',
     color: COLORS.lightTextMuted,
   },
   quickLocations: {
@@ -428,7 +428,7 @@ const styles = StyleSheet.create({
   quickLocationLabel: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.white,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.3,
   },
   servicesSection: {
@@ -441,8 +441,8 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
   },
   sectionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
+    fontSize: FONT_SIZE.lg + 2,
+    fontWeight: '900',
     color: COLORS.lightTextPrimary,
     letterSpacing: -0.3,
   },
@@ -496,14 +496,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   serviceTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
+    fontSize: FONT_SIZE.md + 1,
+    fontWeight: '900',
     color: COLORS.lightTextPrimary,
     letterSpacing: -0.2,
   },
   serviceDesc: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
+    fontWeight: '600',
     color: COLORS.lightTextMuted,
     marginTop: 4,
   },
@@ -535,15 +535,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   aiTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
+    fontSize: FONT_SIZE.md + 1,
+    fontWeight: '900',
     color: COLORS.white,
     letterSpacing: -0.2,
   },
   aiDesc: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '500',
-    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
     marginTop: 2,
   },
   aiArrow: {
@@ -575,8 +575,8 @@ const styles = StyleSheet.create({
     borderColor: COLORS.accentGreen + '30',
   },
   quickActionLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontSize: FONT_SIZE.xs + 1,
+    fontWeight: '800',
     color: COLORS.lightTextSecondary,
     letterSpacing: 0.2,
   },
@@ -607,8 +607,8 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   whyTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontSize: FONT_SIZE.sm + 1,
+    fontWeight: '800',
     color: COLORS.lightTextPrimary,
     letterSpacing: -0.1,
   },
