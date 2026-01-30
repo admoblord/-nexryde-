@@ -54,7 +54,17 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
+  
+  // Store phone in AsyncStorage for later use
+  const storePhone = async (phoneNumber: string) => {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem('pending_phone', phoneNumber);
+    } catch (e) {
+      console.log('Failed to store phone:', e);
+    }
+  };
   
   // CRITICAL: Ref to prevent double processing of session_id
   const isProcessingSession = useRef(false);
