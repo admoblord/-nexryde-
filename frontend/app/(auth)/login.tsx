@@ -144,22 +144,17 @@ export default function LoginScreen() {
   const [whatsappLoading, setWhatsappLoading] = useState(false);
   
   const handleWhatsAppOTP = async () => {
-    addLog("=== WHATSAPP OTP REQUEST STARTED ===");
-    
-    if (phone.length < 10) {
-      setErrorMessage("Please enter a valid phone number");
-      return;
-    }
+    console.log("WhatsApp: pressed");
+    if (phone.length < 10) return;
     
     setWhatsappLoading(true);
-    setErrorMessage(null);
     storePhone(phone);
     
-    const fullPhone = formatPhoneNumber(phone);
-    const endpoint = `${BACKEND_URL}/auth/request-otp-whatsapp`;
+    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
+    const fullPhone = `+234${phone}`;
+    const endpoint = `${BASE_URL}/api/auth/request-otp-whatsapp`;
     
-    addLog(`URL: ${endpoint}`);
-    addLog(`Phone (formatted): ${fullPhone}`);
+    console.log("WhatsApp: endpoint", endpoint);
     
     try {
       const res = await fetch(endpoint, {
@@ -168,15 +163,15 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: fullPhone }),
       });
       
-      addLog(`Status: ${res.status}`);
+      console.log('WhatsApp: status', res.status);
       const text = await res.text();
-      addLog(`Response: ${text.substring(0, 200)}`);
+      console.log('WhatsApp: raw', text);
       
       let data = null;
       try { data = JSON.parse(text); } catch {}
       
       if (!res.ok || !data?.success) {
-        setErrorMessage(data?.message || 'WhatsApp not available. Try SMS instead.');
+        Alert.alert('WhatsApp OTP failed', data?.message || 'WhatsApp not available. Try SMS instead.');
         return;
       }
       
