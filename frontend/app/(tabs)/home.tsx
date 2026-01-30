@@ -429,40 +429,106 @@ export default function HomeScreen() {
         ) : (
           // RIDER VIEW
           <>
-            {/* Book Ride Card */}
+            {/* Book Ride Card - Premium Design */}
             <View style={styles.bookRideCard}>
-              <Text style={styles.bookRideTitle}>Where to?</Text>
-              <TouchableOpacity 
-                style={styles.searchBar}
-                onPress={handleBookRide}
-                activeOpacity={0.8}
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                style={styles.bookRideGradientHeader}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
               >
-                <View style={styles.searchIconWrap}>
-                  <Ionicons name="search" size={20} color={COLORS.accentGreen} />
+                <Ionicons name="location" size={24} color="#FFFFFF" />
+                <Text style={styles.bookRideHeaderText}>Where are you going?</Text>
+              </LinearGradient>
+              
+              <View style={styles.bookRideContent}>
+                <TouchableOpacity 
+                  style={styles.searchBar}
+                  onPress={handleBookRide}
+                  activeOpacity={0.8}
+                >
+                  <View style={styles.searchIconWrap}>
+                    <Ionicons name="search" size={22} color="#10B981" />
+                  </View>
+                  <Text style={styles.searchPlaceholder}>Enter your destination</Text>
+                  <View style={styles.searchArrow}>
+                    <Ionicons name="arrow-forward" size={18} color="#64748B" />
+                  </View>
+                </TouchableOpacity>
+                
+                <View style={styles.savedLocations}>
+                  <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                    <LinearGradient
+                      colors={['#3B82F6', '#2563EB']}
+                      style={styles.savedLocationIconGradient}
+                    >
+                      <Ionicons name="home" size={20} color="#FFFFFF" />
+                    </LinearGradient>
+                    <Text style={styles.savedLocationText}>Home</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                    <LinearGradient
+                      colors={['#10B981', '#059669']}
+                      style={styles.savedLocationIconGradient}
+                    >
+                      <Ionicons name="briefcase" size={20} color="#FFFFFF" />
+                    </LinearGradient>
+                    <Text style={styles.savedLocationText}>Work</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
+                    <LinearGradient
+                      colors={['#8B5CF6', '#7C3AED']}
+                      style={styles.savedLocationIconGradient}
+                    >
+                      <Ionicons name="map" size={20} color="#FFFFFF" />
+                    </LinearGradient>
+                    <Text style={styles.savedLocationText}>Map</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.searchPlaceholder}>Enter your destination</Text>
+              </View>
+            </View>
+
+            {/* Service Types */}
+            <Text style={styles.sectionTitle}>Choose your ride</Text>
+            <View style={styles.servicesRow}>
+              <TouchableOpacity style={styles.serviceCard} onPress={handleBookRide}>
+                <View style={[styles.serviceIcon, { backgroundColor: '#10B98120' }]}>
+                  <Ionicons name="car-sport" size={28} color="#10B981" />
+                </View>
+                <Text style={styles.serviceTitle}>Standard</Text>
+                <Text style={styles.serviceDesc}>Affordable rides</Text>
               </TouchableOpacity>
               
-              <View style={styles.savedLocations}>
-                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                    <Ionicons name="home" size={18} color={COLORS.accentBlue} />
-                  </View>
-                  <Text style={styles.savedLocationText}>Home</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                    <Ionicons name="briefcase" size={18} color={COLORS.accentGreen} />
-                  </View>
-                  <Text style={styles.savedLocationText}>Work</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.savedLocation} onPress={handleBookRide}>
-                  <View style={[styles.savedLocationIcon, { backgroundColor: COLORS.goldSoft }]}>
-                    <Ionicons name="location" size={18} color={COLORS.gold} />
-                  </View>
-                  <Text style={styles.savedLocationText}>Map</Text>
-                </TouchableOpacity>
-              </View>
+              <TouchableOpacity style={styles.serviceCard} onPress={() => router.push('/rider/bid')}>
+                <View style={[styles.serviceIcon, { backgroundColor: '#F59E0B20' }]}>
+                  <Ionicons name="pricetag" size={28} color="#F59E0B" />
+                </View>
+                <Text style={styles.serviceTitle}>Bid Ride</Text>
+                <Text style={styles.serviceDesc}>Name your price</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* More Services */}
+            <View style={styles.moreServicesRow}>
+              <TouchableOpacity style={styles.moreServiceCard} onPress={() => router.push('/rider/schedule')}>
+                <View style={[styles.moreServiceIcon, { backgroundColor: '#3B82F620' }]}>
+                  <Ionicons name="calendar" size={24} color="#3B82F6" />
+                </View>
+                <View>
+                  <Text style={styles.moreServiceTitle}>Schedule</Text>
+                  <Text style={styles.moreServiceDesc}>Book in advance</Text>
+                </View>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.moreServiceCard} onPress={() => router.push('/rider/delivery')}>
+                <View style={[styles.moreServiceIcon, { backgroundColor: '#8B5CF620' }]}>
+                  <Ionicons name="cube" size={24} color="#8B5CF6" />
+                </View>
+                <View>
+                  <Text style={styles.moreServiceTitle}>Delivery</Text>
+                  <Text style={styles.moreServiceDesc}>Send packages</Text>
+                </View>
+              </TouchableOpacity>
             </View>
 
             {/* AI Assistant Banner */}
@@ -472,19 +538,22 @@ export default function HomeScreen() {
               activeOpacity={0.85}
             >
               <LinearGradient
-                colors={[COLORS.primary, COLORS.primaryLight]}
+                colors={['#1E293B', '#334155']}
                 style={styles.aiAssistantGradient}
               >
                 <View style={styles.aiAssistantLeft}>
-                  <View style={styles.aiAssistantIcon}>
-                    <Ionicons name="sparkles" size={22} color={COLORS.accentGreen} />
-                  </View>
+                  <LinearGradient
+                    colors={['#10B981', '#3B82F6']}
+                    style={styles.aiAssistantIconGradient}
+                  >
+                    <Ionicons name="sparkles" size={24} color="#FFFFFF" />
+                  </LinearGradient>
                   <View>
                     <Text style={styles.aiAssistantTitle}>AI Assistant</Text>
-                    <Text style={styles.aiAssistantSubtext}>Get help with anything</Text>
+                    <Text style={styles.aiAssistantSubtext}>Get instant help with anything</Text>
                   </View>
                 </View>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.accentGreen} />
+                <Ionicons name="chevron-forward" size={22} color="#64748B" />
               </LinearGradient>
             </TouchableOpacity>
 
@@ -492,35 +561,47 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Why NEXRYDE?</Text>
             <View style={styles.featuresGrid}>
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentGreenSoft }]}>
-                  <Ionicons name="shield-checkmark" size={24} color={COLORS.accentGreen} />
-                </View>
+                <LinearGradient
+                  colors={['#10B981', '#059669']}
+                  style={styles.featureIconGradient}
+                >
+                  <Ionicons name="shield-checkmark" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.featureTitle}>Verified Drivers</Text>
-                <Text style={styles.featureDesc}>All drivers verified with NIN</Text>
+                <Text style={styles.featureDesc}>All drivers verified</Text>
               </View>
               
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.accentBlueSoft }]}>
-                  <Ionicons name="cash" size={24} color={COLORS.accentBlue} />
-                </View>
+                <LinearGradient
+                  colors={['#3B82F6', '#2563EB']}
+                  style={styles.featureIconGradient}
+                >
+                  <Ionicons name="cash" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.featureTitle}>Fair Pricing</Text>
                 <Text style={styles.featureDesc}>No hidden charges</Text>
               </View>
               
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.infoSoft }]}>
-                  <Ionicons name="location" size={24} color={COLORS.info} />
-                </View>
+                <LinearGradient
+                  colors={['#8B5CF6', '#7C3AED']}
+                  style={styles.featureIconGradient}
+                >
+                  <Ionicons name="navigate" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.featureTitle}>Live Tracking</Text>
-                <Text style={styles.featureDesc}>Real-time trip monitoring</Text>
+                <Text style={styles.featureDesc}>Real-time monitoring</Text>
               </View>
               
               <View style={styles.featureCard}>
-                <View style={[styles.featureIconWrap, { backgroundColor: COLORS.errorSoft }]}>
-                  <Ionicons name="heart" size={24} color={COLORS.error} />
-                </View>
+                <LinearGradient
+                  colors={['#EF4444', '#DC2626']}
+                  style={styles.featureIconGradient}
+                >
+                  <Ionicons name="heart" size={26} color="#FFFFFF" />
+                </LinearGradient>
                 <Text style={styles.featureTitle}>Driver Welfare</Text>
-                <Text style={styles.featureDesc}>100% earnings to drivers</Text>
+                <Text style={styles.featureDesc}>100% to drivers</Text>
               </View>
             </View>
           </>
