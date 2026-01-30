@@ -351,17 +351,18 @@ export default function BookScreen() {
               <View style={styles.stopRow}>
                 {getStopIcon(stop.type)}
 
-                <Pressable 
-                  style={({ pressed }) => [
+                <TouchableOpacity 
+                  style={[
                     styles.stopInputContainer,
-                    activeStopId === stop.id && styles.stopInputActive,
-                    pressed && styles.stopInputPressed
+                    activeStopId === stop.id && styles.stopInputActive
                   ]}
                   onPress={() => {
-                    console.log('=== Location field pressed ===');
+                    console.log('=== Location field pressed (TouchableOpacity) ===');
                     console.log('Stop ID:', stop.id);
                     openLocationPicker(stop.id);
                   }}
+                  activeOpacity={0.7}
+                  accessibilityRole="button"
                 >
                   <Text 
                     style={[
@@ -382,29 +383,31 @@ export default function BookScreen() {
                     </View>
                   )}
                   
-                  <View style={styles.dragHandle} pointerEvents="none">
+                  <View style={[styles.dragHandle, { pointerEvents: 'none' }]}>
                     <Ionicons name="reorder-three" size={20} color={COLORS.lightTextMuted} />
                   </View>
-                </Pressable>
+                </TouchableOpacity>
 
                 {stop.type === 'pickup' ? (
-                  <Pressable 
+                  <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={addStop}
+                    activeOpacity={0.7}
                   >
                     <Ionicons name="add" size={22} color={COLORS.lightTextPrimary} />
-                  </Pressable>
+                  </TouchableOpacity>
                 ) : (
-                  <Pressable 
+                  <TouchableOpacity 
                     style={styles.actionButton}
                     onPress={() => removeStop(stop.id)}
+                    activeOpacity={0.7}
                   >
                     <Ionicons 
                       name="close" 
                       size={22} 
                       color={stop.type === 'dropoff' ? COLORS.error : COLORS.error} 
                     />
-                  </Pressable>
+                  </TouchableOpacity>
                 )}
               </View>
             </View>
