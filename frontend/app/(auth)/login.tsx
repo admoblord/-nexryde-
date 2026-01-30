@@ -88,26 +88,36 @@ export default function LoginScreen() {
       });
       
       const data = await response.json();
+      setLoading(false);
       
       if (response.ok) {
-        // Navigate to verify screen with params
-        setLoading(false);
-        router.push({
-          pathname: '/(auth)/verify',
-          params: {
-            phone: phone,
-            pin_id: data.pin_id || '',
-            provider: data.provider || 'mock',
-            mock_otp: data.otp || ''
-          }
-        });
+        // Show success and navigate
+        Alert.alert(
+          'OTP Sent!', 
+          `Check your SMS. Provider: ${data.provider}`,
+          [
+            {
+              text: 'Enter Code',
+              onPress: () => {
+                router.push({
+                  pathname: '/(auth)/verify',
+                  params: {
+                    phone: phone,
+                    pin_id: data.pin_id || '',
+                    provider: data.provider || 'mock',
+                    mock_otp: data.otp || ''
+                  }
+                });
+              }
+            }
+          ]
+        );
       } else {
-        setLoading(false);
         Alert.alert('Error', data.detail || 'Failed to send OTP');
       }
     } catch (error: any) {
       setLoading(false);
-      Alert.alert('Error', 'Network error. Please try again.');
+      Alert.alert('Error', `Network error: ${error.message}`);
     }
   };
 
