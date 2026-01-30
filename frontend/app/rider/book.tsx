@@ -226,51 +226,19 @@ export default function BookScreen() {
     console.log('setShowMapPicker called with true');
   };
 
-  // Custom location field component with web click fix
+  // Location Field Component with proper web support
   const LocationField = ({ stop }: { stop: RouteStop }) => {
     const handlePress = () => {
       console.log('LocationField pressed for:', stop.id);
       openLocationPicker(stop.id);
     };
 
-    if (Platform.OS === 'web') {
-      return (
-        <div 
-          onClick={handlePress}
-          style={{
-            flex: 1,
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#FFFFFF',
-            borderRadius: 12,
-            padding: 12,
-            marginBottom: 8,
-            border: '1px solid #E2E8F0',
-            cursor: 'pointer',
-            display: 'flex',
-          }}
-        >
-          <View style={styles.locationContent}>
-            <Text 
-              style={[
-                styles.locationName,
-                !stop.address && { color: COLORS.lightTextMuted }
-              ]}
-              numberOfLines={1}
-            >
-              {stop.address || getPlaceholder(stop.type)}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
-        </div>
-      );
-    }
-
     return (
-      <TouchableOpacity 
+      <Pressable 
         style={styles.locationItem}
         onPress={handlePress}
-        activeOpacity={0.7}
+        // @ts-ignore - For web platform support
+        onClick={Platform.OS === 'web' ? handlePress : undefined}
       >
         <View style={styles.locationContent}>
           <Text 
@@ -284,7 +252,7 @@ export default function BookScreen() {
           </Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
-      </TouchableOpacity>
+      </Pressable>
     );
   };
 
