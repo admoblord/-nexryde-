@@ -91,8 +91,8 @@ export default function LoginScreen() {
       controller.abort();
     }, 10000);
 
-    // HARDCODED URL - for debugging
-    const BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api";
+    // HARDCODED PRODUCTION URL - stable Emergent deployment
+    const BASE_URL = "https://nexryde-ui.emergent.host/api";
     const fullPhone = `+234${phone}`;
     const endpoint = `${BASE_URL}/auth/request-otp`;
 
