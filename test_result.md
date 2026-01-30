@@ -741,14 +741,17 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Pressable Click Handler Issues - Booking Screen"
-    - "Splash Screen Navigation Fix"
+    - "Complete Driver Flow Testing - End to End"
+    - "Complete Rider Flow Testing - End to End"
+    - "Settings and All Buttons Testing"
+    - "Payment Proof Upload and Admin Review"
+    - "Final UI Polish Verification"
   stuck_tasks:
-    - "Rider Booking Screen"
-    - "Splash Screen"
+    - "Rider Booking Screen - Pressable handlers"
+    - "Splash Screen Navigation"
     - "Driver Subscription Screen Loading"
-  test_all: false
-  test_priority: "high_first"
+  test_all: true
+  test_priority: "comprehensive"
 
   - task: "Family Mode Screen"
     implemented: true
