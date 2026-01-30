@@ -411,11 +411,11 @@ export default function BookScreen() {
             {savedLocations.map((location) => (
               <TouchableOpacity 
                 key={location.id}
-                style={styles.locationItem}
+                style={styles.savedLocationItem}
                 onPress={() => selectSavedLocation(location.address, location.name)}
               >
-                <View style={[styles.locationIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                  <Ionicons name={location.icon as any} size={18} color={COLORS.accentGreen} />
+                <View style={styles.savedLocationIcon}>
+                  <Ionicons name={location.icon as any} size={20} color={COLORS.white} />
                 </View>
                 <View style={styles.locationContent}>
                   <Text style={styles.locationName}>{location.name}</Text>
@@ -432,11 +432,11 @@ export default function BookScreen() {
             {recentLocations.map((location) => (
               <TouchableOpacity 
                 key={location.id}
-                style={styles.locationItem}
+                style={styles.recentLocationItem}
                 onPress={() => selectSavedLocation(location.address, location.name)}
               >
-                <View style={[styles.locationIcon, { backgroundColor: COLORS.lightSurface }]}>
-                  <Ionicons name="time-outline" size={18} color={COLORS.lightTextSecondary} />
+                <View style={styles.recentLocationIcon}>
+                  <Ionicons name="time" size={18} color={COLORS.lightTextSecondary} />
                 </View>
                 <View style={styles.locationContent}>
                   <Text style={styles.locationName}>{location.name}</Text>
