@@ -270,7 +270,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: '#FFFFFF', letterSpacing: -0.3 },
   content: { flex: 1, padding: 16 },
   balanceCard: {
     borderRadius: 24,
@@ -278,8 +278,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  balanceLabel: { fontSize: 14, color: 'rgba(255,255,255,0.7)' },
-  balanceAmount: { fontSize: 42, fontWeight: '800', color: '#FFFFFF', marginTop: 8 },
+  balanceLabel: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  balanceAmount: { fontSize: 48, fontWeight: '900', color: '#FFFFFF', marginTop: 8, letterSpacing: -1 },
   topupBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     gap: 6,
   },
-  topupBtnText: { fontSize: 14, fontWeight: '700', color: '#6366F1' },
+  topupBtnText: { fontSize: 16, fontWeight: '800', color: '#6366F1' },
   quickActions: { flexDirection: 'row', gap: 12, marginBottom: 24 },
   actionCard: {
     flex: 1,
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  actionText: { fontSize: 13, fontWeight: '600', color: '#FFFFFF' },
+  actionText: { fontSize: 14, fontWeight: '800', color: '#FFFFFF' },
   referralCard: {
     backgroundColor: 'rgba(139,92,246,0.1)',
     borderRadius: 20,
@@ -325,8 +325,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  referralTitle: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
-  referralSubtitle: { fontSize: 13, color: '#A5B4FC', marginTop: 2 },
+  referralTitle: { fontSize: 18, fontWeight: '800', color: '#FFFFFF' },
+  referralSubtitle: { fontSize: 14, fontWeight: '600', color: '#A5B4FC', marginTop: 2 },
   referralCodeBox: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -335,8 +335,8 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 14,
   },
-  referralCodeLabel: { fontSize: 11, color: '#94A3B8', marginRight: 10 },
-  referralCode: { flex: 1, fontSize: 18, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 },
+  referralCodeLabel: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginRight: 10 },
+  referralCode: { flex: 1, fontSize: 20, fontWeight: '900', color: '#FFFFFF', letterSpacing: 2 },
   copyBtn: { padding: 8 },
   shareBtn: {
     flexDirection: 'row',
@@ -347,13 +347,13 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 8,
   },
-  shareBtnText: { fontSize: 14, fontWeight: '700', color: '#FFFFFF' },
+  shareBtnText: { fontSize: 16, fontWeight: '800', color: '#FFFFFF' },
   promoCard: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 16,
     padding: 16,
   },
-  promoTitle: { fontSize: 14, fontWeight: '600', color: '#FFFFFF', marginBottom: 12 },
+  promoTitle: { fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginBottom: 12 },
   promoInputRow: { flexDirection: 'row', gap: 10 },
   promoInput: {
     flex: 1,
@@ -370,7 +370,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     justifyContent: 'center',
   },
-  promoApplyText: { fontSize: 14, fontWeight: '700', color: '#0F172A' },
+  promoApplyText: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
   // Modal
   modalOverlay: {
     position: 'absolute',
@@ -393,7 +393,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  modalTitle: { fontSize: 18, fontWeight: '700', color: '#FFFFFF' },
+  modalTitle: { fontSize: 22, fontWeight: '900', color: '#FFFFFF' },
   amountInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.1)',
   },
   quickAmtBtnActive: { backgroundColor: 'rgba(99,102,241,0.2)', borderColor: '#6366F1' },
-  quickAmtText: { fontSize: 14, fontWeight: '600', color: '#94A3B8' },
+  quickAmtText: { fontSize: 15, fontWeight: '700', color: '#94A3B8' },
   quickAmtTextActive: { color: '#A5B4FC' },
   confirmBtn: {
     backgroundColor: '#00E676',
@@ -426,5 +426,5 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     alignItems: 'center',
   },
-  confirmBtnText: { fontSize: 16, fontWeight: '700', color: '#0F172A' },
+  confirmBtnText: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
 });
