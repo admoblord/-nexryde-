@@ -74,75 +74,40 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
     
-    // Use the full backend URL
     const backendUrl = 'https://ride-location-fix.preview.emergentagent.com';
-    const fullUrl = `${backendUrl}/api/auth/send-otp`;
-    
-    console.log('=== Phone Login Started ===');
-    console.log('Full URL:', fullUrl);
-    console.log('Phone:', `+234${phone}`);
+    const fullPhone = `+234${phone}`;
     
     try {
-      // Add timeout to prevent infinite loading - increased to 30 seconds
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => {
-        console.log('Request timed out after 30 seconds');
-        controller.abort();
-      }, 30000);
-      
-      console.log('Sending request...');
-      const response = await fetch(fullUrl, {
+      const response = await fetch(`${backendUrl}/api/auth/send-otp`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Accept': 'application/json',
         },
-        body: JSON.stringify({ phone: `+234${phone}` }),
-        signal: controller.signal,
+        body: JSON.stringify({ phone: fullPhone }),
       });
       
-      clearTimeout(timeoutId);
-      console.log('Response received, status:', response.status);
-      
       const data = await response.json();
-      console.log('Response data:', JSON.stringify(data));
       
       if (response.ok) {
-        console.log('OTP sent successfully, navigating to verify screen');
-        
-        // Store OTP data for verify screen to access
-        const otpData = {
-          phone: phone,
-          pin_id: data.pin_id || '',
-          provider: data.provider || 'mock',
-          mock_otp: data.otp || ''
-        };
-        
-        // Store in app state for the verify screen
-        storePhone(phone);
-        
-        // Reset loading BEFORE navigation
+        // Navigate to verify screen with params
         setLoading(false);
-        
-        // Navigate to verify screen
-        router.replace({
+        router.push({
           pathname: '/(auth)/verify',
-          params: otpData
+          params: {
+            phone: phone,
+            pin_id: data.pin_id || '',
+            provider: data.provider || 'mock',
+            mock_otp: data.otp || ''
+          }
         });
       } else {
-        console.log('Response not OK:', data);
-        Alert.alert('Error', data.detail || 'Failed to send OTP');
         setLoading(false);
+        Alert.alert('Error', data.detail || 'Failed to send OTP');
       }
     } catch (error: any) {
-      console.error('OTP Error:', error.name, error.message);
       setLoading(false);
-      
-      if (error.name === 'AbortError') {
-        Alert.alert('Timeout', 'Request took too long. Please check your internet connection and try again.');
-      } else {
-        Alert.alert('Connection Error', `Could not connect to server. Please check your internet.\n\nError: ${error.message}`);
-      }
+      Alert.alert('Error', 'Network error. Please try again.');
     }
   };
 
