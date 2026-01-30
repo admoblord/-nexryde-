@@ -952,10 +952,10 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   benefitsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginBottom: 4,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#CBD5E1',
+    marginBottom: 8,
   },
   benefitRow: {
     flexDirection: 'row',
@@ -970,9 +970,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   benefitText: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#FFFFFF',
-    fontWeight: '500',
+    fontWeight: '600',
     flex: 1,
   },
   
@@ -999,8 +999,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bankTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   bankDetailsContainer: {
@@ -1022,20 +1022,21 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 230, 118, 0.1)',
   },
   bankDetailLabel: {
-    fontSize: 12,
-    color: '#94A3B8',
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#CBD5E1',
     marginBottom: 4,
   },
   bankDetailValue: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
     color: '#FFFFFF',
   },
   bankDetailValueHighlight: {
     color: '#00E676',
-    fontSize: 18,
-    fontWeight: '700',
-    letterSpacing: 1,
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: 1.5,
   },
   copyButton: {
     width: 40,
@@ -1055,8 +1056,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245, 158, 11, 0.2)',
   },
   stepsTitle: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '900',
     color: '#F59E0B',
     marginBottom: 12,
   },
@@ -1067,21 +1068,22 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   stepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: '#F59E0B',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepNumberText: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 14,
+    fontWeight: '900',
     color: '#000000',
   },
   stepText: {
-    fontSize: 13,
-    color: '#FCD34D',
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#FDE68A',
     flex: 1,
   },
   
