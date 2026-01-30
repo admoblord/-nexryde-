@@ -43,12 +43,10 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Backend URL - Use the correct URL for each platform
+// Backend URL - includes /api
 const getBackendUrl = () => {
-  // Always use the full URL for API calls
   const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 
-                 'https://ride-location-fix.preview.emergentagent.com';
-  console.log('Using backend URL:', envUrl);
+                 'https://ride-location-fix.preview.emergentagent.com/api';
   return envUrl;
 };
 
