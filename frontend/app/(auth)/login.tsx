@@ -120,6 +120,56 @@ export default function LoginScreen() {
     }
   };
 
+  // WhatsApp OTP request function
+  const [whatsappLoading, setWhatsappLoading] = useState(false);
+  
+  const handleWhatsAppOTP = async () => {
+    if (phone.length < 10) return;
+    setWhatsappLoading(true);
+    storePhone(phone);
+    
+    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
+    const fullPhone = `+234${phone}`;
+    
+    console.log("BASE_URL:", BASE_URL);
+    console.log("WhatsApp OTP URL:", `${BASE_URL}/auth/request-otp-whatsapp`);
+    
+    try {
+      const res = await fetch(`${BASE_URL}/auth/request-otp-whatsapp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: fullPhone }),
+      });
+      
+      console.log('WhatsApp Status:', res.status);
+      
+      const text = await res.text();
+      console.log('WhatsApp Raw response:', text);
+      
+      const data = text ? JSON.parse(text) : null;
+      
+      if (!res.ok || !data?.success) {
+        Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
+        return;
+      }
+      
+      console.log('WhatsApp OTP success - navigating to VerifyOTP');
+      router.push({
+        pathname: '/(auth)/verify',
+        params: {
+          phone: phone,
+          provider: 'whatsapp',
+        }
+      });
+      
+    } catch (e: any) {
+      console.log('WhatsApp Network error:', e.message);
+      Alert.alert('Network error', 'Could not reach server. Try SMS instead.');
+    } finally {
+      setWhatsappLoading(false);
+    }
+  };
+
   // Extract session_id from URL (supports both hash and query params)
   const extractSessionId = (url: string): string | null => {
     try {
