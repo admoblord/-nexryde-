@@ -1123,6 +1123,7 @@ async def send_otp(request: OTPRequest):
                         
                         logger.info(f"Termii SMS sent successfully to {normalized_phone}")
                         return {
+                            "success": True,
                             "message": "OTP sent successfully via SMS",
                             "expires_in_minutes": OTP_EXPIRY_MINUTES,
                             "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
