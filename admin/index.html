@@ -1121,6 +1121,24 @@
         
         function closeScreenshotModal() {
             document.getElementById('screenshotModal').style.display = 'none';
+            currentViewingPaymentId = null;
+        }
+        
+        // Variable to track which payment is being viewed
+        let currentViewingPaymentId = null;
+        
+        async function approveFromModal() {
+            if (currentViewingPaymentId) {
+                await approvePayment(currentViewingPaymentId);
+                closeScreenshotModal();
+            }
+        }
+        
+        async function rejectFromModal() {
+            if (currentViewingPaymentId) {
+                await rejectPayment(currentViewingPaymentId);
+                closeScreenshotModal();
+            }
         }
         
         async function viewDriver(driverId) {
