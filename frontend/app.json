@@ -9,7 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "extra": {
-      "BACKEND_URL": "https://nexryde-ui.emergent.host/api"
+      "BACKEND_URL": "https://nexryde-ui.emergent.host/api",
+      "router": {},
+      "eas": {
+        "projectId": "342aff56-5e09-4363-b8b6-12ab1cdec11f"
+      }
     },
     "ios": {
       "supportsTablet": true,
@@ -31,7 +35,9 @@
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
-        "CAMERA"
+        "CAMERA",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "web": {
@@ -59,6 +65,7 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "owner": "josephbbs1"
   }
 }
