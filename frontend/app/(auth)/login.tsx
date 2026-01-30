@@ -69,33 +69,60 @@ export default function LoginScreen() {
   const isProcessingSession = useRef(false);
   const processedSessionIds = useRef<Set<string>>(new Set());
 
+  // Single OTP request function with proper logging
   const handleContinue = async () => {
     if (phone.length < 10) return;
     setLoading(true);
     storePhone(phone);
     
-    // Navigate immediately to verify screen
-    // OTP will be sent in background
-    const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
+    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
     const fullPhone = `+234${phone}`;
+    const endpoint = `${BASE_URL}/auth/request-otp`;
     
-    // Send OTP request in background (don't wait for response)
-    fetch(`${backendUrl}/auth/send-otp`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: fullPhone }),
-    }).catch(() => {}); // Ignore errors - OTP might already be sent
+    // Log request details
+    console.log('=== OTP Request ===');
+    console.log('BASE_URL:', BASE_URL);
+    console.log('Endpoint:', endpoint);
+    console.log('Phone:', fullPhone);
     
-    setLoading(false);
-    
-    // Navigate to verify screen immediately
-    router.push({
-      pathname: '/(auth)/verify',
-      params: {
-        phone: phone,
-        provider: 'termii',
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: fullPhone }),
+      });
+      
+      // Log response status
+      console.log('Status:', res.status);
+      
+      const text = await res.text();
+      console.log('Raw response:', text);
+      
+      const data = text ? JSON.parse(text) : null;
+      console.log('Parsed data:', data);
+      
+      if (!res.ok || !data?.success) {
+        console.log('OTP failed - showing alert');
+        Alert.alert('OTP failed', data?.message || 'Try again');
+        return;
       }
-    });
+      
+      // Success - navigate to verify screen
+      console.log('OTP success - navigating to VerifyOTP');
+      router.push({
+        pathname: '/(auth)/verify',
+        params: {
+          phone: phone,
+          provider: data.provider || 'termii',
+        }
+      });
+      
+    } catch (e: any) {
+      console.log('Network error:', e.message);
+      Alert.alert('Network error', 'Could not reach server');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Extract session_id from URL (supports both hash and query params)
