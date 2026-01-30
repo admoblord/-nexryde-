@@ -69,42 +69,43 @@ export default function LoginScreen() {
 
   // Single OTP request function with proper logging
   const handleContinue = async () => {
+    console.log("OTP: pressed");
     if (phone.length < 10) return;
     setLoading(true);
     storePhone(phone);
-    
-    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
-    const fullPhone = `+234${phone}`;
-    
-    // Logs right before fetch
-    console.log("BASE_URL:", BASE_URL);
-    console.log("OTP URL:", `${BASE_URL}/auth/request-otp`);
-    
+
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 10000);
+
     try {
-      const res = await fetch(`${BASE_URL}/auth/request-otp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const base = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://ride-location-fix.preview.emergentagent.com/api';
+      const fullPhone = `+234${phone}`;
+      const endpoint = `${base}/auth/request-otp`;
+      
+      console.log("OTP: fullPhone", fullPhone);
+      console.log("OTP: BASE_URL", base);
+      console.log("OTP: endpoint", endpoint);
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: fullPhone }),
+        signal: controller.signal,
       });
-      
-      // Safe text parse
+
+      console.log("OTP: status", res.status);
       const text = await res.text();
-      console.log("OTP status:", res.status);
-      console.log("OTP raw:", text);
-      
-      // DEBUG ALERT - show values on device
-      Alert.alert("DEBUG", `Endpoint: ${BASE_URL}/auth/request-otp\nStatus: ${res.status}\nResponse: ${text.slice(0, 300)}`);
-      
+      console.log("OTP: raw", text);
+
       let data = null;
-      try { data = JSON.parse(text); } catch (e) {}
-      
-      if (!res.ok || !data || data.success !== true) {
+      try { data = JSON.parse(text); } catch {}
+
+      if (!res.ok || !data?.success) {
         Alert.alert("OTP failed", data?.message || text || "Unknown error");
         return;
       }
-      
-      // Success - navigate to verify screen
-      console.log('OTP success - navigating to VerifyOTP');
+
+      console.log("OTP: success, navigating");
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -112,11 +113,12 @@ export default function LoginScreen() {
           provider: data.provider || 'termii',
         }
       });
-      
     } catch (e: any) {
-      console.log('Network error:', e.message);
-      Alert.alert('Network error', 'Could not reach server');
+      console.log("OTP: error", String(e));
+      Alert.alert("Network error", String(e));
     } finally {
+      clearTimeout(t);
+      console.log("OTP: finally, stop loading");
       setLoading(false);
     }
   };
