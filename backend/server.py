@@ -1173,6 +1173,7 @@ async def send_otp(request: OTPRequest):
             "provider": "mock"
         }
         return {
+            "success": True,
             "message": "OTP sent successfully (test mode)",
             "otp": otp,
             "expires_in_minutes": OTP_EXPIRY_MINUTES,
