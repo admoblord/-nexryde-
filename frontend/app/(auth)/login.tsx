@@ -87,17 +87,18 @@ export default function LoginScreen() {
     storePhone(phone);
 
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 10000);
+
+    // HARDCODED URL - for debugging
+    const BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api";
+    const fullPhone = `+234${phone}`;
+    const endpoint = `${BASE_URL}/auth/request-otp`;
 
     try {
-      // Use the proper getBackendUrl() function which reads from app.json extra
-      const BASE_URL = getBackendUrl();
-      const fullPhone = `+234${phone}`;
-      const endpoint = `${BASE_URL}/auth/request-otp`;
-      
-      console.log("OTP: fullPhone", fullPhone);
-      console.log("OTP: BASE_URL", BASE_URL);
       console.log("OTP: endpoint", endpoint);
+      console.log("OTP: fullPhone", fullPhone);
 
       const res = await fetch(endpoint, {
         method: "POST",
@@ -106,9 +107,20 @@ export default function LoginScreen() {
         signal: controller.signal,
       });
 
-      console.log("OTP: status", res.status);
+      clearTimeout(timeoutId);
+
+      const status = res.status;
       const text = await res.text();
-      console.log("OTP: raw", text);
+      const rawPreview = text.substring(0, 300);
+
+      console.log("OTP: status", status);
+      console.log("OTP: raw (300 chars)", rawPreview);
+
+      // Show debug alert with endpoint, status, and raw response
+      Alert.alert(
+        "Debug Info",
+        `Endpoint: ${endpoint}\n\nStatus: ${status}\n\nRaw (300 chars):\n${rawPreview}`
+      );
 
       let data = null;
       try { data = JSON.parse(text); } catch {}
@@ -127,10 +139,15 @@ export default function LoginScreen() {
         }
       });
     } catch (e: any) {
+      clearTimeout(timeoutId);
       console.log("OTP: error", String(e));
-      Alert.alert("Network error", String(e));
+      
+      if (e.name === 'AbortError') {
+        Alert.alert("Timeout hit", `Request timed out after 10 seconds.\n\nEndpoint: ${endpoint}`);
+      } else {
+        Alert.alert("Network error", `${String(e)}\n\nEndpoint: ${endpoint}`);
+      }
     } finally {
-      clearTimeout(t);
       console.log("OTP: finally, stop loading");
       setLoading(false);
     }
