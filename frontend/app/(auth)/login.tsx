@@ -90,8 +90,8 @@ export default function LoginScreen() {
     const t = setTimeout(() => controller.abort(), 10000);
 
     try {
-      // HARDCODED URL - DO NOT USE process.env
-      const BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api";
+      // Use the proper getBackendUrl() function which reads from app.json extra
+      const BASE_URL = getBackendUrl();
       const fullPhone = `+234${phone}`;
       const endpoint = `${BASE_URL}/auth/request-otp`;
       
