@@ -23,9 +23,6 @@ import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 
-// DEBUG MODE - set to false for production builds
-const DEBUG_MODE = true;
-
 // Colors based on NEXRYDE logo
 const COLORS = {
   background: '#0D1420',
@@ -44,12 +41,7 @@ const COLORS = {
   gray700: '#2D3748',
   google: '#4285F4',
   googleSoft: 'rgba(66, 133, 244, 0.15)',
-  debugBg: 'rgba(0,0,0,0.9)',
-  debugText: '#00FF00',
 };
-
-// HARDCODED PRODUCTION BACKEND URL
-const BACKEND_URL = "https://nexryde-ui.emergent.host/api";
 
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
@@ -57,47 +49,16 @@ const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 // Warm up WebBrowser for faster auth
 WebBrowser.maybeCompleteAuthSession();
 
-// Format phone number to +234 format
-const formatPhoneNumber = (phone: string): string => {
-  // Remove all non-digits
-  let cleaned = phone.replace(/\D/g, '');
-  
-  // Handle Nigerian numbers
-  if (cleaned.startsWith('234')) {
-    return `+${cleaned}`;
-  }
-  if (cleaned.startsWith('0')) {
-    return `+234${cleaned.substring(1)}`;
-  }
-  if (cleaned.length === 10) {
-    return `+234${cleaned}`;
-  }
-  // Default: assume it's already without country code
-  return `+234${cleaned}`;
-};
-
 export default function LoginScreen() {
   const router = useRouter();
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const [showDebugPanel, setShowDebugPanel] = useState(DEBUG_MODE);
   const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
   
   // CRITICAL: Ref to prevent double processing of session_id
   const isProcessingSession = useRef(false);
   const processedSessionIds = useRef<Set<string>>(new Set());
-
-  // Add debug log
-  const addLog = (message: string) => {
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = `[${timestamp}] ${message}`;
-    console.log(logEntry);
-    if (DEBUG_MODE) {
-      setDebugLogs(prev => [...prev.slice(-20), logEntry]); // Keep last 20 logs
-    }
   };
 
   // Clear error after 5 seconds
