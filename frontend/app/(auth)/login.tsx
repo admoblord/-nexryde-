@@ -87,18 +87,16 @@ export default function LoginScreen() {
         body: JSON.stringify({ phone: fullPhone }),
       });
       
-      // Log response status
-      console.log('Status:', res.status);
-      
+      // Safe text parse
       const text = await res.text();
-      console.log('Raw response:', text);
+      console.log("OTP status:", res.status);
+      console.log("OTP raw:", text);
       
-      const data = text ? JSON.parse(text) : null;
-      console.log('Parsed data:', data);
+      let data = null;
+      try { data = JSON.parse(text); } catch (e) {}
       
-      if (!res.ok || !data?.success) {
-        console.log('OTP failed - showing alert');
-        Alert.alert('OTP failed', data?.message || 'Try again');
+      if (!res.ok || !data || data.success !== true) {
+        Alert.alert("OTP failed", data?.message || text || "Unknown error");
         return;
       }
       
