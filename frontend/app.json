@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
+    "newArchEnabled": false,
     "extra": {
       "BACKEND_URL": "https://nexryde-ui.emergent.host/api",
       "router": {},
