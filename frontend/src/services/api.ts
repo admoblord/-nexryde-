@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 // Backend URL - HARDCODED for reliability
-const API_URL = 'https://docs-hub-7.preview.emergentagent.com';
+const API_URL = 'https://rideapp-admin-1.preview.emergentagent.com';
 
 // Export for other components to use
 export const BACKEND_URL = API_URL;
