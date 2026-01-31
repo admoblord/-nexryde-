@@ -6541,6 +6541,15 @@ async def serve_admin():
         return FileResponse(admin_file, media_type="text/html")
     raise HTTPException(status_code=404, detail="Admin panel not found")
 
+@app.get("/admin/subscription-management.html")
+@app.get("/admin/subscription-management")
+async def serve_subscription_admin():
+    """Serve subscription management admin panel"""
+    admin_file = ADMIN_DIR / "subscription-management.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Subscription management panel not found")
+
 # Direct auth routes WITHOUT /api prefix (for compatibility)
 @app.post("/auth/request-otp")
 @app.post("/auth/send-otp")
