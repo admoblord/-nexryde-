@@ -43,13 +43,6 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Backend URL - includes /api
-const getBackendUrl = () => {
-  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 
-                 'https://ride-location-fix.preview.emergentagent.com/api';
-  return envUrl;
-};
-
 // Emergent Auth URL
 const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
 
@@ -61,31 +54,39 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
-  const { setPhone: storePhone, setUser, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
+  
+  // Store phone in AsyncStorage for later use
+  const storePhone = async (phoneNumber: string) => {
+    try {
+      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+      await AsyncStorage.setItem('pending_phone', phoneNumber);
+    } catch (e) {
+      console.log('Failed to store phone:', e);
+    }
+  };
   
   // CRITICAL: Ref to prevent double processing of session_id
   const isProcessingSession = useRef(false);
   const processedSessionIds = useRef<Set<string>>(new Set());
 
-  // Single OTP request function with proper logging
+  // OTP request function with 15-second timeout
   const handleContinue = async () => {
-    console.log("OTP: pressed");
     if (phone.length < 10) return;
     setLoading(true);
     storePhone(phone);
 
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 10000);
+    const t = setTimeout(() => {
+      controller.abort();
+      setLoading(false);
+      Alert.alert("Connection Timeout", "Could not reach server. Please check your internet connection and try again.");
+    }, 15000);
 
     try {
-      // HARDCODED URL - DO NOT USE process.env
-      const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
+      const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
       const fullPhone = `+234${phone}`;
-      const endpoint = `${BASE_URL}/auth/request-otp`;
-      
-      console.log("OTP: fullPhone", fullPhone);
-      console.log("OTP: BASE_URL", BASE_URL);
-      console.log("OTP: endpoint", endpoint);
+      const endpoint = `${BASE_URL}/api/auth/request-otp`;
 
       const res = await fetch(endpoint, {
         method: "POST",
@@ -94,19 +95,24 @@ export default function LoginScreen() {
         signal: controller.signal,
       });
 
-      console.log("OTP: status", res.status);
       const text = await res.text();
-      console.log("OTP: raw", text);
-
       let data = null;
       try { data = JSON.parse(text); } catch {}
 
-      if (!res.ok || !data?.success) {
-        Alert.alert("OTP failed", data?.message || text || "Unknown error");
+      if (!res.ok) {
+        if (res.status === 429 && data?.detail) {
+          Alert.alert("Please Wait", data.detail);
+        } else {
+          Alert.alert("OTP failed", data?.detail || data?.message || text || "Unknown error. Please try again.");
+        }
         return;
       }
 
-      console.log("OTP: success, navigating");
+      if (!data?.success) {
+        Alert.alert("OTP failed", data?.message || "Unable to send OTP. Please try again.");
+        return;
+      }
+
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -115,11 +121,15 @@ export default function LoginScreen() {
         }
       });
     } catch (e: any) {
-      console.log("OTP: error", String(e));
-      Alert.alert("Network error", String(e));
+      if (e.name === 'AbortError') {
+        return;
+      }
+      Alert.alert(
+        "Connection Error", 
+        "Cannot connect to server. Please check:\n\n1. Your internet connection\n2. Backend server is running\n3. Backend URL is correct in .env file"
+      );
     } finally {
       clearTimeout(t);
-      console.log("OTP: finally, stop loading");
       setLoading(false);
     }
   };
@@ -132,33 +142,42 @@ export default function LoginScreen() {
     setWhatsappLoading(true);
     storePhone(phone);
     
-    // HARDCODED URL - DO NOT USE process.env
-    const BASE_URL = "https://ride-location-fix.preview.emergentagent.com/api";
+    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
     const fullPhone = `+234${phone}`;
     
-    console.log("WhatsApp: BASE_URL", BASE_URL);
-    console.log("WhatsApp: endpoint", `${BASE_URL}/auth/request-otp-whatsapp`);
+    const controller = new AbortController();
+    const t = setTimeout(() => {
+      controller.abort();
+      setWhatsappLoading(false);
+      Alert.alert("Connection Timeout", "Could not reach server. Please try SMS instead.");
+    }, 15000);
     
     try {
-      const res = await fetch(`${BASE_URL}/auth/request-otp-whatsapp`, {
+      const res = await fetch(`${BASE_URL}/api/auth/request-otp-whatsapp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: fullPhone }),
+        signal: controller.signal,
       });
       
-      console.log('WhatsApp: status', res.status);
       const text = await res.text();
-      console.log('WhatsApp: raw', text);
-      
       let data = null;
       try { data = JSON.parse(text); } catch {}
       
-      if (!res.ok || !data?.success) {
+      if (!res.ok) {
+        if (res.status === 429 && data?.detail) {
+          Alert.alert("Please Wait", data.detail);
+        } else {
+          Alert.alert('WhatsApp OTP failed', data?.detail || data?.message || 'Try SMS instead');
+        }
+        return;
+      }
+
+      if (!data?.success) {
         Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
         return;
       }
       
-      console.log('WhatsApp: success, navigating');
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -168,12 +187,18 @@ export default function LoginScreen() {
       });
       
     } catch (e: any) {
-      console.log('WhatsApp: error', String(e));
-      Alert.alert('Network error', 'Could not reach server. Try SMS instead.');
+      if (e.name === 'AbortError') {
+        return;
+      }
+      Alert.alert('Connection Error', 'Cannot connect to server. Please try SMS instead.');
     } finally {
+      clearTimeout(t);
       setWhatsappLoading(false);
     }
   };
+
+  // Get backend URL for Google auth
+  const getBackendUrl = () => process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
 
   // Extract session_id from URL (supports both hash and query params)
   const extractSessionId = (url: string): string | null => {
