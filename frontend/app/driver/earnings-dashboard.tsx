@@ -123,6 +123,34 @@ export default function EarningsDashboardScreen() {
               </View>
             ))}
           </View>
+
+          {/* 🔥 INSTANT LOANS - COMING SOON */}
+          <View style={styles.loanCard}>
+            <View style={styles.loanBadge}>
+              <Text style={styles.loanBadgeText}>COMING SOON</Text>
+            </View>
+            <View style={styles.loanIcon}>
+              <Ionicons name="cash" size={40} color="#10B981" />
+            </View>
+            <Text style={styles.loanTitle}>💳 Instant Driver Loans</Text>
+            <Text style={styles.loanDesc}>
+              Get instant loans from ₦5,000 to ₦50,000 • Auto-payback from earnings • Build your credit score
+            </Text>
+            <View style={styles.loanFeatures}>
+              <View style={styles.loanFeature}>
+                <Ionicons name="flash" size={16} color="#F59E0B" />
+                <Text style={styles.loanFeatureText}>Instant approval</Text>
+              </View>
+              <View style={styles.loanFeature}>
+                <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+                <Text style={styles.loanFeatureText}>No paperwork</Text>
+              </View>
+              <View style={styles.loanFeature}>
+                <Ionicons name="trending-up" size={16} color="#3B82F6" />
+                <Text style={styles.loanFeatureText}>Build credit</Text>
+              </View>
+            </View>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -310,5 +338,75 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     color: COLORS.accentGreen,
+  },
+  // Loan Card Styles
+  loanCard: {
+    backgroundColor: 'rgba(16,185,129,0.1)',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(16,185,129,0.3)',
+    alignItems: 'center',
+  },
+  loanBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    marginBottom: 16,
+  },
+  loanBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  loanIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: 'rgba(16,185,129,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  loanTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  loanDesc: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    textAlign: 'center',
+    marginBottom: 20,
+    lineHeight: 20,
+    paddingHorizontal: 12,
+  },
+  loanFeatures: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loanFeature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  loanFeatureText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
   },
 });

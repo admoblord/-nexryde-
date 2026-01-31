@@ -400,6 +400,22 @@ export default function BookScreen() {
           ))}
         </View>
 
+        {/* 🔥 VOICE BOOKING - COMING SOON */}
+        <View style={styles.voiceBookingCard}>
+          <View style={styles.voiceBookingBadge}>
+            <Text style={styles.voiceBookingBadgeText}>COMING SOON</Text>
+          </View>
+          <View style={styles.voiceBookingContent}>
+            <View style={styles.voiceIcon}>
+              <Ionicons name="mic" size={28} color="#8B5CF6" />
+            </View>
+            <View style={styles.voiceText}>
+              <Text style={styles.voiceTitle}>🎤 Voice Booking</Text>
+              <Text style={styles.voiceDesc}>Book rides by voice in Yoruba, Igbo, Hausa & Pidgin!</Text>
+            </View>
+          </View>
+        </View>
+
         {/* Location Suggestions */}
         <ScrollView 
           style={styles.suggestionsContainer}
@@ -1093,5 +1109,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: SPACING.md,
+  },
+  // Voice Booking Card
+  voiceBookingCard: {
+    backgroundColor: 'rgba(139,92,246,0.1)',
+    borderRadius: 20,
+    padding: 16,
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
+    borderWidth: 2,
+    borderColor: 'rgba(139,92,246,0.3)',
+  },
+  voiceBookingBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  voiceBookingBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
+  voiceBookingContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  voiceIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(139,92,246,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  voiceText: {
+    flex: 1,
+  },
+  voiceTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 4,
+  },
+  voiceDesc: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    lineHeight: 18,
   },
 });
