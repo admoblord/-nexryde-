@@ -26,6 +26,12 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 from subscription_manager import subscription_router
 from payment_reminder_system import payment_reminder_job
 
+# Import Map Service (Cost Controlled)
+from map_service import map_router
+
+# Import Call Service (Privacy Protected)
+from call_service import call_router
+
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
 load_dotenv(ROOT_DIR / '.env')
@@ -6523,6 +6529,8 @@ async def seed_promo_codes():
 # Include routers
 app.include_router(api_router)
 app.include_router(subscription_router)
+app.include_router(map_router)
+app.include_router(call_router)
 
 # Payment reminder background job
 @app.on_event("startup")
