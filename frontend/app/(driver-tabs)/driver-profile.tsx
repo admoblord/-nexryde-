@@ -500,8 +500,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0F172A',
   },
-    color: COLORS.textPrimary,
-  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
