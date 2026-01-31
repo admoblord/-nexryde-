@@ -679,6 +679,233 @@
                     </table>
                 </div>
             </div>
+
+            <!-- FRAUD ALERTS PAGE -->
+            <div class="page-section" id="page-fraud">
+                <div class="stats-grid" style="grid-template-columns: repeat(5, 1fr);">
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(239,68,68,0.15); color: #EF4444;"><i class="ri-alarm-warning-line"></i></div>
+                        <div class="value" id="fraudTotal">0</div>
+                        <div class="label">Total Alerts</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(239,68,68,0.15); color: #EF4444;"><i class="ri-error-warning-line"></i></div>
+                        <div class="value" id="fraudCritical">0</div>
+                        <div class="label">Critical</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(249,115,22,0.15); color: #F97316;"><i class="ri-alert-line"></i></div>
+                        <div class="value" id="fraudHigh">0</div>
+                        <div class="label">High</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(234,179,8,0.15); color: #EAB308;"><i class="ri-information-line"></i></div>
+                        <div class="value" id="fraudMedium">0</div>
+                        <div class="label">Medium</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(34,197,94,0.15); color: #22C55E;"><i class="ri-checkbox-circle-line"></i></div>
+                        <div class="value" id="fraudLow">0</div>
+                        <div class="label">Low</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🚨 Fraud Alerts</h3>
+                        <span id="fraudMessage" style="color: #94A3B8; font-size: 14px;"></span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Severity</th>
+                                <th>Details</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fraudTable">
+                            <tr><td colspan="4" class="empty-state"><i class="ri-shield-check-line"></i><p>No fraud alerts</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- USER MANAGEMENT PAGE -->
+            <div class="page-section" id="page-users">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🔍 User Management</h3>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <input type="text" id="userSearchInput" placeholder="Search by name, phone, email..." style="padding: 10px 16px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff; width: 300px;">
+                            <select id="userRoleFilter" style="padding: 10px 16px; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; color: #fff;">
+                                <option value="">All Roles</option>
+                                <option value="rider">Riders</option>
+                                <option value="driver">Drivers</option>
+                            </select>
+                            <button class="action-btn view" onclick="searchUsers()">Search</button>
+                        </div>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Phone</th>
+                                <th>Email</th>
+                                <th>Role</th>
+                                <th>Trips</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="usersTable">
+                            <tr><td colspan="7" class="empty-state"><i class="ri-user-search-line"></i><p>Search for users</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- LIVE TRIPS PAGE -->
+            <div class="page-section" id="page-livetrips">
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-car-line"></i></div>
+                        <div class="value" id="liveTripsCount">0</div>
+                        <div class="label">Active Trips</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(249,115,22,0.15); color: #F97316;"><i class="ri-time-line"></i></div>
+                        <div class="value" id="longTripsCount">0</div>
+                        <div class="label">Long Trips (2h+)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-refresh-line"></i></div>
+                        <div class="value" id="lastRefresh">-</div>
+                        <div class="label">Last Updated</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🚗 Live Trips</h3>
+                        <button class="action-btn view" onclick="loadLiveTrips()"><i class="ri-refresh-line"></i> Refresh</button>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Trip ID</th>
+                                <th>Driver</th>
+                                <th>Rider</th>
+                                <th>Status</th>
+                                <th>Duration</th>
+                                <th>Alert</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="liveTripsTable">
+                            <tr><td colspan="7" class="empty-state"><i class="ri-car-line"></i><p>No active trips</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- ANALYTICS PAGE -->
+            <div class="page-section" id="page-analytics">
+                <div style="display: flex; gap: 12px; margin-bottom: 24px;">
+                    <button class="action-btn view" onclick="loadAnalytics('today')" id="btn-today">Today</button>
+                    <button class="action-btn" onclick="loadAnalytics('week')" id="btn-week">This Week</button>
+                    <button class="action-btn" onclick="loadAnalytics('month')" id="btn-month">This Month</button>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-road-map-line"></i></div>
+                        <div class="value" id="analyticsTrips">0</div>
+                        <div class="label">Total Trips</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-check-double-line"></i></div>
+                        <div class="value" id="analyticsCompleted">0</div>
+                        <div class="label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(239,68,68,0.15); color: #EF4444;"><i class="ri-close-circle-line"></i></div>
+                        <div class="value" id="analyticsCancelRate">0%</div>
+                        <div class="label">Cancel Rate</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(234,179,8,0.15); color: #EAB308;"><i class="ri-money-dollar-circle-line"></i></div>
+                        <div class="value" id="analyticsRevenue">₦0</div>
+                        <div class="label">Revenue</div>
+                    </div>
+                </div>
+                <div class="stats-grid" style="grid-template-columns: repeat(3, 1fr);">
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-route-line"></i></div>
+                        <div class="value" id="analyticsAvgDistance">0 km</div>
+                        <div class="label">Avg Distance</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-timer-line"></i></div>
+                        <div class="value" id="analyticsAvgDuration">0 min</div>
+                        <div class="label">Avg Duration</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(249,115,22,0.15); color: #F97316;"><i class="ri-fire-line"></i></div>
+                        <div class="value" id="analyticsPeakHour">-</div>
+                        <div class="label">Peak Hour</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📊 Insights</h3>
+                    </div>
+                    <div id="analyticsInsights" style="padding: 16px;">
+                        <p style="color: #64748B;">Select a period to view insights</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COMMUNITY PAGE -->
+            <div class="page-section" id="page-community">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-team-line"></i></div>
+                        <div class="value" id="communityDrivers">0</div>
+                        <div class="label">Total Drivers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-user-voice-line"></i></div>
+                        <div class="value" id="communityActive">0</div>
+                        <div class="label">Active (7 days)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-article-line"></i></div>
+                        <div class="value" id="communityPosts">0</div>
+                        <div class="label">Posts</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon" style="background: rgba(234,179,8,0.15); color: #EAB308;"><i class="ri-calendar-event-line"></i></div>
+                        <div class="value" id="communityEvents">0</div>
+                        <div class="label">Events</div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📅 Upcoming Events</h3>
+                        </div>
+                        <div id="communityEventsList" style="padding: 16px;">
+                            <p style="color: #64748B;">No upcoming events</p>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>👥 Community Groups</h3>
+                        </div>
+                        <div id="communityGroupsList" style="padding: 16px;">
+                            <p style="color: #64748B;">No groups yet</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
