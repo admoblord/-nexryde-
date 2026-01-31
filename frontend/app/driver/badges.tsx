@@ -1,348 +1,155 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
-interface Badge {
-  id: string;
-  name: string;
-  description: string;
-  icon: any;
-  color: string;
-  level: number;
-  progress: number;
-  total: number;
-  unlocked: boolean;
-  reward: string;
-  category: string;
-}
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-ui.emergent.host';
 
 export default function BadgesScreen() {
   const router = useRouter();
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const { user } = useAppStore();
+  const [loading, setLoading] = useState(true);
+  const [badges, setBadges] = useState<any[]>([]);
+  const [earnedCount, setEarnedCount] = useState(0);
 
-  const badges: Badge[] = [
-    // Earnings Badges
-    {
-      id: '1',
-      name: 'First Naira',
-      description: 'Complete your first trip',
-      icon: 'cash',
-      color: '#10B981',
-      level: 1,
-      progress: 1,
-      total: 1,
-      unlocked: true,
-      reward: '₦500 bonus',
-      category: 'earnings',
-    },
-    {
-      id: '2',
-      name: 'Money Maker',
-      description: 'Earn ₦100,000 total',
-      icon: 'wallet',
-      color: '#F59E0B',
-      level: 2,
-      progress: 85000,
-      total: 100000,
-      unlocked: false,
-      reward: '₦2,000 bonus',
-      category: 'earnings',
-    },
-    {
-      id: '3',
-      name: 'Millionaire',
-      description: 'Earn ₦1,000,000 total',
-      icon: 'trophy',
-      color: '#EF4444',
-      level: 5,
-      progress: 85000,
-      total: 1000000,
-      unlocked: false,
-      reward: '₦10,000 bonus',
-      category: 'earnings',
-    },
-    // Trips Badges
-    {
-      id: '4',
-      name: 'Road Warrior',
-      description: 'Complete 50 trips',
-      icon: 'car-sport',
-      color: '#3B82F6',
-      level: 2,
-      progress: 42,
-      total: 50,
-      unlocked: false,
-      reward: '₦1,500 bonus',
-      category: 'trips',
-    },
-    {
-      id: '5',
-      name: 'Century Club',
-      description: 'Complete 100 trips',
-      icon: 'ribbon',
-      color: '#8B5CF6',
-      level: 3,
-      progress: 42,
-      total: 100,
-      unlocked: false,
-      reward: '₦3,000 bonus',
-      category: 'trips',
-    },
-    {
-      id: '6',
-      name: 'Legend',
-      description: 'Complete 1,000 trips',
-      icon: 'star',
-      color: '#EC4899',
-      level: 5,
-      progress: 42,
-      total: 1000,
-      unlocked: false,
-      reward: '₦20,000 bonus',
-      category: 'trips',
-    },
-    // Rating Badges
-    {
-      id: '7',
-      name: '5-Star Pro',
-      description: 'Maintain 5.0 rating for 20 trips',
-      icon: 'star-outline',
-      color: '#FBBF24',
-      level: 3,
-      progress: 12,
-      total: 20,
-      unlocked: false,
-      reward: 'Priority rides',
-      category: 'rating',
-    },
-    {
-      id: '8',
-      name: 'Perfect Week',
-      description: 'Get 5 stars on every trip this week',
-      icon: 'thumbs-up',
-      color: '#34D399',
-      level: 2,
-      progress: 5,
-      total: 7,
-      unlocked: false,
-      reward: '₦1,000 bonus',
-      category: 'rating',
-    },
-    // Special Badges
-    {
-      id: '9',
-      name: 'Early Bird',
-      description: 'Complete 20 trips before 8am',
-      icon: 'sunny',
-      color: '#F59E0B',
-      level: 2,
-      progress: 8,
-      total: 20,
-      unlocked: false,
-      reward: '₦1,000 bonus',
-      category: 'special',
-    },
-    {
-      id: '10',
-      name: 'Night Owl',
-      description: 'Complete 20 trips after 10pm',
-      icon: 'moon',
-      color: '#6366F1',
-      level: 2,
-      progress: 3,
-      total: 20,
-      unlocked: false,
-      reward: '₦1,000 bonus',
-      category: 'special',
-    },
-    {
-      id: '11',
-      name: 'Weekend Warrior',
-      description: 'Work every weekend for a month',
-      icon: 'calendar',
-      color: '#14B8A6',
-      level: 3,
-      progress: 2,
-      total: 4,
-      unlocked: false,
-      reward: '₦2,500 bonus',
-      category: 'special',
-    },
-    {
-      id: '12',
-      name: 'Fuel Master',
-      description: 'Achieve 15+ km/L efficiency',
-      icon: 'leaf',
-      color: '#22C55E',
-      level: 2,
-      progress: 12.5,
-      total: 15,
-      unlocked: false,
-      reward: 'Eco badge',
-      category: 'special',
-    },
-  ];
+  useEffect(() => {
+    fetchBadges();
+  }, []);
 
-  const categories = [
-    { id: 'all', name: 'All', icon: 'grid' },
-    { id: 'earnings', name: 'Earnings', icon: 'cash' },
-    { id: 'trips', name: 'Trips', icon: 'car' },
-    { id: 'rating', name: 'Rating', icon: 'star' },
-    { id: 'special', name: 'Special', icon: 'sparkles' },
-  ];
+  const fetchBadges = async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
 
-  const filteredBadges = selectedCategory === 'all' 
-    ? badges 
-    : badges.filter(b => b.category === selectedCategory);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/driver/${user.id}/badges`);
+      const data = await response.json();
+      
+      setBadges(data.badges || []);
+      setEarnedCount(data.earned_count || 0);
+    } catch (error) {
+      console.error('Error fetching badges:', error);
+      setBadges([]);
+      setEarnedCount(0);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  const unlockedCount = badges.filter(b => b.unlocked).length;
-  const totalBadges = badges.length;
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading achievements...</Text>
+      </View>
+    );
+  }
+
+  if (earnedCount === 0) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Badges & Achievements</Text>
+            <View style={styles.placeholder} />
+          </View>
+
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconContainer}>
+              <Ionicons name="ribbon-outline" size={80} color={COLORS.textSecondary} />
+            </View>
+            <Text style={styles.emptyTitle}>No Badges Yet</Text>
+            <Text style={styles.emptyText}>
+              Complete trips to earn badges and unlock rewards! Your first badge awaits after your first completed trip.
+            </Text>
+
+            {/* Available Badges Preview */}
+            <View style={styles.previewSection}>
+              <Text style={styles.previewTitle}>🎯 Badges You Can Earn:</Text>
+              <View style={styles.previewBadges}>
+                <View style={styles.previewBadge}>
+                  <Ionicons name="cash" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.previewBadgeText}>First Trip</Text>
+                </View>
+                <View style={styles.previewBadge}>
+                  <Ionicons name="star" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.previewBadgeText}>Top Rated</Text>
+                </View>
+                <View style={styles.previewBadge}>
+                  <Ionicons name="flash" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.previewBadgeText}>Speed Demon</Text>
+                </View>
+                <View style={styles.previewBadge}>
+                  <Ionicons name="trophy" size={24} color={COLORS.textSecondary} />
+                  <Text style={styles.previewBadgeText}>Millionaire</Text>
+                </View>
+              </View>
+            </View>
+
+            <TouchableOpacity 
+              style={styles.emptyButton}
+              onPress={() => router.back()}
+            >
+              <Text style={styles.emptyButtonText}>Start Earning Badges</Text>
+              <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark]}
-        style={StyleSheet.absoluteFillObject}
-      />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <View style={styles.headerTitle}>
-            <Ionicons name="trophy" size={28} color={COLORS.white} />
-            <Text style={styles.headerText}>Badges & Achievements</Text>
-          </View>
-          <View style={styles.backButton} />
+          <Text style={styles.headerTitle}>Badges ({earnedCount})</Text>
+          <View style={styles.placeholder} />
         </View>
 
-        {/* Progress Card */}
-        <View style={styles.progressCard}>
-          <LinearGradient
-            colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
-            style={styles.progressGradient}
-          >
-            <Text style={styles.progressTitle}>Your Progress</Text>
-            <Text style={styles.progressValue}>{unlockedCount}/{totalBadges}</Text>
-            <View style={styles.progressBar}>
-              <View style={[styles.progressFill, { width: `${(unlockedCount/totalBadges)*100}%` }]} />
-            </View>
-            <Text style={styles.progressLabel}>
-              {totalBadges - unlockedCount} more badges to unlock!
+        <ScrollView contentContainerStyle={styles.content}>
+          <View style={styles.statsCard}>
+            <Text style={styles.statsTitle}>🏆 Your Achievements</Text>
+            <Text style={styles.statsText}>
+              You've earned {earnedCount} badge{earnedCount !== 1 ? 's' : ''}!
             </Text>
-          </LinearGradient>
-        </View>
+          </View>
 
-        {/* Categories */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoriesScroll}
-          contentContainerStyle={styles.categoriesContent}
-        >
-          {categories.map((cat) => (
-            <TouchableOpacity
-              key={cat.id}
-              style={[
-                styles.categoryButton,
-                selectedCategory === cat.id && styles.categoryButtonActive,
-              ]}
-              onPress={() => setSelectedCategory(cat.id)}
-            >
-              <Ionicons
-                name={cat.icon as any}
-                size={20}
-                color={selectedCategory === cat.id ? COLORS.white : COLORS.lightTextMuted}
-              />
-              <Text
-                style={[
-                  styles.categoryText,
-                  selectedCategory === cat.id && styles.categoryTextActive,
-                ]}
-              >
-                {cat.name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Badges Grid */}
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {filteredBadges.map((badge) => (
-            <View key={badge.id} style={styles.badgeCard}>
-              <View style={[styles.badgeIconContainer, !badge.unlocked && styles.badgeLocked]}>
-                <LinearGradient
-                  colors={badge.unlocked ? [badge.color, `${badge.color}CC`] : ['#9CA3AF', '#6B7280']}
-                  style={styles.badgeIconGradient}
-                >
-                  <Ionicons
-                    name={badge.icon as any}
-                    size={32}
-                    color={COLORS.white}
-                  />
-                  {badge.unlocked && (
-                    <View style={styles.unlockedBadge}>
-                      <Ionicons name="checkmark-circle" size={20} color={COLORS.accentGreen} />
-                    </View>
-                  )}
-                </LinearGradient>
-              </View>
-
-              <View style={styles.badgeContent}>
-                <View style={styles.badgeHeader}>
-                  <Text style={styles.badgeName}>{badge.name}</Text>
-                  <View style={styles.levelBadge}>
-                    <Text style={styles.levelText}>Lv.{badge.level}</Text>
-                  </View>
+          {/* Display real earned badges */}
+          <View style={styles.badgesGrid}>
+            {badges.map((badge) => (
+              <View key={badge.id} style={styles.badgeCard}>
+                <View style={[styles.badgeIcon, { backgroundColor: badge.color + '20' }]}>
+                  <Ionicons name={badge.icon} size={32} color={badge.color} />
                 </View>
-                <Text style={styles.badgeDescription}>{badge.description}</Text>
-
-                {!badge.unlocked && (
-                  <View style={styles.progressSection}>
-                    <View style={styles.progressInfo}>
-                      <Text style={styles.progressText}>
-                        {badge.progress.toLocaleString()} / {badge.total.toLocaleString()}
-                      </Text>
-                      <Text style={styles.progressPercentage}>
-                        {Math.round((badge.progress / badge.total) * 100)}%
-                      </Text>
-                    </View>
-                    <View style={styles.badgeProgressBar}>
-                      <View
-                        style={[
-                          styles.badgeProgressFill,
-                          { width: `${(badge.progress / badge.total) * 100}%`, backgroundColor: badge.color }
-                        ]}
-                      />
-                    </View>
-                  </View>
-                )}
-
-                <View style={styles.rewardSection}>
-                  <Ionicons name="gift" size={16} color={badge.unlocked ? COLORS.accentGreen : COLORS.lightTextMuted} />
-                  <Text style={[styles.rewardText, badge.unlocked && styles.rewardTextUnlocked]}>
-                    Reward: {badge.reward}
+                <Text style={styles.badgeName}>{badge.name}</Text>
+                <Text style={styles.badgeDesc}>{badge.description}</Text>
+                {badge.earned_at && (
+                  <Text style={styles.badgeDate}>
+                    Earned {new Date(badge.earned_at).toLocaleDateString()}
                   </Text>
-                </View>
+                )}
               </View>
-            </View>
-          ))}
+            ))}
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -352,211 +159,163 @@ export default function BadgesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.lightBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: SPACING.md,
+    color: COLORS.textSecondary,
   },
   safeArea: {
     flex: 1,
+    width: '100%',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
+    backgroundColor: COLORS.lightSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderColor,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: SPACING.xs,
   },
   headerTitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
   },
-  progressCard: {
-    marginHorizontal: SPACING.lg,
-    marginBottom: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
+  placeholder: {
+    width: 40,
   },
-  progressGradient: {
-    padding: SPACING.lg,
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: SPACING.xl,
   },
-  progressTitle: {
+  emptyIconContainer: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: COLORS.borderColor,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
+  },
+  emptyTitle: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.md,
+  },
+  emptyText: {
     fontSize: FONT_SIZE.md,
-    color: '#64748B',
-    marginBottom: SPACING.xs,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: SPACING.xl,
   },
-  progressValue: {
-    fontSize: 48,
-    fontWeight: '900',
-    color: COLORS.white,
-    marginBottom: SPACING.sm,
-  },
-  progressBar: {
+  previewSection: {
     width: '100%',
-    height: 8,
-    backgroundColor: 'rgba(255,255,255,0.3)',
-    borderRadius: 4,
-    overflow: 'hidden',
-    marginBottom: SPACING.sm,
+    marginBottom: SPACING.xl,
   },
-  progressFill: {
-    height: '100%',
-    backgroundColor: COLORS.white,
+  previewTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.md,
+    textAlign: 'center',
   },
-  progressLabel: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    fontWeight: '700',
+  previewBadges: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    flexWrap: 'wrap',
+    gap: SPACING.md,
   },
-  categoriesScroll: {
-    maxHeight: 50,
+  previewBadge: {
+    alignItems: 'center',
+    width: 70,
   },
-  categoriesContent: {
-    paddingHorizontal: SPACING.lg,
+  previewBadgeText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.xs,
+    textAlign: 'center',
+  },
+  emptyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
     gap: SPACING.sm,
   },
-  categoryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  categoryButtonActive: {
-    backgroundColor: COLORS.accentGreen,
-  },
-  categoryText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
-  },
-  categoryTextActive: {
+  emptyButtonText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: 'bold',
     color: COLORS.white,
   },
-  scrollView: {
-    flex: 1,
-    marginTop: SPACING.md,
+  content: {
+    padding: SPACING.md,
   },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xxl,
-  },
-  badgeCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
+  statsCard: {
+    backgroundColor: COLORS.primary + '10',
+    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
     marginBottom: SPACING.md,
   },
-  badgeIconContainer: {
-    marginRight: SPACING.md,
-  },
-  badgeLocked: {
-    opacity: 0.5,
-  },
-  badgeIconGradient: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  unlockedBadge: {
-    position: 'absolute',
-    bottom: -4,
-    right: -4,
-    backgroundColor: COLORS.white,
-    borderRadius: 12,
-  },
-  badgeContent: {
-    flex: 1,
-  },
-  badgeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  statsTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: 'bold',
+    color: COLORS.primary,
     marginBottom: SPACING.xs,
+  },
+  statsText: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.textSecondary,
+  },
+  badgesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  badgeCard: {
+    width: '48%',
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    alignItems: 'center',
+  },
+  badgeIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
   },
   badgeName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.xs,
+    textAlign: 'center',
   },
-  levelBadge: {
-    backgroundColor: COLORS.lightSurface,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  levelText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.lightTextSecondary,
-  },
-  badgeDescription: {
+  badgeDesc: {
     fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    marginBottom: SPACING.sm,
-    fontWeight: '700',
-  },
-  progressSection: {
-    marginBottom: SPACING.sm,
-  },
-  progressInfo: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    color: COLORS.textSecondary,
+    textAlign: 'center',
     marginBottom: SPACING.xs,
   },
-  progressText: {
+  badgeDate: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: '#475569',
-  },
-  progressPercentage: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '900',
-    color: COLORS.accentGreen,
-  },
-  badgeProgressBar: {
-    width: '100%',
-    height: 6,
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  badgeProgressFill: {
-    height: '100%',
-  },
-  rewardSection: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  rewardText: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    fontWeight: '700',
-  },
-  rewardTextUnlocked: {
-    color: COLORS.accentGreen,
-    fontWeight: '700',
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
   },
 });
