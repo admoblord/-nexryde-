@@ -307,16 +307,18 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     textAlign: 'center',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     textAlign: 'center',
     marginBottom: SPACING.xl,
+    fontWeight: '700',
   },
   roleContainer: {
     flexDirection: 'row',
@@ -350,8 +352,10 @@ const styles = StyleSheet.create({
   },
   premiumText: {
     fontSize: FONT_SIZE.xxs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   radioOuter: {
     width: 24,
@@ -383,8 +387,9 @@ const styles = StyleSheet.create({
   },
   roleTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   roleTitleActive: {
     color: COLORS.accentGreen,
@@ -394,8 +399,8 @@ const styles = StyleSheet.create({
   },
   rolePrice: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   rolePriceActive: {
     color: COLORS.accentGreen,
@@ -408,7 +413,8 @@ const styles = StyleSheet.create({
   },
   roleFeature: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   roleFeatureActive: {
     color: COLORS.accentGreenDark,
@@ -421,9 +427,11 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#64748B',
     marginBottom: SPACING.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   textInput: {
     backgroundColor: COLORS.white,
@@ -459,8 +467,8 @@ const styles = StyleSheet.create({
   },
   phonePrefix: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   phoneInput: {
     flex: 1,
@@ -502,17 +510,18 @@ const styles = StyleSheet.create({
   },
   continueText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   termsText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     textAlign: 'center',
     lineHeight: 20,
+    fontWeight: '700',
   },
   termsLink: {
     color: COLORS.accentGreen,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

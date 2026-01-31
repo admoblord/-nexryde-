@@ -284,19 +284,21 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxxl,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
+    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: '#475569',
     textAlign: 'center',
+    fontWeight: '700',
   },
   phone: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginTop: SPACING.xs,
   },
   providerBadge: {
@@ -312,7 +314,9 @@ const styles = StyleSheet.create({
   providerText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.accentGreen,
-    fontWeight: '600',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   form: {
     alignItems: 'center',
@@ -324,8 +328,8 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.lg,
     paddingHorizontal: SPACING.xl,
     fontSize: FONT_SIZE.xxxl,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     textAlign: 'center',
     letterSpacing: 16,
     borderWidth: 2,
@@ -345,7 +349,7 @@ const styles = StyleSheet.create({
   otpHintText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.gold,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   verifyButton: {
     width: '100%',
@@ -368,7 +372,7 @@ const styles = StyleSheet.create({
   },
   verifyButtonText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.textMuted,
   },
   verifyButtonTextActive: {
@@ -388,16 +392,17 @@ const styles = StyleSheet.create({
   },
   resendText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   resendLink: {
     fontSize: FONT_SIZE.md,
     color: COLORS.accentGreen,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   resendTimer: {
     fontSize: FONT_SIZE.md,
     color: COLORS.textMuted,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });
