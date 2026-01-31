@@ -1,7 +1,24 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 
-// Backend URL - HARDCODED for reliability
-const API_URL = 'https://ride-location-fix.preview.emergentagent.com';
+// Backend URL - reads from app.json extra config (works in APK builds)
+const getApiUrl = () => {
+  // Priority 1: Expo config extra (for standalone builds)
+  const expoUrl = Constants.expoConfig?.extra?.BACKEND_URL;
+  if (expoUrl) {
+    // Remove /api suffix if present, we add it in baseURL
+    return expoUrl.replace(/\/api$/, '');
+  }
+  // Priority 2: Environment variable
+  const envUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  if (envUrl) {
+    return envUrl.replace(/\/api$/, '');
+  }
+  // Priority 3: Production fallback
+  return 'https://nexryde-ui.emergent.host';
+};
+
+const API_URL = getApiUrl();
 
 // Export for other components to use
 export const BACKEND_URL = API_URL;
