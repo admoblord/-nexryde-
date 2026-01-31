@@ -178,15 +178,16 @@ export default function SubscriptionScreen() {
     };
   }, []);
 
-  const fetchSubscription = async () => {
-    console.log('fetchSubscription called, user:', user?.id);
+  const fetchSubscription = async (currentPrice?: number) => {
+    const price = currentPrice || pricing.current_price || 18000;
+    console.log('fetchSubscription called, user:', user?.id, 'price:', price);
     if (!user?.id) {
       console.log('No user, setting default subscription');
       // Set default subscription data for demo/testing when no user is logged in
       setSubscription({
         status: 'none',
         days_remaining: 0,
-        monthly_fee: 25000,
+        monthly_fee: price,
         bank_details: {
           bank_name: 'United Bank for Africa (UBA)',
           account_name: 'ADMOBLORDGROUP LIMITED',
@@ -201,6 +202,10 @@ export default function SubscriptionScreen() {
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}`);
       const data = await response.json();
       console.log('Subscription data:', data);
+      // Use API price if not set in subscription data
+      if (!data.monthly_fee) {
+        data.monthly_fee = price;
+      }
       setSubscription(data);
       setLoading(false);
     } catch (error) {
@@ -209,7 +214,7 @@ export default function SubscriptionScreen() {
       setSubscription({
         status: 'none',
         days_remaining: 0,
-        monthly_fee: 25000,
+        monthly_fee: price,
         bank_details: {
           bank_name: 'United Bank for Africa (UBA)',
           account_name: 'ADMOBLORDGROUP LIMITED',
