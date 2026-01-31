@@ -169,8 +169,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   placeholder: {
     width: 44,
@@ -197,12 +198,16 @@ const styles = StyleSheet.create({
   },
   currentTierLabel: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: 'rgba(255,255,255,0.8)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   currentTierName: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   multiplierBadge: {
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -212,12 +217,15 @@ const styles = StyleSheet.create({
   },
   multiplierText: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
   },
   multiplierLabel: {
     fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
     color: 'rgba(255,255,255,0.8)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   tierCard: {
     backgroundColor: COLORS.white,
@@ -263,12 +271,14 @@ const styles = StyleSheet.create({
   },
   tierName: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   tierPrice: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   tierMultiplier: {
     backgroundColor: COLORS.accentGreenSoft,
@@ -286,7 +296,8 @@ const styles = StyleSheet.create({
   },
   tierBenefit: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginBottom: 4,
   },
   currentBadge: {
@@ -309,13 +320,16 @@ const styles = StyleSheet.create({
   },
   requirementsTitle: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: SPACING.xs,
   },
   requirementItem: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginBottom: 2,
   },
   upgradeButton: {

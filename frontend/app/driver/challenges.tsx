@@ -140,8 +140,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   placeholder: {
     width: 44,
@@ -165,8 +166,8 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   tabTextActive: {
     color: COLORS.white,
@@ -203,12 +204,14 @@ const styles = StyleSheet.create({
   },
   challengeTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   challengeDesc: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   rewardBadge: {
     paddingHorizontal: SPACING.md,
@@ -217,7 +220,7 @@ const styles = StyleSheet.create({
   },
   rewardText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontWeight: '900',
   },
   progressContainer: {
     flexDirection: 'row',
@@ -238,8 +241,8 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '900',
+    color: '#0F172A',
     minWidth: 40,
     textAlign: 'right',
   },

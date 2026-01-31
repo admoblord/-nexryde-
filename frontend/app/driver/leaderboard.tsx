@@ -248,8 +248,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   headerPlaceholder: {
     width: 44,
@@ -273,7 +274,7 @@ const styles = StyleSheet.create({
   },
   periodButtonText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.gray400,
   },
   periodButtonTextActive: {
@@ -331,7 +332,7 @@ const styles = StyleSheet.create({
   },
   topThreeAvatarText: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.primary,
   },
   silverBadge: {
@@ -346,13 +347,14 @@ const styles = StyleSheet.create({
   },
   topThreeName: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
     textAlign: 'center',
   },
   topThreeTrips: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginBottom: SPACING.sm,
   },
   topThreePodium: {
@@ -373,7 +375,7 @@ const styles = StyleSheet.create({
   },
   podiumRank: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
   },
   // Your Position
@@ -382,8 +384,10 @@ const styles = StyleSheet.create({
   },
   yourPositionLabel: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: SPACING.sm,
   },
   yourPositionCard: {
@@ -396,7 +400,7 @@ const styles = StyleSheet.create({
   },
   yourRank: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.accent,
     marginRight: SPACING.md,
   },
@@ -405,11 +409,12 @@ const styles = StyleSheet.create({
   },
   yourName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   yourStats: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: COLORS.gray400,
   },
   yourRating: {
@@ -423,14 +428,15 @@ const styles = StyleSheet.create({
   },
   yourRatingText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accent,
   },
   // Leaderboard List
   sectionTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
     marginBottom: SPACING.md,
   },
   leaderboardList: {
@@ -449,8 +455,8 @@ const styles = StyleSheet.create({
   itemRank: {
     width: 30,
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.textSecondary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   itemAvatar: {
     width: 44,
@@ -471,19 +477,20 @@ const styles = StyleSheet.create({
   },
   itemName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   itemStats: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   itemRight: {
     alignItems: 'flex-end',
   },
   itemEarnings: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.success,
   },
   itemRating: {
@@ -493,7 +500,8 @@ const styles = StyleSheet.create({
   },
   itemRatingText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   bottomSpacer: {
     height: SPACING.xxl,
