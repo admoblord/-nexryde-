@@ -220,6 +220,54 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Crypto Payment - Coming Soon */}
+          <View style={styles.cryptoCard}>
+            <LinearGradient
+              colors={['rgba(99, 102, 241, 0.1)', 'rgba(139, 92, 246, 0.1)']}
+              style={styles.cryptoGradient}
+            >
+              <View style={styles.cryptoHeader}>
+                <View style={styles.cryptoIconContainer}>
+                  <Ionicons name="logo-bitcoin" size={28} color="#F7931A" />
+                </View>
+                <View style={styles.cryptoTitleContainer}>
+                  <Text style={styles.cryptoTitle}>Crypto Payments</Text>
+                  <View style={styles.comingSoonBadge}>
+                    <Text style={styles.comingSoonText}>COMING SOON</Text>
+                  </View>
+                </View>
+              </View>
+              
+              <Text style={styles.cryptoDescription}>
+                Pay for rides with Bitcoin, Ethereum, USDT and more cryptocurrencies.
+              </Text>
+              
+              <View style={styles.cryptoIcons}>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>₿</Text>
+                  <Text style={styles.cryptoCoinLabel}>BTC</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>Ξ</Text>
+                  <Text style={styles.cryptoCoinLabel}>ETH</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>₮</Text>
+                  <Text style={styles.cryptoCoinLabel}>USDT</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Ionicons name="ellipsis-horizontal" size={20} color="#64748B" />
+                  <Text style={styles.cryptoCoinLabel}>More</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.notifyBtn}>
+                <Ionicons name="notifications-outline" size={18} color="#8B5CF6" />
+                <Text style={styles.notifyBtnText}>Notify Me When Available</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
         </ScrollView>
 
         {/* Topup Modal */}
@@ -401,6 +449,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   promoApplyText: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  // Crypto Card
+  cryptoCard: {
+    marginTop: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  cryptoGradient: {
+    padding: 20,
+  },
+  cryptoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cryptoIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(247, 147, 26, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cryptoTitleContainer: {
+    flex: 1,
+  },
+  cryptoTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  comingSoonBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#A78BFA',
+    letterSpacing: 1,
+  },
+  cryptoDescription: {
+    fontSize: 14,
+    color: '#94A3B8',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  cryptoIcons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 12,
+  },
+  cryptoCoin: {
+    alignItems: 'center',
+  },
+  cryptoCoinIcon: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  cryptoCoinLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  notifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  notifyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#A78BFA',
+  },
   // Modal
   modalOverlay: {
     position: 'absolute',

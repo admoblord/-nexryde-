@@ -1,0 +1,30 @@
+{
+  "cli": {
+    "version": ">= 5.0.0"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-ui.emergent.host",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-ui.emergent.host",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
