@@ -607,7 +607,7 @@ frontend:
         - agent: "main"
         - comment: "NEW: Complete subscription management screen with dark glassmorphism design. Features: subscription status card with animated hero section, 7-day trial start button, ₦25,000 monthly price display with benefits, bank details (UBA - ADMOBLORDGROUP LIMITED - 1028400669) with copy functionality, payment screenshot upload via camera/gallery, quick steps guide. Accessible from Profile screen for drivers."
 
-  - task: "Driver Subscription Screen"
+  - task: "Driver Subscription Screen - Dynamic Pricing"
     implemented: true
     working: true
     file: "app/driver/subscription.tsx"
@@ -618,6 +618,9 @@ frontend:
         - working: true
         - agent: "main"
         - comment: "Shows ₦25,000/month plan with payment options"
+        - working: true
+        - agent: "main"
+        - comment: "✅ DYNAMIC PRICING COMPLETE: Subscription price now fetched dynamically from /api/subscription/pricing endpoint. Frontend displays ₦18,000 (current_price from API) instead of hardcoded ₦25,000. Shows 'EARLY ADOPTER' phase badge based on API data (current_phase: 'early'). Pricing updates automatically when backend pricing changes. Implemented with loading state, error handling, and fallback to default values. Screenshot confirmed working correctly."
 
   - task: "Driver Verification Screen"
     implemented: true
