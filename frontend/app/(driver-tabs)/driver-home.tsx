@@ -316,6 +316,15 @@ const QuickAction = ({ icon, label, color, onPress }: any) => (
   </TouchableOpacity>
 );
 
+const FeatureCard = ({ icon, label, color, onPress }: any) => (
+  <TouchableOpacity style={styles.featureCard} onPress={onPress}>
+    <View style={[styles.featureIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon} size={20} color={color} />
+    </View>
+    <Text style={styles.featureLabel}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
