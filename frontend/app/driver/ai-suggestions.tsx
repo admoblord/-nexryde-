@@ -1,300 +1,278 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+
+// Dynamic AI logic based on time, day, location
+const generateDynamicTips = () => {
+  const now = new Date();
+  const hour = now.getHours();
+  const day = now.getDay(); // 0 = Sunday, 6 = Saturday
+  const isWeekend = day === 0 || day === 6;
+  const tips = [];
+
+  // Time-based tips
+  if (hour >= 6 && hour < 9) {
+    tips.push({
+      id: 'morning',
+      icon: 'sunny',
+      color: '#FF9500',
+      title: 'Morning Rush Hour',
+      description: 'High demand from residential areas to business districts',
+      zones: ['Lekki → VI', 'Ikoyi → VI', 'Ikeja → VI'],
+      expectedEarnings: '₦12,000 - ₦18,000',
+      confidence: 92,
+    });
+  } else if (hour >= 9 && hour < 12) {
+    tips.push({
+      id: 'mid-morning',
+      icon: 'briefcase',
+      color: '#007AFF',
+      title: 'Mid-Morning Business Trips',
+      description: 'Moderate demand for meetings and appointments',
+      zones: ['Victoria Island', 'Ikoyi', 'Ikeja GRA'],
+      expectedEarnings: '₦8,000 - ₦12,000',
+      confidence: 78,
+    });
+  } else if (hour >= 12 && hour < 14) {
+    tips.push({
+      id: 'lunch',
+      icon: 'restaurant',
+      color: '#FF3B30',
+      title: 'Lunch Hour Surge',
+      description: 'Peak demand around restaurants and food areas',
+      zones: ['VI Business District', 'Ikeja Mall Area', 'Lekki Phase 1'],
+      expectedEarnings: '₦10,000 - ₦15,000',
+      confidence: 85,
+    });
+  } else if (hour >= 14 && hour < 17) {
+    tips.push({
+      id: 'afternoon',
+      icon: 'business',
+      color: '#5856D6',
+      title: 'Afternoon Activity',
+      description: 'Steady demand from business areas',
+      zones: ['Victoria Island', 'Lekki', 'Ajah'],
+      expectedEarnings: '₦6,000 - ₦10,000',
+      confidence: 72,
+    });
+  } else if (hour >= 17 && hour < 20) {
+    tips.push({
+      id: 'evening',
+      icon: 'trending-up',
+      color: '#34C759',
+      title: '🔥 Evening Rush - HIGHEST DEMAND',
+      description: 'Peak hours! Business districts to residential areas',
+      zones: ['VI → Lekki', 'VI → Ikoyi', 'Ikeja → Residential'],
+      expectedEarnings: '₦18,000 - ₦28,000',
+      confidence: 96,
+    });
+  } else if (hour >= 20 && hour < 23) {
+    tips.push({
+      id: 'night',
+      icon: 'moon',
+      color: '#AF52DE',
+      title: 'Night Entertainment',
+      description: 'Good demand from bars, clubs, and restaurants',
+      zones: ['Lekki Entertainment', 'VI Nightlife', 'Ikeja GRA'],
+      expectedEarnings: '₦8,000 - ₦15,000',
+      confidence: 80,
+    });
+  } else {
+    tips.push({
+      id: 'late-night',
+      icon: 'moon-outline',
+      color: '#8E8E93',
+      title: 'Late Night / Early Morning',
+      description: 'Low demand - Consider resting or airport runs',
+      zones: ['Murtala Muhammed Airport', 'Hotels'],
+      expectedEarnings: '₦3,000 - ₦8,000',
+      confidence: 60,
+    });
+  }
+
+  // Day-specific tips
+  if (isWeekend) {
+    tips.push({
+      id: 'weekend',
+      icon: 'calendar',
+      color: '#FF9500',
+      title: 'Weekend Strategy',
+      description: 'Focus on leisure and shopping areas',
+      zones: ['Shopping Malls', 'Beaches', 'Restaurants', 'Parks'],
+      expectedEarnings: '₦15,000 - ₦22,000',
+      confidence: 88,
+    });
+  } else {
+    tips.push({
+      id: 'weekday',
+      icon: 'briefcase-outline',
+      color: '#007AFF',
+      title: 'Weekday Strategy',
+      description: 'Business commuters are your primary customers',
+      zones: ['Business Districts', 'Office Areas', 'Corporate HQs'],
+      expectedEarnings: '₦12,000 - ₦20,000',
+      confidence: 90,
+    });
+  }
+
+  // Lagos-specific tips
+  tips.push({
+    id: 'lagos-hot-zones',
+    icon: 'location',
+    color: '#FF3B30',
+    title: 'Lagos High-Demand Zones',
+    description: 'Always busy areas with consistent rides',
+    zones: [
+      'Victoria Island (VI)',
+      'Lekki Phase 1',
+      'Ikoyi',
+      'Ikeja GRA',
+      'Ajah',
+      'Surulere',
+    ],
+    expectedEarnings: '₦10,000 - ₦25,000',
+    confidence: 94,
+  });
+
+  // Weather-based tip (simulate)
+  const isRainySeason = now.getMonth() >= 3 && now.getMonth() <= 10;
+  if (isRainySeason) {
+    tips.push({
+      id: 'weather',
+      icon: 'rainy',
+      color: '#5AC8FA',
+      title: 'Rainy Season Strategy',
+      description: 'Higher demand expected, stay near sheltered areas',
+      zones: ['Mall Areas', 'Covered Locations', 'Residential'],
+      expectedEarnings: '+20% surge expected',
+      confidence: 85,
+    });
+  }
+
+  return tips;
+};
 
 export default function AITripSuggestionsScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('hotspots');
+  const [tips, setTips] = useState<any[]>([]);
+  const [refreshing, setRefreshing] = useState(false);
+  const [currentTime, setCurrentTime] = useState(new Date());
 
-  const hotspots = [
-    {
-      id: '1',
-      location: 'Lekki Phase 1',
-      demand: 'High',
-      demandColor: COLORS.accentGreen,
-      waitTime: '3 min',
-      avgFare: '₦2,500',
-      distance: '2.1 km',
-      reason: 'Rush hour, many ride requests',
-      confidence: 94,
-    },
-    {
-      id: '2',
-      location: 'Victoria Island',
-      demand: 'Medium',
-      demandColor: COLORS.accentOrange,
-      waitTime: '8 min',
-      avgFare: '₦3,200',
-      distance: '5.3 km',
-      reason: 'Office closing time',
-      confidence: 87,
-    },
-    {
-      id: '3',
-      location: 'Ikeja GRA',
-      demand: 'High',
-      demandColor: COLORS.accentGreen,
-      waitTime: '5 min',
-      avgFare: '₦1,800',
-      distance: '8.7 km',
-      reason: 'Evening traffic peak',
-      confidence: 91,
-    },
-  ];
+  useEffect(() => {
+    loadTips();
+    // Update tips every 30 minutes
+    const interval = setInterval(() => {
+      setCurrentTime(new Date());
+      loadTips();
+    }, 30 * 60 * 1000);
 
-  const predictions = [
-    {
-      id: '1',
-      time: '5:00 PM - 7:00 PM',
-      title: 'Rush Hour Peak',
-      earnings: '₦15,000 - ₦20,000',
-      icon: 'trending-up',
-      color: COLORS.accentGreen,
-      tip: 'Position yourself near VI by 4:45 PM',
-    },
-    {
-      id: '2',
-      time: '10:00 PM - 12:00 AM',
-      title: 'Late Night Surge',
-      earnings: '₦8,000 - ₦12,000',
-      icon: 'moon',
-      color: COLORS.accentBlue,
-      tip: 'Focus on bar/restaurant areas in Lekki',
-    },
-    {
-      id: '3',
-      time: 'Saturday 2:00 PM - 6:00 PM',
-      title: 'Weekend Shopping',
-      earnings: '₦12,000 - ₦18,000',
-      icon: 'cart',
-      color: COLORS.accentOrange,
-      tip: 'Stay near Palms Mall & Ikeja City Mall',
-    },
-  ];
+    return () => clearInterval(interval);
+  }, []);
 
-  const insights = [
-    {
-      id: '1',
-      title: 'Your Best Hours',
-      value: '5 PM - 8 PM',
-      icon: 'time',
-      color: COLORS.accentGreen,
-      description: 'You earn 40% more during these hours',
-    },
-    {
-      id: '2',
-      title: 'Peak Day',
-      value: 'Friday',
-      icon: 'calendar',
-      color: COLORS.accentBlue,
-      description: 'Fridays bring you ₦8,500 more on average',
-    },
-    {
-      id: '3',
-      title: 'Best Routes',
-      value: 'VI → Lekki',
-      icon: 'navigate',
-      color: COLORS.accentOrange,
-      description: 'Highest demand & earnings route',
-    },
-  ];
+  const loadTips = () => {
+    const dynamicTips = generateDynamicTips();
+    setTips(dynamicTips);
+  };
+
+  const handleRefresh = () => {
+    setRefreshing(true);
+    setCurrentTime(new Date());
+    loadTips();
+    setTimeout(() => setRefreshing(false), 1000);
+  };
+
+  const formatTime = () => {
+    return currentTime.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  };
 
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark]}
-        style={StyleSheet.absoluteFillObject}
-      />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <View style={styles.headerTitle}>
-            <Ionicons name="sparkles" size={28} color={COLORS.white} />
-            <Text style={styles.headerText}>AI Trip Suggestions</Text>
-          </View>
-          <View style={styles.backButton} />
-        </View>
-
-        {/* Tabs */}
-        <View style={styles.tabs}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'hotspots' && styles.tabActive]}
-            onPress={() => setActiveTab('hotspots')}
-          >
-            <Ionicons
-              name="location"
-              size={20}
-              color={activeTab === 'hotspots' ? COLORS.white : COLORS.textSecondary}
-            />
-            <Text style={[styles.tabText, activeTab === 'hotspots' && styles.tabTextActive]}>
-              Hotspots
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'predictions' && styles.tabActive]}
-            onPress={() => setActiveTab('predictions')}
-          >
-            <Ionicons
-              name="analytics"
-              size={20}
-              color={activeTab === 'predictions' ? COLORS.white : COLORS.textSecondary}
-            />
-            <Text style={[styles.tabText, activeTab === 'predictions' && styles.tabTextActive]}>
-              Predictions
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'insights' && styles.tabActive]}
-            onPress={() => setActiveTab('insights')}
-          >
-            <Ionicons
-              name="bulb"
-              size={20}
-              color={activeTab === 'insights' ? COLORS.white : COLORS.textSecondary}
-            />
-            <Text style={[styles.tabText, activeTab === 'insights' && styles.tabTextActive]}>
-              Insights
-            </Text>
+          <Text style={styles.headerTitle}>AI Tips</Text>
+          <TouchableOpacity style={styles.refreshButton} onPress={handleRefresh}>
+            <Ionicons name="refresh" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
         </View>
 
         <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
         >
-          {activeTab === 'hotspots' && (
-            <>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>🔥 Current Hotspots</Text>
-                <Text style={styles.sectionSubtitle}>AI-powered real-time demand</Text>
-              </View>
+          <View style={styles.content}>
+            {/* Live Update Badge */}
+            <View style={styles.liveCard}>
+              <View style={styles.liveDot} />
+              <Text style={styles.liveText}>
+                Live AI Recommendations · Updated {formatTime()}
+              </Text>
+            </View>
 
-              {hotspots.map((spot) => (
-                <View key={spot.id} style={styles.hotspotCard}>
-                  <View style={styles.hotspotHeader}>
-                    <View style={styles.hotspotInfo}>
-                      <Text style={styles.hotspotLocation}>{spot.location}</Text>
-                      <View style={[styles.demandBadge, { backgroundColor: `${spot.demandColor}20` }]}>
-                        <View style={[styles.demandDot, { backgroundColor: spot.demandColor }]} />
-                        <Text style={[styles.demandText, { color: spot.demandColor }]}>
-                          {spot.demand} Demand
-                        </Text>
+            {/* Tips List */}
+            {tips.map((tip) => (
+              <View key={tip.id} style={styles.tipCard}>
+                <View style={[styles.tipIcon, { backgroundColor: tip.color + '20' }]}>
+                  <Ionicons name={tip.icon as any} size={28} color={tip.color} />
+                </View>
+
+                <View style={styles.tipContent}>
+                  <Text style={styles.tipTitle}>{tip.title}</Text>
+                  <Text style={styles.tipDescription}>{tip.description}</Text>
+
+                  {/* Zones */}
+                  <View style={styles.zonesSection}>
+                    <Text style={styles.zonesLabel}>🎯 Recommended Zones:</Text>
+                    {tip.zones.map((zone: string, index: number) => (
+                      <View key={index} style={styles.zoneChip}>
+                        <Text style={styles.zoneText}>{zone}</Text>
                       </View>
-                    </View>
-                    <TouchableOpacity style={styles.navigateButton}>
-                      <Ionicons name="navigate" size={20} color={COLORS.white} />
-                    </TouchableOpacity>
+                    ))}
                   </View>
 
-                  <View style={styles.hotspotStats}>
-                    <View style={styles.statItem}>
-                      <Ionicons name="time" size={16} color={COLORS.accentBlue} />
-                      <Text style={styles.statLabel}>Wait</Text>
-                      <Text style={styles.statValue}>{spot.waitTime}</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Ionicons name="cash" size={16} color={COLORS.accentGreen} />
-                      <Text style={styles.statLabel}>Avg Fare</Text>
-                      <Text style={styles.statValue}>{spot.avgFare}</Text>
-                    </View>
-                    <View style={styles.statDivider} />
-                    <View style={styles.statItem}>
-                      <Ionicons name="location" size={16} color={COLORS.accentOrange} />
-                      <Text style={styles.statLabel}>Distance</Text>
-                      <Text style={styles.statValue}>{spot.distance}</Text>
-                    </View>
+                  {/* Expected Earnings */}
+                  <View style={styles.earningsSection}>
+                    <Ionicons name="cash-outline" size={16} color={COLORS.success} />
+                    <Text style={styles.earningsText}>{tip.expectedEarnings}</Text>
                   </View>
 
-                  <View style={styles.hotspotFooter}>
-                    <Text style={styles.reasonText}>{spot.reason}</Text>
-                    <View style={styles.confidenceBadge}>
-                      <Ionicons name="checkmark-circle" size={14} color={COLORS.accentGreen} />
-                      <Text style={styles.confidenceText}>{spot.confidence}% confident</Text>
+                  {/* Confidence */}
+                  <View style={styles.confidenceSection}>
+                    <View style={styles.confidenceBar}>
+                      <View
+                        style={[styles.confidenceFill, { width: `${tip.confidence}%` }]}
+                      />
                     </View>
+                    <Text style={styles.confidenceText}>{tip.confidence}% confident</Text>
                   </View>
                 </View>
-              ))}
-            </>
-          )}
-
-          {activeTab === 'predictions' && (
-            <>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>📊 Earnings Predictions</Text>
-                <Text style={styles.sectionSubtitle}>Based on historical data & patterns</Text>
               </View>
+            ))}
 
-              {predictions.map((pred) => (
-                <View key={pred.id} style={styles.predictionCard}>
-                  <View style={[styles.predictionIcon, { backgroundColor: pred.color }]}>
-                    <Ionicons name={pred.icon as any} size={28} color={COLORS.white} />
-                  </View>
-                  <View style={styles.predictionContent}>
-                    <Text style={styles.predictionTime}>{pred.time}</Text>
-                    <Text style={styles.predictionTitle}>{pred.title}</Text>
-                    <View style={styles.earningsRow}>
-                      <Text style={styles.earningsLabel}>Potential Earnings:</Text>
-                      <Text style={styles.earningsValue}>{pred.earnings}</Text>
-                    </View>
-                    <View style={styles.tipBox}>
-                      <Ionicons name="bulb" size={14} color={COLORS.accentGreen} />
-                      <Text style={styles.tipText}>{pred.tip}</Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </>
-          )}
-
-          {activeTab === 'insights' && (
-            <>
-              <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>💡 Your Insights</Text>
-                <Text style={styles.sectionSubtitle}>Personalized for you</Text>
-              </View>
-
-              {insights.map((insight) => (
-                <View key={insight.id} style={styles.insightCard}>
-                  <LinearGradient
-                    colors={[insight.color, `${insight.color}CC`]}
-                    style={styles.insightGradient}
-                  >
-                    <Ionicons name={insight.icon as any} size={32} color={COLORS.white} />
-                  </LinearGradient>
-                  <View style={styles.insightContent}>
-                    <Text style={styles.insightTitle}>{insight.title}</Text>
-                    <Text style={styles.insightValue}>{insight.value}</Text>
-                    <Text style={styles.insightDescription}>{insight.description}</Text>
-                  </View>
-                </View>
-              ))}
-
-              <View style={styles.aiCard}>
-                <Ionicons name="sparkles" size={24} color={COLORS.accentGreen} />
-                <Text style={styles.aiCardTitle}>AI Learning About You</Text>
-                <Text style={styles.aiCardText}>
-                  Our AI analyzes your driving patterns, peak hours, and best routes to give you
-                  personalized suggestions that maximize your earnings.
-                </Text>
-              </View>
-            </>
-          )}
+            {/* Info */}
+            <View style={styles.infoCard}>
+              <Ionicons name="information-circle" size={20} color={COLORS.primary} />
+              <Text style={styles.infoText}>
+                💡 Tips update automatically based on time of day, day of week, and Lagos traffic patterns
+              </Text>
+            </View>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -304,6 +282,7 @@ export default function AITripSuggestionsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.lightBackground,
   },
   safeArea: {
     flex: 1,
@@ -312,292 +291,142 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
+    backgroundColor: COLORS.lightSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderColor,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: SPACING.xs,
   },
   headerTitle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
   },
-  tabs: {
-    flexDirection: 'row',
-    paddingHorizontal: SPACING.lg,
-    marginBottom: SPACING.md,
-    gap: SPACING.sm,
+  refreshButton: {
+    padding: SPACING.xs,
   },
-  tab: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.xs,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  tabActive: {
-    backgroundColor: COLORS.accentGreen,
-  },
-  tabText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
-  },
-  tabTextActive: {
-    color: COLORS.white,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xxl,
-  },
-  sectionHeader: {
-    marginBottom: SPACING.lg,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.xs,
-    letterSpacing: -0.5,
-  },
-  sectionSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    fontWeight: '700',
-  },
-  hotspotCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
+  content: {
     padding: SPACING.md,
-    marginBottom: SPACING.md,
   },
-  hotspotHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: SPACING.md,
-  },
-  hotspotInfo: {
-    flex: 1,
-  },
-  hotspotLocation: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.xs,
-    letterSpacing: -0.5,
-  },
-  demandBadge: {
+  liveCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
+    backgroundColor: COLORS.success + '20',
     borderRadius: BORDER_RADIUS.md,
-    gap: 4,
+    padding: SPACING.sm,
+    marginBottom: SPACING.md,
+    gap: SPACING.xs,
   },
-  demandDot: {
+  liveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    backgroundColor: COLORS.success,
   },
-  demandText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+  liveText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.success,
   },
-  navigateButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.accentBlue,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  hotspotStats: {
+  tipCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.lightSurface,
     borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.sm,
+    padding: SPACING.md,
     marginBottom: SPACING.md,
+    gap: SPACING.md,
   },
-  statItem: {
-    flex: 1,
+  tipIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: BORDER_RADIUS.lg,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 4,
   },
-  statDivider: {
-    width: 1,
-    backgroundColor: COLORS.lightBorder,
+  tipContent: {
+    flex: 1,
   },
-  statLabel: {
+  tipTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.xs,
+  },
+  tipDescription: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+    lineHeight: 20,
+  },
+  zonesSection: {
+    marginBottom: SPACING.sm,
+  },
+  zonesLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.xs,
+  },
+  zoneChip: {
+    backgroundColor: COLORS.primary + '10',
+    borderRadius: BORDER_RADIUS.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    marginBottom: 4,
+    alignSelf: 'flex-start',
+  },
+  zoneText: {
     fontSize: FONT_SIZE.xs,
-    color: '#64748B',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: COLORS.primary,
+    fontWeight: '600',
   },
-  statValue: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
-    color: '#0F172A',
-  },
-  hotspotFooter: {
+  earningsSection: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    gap: SPACING.xs,
+    marginBottom: SPACING.sm,
   },
-  reasonText: {
+  earningsText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.success,
+  },
+  confidenceSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  confidenceBar: {
     flex: 1,
-    fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    fontWeight: '700',
+    height: 6,
+    backgroundColor: COLORS.borderColor,
+    borderRadius: 3,
+    overflow: 'hidden',
   },
-  confidenceBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+  confidenceFill: {
+    height: '100%',
+    backgroundColor: COLORS.primary,
   },
   confidenceText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
+    color: COLORS.textSecondary,
+    minWidth: 80,
   },
-  predictionCard: {
+  infoCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
+    backgroundColor: COLORS.primary + '10',
+    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    marginBottom: SPACING.md,
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
   },
-  predictionIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  predictionContent: {
-    flex: 1,
-  },
-  predictionTime: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.accentBlue,
-    marginBottom: 4,
-  },
-  predictionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.sm,
-    letterSpacing: -0.5,
-  },
-  earningsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    marginBottom: SPACING.sm,
-  },
-  earningsLabel: {
-    fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    fontWeight: '700',
-  },
-  earningsValue: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.accentGreen,
-  },
-  tipBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.xs,
-    backgroundColor: COLORS.successSoft,
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  tipText: {
+  infoText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    color: COLORS.accentGreen,
-    fontWeight: '700',
-  },
-  insightCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-  },
-  insightGradient: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  insightContent: {
-    flex: 1,
-  },
-  insightTitle: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    marginBottom: 4,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  insightValue: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.xs,
-    letterSpacing: -0.5,
-  },
-  insightDescription: {
-    fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    fontWeight: '700',
-  },
-  aiCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-  },
-  aiCardTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginVertical: SPACING.sm,
-    letterSpacing: -0.5,
-  },
-  aiCardText: {
-    fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    textAlign: 'center',
+    color: COLORS.textSecondary,
     lineHeight: 20,
-    fontWeight: '700',
   },
 });
