@@ -320,12 +320,14 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   userPhone: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#1E293B',
     marginTop: SPACING.xs,
   },
   driverBadge: {
@@ -340,8 +342,8 @@ const styles = StyleSheet.create({
   },
   driverBadgeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.success,
+    fontWeight: '800',
+    color: '#059669',
   },
   statsRow: {
     flexDirection: 'row',
@@ -367,13 +369,16 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   statLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statDivider: {
     width: 1,
@@ -404,12 +409,13 @@ const styles = StyleSheet.create({
   },
   subscriptionTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   subscriptionSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '600',
+    color: '#475569',
   },
   subscriptionBanner: {
     backgroundColor: COLORS.accentSoft,
@@ -420,8 +426,8 @@ const styles = StyleSheet.create({
   },
   subscriptionBannerText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.accent,
+    fontWeight: '800',
+    color: '#059669',
   },
   switchRiderCard: {
     flexDirection: 'row',
@@ -448,12 +454,13 @@ const styles = StyleSheet.create({
   },
   switchRiderTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   switchRiderText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '600',
+    color: '#475569',
   },
   menuSection: {
     backgroundColor: COLORS.white,
@@ -464,8 +471,8 @@ const styles = StyleSheet.create({
   },
   menuSectionTitle: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '800',
+    color: '#64748B',
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.sm,
@@ -490,7 +497,9 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: SPACING.md,
     fontSize: FONT_SIZE.md,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: '#0F172A',
+  },
     color: COLORS.textPrimary,
   },
   logoutButton: {
