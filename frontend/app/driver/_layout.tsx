@@ -14,6 +14,7 @@ export default function DriverLayout() {
       <Stack.Screen name="trips" />
       <Stack.Screen name="vehicle" />
       <Stack.Screen name="bank" />
+      <Stack.Screen name="community" options={{ title: 'Community' }} />
     </Stack>
   );
 }
