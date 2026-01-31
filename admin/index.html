@@ -1410,6 +1410,320 @@
                 alert('Failed to load driver details');
             }
         }
+
+        // ==================== FRAUD ALERTS ====================
+        async function loadFraudAlerts() {
+            try {
+                const res = await fetch(`${API_URL}/admin/fraud/dashboard`);
+                const data = await res.json();
+                
+                document.getElementById('fraudTotal').textContent = data.stats?.total_alerts || 0;
+                document.getElementById('fraudCritical').textContent = data.stats?.critical || 0;
+                document.getElementById('fraudHigh').textContent = data.stats?.high || 0;
+                document.getElementById('fraudMedium').textContent = data.stats?.medium || 0;
+                document.getElementById('fraudLow').textContent = data.stats?.low || 0;
+                document.getElementById('fraudMessage').textContent = data.message || '';
+                
+                if (data.alerts && data.alerts.length > 0) {
+                    document.getElementById('fraudTable').innerHTML = data.alerts.map(alert => `
+                        <tr>
+                            <td><span class="badge ${alert.type === 'FAKE_PAYMENT' ? 'red' : alert.type === 'MULTIPLE_ACCOUNTS' ? 'orange' : 'yellow'}">${alert.type.replace(/_/g, ' ')}</span></td>
+                            <td><span class="badge ${alert.severity === 'CRITICAL' ? 'red' : alert.severity === 'HIGH' ? 'orange' : alert.severity === 'MEDIUM' ? 'yellow' : 'green'}">${alert.severity}</span></td>
+                            <td style="max-width: 300px;">${alert.message}</td>
+                            <td>
+                                ${alert.user_id ? `<button class="action-btn view" onclick="investigateUser('${alert.user_id}')">Investigate</button>` : 
+                                  alert.driver_id ? `<button class="action-btn view" onclick="investigateUser('${alert.driver_id}')">Investigate</button>` : '-'}
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    document.getElementById('fraudTable').innerHTML = '<tr><td colspan="4" class="empty-state"><i class="ri-shield-check-line"></i><p>No fraud alerts - All clear! ✅</p></td></tr>';
+                }
+            } catch (err) {
+                console.error('Load fraud alerts error:', err);
+            }
+        }
+
+        async function investigateUser(userId) {
+            try {
+                const res = await fetch(`${API_URL}/admin/fraud/investigate/${userId}`, { method: 'POST' });
+                const data = await res.json();
+                
+                let report = `🔍 INVESTIGATION REPORT\n\n`;
+                report += `User: ${data.user_info?.name || 'Unknown'}\n`;
+                report += `Phone: ${data.user_info?.phone || 'N/A'}\n`;
+                report += `Role: ${data.user_info?.role || 'N/A'}\n\n`;
+                report += `📊 STATS:\n`;
+                report += `Total Trips: ${data.stats?.total_trips || 0}\n`;
+                report += `Cancelled: ${data.stats?.cancelled_trips || 0} (${data.stats?.cancel_rate || 0}%)\n`;
+                report += `SOS Alerts: ${data.stats?.sos_count || 0}\n\n`;
+                report += `⚠️ RED FLAGS:\n`;
+                report += data.red_flags?.length > 0 ? data.red_flags.join('\n') : 'None found';
+                report += `\n\n🎯 RISK: ${data.risk_assessment?.level || 'LOW'}\n`;
+                report += `💡 ${data.risk_assessment?.recommendation || 'No action needed'}`;
+                
+                alert(report);
+            } catch (err) {
+                console.error('Investigation error:', err);
+                alert('Failed to investigate user');
+            }
+        }
+
+        async function takeFraudAction(userId, action) {
+            const reason = prompt(`Enter reason for ${action}:`);
+            if (!reason) return;
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/fraud/action/${userId}?action=${action}&reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'Action completed');
+                loadFraudAlerts();
+            } catch (err) {
+                console.error('Fraud action error:', err);
+                alert('Failed to take action');
+            }
+        }
+
+        // ==================== USER MANAGEMENT ====================
+        async function searchUsers() {
+            const query = document.getElementById('userSearchInput').value;
+            const role = document.getElementById('userRoleFilter').value;
+            
+            if (!query) {
+                alert('Please enter a search term');
+                return;
+            }
+            
+            try {
+                let url = `${API_URL}/admin/users/search?query=${encodeURIComponent(query)}`;
+                if (role) url += `&role=${role}`;
+                
+                const res = await fetch(url);
+                const data = await res.json();
+                
+                if (data.users && data.users.length > 0) {
+                    document.getElementById('usersTable').innerHTML = data.users.map(u => `
+                        <tr>
+                            <td>${u.name || 'N/A'}</td>
+                            <td>${u.phone || 'N/A'}</td>
+                            <td>${u.email || 'N/A'}</td>
+                            <td><span class="badge ${u.role === 'driver' ? 'blue' : 'green'}">${u.role || 'N/A'}</span></td>
+                            <td>${u.total_trips || 0}</td>
+                            <td>
+                                ${u.is_banned ? '<span class="badge red">Banned</span>' : 
+                                  u.is_suspended ? '<span class="badge orange">Suspended</span>' : 
+                                  '<span class="badge green">Active</span>'}
+                            </td>
+                            <td>
+                                <button class="action-btn view" onclick="viewUserDetails('${u.id}')">View</button>
+                                ${u.is_suspended ? 
+                                    `<button class="action-btn approve" onclick="unsuspendUser('${u.id}')">Unsuspend</button>` : 
+                                    `<button class="action-btn block" onclick="takeFraudAction('${u.id}', 'suspend_7days')">Suspend</button>`}
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    document.getElementById('usersTable').innerHTML = '<tr><td colspan="7" class="empty-state"><i class="ri-user-search-line"></i><p>No users found</p></td></tr>';
+                }
+            } catch (err) {
+                console.error('Search users error:', err);
+            }
+        }
+
+        async function viewUserDetails(userId) {
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${userId}/details`);
+                const data = await res.json();
+                
+                let details = `👤 USER DETAILS\n\n`;
+                details += `Name: ${data.user?.name || 'N/A'}\n`;
+                details += `Phone: ${data.user?.phone || 'N/A'}\n`;
+                details += `Email: ${data.user?.email || 'N/A'}\n`;
+                details += `Role: ${data.user?.role || 'N/A'}\n`;
+                details += `Rating: ${data.user?.rating || 5.0}⭐\n`;
+                details += `Behavior Score: ${data.user?.behavior_score || 100}\n\n`;
+                details += `📊 STATS:\n`;
+                details += `Total Trips: ${data.stats?.total_trips || 0}\n`;
+                details += `Warnings: ${data.stats?.warnings || 0}\n`;
+                details += `Status: ${data.stats?.is_banned ? '🚫 BANNED' : data.stats?.is_suspended ? '⏸️ SUSPENDED' : '✅ ACTIVE'}`;
+                
+                alert(details);
+            } catch (err) {
+                console.error('View user error:', err);
+                alert('Failed to load user details');
+            }
+        }
+
+        async function unsuspendUser(userId) {
+            if (!confirm('Are you sure you want to unsuspend this user?')) return;
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/users/${userId}/unsuspend`, { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'User unsuspended');
+                searchUsers();
+            } catch (err) {
+                console.error('Unsuspend error:', err);
+                alert('Failed to unsuspend user');
+            }
+        }
+
+        // ==================== LIVE TRIPS ====================
+        async function loadLiveTrips() {
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/live`);
+                const data = await res.json();
+                
+                document.getElementById('liveTripsCount').textContent = data.count || 0;
+                document.getElementById('longTripsCount').textContent = data.long_trips || 0;
+                document.getElementById('lastRefresh').textContent = new Date().toLocaleTimeString();
+                
+                if (data.active_trips && data.active_trips.length > 0) {
+                    document.getElementById('liveTripsTable').innerHTML = data.active_trips.map(trip => `
+                        <tr>
+                            <td style="font-family: monospace; font-size: 12px;">${trip.id?.substring(0, 8) || 'N/A'}...</td>
+                            <td>${trip.driver_info?.name || 'N/A'}<br><small style="color: #64748B;">${trip.driver_info?.phone || ''}</small></td>
+                            <td>${trip.rider_info?.name || 'N/A'}<br><small style="color: #64748B;">${trip.rider_info?.phone || ''}</small></td>
+                            <td><span class="badge ${trip.status === 'started' ? 'green' : trip.status === 'arrived' ? 'blue' : 'yellow'}">${trip.status}</span></td>
+                            <td>${trip.duration_mins?.toFixed(1) || 0} min</td>
+                            <td>${trip.alert ? `<span style="color: #F97316;">${trip.alert}</span>` : '-'}</td>
+                            <td>
+                                <button class="action-btn view" onclick="viewTripDetails('${trip.id}')">View</button>
+                                <button class="action-btn block" onclick="adminCancelTrip('${trip.id}')">Cancel</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    document.getElementById('liveTripsTable').innerHTML = '<tr><td colspan="7" class="empty-state"><i class="ri-car-line"></i><p>No active trips right now</p></td></tr>';
+                }
+            } catch (err) {
+                console.error('Load live trips error:', err);
+            }
+        }
+
+        async function viewTripDetails(tripId) {
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/${tripId}/details`);
+                const data = await res.json();
+                
+                let details = `🚗 TRIP DETAILS\n\n`;
+                details += `ID: ${data.trip?.id || 'N/A'}\n`;
+                details += `Status: ${data.trip?.status || 'N/A'}\n`;
+                details += `Fare: ₦${data.trip?.fare?.toLocaleString() || 0}\n\n`;
+                details += `👤 Driver: ${data.driver?.name || 'N/A'} (${data.driver?.phone || 'N/A'})\n`;
+                details += `👤 Rider: ${data.rider?.name || 'N/A'} (${data.rider?.phone || 'N/A'})\n\n`;
+                details += `📍 From: ${data.trip?.pickup_address || 'N/A'}\n`;
+                details += `📍 To: ${data.trip?.dropoff_address || 'N/A'}\n`;
+                details += `${data.has_issues ? '\n⚠️ This trip has reported issues!' : ''}`;
+                
+                alert(details);
+            } catch (err) {
+                console.error('View trip error:', err);
+                alert('Failed to load trip details');
+            }
+        }
+
+        async function adminCancelTrip(tripId) {
+            const reason = prompt('Enter cancellation reason:');
+            if (!reason) return;
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/${tripId}/cancel?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                const data = await res.json();
+                alert(data.message || 'Trip cancelled');
+                loadLiveTrips();
+            } catch (err) {
+                console.error('Cancel trip error:', err);
+                alert('Failed to cancel trip');
+            }
+        }
+
+        // ==================== ANALYTICS ====================
+        let currentPeriod = 'today';
+        
+        async function loadAnalytics(period) {
+            currentPeriod = period;
+            
+            // Update button styles
+            document.getElementById('btn-today').className = period === 'today' ? 'action-btn view' : 'action-btn';
+            document.getElementById('btn-week').className = period === 'week' ? 'action-btn view' : 'action-btn';
+            document.getElementById('btn-month').className = period === 'month' ? 'action-btn view' : 'action-btn';
+            
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/analytics?period=${period}`);
+                const data = await res.json();
+                
+                document.getElementById('analyticsTrips').textContent = data.total_trips || 0;
+                document.getElementById('analyticsCompleted').textContent = data.completed || 0;
+                document.getElementById('analyticsCancelRate').textContent = `${data.cancel_rate || 0}%`;
+                document.getElementById('analyticsRevenue').textContent = `₦${(data.revenue?.total || 0).toLocaleString()}`;
+                document.getElementById('analyticsAvgDistance').textContent = `${data.averages?.distance_km || 0} km`;
+                document.getElementById('analyticsAvgDuration').textContent = `${data.averages?.duration_mins || 0} min`;
+                document.getElementById('analyticsPeakHour').textContent = data.peak_hour || '-';
+                
+                // Insights
+                if (data.insights && data.insights.length > 0) {
+                    document.getElementById('analyticsInsights').innerHTML = data.insights.map(i => 
+                        `<p style="padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05);">${i}</p>`
+                    ).join('');
+                }
+            } catch (err) {
+                console.error('Load analytics error:', err);
+            }
+        }
+
+        // ==================== COMMUNITY ====================
+        async function loadCommunity() {
+            try {
+                // Load stats
+                const statsRes = await fetch(`${API_URL}/community/stats?region=lagos`);
+                const stats = await statsRes.json();
+                
+                document.getElementById('communityDrivers').textContent = stats.total_drivers || 0;
+                document.getElementById('communityActive').textContent = stats.active_drivers || 0;
+                document.getElementById('communityPosts').textContent = stats.total_posts || 0;
+                document.getElementById('communityEvents').textContent = stats.total_events || 0;
+                
+                // Load events
+                const eventsRes = await fetch(`${API_URL}/community/events?region=lagos`);
+                const eventsData = await eventsRes.json();
+                
+                if (eventsData.events && eventsData.events.length > 0) {
+                    document.getElementById('communityEventsList').innerHTML = eventsData.events.map(e => `
+                        <div style="padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 8px;">
+                            <div style="font-weight: 600;">${e.title}</div>
+                            <div style="font-size: 12px; color: #64748B;">${new Date(e.event_date).toLocaleDateString()} • ${e.location || 'TBD'}</div>
+                            <div style="font-size: 12px; color: #00E676; margin-top: 4px;">${e.attendees?.length || 0} attending</div>
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('communityEventsList').innerHTML = '<p style="color: #64748B;">No upcoming events</p>';
+                }
+                
+                // Load groups
+                const groupsRes = await fetch(`${API_URL}/community/groups?region=lagos`);
+                const groupsData = await groupsRes.json();
+                
+                if (groupsData.groups && groupsData.groups.length > 0) {
+                    document.getElementById('communityGroupsList').innerHTML = groupsData.groups.map(g => `
+                        <div style="padding: 12px; background: rgba(0,0,0,0.2); border-radius: 8px; margin-bottom: 8px;">
+                            <div style="font-weight: 600;">${g.name}</div>
+                            <div style="font-size: 12px; color: #64748B;">${g.description || 'No description'}</div>
+                            <div style="font-size: 12px; color: #6366F1; margin-top: 4px;">${g.members_count || 0} members</div>
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('communityGroupsList').innerHTML = '<p style="color: #64748B;">No groups yet</p>';
+                }
+            } catch (err) {
+                console.error('Load community error:', err);
+            }
+        }
+
+        // Add enter key support for user search
+        document.getElementById('userSearchInput')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') searchUsers();
+        });
     </script>
 </body>
 </html>
