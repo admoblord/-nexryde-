@@ -479,9 +479,16 @@ export default function SubscriptionScreen() {
               </View>
               <View style={styles.priceRow}>
                 <Text style={styles.currencySymbol}>₦</Text>
-                <Text style={styles.priceValue}>25,000</Text>
+                <Text style={styles.priceValue}>{(pricing.current_price || subscription?.monthly_fee || 18000).toLocaleString()}</Text>
               </View>
               <Text style={styles.priceSubtext}>per month • No commission fees</Text>
+              {pricing.current_phase && (
+                <Text style={styles.phaseBadge}>
+                  {pricing.current_phase === 'launch' ? '🚀 LAUNCH PRICE' : 
+                   pricing.current_phase === 'early' ? '⭐ EARLY ADOPTER' : 
+                   pricing.current_phase === 'growth' ? '📈 GROWTH PHASE' : '💎 PREMIUM'}
+                </Text>
+              )}
             </View>
             
             <View style={styles.divider} />
