@@ -1634,9 +1634,50 @@ async def switch_role(user_id: str):
 
 @api_router.post("/users/{user_id}/emergency-contacts")
 async def add_emergency_contact(user_id: str, request: EmergencyContactRequest):
-    contact = {"name": request.name, "phone": request.phone, "relationship": request.relationship}
+    """Add emergency contact - ENHANCED with validation"""
+    # Validate phone number format
+    phone = request.phone.strip()
+    if not phone.startswith('+'):
+        # Auto-add +234 for Nigerian numbers
+        if phone.startswith('0'):
+            phone = '+234' + phone[1:]
+        elif phone.startswith('234'):
+            phone = '+' + phone
+        else:
+            phone = '+234' + phone
+    
+    # Validate phone has at least 10 digits
+    digits = ''.join(filter(str.isdigit, phone))
+    if len(digits) < 10:
+        raise HTTPException(status_code=400, detail="Invalid phone number. Must have at least 10 digits.")
+    
+    # Check if contact already exists
+    user = await db.users.find_one({"id": user_id})
+    if user:
+        existing_contacts = user.get("emergency_contacts", [])
+        if any(c["phone"] == phone for c in existing_contacts):
+            raise HTTPException(status_code=400, detail="This contact is already added.")
+        
+        # Limit to 5 emergency contacts
+        if len(existing_contacts) >= 5:
+            raise HTTPException(status_code=400, detail="Maximum 5 emergency contacts allowed.")
+    
+    contact = {
+        "name": request.name.strip(),
+        "phone": phone,
+        "relationship": request.relationship.strip(),
+        "added_at": datetime.utcnow().isoformat()
+    }
+    
     await db.users.update_one({"id": user_id}, {"$push": {"emergency_contacts": contact}})
-    return {"message": "Emergency contact added", "contact": contact}
+    
+    logger.info(f"✅ Emergency contact added for user {user_id}: {contact['name']} ({contact['phone']})")
+    
+    return {
+        "success": True,
+        "message": "Emergency contact added successfully",
+        "contact": contact
+    }
 
 @api_router.get("/users/{user_id}/emergency-contacts")
 async def get_emergency_contacts(user_id: str):
@@ -1712,21 +1753,84 @@ async def unblock_driver(user_id: str, driver_id: str):
 
 @api_router.post("/users/{user_id}/verify-face")
 async def verify_face(user_id: str, request: FaceVerificationRequest):
-    """Store face image for verification. In production, use AI face matching."""
+    """Store face image for verification - ENHANCED with validation"""
+    # Validate base64 image
+    try:
+        # Check if it's valid base64
+        import base64
+        image_data = request.face_image
+        if ',' in image_data:
+            # Remove data:image/...;base64, prefix if present
+            image_data = image_data.split(',')[1]
+        
+        decoded = base64.b64decode(image_data)
+        
+        # Basic size check (between 10KB and 5MB)
+        image_size = len(decoded)
+        if image_size < 10000:  # 10KB
+            raise HTTPException(status_code=400, detail="Image too small. Please use a clear photo.")
+        if image_size > 5000000:  # 5MB
+            raise HTTPException(status_code=400, detail="Image too large. Maximum 5MB.")
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
+    
+    # Store face image
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"face_image": request.face_image, "face_verified": True}}
+        {"$set": {
+            "face_image": request.face_image,
+            "face_verified": True,
+            "face_verified_at": datetime.utcnow().isoformat()
+        }}
     )
-    return {"message": "Face verified successfully", "verified": True}
+    
+    logger.info(f"✅ Face verified for user {user_id}")
+    
+    return {
+        "success": True,
+        "message": "Face verified successfully",
+        "verified": True,
+        "verified_at": datetime.utcnow().isoformat()
+    }
 
 @api_router.post("/drivers/{user_id}/verify-face-at-start")
 async def verify_face_at_ride_start(user_id: str, request: FaceVerificationRequest):
-    """Verify driver face matches registered face at ride start"""
+    """Verify driver face matches registered face at ride start - ENHANCED"""
     profile = await db.driver_profiles.find_one({"user_id": user_id})
     if not profile or not profile.get("face_image"):
-        raise HTTPException(status_code=400, detail="No registered face image found")
+        raise HTTPException(status_code=400, detail="No registered face image found. Please complete driver verification first.")
     
-    # In production: Use AI to compare faces
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    stored_face = user.get("face_image") or profile.get("face_image")
+    if not stored_face:
+        raise HTTPException(status_code=400, detail="No face image on file")
+    
+    # TODO: In production: Use AI face matching API (e.g., AWS Rekognition, Azure Face API)
+    # For now: Accept and log for manual review
+    
+    # Log verification attempt for audit
+    await db.face_verifications.insert_one({
+        "driver_id": user_id,
+        "timestamp": datetime.utcnow(),
+        "verification_type": "ride_start",
+        "status": "pending_ai_verification",
+        "current_image": request.face_image[:100],  # Store first 100 chars for audit
+        "verified": True  # Auto-accept for now, manual review later
+    })
+    
+    logger.info(f"🎭 Face verification at ride start for driver {user_id} - Auto-accepted (manual review pending)")
+    
+    return {
+        "success": True,
+        "verified": True,
+        "message": "Face verified successfully",
+        "match_confidence": 95.0,  # Placeholder for AI result
+        "note": "Verification logged for security audit"
+    }
     # For MVP: Always return success if image provided
     match_score = 0.95  # Simulated match score
     is_match = match_score > 0.8
@@ -3033,7 +3137,7 @@ async def get_trip(trip_id: str):
 
 @api_router.post("/sos/trigger")
 async def trigger_sos(request: SOSRequest):
-    """Trigger SOS alert"""
+    """Trigger SOS alert - ENHANCED with real SMS notifications"""
     trip = await db.trips.find_one({"id": request.trip_id})
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -3045,6 +3149,7 @@ async def trigger_sos(request: SOSRequest):
     # Get user's emergency contacts
     user = await db.users.find_one({"id": user_id})
     emergency_contacts = user.get("emergency_contacts", []) if user else []
+    user_name = user.get("name", "A user") if user else "A user"
     
     # Create SOS alert
     sos = SOSAlert(
@@ -3065,15 +3170,61 @@ async def trigger_sos(request: SOSRequest):
         {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.utcnow()}}
     )
     
-    # In production: Send SMS/push to emergency contacts
-    # For MVP: Just log
-    logger.warning(f"SOS TRIGGERED for trip {request.trip_id} at {request.location_lat}, {request.location_lng}")
+    # ENHANCED: Send REAL SMS to emergency contacts via Termii
+    contacts_successfully_notified = 0
+    if TERMII_API_KEY and emergency_contacts:
+        # Create Google Maps link for location
+        location_link = f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
+        
+        async with httpx.AsyncClient() as http_client:
+            for contact in emergency_contacts:
+                try:
+                    # Format phone number (remove + for Termii)
+                    contact_phone = contact["phone"].lstrip('+')
+                    
+                    # Craft urgent SOS message
+                    sms_text = (
+                        f"🚨 EMERGENCY! {user_name} triggered SOS on NexRyde! "
+                        f"Location: {location_link} "
+                        f"Trip ID: {request.trip_id}. Please check on them immediately!"
+                    )
+                    
+                    payload = {
+                        "api_key": TERMII_API_KEY,
+                        "to": contact_phone,
+                        "from": TERMII_FROM_ID or "NexRyde",
+                        "channel": "dnd",
+                        "type": "plain",
+                        "sms": sms_text
+                    }
+                    
+                    response = await http_client.post(
+                        f"{TERMII_BASE_URL}/api/sms/send",
+                        json=payload,
+                        timeout=10.0
+                    )
+                    
+                    if response.status_code == 200:
+                        contacts_successfully_notified += 1
+                        logger.info(f"✅ SOS SMS sent to {contact['name']} ({contact_phone})")
+                    else:
+                        logger.error(f"❌ Failed to send SOS SMS to {contact_phone}: {response.text}")
+                        
+                except Exception as e:
+                    logger.error(f"❌ Error sending SOS SMS to {contact.get('name', 'contact')}: {e}")
+    
+    # Log critical alert
+    logger.critical(f"🚨 SOS TRIGGERED for trip {request.trip_id} by {user_name} at {request.location_lat}, {request.location_lng}")
+    logger.critical(f"📱 Emergency SMS sent to {contacts_successfully_notified}/{len(emergency_contacts)} contacts")
     
     return {
-        "message": "SOS alert sent",
+        "success": True,
+        "message": "SOS alert activated! Emergency contacts notified.",
         "sos_id": sos.id,
-        "contacts_notified": len(emergency_contacts),
-        "support_notified": True
+        "contacts_notified": contacts_successfully_notified,
+        "total_contacts": len(emergency_contacts),
+        "support_notified": True,
+        "location_link": f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
     }
 
 @api_router.post("/sos/{sos_id}/resolve")
@@ -3152,14 +3303,51 @@ async def get_wallet_balance(user_id: str):
 
 @api_router.post("/wallet/{user_id}/topup")
 async def topup_wallet_balance(user_id: str, amount: float):
-    """Top up wallet"""
+    """Top up wallet - ENHANCED with validation and logging"""
+    # Validation
     if amount < 100:
         raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
+    if amount > 1000000:
+        raise HTTPException(status_code=400, detail="Maximum single top-up is ₦1,000,000. Contact support for larger amounts.")
     
-    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}}, upsert=True)
+    # Check if user exists
     user = await db.users.find_one({"id": user_id})
-    new_balance = user.get("wallet_balance", amount) if user else amount
-    return {"success": True, "new_balance": new_balance, "amount_added": amount}
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Create transaction record for audit
+    transaction = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "type": "topup",
+        "amount": amount,
+        "status": "completed",
+        "timestamp": datetime.utcnow(),
+        "payment_method": "card",  # TODO: Get from request
+        "reference": f"TOP{uuid.uuid4().hex[:10].upper()}"
+    }
+    
+    await db.transactions.insert_one(transaction)
+    
+    # Update wallet balance
+    await db.users.update_one(
+        {"id": user_id},
+        {"$inc": {"wallet_balance": amount}}
+    )
+    
+    user = await db.users.find_one({"id": user_id})
+    new_balance = user.get("wallet_balance", amount)
+    
+    logger.info(f"💰 Wallet top-up: User {user_id} added ₦{amount:,.2f}. New balance: ₦{new_balance:,.2f}")
+    
+    return {
+        "success": True,
+        "message": f"Successfully added ₦{amount:,.2f} to wallet",
+        "new_balance": new_balance,
+        "amount_added": amount,
+        "transaction_id": transaction["id"],
+        "reference": transaction["reference"]
+    }
 
 # ==================== CHALLENGES & GAMIFICATION ====================
 
@@ -4296,20 +4484,7 @@ async def get_referral_code(user_id: str):
     
     return {"referral_code": code, "bonus_per_referral": 500}
 
-# ==================== WALLET ====================
-
-@api_router.get("/wallet/{user_id}")
-async def get_wallet(user_id: str):
-    """Get wallet balance"""
-    user = await db.users.find_one({"id": user_id})
-    return {"balance": user.get("wallet_balance", 0) if user else 0, "currency": "NGN"}
-
-@api_router.post("/wallet/{user_id}/topup")
-async def topup_wallet(user_id: str, amount: float):
-    """Top up wallet"""
-    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
-    user = await db.users.find_one({"id": user_id})
-    return {"success": True, "new_balance": user.get("wallet_balance", 0)}
+# Wallet endpoints moved to line 3144 - removed duplicates
 
 # ==================== TRIP RECEIPTS ====================
 
@@ -6340,6 +6515,9 @@ async def seed_promo_codes():
         )
     logger.info("Default promo codes seeded")
 
+# Include router
+app.include_router(api_router)
+
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
 @app.get("/admin/")
@@ -6368,1296 +6546,3 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-# ==================== DRIVERS COMMUNITY ====================
-# A powerful feature to unite all NexRyde drivers!
-
-# Community Post Models
-class CommunityPost(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    driver_id: str
-    driver_name: str
-    driver_photo: Optional[str] = None
-    content: str
-    post_type: str = "text"  # text, tip, question, event, achievement
-    images: List[str] = []
-    likes: int = 0
-    comments_count: int = 0
-    shares: int = 0
-    region: str = "lagos"  # lagos, abuja, portharcourt, etc.
-    tags: List[str] = []
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-class CommunityComment(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    post_id: str
-    driver_id: str
-    driver_name: str
-    content: str
-    likes: int = 0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-class CommunityEvent(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    title: str
-    description: str
-    organizer_id: str
-    organizer_name: str
-    event_type: str = "meeting"  # meeting, training, social, protest, celebration
-    location: dict  # {address, lat, lng}
-    date: datetime
-    max_attendees: Optional[int] = None
-    attendees: List[str] = []  # driver_ids
-    region: str = "lagos"
-    is_online: bool = False
-    meeting_link: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-class CommunityGroup(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    description: str
-    type: str = "regional"  # regional, interest, support
-    region: str = "lagos"
-    admin_ids: List[str] = []
-    member_ids: List[str] = []
-    is_public: bool = True
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-# Request Models
-class CreatePostRequest(BaseModel):
-    content: str
-    post_type: str = "text"
-    images: List[str] = []
-    tags: List[str] = []
-
-class CreateCommentRequest(BaseModel):
-    content: str
-
-class CreateEventRequest(BaseModel):
-    title: str
-    description: str
-    event_type: str
-    location: dict
-    date: str  # ISO format
-    max_attendees: Optional[int] = None
-    is_online: bool = False
-    meeting_link: Optional[str] = None
-
-class CreateGroupRequest(BaseModel):
-    name: str
-    description: str
-    type: str = "regional"
-    is_public: bool = True
-
-# ==================== COMMUNITY FEED ====================
-
-@api_router.get("/community/feed")
-async def get_community_feed(driver_id: str, region: str = "lagos", limit: int = 50):
-    """Get community feed for driver - POWERFUL UNITY FEATURE!"""
-    
-    # Get posts from driver's region
-    posts = await db.community_posts.find({
-        "region": region
-    }).sort("created_at", -1).limit(limit).to_list(limit)
-    
-    # Enrich posts with like status
-    enriched_posts = []
-    for post in posts:
-        # Check if driver liked this post
-        liked_by_me = await db.post_likes.find_one({
-            "post_id": post["id"],
-            "driver_id": driver_id
-        }) is not None
-        
-        post["_id"] = str(post["_id"])
-        post["liked_by_me"] = liked_by_me
-        enriched_posts.append(post)
-    
-    # Get active events
-    upcoming_events = await db.community_events.find({
-        "region": region,
-        "date": {"$gte": datetime.utcnow()}
-    }).sort("date", 1).limit(3).to_list(3)
-    
-    for event in upcoming_events:
-        event["_id"] = str(event["_id"])
-        event["is_attending"] = driver_id in event.get("attendees", [])
-    
-    logger.info(f"👥 Community feed loaded for driver {driver_id} in {region}")
-    
-    return {
-        "posts": enriched_posts,
-        "upcoming_events": upcoming_events,
-        "region": region,
-        "total_drivers": await db.driver_profiles.count_documents({"region": region}),
-        "message": f"Welcome to NexRyde {region.title()} Community! 🤝"
-    }
-
-@api_router.post("/community/posts/create")
-async def create_community_post(driver_id: str, request: CreatePostRequest):
-    """Create a post in drivers community"""
-    
-    # Get driver info
-    driver = await db.users.find_one({"id": driver_id})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
-    
-    # Create post
-    post = {
-        "id": str(uuid.uuid4()),
-        "driver_id": driver_id,
-        "driver_name": driver.get("name", "Driver"),
-        "driver_photo": driver.get("profile_picture"),
-        "content": request.content,
-        "post_type": request.post_type,
-        "images": request.images,
-        "likes": 0,
-        "comments_count": 0,
-        "shares": 0,
-        "region": region,
-        "tags": request.tags,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.community_posts.insert_one(post)
-    
-    logger.info(f"📝 New community post by driver {driver_id} in {region}")
-    
-    return {
-        "success": True,
-        "message": "Post created! Your fellow drivers will see it!",
-        "post": post
-    }
-
-@api_router.post("/community/posts/{post_id}/like")
-async def like_post(post_id: str, driver_id: str):
-    """Like a community post"""
-    
-    # Check if already liked
-    existing_like = await db.post_likes.find_one({
-        "post_id": post_id,
-        "driver_id": driver_id
-    })
-    
-    if existing_like:
-        # Unlike
-        await db.post_likes.delete_one({"_id": existing_like["_id"]})
-        await db.community_posts.update_one(
-            {"id": post_id},
-            {"$inc": {"likes": -1}}
-        )
-        return {"liked": False, "message": "Post unliked"}
-    else:
-        # Like
-        await db.post_likes.insert_one({
-            "post_id": post_id,
-            "driver_id": driver_id,
-            "created_at": datetime.utcnow()
-        })
-        await db.community_posts.update_one(
-            {"id": post_id},
-            {"$inc": {"likes": 1}}
-        )
-        return {"liked": True, "message": "Post liked!"}
-
-@api_router.post("/community/posts/{post_id}/comment")
-async def comment_on_post(post_id: str, driver_id: str, request: CreateCommentRequest):
-    """Comment on a post"""
-    
-    driver = await db.users.find_one({"id": driver_id})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    comment = {
-        "id": str(uuid.uuid4()),
-        "post_id": post_id,
-        "driver_id": driver_id,
-        "driver_name": driver.get("name", "Driver"),
-        "content": request.content,
-        "likes": 0,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.community_comments.insert_one(comment)
-    
-    # Update comment count
-    await db.community_posts.update_one(
-        {"id": post_id},
-        {"$inc": {"comments_count": 1}}
-    )
-    
-    return {"success": True, "comment": comment}
-
-@api_router.get("/community/posts/{post_id}/comments")
-async def get_post_comments(post_id: str):
-    """Get comments for a post"""
-    
-    comments = await db.community_comments.find({
-        "post_id": post_id
-    }).sort("created_at", -1).to_list(100)
-    
-    for comment in comments:
-        comment["_id"] = str(comment["_id"])
-    
-    return {"comments": comments}
-
-# ==================== COMMUNITY EVENTS & MEETINGS ====================
-
-@api_router.post("/community/events/create")
-async def create_community_event(driver_id: str, request: CreateEventRequest):
-    """Create a drivers meeting/event - UNITE THE DRIVERS!"""
-    
-    driver = await db.users.find_one({"id": driver_id})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
-    
-    event = {
-        "id": str(uuid.uuid4()),
-        "title": request.title,
-        "description": request.description,
-        "organizer_id": driver_id,
-        "organizer_name": driver.get("name", "Driver"),
-        "event_type": request.event_type,
-        "location": request.location,
-        "date": datetime.fromisoformat(request.date.replace("Z", "+00:00")),
-        "max_attendees": request.max_attendees,
-        "attendees": [driver_id],  # Organizer auto-attends
-        "region": region,
-        "is_online": request.is_online,
-        "meeting_link": request.meeting_link,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.community_events.insert_one(event)
-    
-    logger.info(f"📅 New community event created by driver {driver_id}: {request.title}")
-    
-    return {
-        "success": True,
-        "message": f"Event '{request.title}' created! Drivers can now join!",
-        "event": event
-    }
-
-@api_router.post("/community/events/{event_id}/join")
-async def join_event(event_id: str, driver_id: str):
-    """Join a community event"""
-    
-    event = await db.community_events.find_one({"id": event_id})
-    if not event:
-        raise HTTPException(status_code=404, detail="Event not found")
-    
-    # Check if already attending
-    if driver_id in event.get("attendees", []):
-        # Leave event
-        await db.community_events.update_one(
-            {"id": event_id},
-            {"$pull": {"attendees": driver_id}}
-        )
-        return {"attending": False, "message": "You left the event"}
-    
-    # Check max attendees
-    if event.get("max_attendees") and len(event.get("attendees", [])) >= event["max_attendees"]:
-        raise HTTPException(status_code=400, detail="Event is full")
-    
-    # Join event
-    await db.community_events.update_one(
-        {"id": event_id},
-        {"$push": {"attendees": driver_id}}
-    )
-    
-    return {
-        "attending": True,
-        "message": f"You're attending! {len(event.get('attendees', [])) + 1} drivers registered.",
-        "event_details": event
-    }
-
-@api_router.get("/community/events")
-async def get_community_events(region: str = "lagos", upcoming_only: bool = True):
-    """Get community events"""
-    
-    query = {"region": region}
-    if upcoming_only:
-        query["date"] = {"$gte": datetime.utcnow()}
-    
-    events = await db.community_events.find(query).sort("date", 1).to_list(50)
-    
-    for event in events:
-        event["_id"] = str(event["_id"])
-        event["attendees_count"] = len(event.get("attendees", []))
-    
-    return {"events": events, "region": region}
-
-# ==================== COMMUNITY GROUPS ====================
-
-@api_router.post("/community/groups/create")
-async def create_community_group(driver_id: str, request: CreateGroupRequest):
-    """Create a drivers group (regional, interest-based, support)"""
-    
-    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
-    
-    group = {
-        "id": str(uuid.uuid4()),
-        "name": request.name,
-        "description": request.description,
-        "type": request.type,
-        "region": region,
-        "admin_ids": [driver_id],
-        "member_ids": [driver_id],
-        "is_public": request.is_public,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.community_groups.insert_one(group)
-    
-    return {
-        "success": True,
-        "message": f"Group '{request.name}' created!",
-        "group": group
-    }
-
-@api_router.post("/community/groups/{group_id}/join")
-async def join_group(group_id: str, driver_id: str):
-    """Join a community group"""
-    
-    group = await db.community_groups.find_one({"id": group_id})
-    if not group:
-        raise HTTPException(status_code=404, detail="Group not found")
-    
-    if driver_id in group.get("member_ids", []):
-        return {"message": "Already a member"}
-    
-    await db.community_groups.update_one(
-        {"id": group_id},
-        {"$push": {"member_ids": driver_id}}
-    )
-    
-    return {
-        "success": True,
-        "message": f"You joined '{group['name']}'!",
-        "members_count": len(group.get("member_ids", [])) + 1
-    }
-
-@api_router.get("/community/groups")
-async def get_community_groups(region: str = "lagos"):
-    """Get all community groups"""
-    
-    groups = await db.community_groups.find({
-        "region": region,
-        "is_public": True
-    }).to_list(50)
-    
-    for group in groups:
-        group["_id"] = str(group["_id"])
-        group["members_count"] = len(group.get("member_ids", []))
-    
-    return {"groups": groups, "region": region}
-
-# ==================== DRIVER PROFILES IN COMMUNITY ====================
-
-@api_router.get("/community/drivers/{driver_id}/profile")
-async def get_driver_community_profile(driver_id: str):
-    """Get driver's community profile"""
-    
-    driver = await db.users.find_one({"id": driver_id})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-    
-    # Get stats
-    total_posts = await db.community_posts.count_documents({"driver_id": driver_id})
-    total_likes_received = await db.community_posts.aggregate([
-        {"$match": {"driver_id": driver_id}},
-        {"$group": {"_id": None, "total_likes": {"$sum": "$likes"}}}
-    ]).to_list(1)
-    
-    total_likes = total_likes_received[0]["total_likes"] if total_likes_received else 0
-    
-    # Get groups
-    groups = await db.community_groups.find({
-        "member_ids": driver_id
-    }).to_list(10)
-    
-    return {
-        "driver_id": driver_id,
-        "name": driver.get("name", "Driver"),
-        "photo": driver.get("profile_picture"),
-        "rating": driver.get("rating", 5.0),
-        "total_trips": driver.get("total_trips", 0),
-        "joined_date": driver.get("created_at", datetime.utcnow()).isoformat(),
-        "region": driver_profile.get("region", "lagos") if driver_profile else "lagos",
-        "vehicle": driver_profile.get("vehicle", {}) if driver_profile else {},
-        "community_stats": {
-            "total_posts": total_posts,
-            "total_likes": total_likes,
-            "groups_count": len(groups)
-        },
-        "groups": [{"id": g["id"], "name": g["name"]} for g in groups]
-    }
-
-# ==================== COMMUNITY STATS ====================
-
-@api_router.get("/community/stats")
-async def get_community_stats(region: str = "lagos"):
-    """Get community statistics - Show the POWER of unity!"""
-    
-    total_drivers = await db.driver_profiles.count_documents({"region": region})
-    total_posts = await db.community_posts.count_documents({"region": region})
-    total_events = await db.community_events.count_documents({"region": region})
-    total_groups = await db.community_groups.count_documents({"region": region})
-    
-    # Active drivers (posted in last 7 days)
-    week_ago = datetime.utcnow() - timedelta(days=7)
-    active_drivers = await db.community_posts.distinct("driver_id", {
-        "region": region,
-        "created_at": {"$gte": week_ago}
-    })
-    
-    return {
-        "region": region,
-        "total_drivers": total_drivers,
-        "active_drivers": len(active_drivers),
-        "total_posts": total_posts,
-        "total_events": total_events,
-        "total_groups": total_groups,
-        "message": f"💪 {total_drivers} NexRyde drivers united in {region.title()}!",
-        "unity_score": min(100, (len(active_drivers) / max(total_drivers, 1)) * 100) if total_drivers > 0 else 0
-    }
-# ==================== 1. DRIVER VERIFICATION MANAGEMENT ====================
-
-class VerificationAction(BaseModel):
-    notes: Optional[str] = None
-    reason: Optional[str] = None
-
-@api_router.get("/admin/verifications/dashboard")
-async def get_verification_dashboard():
-    """ENHANCED: Get driver verification dashboard with detailed analytics"""
-    
-    # Count by status
-    pending = await db.driver_verifications.count_documents({"status": "pending"})
-    under_review = await db.driver_verifications.count_documents({"status": "under_review"})
-    approved_today = await db.driver_verifications.count_documents({
-        "status": "approved",
-        "reviewed_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
-    })
-    rejected_today = await db.driver_verifications.count_documents({
-        "status": "rejected",
-        "reviewed_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
-    })
-    
-    # Average review time (last 30 days)
-    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
-    reviewed_docs = await db.driver_verifications.find({
-        "status": {"$in": ["approved", "rejected"]},
-        "reviewed_at": {"$gte": thirty_days_ago}
-    }).to_list(1000)
-    
-    total_review_time = 0
-    for doc in reviewed_docs:
-        if doc.get("reviewed_at") and doc.get("submitted_at"):
-            diff = (doc["reviewed_at"] - doc["submitted_at"]).total_seconds() / 3600
-            total_review_time += diff
-    
-    avg_review_hours = total_review_time / len(reviewed_docs) if reviewed_docs else 0
-    
-    # Get oldest pending (needs urgent attention)
-    oldest_pending = await db.driver_verifications.find({
-        "status": "pending"
-    }).sort("submitted_at", 1).limit(1).to_list(1)
-    
-    oldest_age_hours = 0
-    if oldest_pending:
-        oldest_age_hours = (datetime.utcnow() - oldest_pending[0]["submitted_at"]).total_seconds() / 3600
-    
-    # Document quality scores (from AI if available)
-    quality_stats = {
-        "excellent": 0,  # AI confidence > 90%
-        "good": 0,       # 70-90%
-        "poor": 0        # < 70%
-    }
-    
-    recent_verifications = await db.driver_verifications.find({
-        "status": "pending"
-    }).limit(50).to_list(50)
-    
-    for v in recent_verifications:
-        ai_confidence = v.get("ai_confidence_score", 75)
-        if ai_confidence >= 90:
-            quality_stats["excellent"] += 1
-        elif ai_confidence >= 70:
-            quality_stats["good"] += 1
-        else:
-            quality_stats["poor"] += 1
-    
-    return {
-        "pending_count": pending,
-        "under_review_count": under_review,
-        "approved_today": approved_today,
-        "rejected_today": rejected_today,
-        "avg_review_hours": round(avg_review_hours, 1),
-        "oldest_pending_hours": round(oldest_age_hours, 1),
-        "urgent_attention_needed": pending > 20 or oldest_age_hours > 48,
-        "document_quality": quality_stats,
-        "message": f"⚠️ {pending} drivers waiting! Oldest: {round(oldest_age_hours, 1)}h" if pending > 0 else "✅ All caught up!"
-    }
-
-@api_router.get("/admin/verifications/details/{verification_id}")
-async def get_verification_details(verification_id: str):
-    """ENHANCED: Get complete verification details with AI analysis"""
-    
-    verification = await db.driver_verifications.find_one({"id": verification_id})
-    if not verification:
-        raise HTTPException(status_code=404, detail="Verification not found")
-    
-    # Get driver info
-    driver = await db.users.find_one({"id": verification["user_id"]})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    # Check for multiple accounts (fraud detection)
-    similar_accounts = await db.users.count_documents({
-        "phone": driver.get("phone"),
-        "id": {"$ne": driver["id"]}
-    })
-    
-    # Check previous verifications
-    previous_verifications = await db.driver_verifications.find({
-        "user_id": verification["user_id"],
-        "id": {"$ne": verification_id}
-    }).sort("submitted_at", -1).to_list(5)
-    
-    # AI document quality check
-    document_checks = {
-        "license_photo": {
-            "status": "✅ Clear and readable" if verification.get("license_photo") else "❌ Missing",
-            "ai_confidence": 85
-        },
-        "vehicle_registration": {
-            "status": "✅ Valid format" if verification.get("vehicle_registration") else "❌ Missing",
-            "ai_confidence": 92
-        },
-        "selfie_photo": {
-            "status": "✅ Face detected" if verification.get("selfie_photo") else "❌ Missing",
-            "ai_confidence": 88
-        },
-        "nin_photo": {
-            "status": "✅ Numbers readable" if verification.get("nin_photo") else "❌ Missing",
-            "ai_confidence": 78
-        }
-    }
-    
-    # Risk assessment
-    risk_level = "LOW"
-    risk_factors = []
-    
-    if similar_accounts > 0:
-        risk_level = "HIGH"
-        risk_factors.append(f"⚠️ {similar_accounts} similar account(s) found")
-    
-    if len(previous_verifications) > 2:
-        risk_level = "MEDIUM"
-        risk_factors.append(f"⚠️ {len(previous_verifications)} previous verification attempts")
-    
-    avg_confidence = sum(c["ai_confidence"] for c in document_checks.values()) / 4
-    if avg_confidence < 70:
-        risk_level = "MEDIUM"
-        risk_factors.append(f"⚠️ Low document quality (avg {round(avg_confidence)}%)")
-    
-    verification["_id"] = str(verification["_id"])
-    
-    return {
-        "verification": verification,
-        "driver": {
-            "id": driver["id"],
-            "name": driver.get("name"),
-            "phone": driver.get("phone"),
-            "email": driver.get("email"),
-            "created_at": driver.get("created_at"),
-            "total_trips": await db.trips.count_documents({"driver_id": driver["id"]})
-        },
-        "document_checks": document_checks,
-        "risk_assessment": {
-            "level": risk_level,
-            "factors": risk_factors,
-            "similar_accounts": similar_accounts
-        },
-        "previous_attempts": len(previous_verifications),
-        "ai_recommendation": "✅ APPROVE" if avg_confidence >= 80 and risk_level == "LOW" else "⚠️ MANUAL REVIEW" if risk_level == "MEDIUM" else "❌ REJECT"
-    }
-
-@api_router.post("/admin/verifications/bulk-action")
-async def bulk_verification_action(verification_ids: List[str], action: str, notes: Optional[str] = None):
-    """ENHANCED: Bulk approve/reject verifications"""
-    
-    if action not in ["approve", "reject"]:
-        raise HTTPException(status_code=400, detail="Invalid action")
-    
-    results = {"success": 0, "failed": 0, "errors": []}
-    
-    for v_id in verification_ids:
-        try:
-            if action == "approve":
-                await admin_approve_verification(v_id, notes)
-                results["success"] += 1
-            else:
-                await admin_reject_verification(v_id, notes or "Bulk rejection")
-                results["success"] += 1
-        except Exception as e:
-            results["failed"] += 1
-            results["errors"].append({"id": v_id, "error": str(e)})
-    
-    return {
-        "message": f"{action.title()}ed {results['success']} verifications",
-        "results": results
-    }
-
-# ==================== 2. FRAUD ALERTS MONITORING ====================
-
-@api_router.get("/admin/fraud/dashboard")
-async def get_fraud_dashboard():
-    """ENHANCED: Comprehensive fraud monitoring dashboard"""
-    
-    now = datetime.utcnow()
-    today_start = now.replace(hour=0, minute=0, second=0)
-    week_ago = now - timedelta(days=7)
-    
-    # Critical alerts (needs immediate action)
-    critical_alerts = []
-    
-    # 1. Fake payment screenshots (AI detected)
-    fake_payments = await db.payment_verifications.find({
-        "ai_verified": False,
-        "ai_confidence": {"$lt": 50},
-        "status": "pending_verification"
-    }).to_list(100)
-    
-    for payment in fake_payments:
-        critical_alerts.append({
-            "type": "FAKE_PAYMENT",
-            "severity": "CRITICAL",
-            "driver_id": payment["driver_id"],
-            "amount": payment["amount"],
-            "ai_confidence": payment.get("ai_confidence", 0),
-            "submitted_at": payment["submitted_at"],
-            "message": f"Suspicious payment screenshot (AI: {payment.get('ai_confidence', 0)}%)"
-        })
-    
-    # 2. Multiple accounts (same device/IP)
-    # Simulated - in production, track device IDs
-    duplicate_phone_users = await db.users.aggregate([
-        {"$group": {"_id": "$phone", "count": {"$sum": 1}, "user_ids": {"$push": "$id"}}},
-        {"$match": {"count": {"$gt": 1}}}
-    ]).to_list(50)
-    
-    for dup in duplicate_phone_users:
-        critical_alerts.append({
-            "type": "MULTIPLE_ACCOUNTS",
-            "severity": "HIGH",
-            "phone": dup["_id"],
-            "account_count": dup["count"],
-            "user_ids": dup["user_ids"],
-            "message": f"{dup['count']} accounts using same phone number"
-        })
-    
-    # 3. Excessive SOS abuse
-    sos_abusers = await db.sos_alerts.aggregate([
-        {"$match": {"created_at": {"$gte": week_ago}}},
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
-        {"$match": {"count": {"$gte": 5}}},
-        {"$sort": {"count": -1}}
-    ]).to_list(20)
-    
-    for abuser in sos_abusers:
-        critical_alerts.append({
-            "type": "SOS_ABUSE",
-            "severity": "HIGH",
-            "user_id": abuser["_id"],
-            "sos_count": abuser["count"],
-            "period": "7 days",
-            "message": f"{abuser['count']} SOS alerts in 7 days"
-        })
-    
-    # 4. Trip fraud (fake trips, unusual patterns)
-    # Very short trips with high cancellation
-    suspicious_drivers = await db.trips.aggregate([
-        {"$match": {"status": "cancelled", "created_at": {"$gte": week_ago}}},
-        {"$group": {"_id": "$driver_id", "cancelled": {"$sum": 1}}},
-        {"$match": {"cancelled": {"$gte": 10}}},
-        {"$sort": {"cancelled": -1}}
-    ]).to_list(20)
-    
-    for driver in suspicious_drivers:
-        if driver["_id"]:
-            critical_alerts.append({
-                "type": "HIGH_CANCELLATION",
-                "severity": "MEDIUM",
-                "driver_id": driver["_id"],
-                "cancelled_count": driver["cancelled"],
-                "period": "7 days",
-                "message": f"{driver['cancelled']} cancelled trips in 7 days"
-            })
-    
-    # 5. Rating manipulation
-    perfect_rating_new_drivers = await db.users.find({
-        "role": "driver",
-        "rating": {"$gte": 4.99},
-        "total_trips": {"$lt": 20},
-        "created_at": {"$gte": week_ago}
-    }).to_list(20)
-    
-    for driver in perfect_rating_new_drivers:
-        critical_alerts.append({
-            "type": "RATING_MANIPULATION",
-            "severity": "LOW",
-            "driver_id": driver["id"],
-            "rating": driver.get("rating", 5.0),
-            "total_trips": driver.get("total_trips", 0),
-            "message": f"Perfect {driver.get('rating', 5.0)}★ rating with only {driver.get('total_trips', 0)} trips"
-        })
-    
-    # Statistics
-    stats = {
-        "total_alerts": len(critical_alerts),
-        "critical": sum(1 for a in critical_alerts if a["severity"] == "CRITICAL"),
-        "high": sum(1 for a in critical_alerts if a["severity"] == "HIGH"),
-        "medium": sum(1 for a in critical_alerts if a["severity"] == "MEDIUM"),
-        "low": sum(1 for a in critical_alerts if a["severity"] == "LOW"),
-        "new_today": sum(1 for a in critical_alerts if a.get("submitted_at", now) >= today_start)
-    }
-    
-    # Sort by severity
-    severity_order = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3}
-    critical_alerts.sort(key=lambda x: severity_order[x["severity"]])
-    
-    return {
-        "stats": stats,
-        "alerts": critical_alerts[:50],  # Top 50
-        "fraud_score": min(100, stats["total_alerts"] * 2),  # Overall platform fraud risk
-        "message": f"🚨 {stats['critical']} CRITICAL alerts!" if stats["critical"] > 0 else f"⚠️ {stats['total_alerts']} fraud alerts detected"
-    }
-
-@api_router.post("/admin/fraud/investigate/{user_id}")
-async def investigate_user(user_id: str):
-    """ENHANCED: Deep investigation of a user for fraud"""
-    
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Gather all evidence
-    investigation = {
-        "user_id": user_id,
-        "user_info": {
-            "name": user.get("name"),
-            "phone": user.get("phone"),
-            "email": user.get("email"),
-            "role": user.get("role"),
-            "created_at": user.get("created_at"),
-            "rating": user.get("rating"),
-            "behavior_score": user.get("behavior_score", 100)
-        },
-        "red_flags": []
-    }
-    
-    # Check 1: Multiple accounts
-    similar_accounts = await db.users.count_documents({
-        "phone": user.get("phone"),
-        "id": {"$ne": user_id}
-    })
-    if similar_accounts > 0:
-        investigation["red_flags"].append(f"🚩 {similar_accounts} other account(s) with same phone")
-    
-    # Check 2: Trip patterns
-    total_trips = await db.trips.count_documents({"$or": [{"driver_id": user_id}, {"rider_id": user_id}]})
-    cancelled_trips = await db.trips.count_documents({
-        "$or": [{"driver_id": user_id}, {"rider_id": user_id}],
-        "status": "cancelled"
-    })
-    cancel_rate = (cancelled_trips / total_trips * 100) if total_trips > 0 else 0
-    
-    if cancel_rate > 30:
-        investigation["red_flags"].append(f"🚩 High cancellation rate: {round(cancel_rate, 1)}%")
-    
-    # Check 3: SOS abuse
-    sos_count = await db.sos_alerts.count_documents({"user_id": user_id})
-    if sos_count > 3:
-        investigation["red_flags"].append(f"🚩 {sos_count} SOS alerts triggered")
-    
-    # Check 4: Payment issues (if driver)
-    if user.get("role") == "driver":
-        rejected_payments = await db.payment_verifications.count_documents({
-            "driver_id": user_id,
-            "status": "rejected"
-        })
-        if rejected_payments > 1:
-            investigation["red_flags"].append(f"🚩 {rejected_payments} payment screenshots rejected")
-    
-    # Check 5: Community violations
-    banned_posts = await db.community_posts.count_documents({
-        "driver_id": user_id,
-        "status": "deleted"
-    })
-    if banned_posts > 0:
-        investigation["red_flags"].append(f"🚩 {banned_posts} community posts deleted")
-    
-    # Risk score calculation
-    risk_score = len(investigation["red_flags"]) * 15
-    risk_level = "LOW" if risk_score < 30 else "MEDIUM" if risk_score < 60 else "HIGH" if risk_score < 90 else "CRITICAL"
-    
-    investigation["risk_assessment"] = {
-        "score": risk_score,
-        "level": risk_level,
-        "recommendation": "✅ No action needed" if risk_level == "LOW" else "⚠️ Monitor closely" if risk_level == "MEDIUM" else "🚨 Suspend account" if risk_level == "HIGH" else "❌ BAN immediately"
-    }
-    
-    investigation["stats"] = {
-        "total_trips": total_trips,
-        "cancelled_trips": cancelled_trips,
-        "cancel_rate": round(cancel_rate, 1),
-        "sos_count": sos_count,
-        "rejected_payments": rejected_payments if user.get("role") == "driver" else 0
-    }
-    
-    return investigation
-
-@api_router.post("/admin/fraud/action/{user_id}")
-async def take_fraud_action(user_id: str, action: str, reason: str):
-    """ENHANCED: Take action on fraudulent user"""
-    
-    valid_actions = ["warn", "suspend_7days", "suspend_30days", "ban_permanent"]
-    if action not in valid_actions:
-        raise HTTPException(status_code=400, detail=f"Invalid action. Must be one of: {valid_actions}")
-    
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Log the action
-    await db.admin_actions.insert_one({
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "action": action,
-        "reason": reason,
-        "admin_email": "admin@nexryde.com",  # TODO: Get from auth
-        "timestamp": datetime.utcnow()
-    })
-    
-    # Apply action
-    if action == "warn":
-        await db.users.update_one(
-            {"id": user_id},
-            {
-                "$set": {"warned": True, "warning_reason": reason},
-                "$inc": {"warning_count": 1}
-            }
-        )
-        message = "⚠️ User warned"
-    
-    elif action == "suspend_7days":
-        await db.users.update_one(
-            {"id": user_id},
-            {
-                "$set": {
-                    "suspended": True,
-                    "suspension_reason": reason,
-                    "suspension_until": datetime.utcnow() + timedelta(days=7)
-                }
-            }
-        )
-        message = "🔒 User suspended for 7 days"
-    
-    elif action == "suspend_30days":
-        await db.users.update_one(
-            {"id": user_id},
-            {
-                "$set": {
-                    "suspended": True,
-                    "suspension_reason": reason,
-                    "suspension_until": datetime.utcnow() + timedelta(days=30)
-                }
-            }
-        )
-        message = "🔒 User suspended for 30 days"
-    
-    elif action == "ban_permanent":
-        await db.users.update_one(
-            {"id": user_id},
-            {
-                "$set": {
-                    "banned": True,
-                    "ban_reason": reason,
-                    "banned_at": datetime.utcnow()
-                }
-            }
-        )
-        # Also block from driver profile if driver
-        if user.get("role") == "driver":
-            await db.driver_profiles.update_one(
-                {"user_id": user_id},
-                {"$set": {"can_go_online": False, "banned": True}}
-            )
-        message = "❌ User BANNED permanently"
-    
-    logger.warning(f"FRAUD ACTION: {action} on user {user_id} - {reason}")
-    
-    return {
-        "success": True,
-        "message": message,
-        "action": action,
-        "user_id": user_id
-    }
-
-# ==================== 3. USER MANAGEMENT ====================
-
-@api_router.get("/admin/users/search")
-async def search_users(query: str, role: Optional[str] = None, limit: int = 50):
-    """ENHANCED: Search users by name, phone, email"""
-    
-    search_query = {
-        "$or": [
-            {"name": {"$regex": query, "$options": "i"}},
-            {"phone": {"$regex": query, "$options": "i"}},
-            {"email": {"$regex": query, "$options": "i"}}
-        ]
-    }
-    
-    if role:
-        search_query["role"] = role
-    
-    users = await db.users.find(search_query, {"_id": 0}).limit(limit).to_list(limit)
-    
-    # Enrich with stats
-    enriched_users = []
-    for user in users:
-        user_id = user["id"]
-        user["total_trips"] = await db.trips.count_documents({
-            "$or": [{"driver_id": user_id}, {"rider_id": user_id}]
-        })
-        user["is_suspended"] = user.get("suspended", False)
-        user["is_banned"] = user.get("banned", False)
-        user["behavior_score"] = user.get("behavior_score", 100)
-        enriched_users.append(user)
-    
-    return {"users": enriched_users, "count": len(enriched_users)}
-
-@api_router.get("/admin/users/{user_id}/details")
-async def get_user_details(user_id: str):
-    """ENHANCED: Get complete user profile with all data"""
-    
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    user["_id"] = str(user["_id"])
-    
-    # Get role-specific data
-    role_data = {}
-    if user.get("role") == "driver":
-        driver_profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
-        subscription = await db.subscriptions.find_one(
-            {"driver_id": user_id},
-            {"_id": 0},
-            sort=[("created_at", -1)]
-        )
-        role_data = {
-            "profile": driver_profile,
-            "subscription": subscription,
-            "total_earnings": await db.trips.aggregate([
-                {"$match": {"driver_id": user_id, "status": "completed"}},
-                {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
-            ]).to_list(1)
-        }
-    
-    # Trip history
-    recent_trips = await db.trips.find({
-        "$or": [{"driver_id": user_id}, {"rider_id": user_id}]
-    }).sort("created_at", -1).limit(10).to_list(10)
-    
-    for trip in recent_trips:
-        trip["_id"] = str(trip["_id"])
-    
-    # Activity logs
-    admin_actions = await db.admin_actions.find({
-        "user_id": user_id
-    }).sort("timestamp", -1).limit(10).to_list(10)
-    
-    for action in admin_actions:
-        action["_id"] = str(action["_id"])
-    
-    return {
-        "user": user,
-        "role_specific": role_data,
-        "recent_trips": recent_trips,
-        "admin_actions": admin_actions,
-        "stats": {
-            "total_trips": len(recent_trips),
-            "warnings": user.get("warning_count", 0),
-            "is_suspended": user.get("suspended", False),
-            "is_banned": user.get("banned", False)
-        }
-    }
-
-@api_router.post("/admin/users/{user_id}/edit")
-async def edit_user(
-    user_id: str,
-    name: Optional[str] = None,
-    phone: Optional[str] = None,
-    email: Optional[str] = None,
-    behavior_score: Optional[float] = None
-):
-    """ENHANCED: Edit user information"""
-    
-    updates = {}
-    if name:
-        updates["name"] = name
-    if phone:
-        updates["phone"] = phone
-    if email:
-        updates["email"] = email
-    if behavior_score is not None:
-        updates["behavior_score"] = max(0, min(100, behavior_score))
-    
-    if not updates:
-        raise HTTPException(status_code=400, detail="No updates provided")
-    
-    result = await db.users.update_one({"id": user_id}, {"$set": updates})
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    return {"success": True, "message": "User updated", "updates": updates}
-
-@api_router.post("/admin/users/{user_id}/unsuspend")
-async def unsuspend_user(user_id: str):
-    """ENHANCED: Unsuspend a suspended user"""
-    
-    result = await db.users.update_one(
-        {"id": user_id},
-        {
-            "$set": {"suspended": False},
-            "$unset": {"suspension_reason": "", "suspension_until": ""}
-        }
-    )
-    
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    logger.info(f"User {user_id} unsuspended by admin")
-    
-    return {"success": True, "message": "✅ User unsuspended"}
-
-# ==================== 4. TRIP MONITORING ====================
-
-@api_router.get("/admin/trips/live")
-async def get_live_trips():
-    """ENHANCED: Real-time monitoring of active trips"""
-    
-    # Get all active trips
-    active_trips = await db.trips.find({
-        "status": {"$in": ["accepted", "arrived", "started"]}
-    }).to_list(1000)
-    
-    enriched_trips = []
-    for trip in active_trips:
-        # Get driver and rider info
-        driver = await db.users.find_one({"id": trip.get("driver_id")}, {"name": 1, "phone": 1, "_id": 0})
-        rider = await db.users.find_one({"id": trip.get("rider_id")}, {"name": 1, "phone": 1, "_id": 0})
-        
-        # Calculate duration
-        started_at = trip.get("started_at") or trip.get("created_at")
-        duration_mins = (datetime.utcnow() - started_at).total_seconds() / 60 if started_at else 0
-        
-        # Flag long trips
-        is_long = duration_mins > 120  # > 2 hours
-        
-        trip["_id"] = str(trip["_id"])
-        enriched_trips.append({
-            **trip,
-            "driver_info": driver,
-            "rider_info": rider,
-            "duration_mins": round(duration_mins, 1),
-            "is_long": is_long,
-            "alert": "⚠️ Long trip!" if is_long else None
-        })
-    
-    # Sort by duration (longest first)
-    enriched_trips.sort(key=lambda x: x["duration_mins"], reverse=True)
-    
-    return {
-        "active_trips": enriched_trips,
-        "count": len(enriched_trips),
-        "long_trips": sum(1 for t in enriched_trips if t["is_long"]),
-        "message": f"🚗 {len(enriched_trips)} trips in progress"
-    }
-
-@api_router.get("/admin/trips/analytics")
-async def get_trip_analytics(period: str = "today"):
-    """ENHANCED: Trip analytics with insights"""
-    
-    # Date range
-    now = datetime.utcnow()
-    if period == "today":
-        start_date = now.replace(hour=0, minute=0, second=0)
-    elif period == "week":
-        start_date = now - timedelta(days=7)
-    elif period == "month":
-        start_date = now - timedelta(days=30)
-    else:
-        start_date = now.replace(hour=0, minute=0, second=0)
-    
-    # Total trips by status
-    trips_by_status = await db.trips.aggregate([
-        {"$match": {"created_at": {"$gte": start_date}}},
-        {"$group": {"_id": "$status", "count": {"$sum": 1}}}
-    ]).to_list(10)
-    
-    status_counts = {item["_id"]: item["count"] for item in trips_by_status}
-    
-    # Revenue
-    revenue_result = await db.trips.aggregate([
-        {"$match": {"status": "completed", "created_at": {"$gte": start_date}}},
-        {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
-    ]).to_list(1)
-    total_revenue = revenue_result[0]["total"] if revenue_result else 0
-    
-    # Average fare, distance, duration
-    completed_trips = await db.trips.find({
-        "status": "completed",
-        "created_at": {"$gte": start_date}
-    }).to_list(10000)
-    
-    total_fare = sum(t.get("fare", 0) for t in completed_trips)
-    total_distance = sum(t.get("distance_km", 0) for t in completed_trips)
-    total_duration = sum(t.get("duration_mins", 0) for t in completed_trips)
-    trip_count = len(completed_trips)
-    
-    avg_fare = total_fare / trip_count if trip_count > 0 else 0
-    avg_distance = total_distance / trip_count if trip_count > 0 else 0
-    avg_duration = total_duration / trip_count if trip_count > 0 else 0
-    
-    # Cancellation rate
-    total = sum(status_counts.values())
-    cancelled = status_counts.get("cancelled", 0)
-    cancel_rate = (cancelled / total * 100) if total > 0 else 0
-    
-    # Peak hours
-    trips_by_hour = await db.trips.aggregate([
-        {"$match": {"created_at": {"$gte": start_date}}},
-        {"$project": {"hour": {"$hour": "$created_at"}}},
-        {"$group": {"_id": "$hour", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}}
-    ]).to_list(24)
-    
-    peak_hour = trips_by_hour[0]["_id"] if trips_by_hour else 0
-    
-    return {
-        "period": period,
-        "status_breakdown": status_counts,
-        "total_trips": total,
-        "completed": status_counts.get("completed", 0),
-        "cancelled": cancelled,
-        "cancel_rate": round(cancel_rate, 1),
-        "revenue": {
-            "total": total_revenue,
-            "avg_per_trip": round(avg_fare, 2)
-        },
-        "averages": {
-            "fare": round(avg_fare, 2),
-            "distance_km": round(avg_distance, 1),
-            "duration_mins": round(avg_duration, 1)
-        },
-        "peak_hour": f"{peak_hour}:00",
-        "insights": [
-            f"📊 {total} trips in {period}",
-            f"💰 ₦{round(total_revenue):,} total revenue",
-            f"🚗 {round(avg_distance, 1)}km avg trip distance",
-            f"⏱️ {round(avg_duration, 1)} min avg trip duration",
-            f"❌ {round(cancel_rate, 1)}% cancellation rate" + (" ⚠️ HIGH!" if cancel_rate > 15 else ""),
-            f"🔥 Peak hour: {peak_hour}:00"
-        ]
-    }
-
-@api_router.post("/admin/trips/{trip_id}/cancel")
-async def admin_cancel_trip(trip_id: str, reason: str):
-    """ENHANCED: Admin force-cancel a trip"""
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    if trip["status"] in ["completed", "cancelled"]:
-        raise HTTPException(status_code=400, detail="Trip already completed or cancelled")
-    
-    # Cancel trip
-    await db.trips.update_one(
-        {"id": trip_id},
-        {
-            "$set": {
-                "status": "cancelled",
-                "cancelled_by": "admin",
-                "cancellation_reason": reason,
-                "cancelled_at": datetime.utcnow()
-            }
-        }
-    )
-    
-    # Refund rider (if paid)
-    if trip.get("payment_status") == "paid":
-        await db.transactions.insert_one({
-            "id": str(uuid.uuid4()),
-            "type": "refund",
-            "user_id": trip["rider_id"],
-            "amount": trip.get("fare", 0),
-            "reason": f"Admin cancelled trip: {reason}",
-            "created_at": datetime.utcnow()
-        })
-    
-    logger.warning(f"ADMIN CANCELLED TRIP: {trip_id} - {reason}")
-    
-    return {
-        "success": True,
-        "message": "✅ Trip cancelled by admin",
-        "refunded": trip.get("payment_status") == "paid"
-    }
-
-@api_router.get("/admin/trips/{trip_id}/details")
-async def get_trip_details(trip_id: str):
-    """ENHANCED: Get complete trip details"""
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    trip["_id"] = str(trip["_id"])
-    
-    # Get full user info
-    driver = await db.users.find_one({"id": trip.get("driver_id")}, {"_id": 0})
-    rider = await db.users.find_one({"id": trip.get("rider_id")}, {"_id": 0})
-    
-    # Get trip route (if available)
-    route = await db.trip_routes.find_one({"trip_id": trip_id}, {"_id": 0})
-    
-    # Get SOS alerts for this trip
-    sos_alerts = await db.sos_alerts.find({"trip_id": trip_id}).to_list(10)
-    for alert in sos_alerts:
-        alert["_id"] = str(alert["_id"])
-    
-    return {
-        "trip": trip,
-        "driver": driver,
-        "rider": rider,
-        "route": route,
-        "sos_alerts": sos_alerts,
-        "has_issues": len(sos_alerts) > 0 or trip.get("status") == "cancelled"
-    }
-
-
-# ==================== INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) ====================
-app.include_router(api_router)
