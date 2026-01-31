@@ -6737,6 +6737,298 @@ async def admin_get_activity_log(limit: int = 50):
     
     return {"activities": activities[:limit]}
 
+
+
+# ============================================================================
+# PERFORMANCE REWARDS SYSTEM ENDPOINTS
+# ============================================================================
+
+from performance_rewards import PerformanceRewardsManager
+
+@api_router.get("/admin/rewards/top-drivers")
+async def admin_get_top_drivers(period: str = "monthly", limit: int = 10):
+    """Get top performing drivers for rewards"""
+    rewards_manager = PerformanceRewardsManager(db)
+    
+    if period == "monthly":
+        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
+    else:
+        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
+    
+    return {
+        "period": period,
+        "top_drivers": top_drivers,
+        "total_qualified": len(top_drivers)
+    }
+
+@api_router.post("/admin/rewards/grant-free-month")
+async def admin_grant_free_month(request: Dict[str, Any]):
+    """Manually grant free month to a driver"""
+    driver_id = request.get("driver_id")
+    reason = request.get("reason", "admin_grant")
+    
+    if not driver_id:
+        raise HTTPException(status_code=400, detail="driver_id required")
+    
+    rewards_manager = PerformanceRewardsManager(db)
+    result = await rewards_manager.grant_free_month(driver_id, reason=reason)
+    
+    return result
+
+@api_router.post("/admin/rewards/process-monthly")
+async def admin_process_monthly_rewards():
+    """Process monthly performance rewards (top 10 drivers)"""
+    rewards_manager = PerformanceRewardsManager(db)
+    result = await rewards_manager.process_monthly_rewards()
+    
+    return result
+
+@api_router.get("/drivers/{driver_id}/rewards")
+async def get_driver_rewards(driver_id: str):
+    """Get driver's reward history"""
+    rewards = await db.rewards_log.find({"driver_id": driver_id}).sort("granted_at", -1).to_list(100)
+    
+    for reward in rewards:
+        reward.pop("_id", None)
+    
+    return {
+        "driver_id": driver_id,
+        "total_rewards": len(rewards),
+        "rewards": rewards
+    }
+
+# ============================================================================
+# TRIAL ABUSE PREVENTION ENDPOINTS
+# ============================================================================
+
+from trial_abuse_prevention import TrialAbuseDetector, validate_trial_eligibility
+
+@api_router.post("/auth/validate-trial-eligibility")
+async def validate_trial(request: Dict[str, Any]):
+    """
+    Validate if user is eligible for trial
+    Prevents abuse by checking phone, NIN, license, device
+    """
+    phone = request.get("phone")
+    nin = request.get("nin")
+    license_number = request.get("license_number")
+    device_id = request.get("device_id")
+    ip_address = request.get("ip_address")
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number required")
+    
+    detector = TrialAbuseDetector(db)
+    is_allowed, reason, checks = await detector.comprehensive_trial_check(
+        phone=phone,
+        nin=nin,
+        license_number=license_number,
+        device_id=device_id,
+        ip_address=ip_address
+    )
+    
+    return {
+        "eligible": is_allowed,
+        "reason": reason,
+        "checks": checks
+    }
+
+@api_router.get("/admin/abuse-prevention/stats")
+async def admin_get_abuse_stats():
+    """Get trial abuse prevention statistics"""
+    detector = TrialAbuseDetector(db)
+    stats = await detector.get_abuse_statistics()
+    
+    return stats
+
+@api_router.post("/admin/abuse-prevention/blacklist")
+async def admin_blacklist_phone(request: Dict[str, Any]):
+    """Manually blacklist a phone number"""
+    phone = request.get("phone")
+    reason = request.get("reason", "admin_blacklist")
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number required")
+    
+    detector = TrialAbuseDetector(db)
+    await detector.blacklist_phone(phone, reason=reason)
+    
+    return {
+        "success": True,
+        "message": f"Phone {phone} has been blacklisted"
+    }
+
+@api_router.get("/admin/abuse-prevention/blacklist")
+async def admin_get_blacklist(limit: int = 100):
+    """Get blacklisted phone numbers"""
+    blacklist = await db.trial_blacklist.find({"status": "active"}).sort("blacklisted_at", -1).to_list(limit)
+    
+    for entry in blacklist:
+        entry.pop("_id", None)
+    
+    return {
+        "total": len(blacklist),
+        "blacklist": blacklist
+    }
+
+# ============================================================================
+# DRIVER REPORT SYSTEM ENDPOINTS
+# ============================================================================
+
+from driver_report_system import DriverReportSystem, ReportCategory, ReportSeverity
+
+@api_router.post("/reports/submit")
+async def submit_driver_report(request: Dict[str, Any]):
+    """
+    Submit a report against a driver
+    Available to riders only
+    """
+    rider_id = request.get("rider_id")
+    driver_id = request.get("driver_id")
+    trip_id = request.get("trip_id")
+    category = request.get("category")
+    description = request.get("description", "")
+    evidence_urls = request.get("evidence_urls", [])
+    
+    # Validate required fields
+    if not all([rider_id, driver_id, trip_id, category]):
+        raise HTTPException(
+            status_code=400,
+            detail="rider_id, driver_id, trip_id, and category are required"
+        )
+    
+    # Validate category
+    valid_categories = [c.value for c in ReportCategory]
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+        )
+    
+    report_system = DriverReportSystem(db)
+    result = await report_system.submit_report(
+        rider_id=rider_id,
+        driver_id=driver_id,
+        trip_id=trip_id,
+        category=category,
+        description=description,
+        evidence_urls=evidence_urls
+    )
+    
+    return result
+
+@api_router.get("/reports/driver/{driver_id}")
+async def get_driver_reports(driver_id: str, include_resolved: bool = False):
+    """Get all reports for a specific driver"""
+    report_system = DriverReportSystem(db)
+    reports = await report_system.get_driver_reports(driver_id, include_resolved=include_resolved)
+    
+    return {
+        "driver_id": driver_id,
+        "total_reports": len(reports),
+        "reports": reports
+    }
+
+@api_router.get("/reports/driver/{driver_id}/statistics")
+async def get_driver_report_statistics(driver_id: str):
+    """Get report statistics for a driver"""
+    report_system = DriverReportSystem(db)
+    stats = await report_system.get_report_statistics(driver_id)
+    
+    return stats
+
+@api_router.get("/admin/reports/all")
+async def admin_get_all_reports(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100
+):
+    """Get all driver reports (admin only)"""
+    query = {}
+    
+    if status:
+        query["status"] = status
+    
+    if severity:
+        query["severity"] = severity
+    
+    reports = await db.driver_reports.find(query).sort("created_at", -1).to_list(limit)
+    
+    for report in reports:
+        report.pop("_id", None)
+    
+    return {
+        "total": len(reports),
+        "reports": reports
+    }
+
+@api_router.post("/admin/reports/{report_id}/resolve")
+async def admin_resolve_report(report_id: str, request: Dict[str, Any]):
+    """Resolve a driver report (admin only)"""
+    resolution_notes = request.get("resolution_notes", "")
+    action_taken = request.get("action_taken", "none")
+    
+    result = await db.driver_reports.update_one(
+        {"report_id": report_id},
+        {
+            "$set": {
+                "status": "resolved",
+                "resolution_notes": resolution_notes,
+                "action_taken": action_taken,
+                "resolved_at": datetime.utcnow(),
+                "reviewed_by": "admin",
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    return {
+        "success": True,
+        "message": "Report resolved successfully",
+        "report_id": report_id
+    }
+
+@api_router.get("/admin/reports/categories")
+async def get_report_categories():
+    """Get available report categories"""
+    categories = [
+        {
+            "value": cat.value,
+            "label": cat.value.replace('_', ' ').title(),
+            "severity": CATEGORY_SEVERITY_MAP.get(cat, ReportSeverity.MEDIUM).value
+        }
+        for cat in ReportCategory
+    ]
+    
+    return {"categories": categories}
+
+@api_router.get("/drivers/{driver_id}/suspension-status")
+async def get_driver_suspension_status(driver_id: str):
+    """Check if driver is suspended"""
+    suspension = await db.driver_suspensions.find_one({
+        "driver_id": driver_id,
+        "status": "active"
+    })
+    
+    if not suspension:
+        return {
+            "is_suspended": False,
+            "message": "Driver is in good standing"
+        }
+    
+    suspension.pop("_id", None)
+    
+    return {
+        "is_suspended": True,
+        "suspension": suspension
+    }
+
+# Import for category severity map
+from driver_report_system import CATEGORY_SEVERITY_MAP
+
 # Seed default promo codes on startup
 @app.on_event("startup")
 async def seed_promo_codes():
