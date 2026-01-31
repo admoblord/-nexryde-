@@ -148,6 +148,36 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* 🔥 CRYPTO PAYMENTS - COMING SOON */}
+          <View style={styles.comingSoonCard}>
+            <View style={styles.comingSoonHeader}>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonBadgeText}>COMING SOON</Text>
+              </View>
+            </View>
+            <View style={styles.comingSoonIcon}>
+              <Ionicons name="logo-bitcoin" size={32} color="#F7931A" />
+            </View>
+            <Text style={styles.comingSoonTitle}>💰 Crypto Payments</Text>
+            <Text style={styles.comingSoonDesc}>
+              Pay and receive in USDT/USDC • Protect against Naira devaluation • First in Africa!
+            </Text>
+            <View style={styles.comingSoonFeatures}>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
+                <Text style={styles.featureText}>Stable value</Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
+                <Text style={styles.featureText}>Lower fees</Text>
+              </View>
+              <View style={styles.featureItem}>
+                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
+                <Text style={styles.featureText}>Instant transfers</Text>
+              </View>
+            </View>
+          </View>
+
           {/* Referral Card */}
           <View style={styles.referralCard}>
             <View style={styles.referralHeader}>
@@ -427,4 +457,75 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   confirmBtnText: { fontSize: 18, fontWeight: '800', color: '#0F172A' },
+  // Coming Soon Card Styles
+  comingSoonCard: {
+    backgroundColor: 'rgba(139,92,246,0.1)',
+    borderRadius: 24,
+    padding: 24,
+    marginBottom: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(139,92,246,0.3)',
+    alignItems: 'center',
+  },
+  comingSoonHeader: {
+    width: '100%',
+    alignItems: 'flex-end',
+    marginBottom: 12,
+  },
+  comingSoonBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  comingSoonBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  comingSoonIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(247,147,26,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  comingSoonTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  comingSoonDesc: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#A5B4FC',
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  comingSoonFeatures: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  featureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    gap: 6,
+  },
+  featureText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
 });
