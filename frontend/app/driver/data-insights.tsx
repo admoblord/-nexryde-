@@ -30,7 +30,7 @@ export default function DataInsightsScreen() {
     netEarnings: 240000,
     topRoute: 'VI → Lekki',
     topHour: '6 PM',
-    busiest Day: 'Friday',
+    busiestDay: 'Friday',
   };
 
   const earningsTrend = [
