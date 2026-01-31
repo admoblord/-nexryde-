@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NexRyde Admin - Subscription Management</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            opacity: 0.9;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .stat-card .icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .stat-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-card .label {
+            color: #64748b;
+            font-size: 0.9rem;
+        }
+
+        .green { background: #d1fae5; }
+        .blue { background: #dbeafe; }
+        .orange { background: #fed7aa; }
+        .red { background: #fecaca; }
+        .purple { background: #e9d5ff; }
+
+        .content {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .section {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f1f5f9;
+        }
+
+        .section-header h2 {
+            font-size: 1.5rem;
+            color: #1e293b;
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            background: #f1f5f9;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .filter-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .driver-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .driver-table th {
+            text-align: left;
+            padding: 1rem;
+            background: #f8fafc;
+            color: #64748b;
+            font-weight: 600;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .driver-table td {
+            padding: 1rem;
+            border-bottom: 1px solid #f1f5f9;
+        }
+
+        .driver-table tr:hover {
+            background: #f8fafc;
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-trial { background: #dbeafe; color: #1e40af; }
+        .status-active { background: #d1fae5; color: #065f46; }
+        .status-limited { background: #fed7aa; color: #92400e; }
+        .status-suspended { background: #fecaca; color: #991b1b; }
+
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-secondary {
+            background: #f1f5f9;
+            color: #64748b;
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .phase-info {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .phase-info h3 {
+            font-size: 1.25rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .phase-info .price {
+            font-size: 2rem;
+            font-weight: 700;
+            margin: 0.5rem 0;
+        }
+
+        .phase-progress {
+            background: rgba(255,255,255,0.2);
+            height: 8px;
+            border-radius: 4px;
+            margin-top: 1rem;
+            overflow: hidden;
+        }
+
+        .phase-progress-fill {
+            background: white;
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📊 Subscription Management</h1>
+        <p>Monitor and manage driver subscriptions</p>
+    </div>
+
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="icon green">👥</div>
+            <div class="value" id="totalDrivers">0</div>
+            <div class="label">Total Drivers</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon blue">✅</div>
+            <div class="value" id="activeDrivers">0</div>
+            <div class="label">Active Subscriptions</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon orange">⏰</div>
+            <div class="value" id="trialDrivers">0</div>
+            <div class="label">On Trial</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon red">⚠️</div>
+            <div class="value" id="overdueDrivers">0</div>
+            <div class="label">Payment Overdue</div>
+        </div>
+        <div class="stat-card">
+            <div class="icon purple">💰</div>
+            <div class="value" id="monthlyRevenue">₦0</div>
+            <div class="label">Monthly Revenue</div>
+        </div>
+    </div>
+
+    <div class="content">
+        <!-- Current Phase Info -->
+        <div class="phase-info">
+            <h3>Current Phase: <span id="currentPhase">LAUNCH</span></h3>
+            <div class="price">₦<span id="currentPrice">15,000</span>/month</div>
+            <p>Launch slots: <span id="launchSlots">467</span>/500 filled</p>
+            <div class="phase-progress">
+                <div class="phase-progress-fill" id="phaseProgress" style="width: 93.4%"></div>
+            </div>
+        </div>
+
+        <!-- Driver List -->
+        <div class="section">
+            <div class="section-header">
+                <h2>Driver Subscriptions</h2>
+                <div class="filter-buttons">
+                    <button class="filter-btn active" onclick="filterDrivers('all')">All</button>
+                    <button class="filter-btn" onclick="filterDrivers('trial')">Trial</button>
+                    <button class="filter-btn" onclick="filterDrivers('active')">Active</button>
+                    <button class="filter-btn" onclick="filterDrivers('overdue')">Overdue</button>
+                    <button class="filter-btn" onclick="filterDrivers('suspended')">Suspended</button>
+                </div>
+            </div>
+
+            <table class="driver-table">
+                <thead>
+                    <tr>
+                        <th>Driver ID</th>
+                        <th>Name</th>
+                        <th>Status</th>
+                        <th>Current Price</th>
+                        <th>Joined Phase</th>
+                        <th>Next Payment</th>
+                        <th>Days Until Due</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="driverTableBody">
+                    <!-- Populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Overdue Payments -->
+        <div class="section">
+            <div class="section-header">
+                <h2>⚠️ Overdue Payments</h2>
+            </div>
+            <table class="driver-table">
+                <thead>
+                    <tr>
+                        <th>Driver</th>
+                        <th>Amount Due</th>
+                        <th>Days Overdue</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="overdueTableBody">
+                    <!-- Populated by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Sample data (replace with API calls)
+        const sampleDrivers = [
+            {
+                id: "DRV001",
+                name: "John Doe",
+                status: "active",
+                price: 15000,
+                phase: "launch",
+                nextPayment: "2026-02-15",
+                daysUntilDue: 15
+            },
+            {
+                id: "DRV002",
+                name: "Jane Smith",
+                status: "trial",
+                price: 15000,
+                phase: "launch",
+                nextPayment: null,
+                daysUntilDue: null
+            },
+            {
+                id: "DRV003",
+                name: "Mike Johnson",
+                status: "limited",
+                price: 15000,
+                phase: "launch",
+                nextPayment: "2026-01-28",
+                daysUntilDue: -2
+            },
+        ];
+
+        function loadStats() {
+            // Load from API
+            document.getElementById('totalDrivers').textContent = '467';
+            document.getElementById('activeDrivers').textContent = '425';
+            document.getElementById('trialDrivers').textContent = '35';
+            document.getElementById('overdueDrivers').textContent = '7';
+            document.getElementById('monthlyRevenue').textContent = '₦6,375,000';
+        }
+
+        function loadDrivers(filter = 'all') {
+            const tbody = document.getElementById('driverTableBody');
+            tbody.innerHTML = '';
+
+            sampleDrivers.forEach(driver => {
+                if (filter !== 'all' && driver.status !== filter) return;
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td>${driver.id}</td>
+                    <td>${driver.name}</td>
+                    <td><span class="status-badge status-${driver.status}">${driver.status.toUpperCase()}</span></td>
+                    <td>₦${driver.price.toLocaleString()}</td>
+                    <td>${driver.phase.toUpperCase()}</td>
+                    <td>${driver.nextPayment || 'N/A'}</td>
+                    <td>${driver.daysUntilDue !== null ? driver.daysUntilDue + ' days' : 'N/A'}</td>
+                    <td class="action-buttons">
+                        <button class="btn btn-primary btn-sm" onclick="viewDriver('${driver.id}')">View</button>
+                        <button class="btn btn-secondary btn-sm" onclick="sendReminder('${driver.id}')">Remind</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function filterDrivers(status) {
+            // Update active button
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            loadDrivers(status);
+        }
+
+        function viewDriver(id) {
+            alert(`View driver: ${id}`);
+        }
+
+        function sendReminder(id) {
+            alert(`Send reminder to: ${id}`);
+        }
+
+        // Load data on page load
+        loadStats();
+        loadDrivers();
+
+        // Refresh every 30 seconds
+        setInterval(() => {
+            loadStats();
+            loadDrivers();
+        }, 30000);
+    </script>
+</body>
+</html>
