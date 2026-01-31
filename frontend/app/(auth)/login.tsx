@@ -20,6 +20,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
+import { saveUserSession } from '@/utils/authStorage';
 
 const { width, height } = Dimensions.get('window');
 
