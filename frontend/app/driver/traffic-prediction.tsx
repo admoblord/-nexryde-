@@ -283,8 +283,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   scrollView: {
     flex: 1,
@@ -309,14 +310,16 @@ const styles = StyleSheet.create({
   },
   aiTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   aiText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: SPACING.md,
     lineHeight: 20,
+    fontWeight: '700',
   },
   aiStats: {
     flexDirection: 'row',
@@ -340,16 +343,20 @@ const styles = StyleSheet.create({
   },
   aiStatLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    color: '#64748B',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   alertsSection: {
     marginBottom: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   alertCard: {
     flexDirection: 'row',
@@ -371,18 +378,21 @@ const styles = StyleSheet.create({
   },
   alertLocation: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   alertMessage: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginBottom: 4,
+    fontWeight: '700',
   },
   alertTime: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   routesSection: {
     marginBottom: SPACING.lg,
@@ -409,9 +419,10 @@ const styles = StyleSheet.create({
   },
   routeName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   udubBadge: {
     flexDirection: 'row',
@@ -458,8 +469,8 @@ const styles = StyleSheet.create({
   },
   routeStatValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   trafficDot: {
     width: 8,
@@ -476,7 +487,8 @@ const styles = StyleSheet.create({
   },
   routeVia: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   savingsBadge: {
     flexDirection: 'row',
@@ -489,7 +501,7 @@ const styles = StyleSheet.create({
   },
   savingsText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   tipsSection: {
@@ -507,8 +519,8 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.white,
+    fontWeight: '700',
+    color: '#334155',
     lineHeight: 20,
   },
 });

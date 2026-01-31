@@ -336,8 +336,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   timeframeSelector: {
     flexDirection: 'row',
@@ -357,8 +358,8 @@ const styles = StyleSheet.create({
   },
   timeframeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   timeframeTextActive: {
     color: COLORS.white,
@@ -393,8 +394,11 @@ const styles = StyleSheet.create({
   },
   insightLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: SPACING.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   trendBadge: {
     flexDirection: 'row',
@@ -407,7 +411,7 @@ const styles = StyleSheet.create({
   },
   trendText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   trendSection: {
@@ -415,9 +419,10 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   trendCard: {
     backgroundColor: COLORS.white,
@@ -437,7 +442,7 @@ const styles = StyleSheet.create({
   },
   trendAmount: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.accentGreen,
     marginBottom: SPACING.xs,
   },
@@ -455,8 +460,9 @@ const styles = StyleSheet.create({
   },
   trendLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginTop: SPACING.xs,
+    fontWeight: '700',
   },
   trendInsight: {
     flexDirection: 'row',
@@ -469,7 +475,7 @@ const styles = StyleSheet.create({
   trendInsightText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   routesSection: {
@@ -510,13 +516,13 @@ const styles = StyleSheet.create({
   },
   routeFrom: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   routeTo: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   routeStats: {
     flexDirection: 'row',
@@ -530,7 +536,8 @@ const styles = StyleSheet.create({
   },
   routeStatText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   hourlySection: {
     marginBottom: SPACING.lg,
@@ -548,8 +555,8 @@ const styles = StyleSheet.create({
   hourlyTime: {
     width: 60,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   hourlyBar: {
     flex: 1,
@@ -565,8 +572,8 @@ const styles = StyleSheet.create({
   hourlyEarnings: {
     width: 50,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     textAlign: 'right',
   },
   hourlyLegend: {
@@ -590,7 +597,8 @@ const styles = StyleSheet.create({
   },
   legendText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   aiSection: {
     marginTop: SPACING.lg,
@@ -603,13 +611,15 @@ const styles = StyleSheet.create({
   },
   aiInsightTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginVertical: SPACING.xs,
+    letterSpacing: -0.5,
   },
   aiInsightText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     lineHeight: 20,
+    fontWeight: '700',
   },
 });

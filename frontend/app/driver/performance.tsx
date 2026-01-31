@@ -334,8 +334,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   periodSelector: {
     flexDirection: 'row',
@@ -355,8 +356,8 @@ const styles = StyleSheet.create({
   },
   periodText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   periodTextActive: {
     color: COLORS.white,
@@ -379,8 +380,11 @@ const styles = StyleSheet.create({
   },
   scoreLabel: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: SPACING.md,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   scoreCircle: {
     width: 140,
@@ -411,7 +415,7 @@ const styles = StyleSheet.create({
   },
   scoreBadgeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   metricsSection: {
@@ -419,9 +423,10 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   metricsGrid: {
     flexDirection: 'row',
@@ -445,14 +450,17 @@ const styles = StyleSheet.create({
   },
   metricTitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
     textAlign: 'center',
     marginBottom: SPACING.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   metricValue: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: '#0F172A',
     marginBottom: SPACING.xs,
   },
   progressBar: {
@@ -468,8 +476,9 @@ const styles = StyleSheet.create({
   },
   metricTip: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     textAlign: 'center',
+    fontWeight: '700',
   },
   chartSection: {
     marginBottom: SPACING.lg,
@@ -498,7 +507,8 @@ const styles = StyleSheet.create({
   },
   legendText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   chart: {
     flexDirection: 'row',
@@ -513,7 +523,7 @@ const styles = StyleSheet.create({
   },
   chartValue: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.accentGreen,
     marginBottom: SPACING.xs,
   },
@@ -530,8 +540,9 @@ const styles = StyleSheet.create({
   },
   chartLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginTop: SPACING.xs,
+    fontWeight: '700',
   },
   ratingContainer: {
     flexDirection: 'row',
@@ -541,8 +552,8 @@ const styles = StyleSheet.create({
   },
   ratingText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   improvementsSection: {
     marginBottom: SPACING.lg,
@@ -573,8 +584,9 @@ const styles = StyleSheet.create({
   },
   improvementArea: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   impactBadge: {
     paddingHorizontal: SPACING.sm,
@@ -587,13 +599,15 @@ const styles = StyleSheet.create({
   },
   improvementCurrent: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
     marginBottom: SPACING.xs,
+    fontWeight: '700',
   },
   improvementSuggestion: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     lineHeight: 20,
+    fontWeight: '700',
   },
   summarySection: {
     marginTop: SPACING.lg,
@@ -613,11 +627,12 @@ const styles = StyleSheet.create({
   },
   summaryLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   summaryValue: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
 });

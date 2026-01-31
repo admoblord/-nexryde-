@@ -184,8 +184,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   placeholder: {
     width: 44,
@@ -210,14 +211,20 @@ const styles = StyleSheet.create({
   },
   mainLabel: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
+    color: '#64748B',
     marginBottom: SPACING.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   mainAmount: {
     fontSize: 48,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
     marginBottom: SPACING.md,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   mainStats: {
     flexDirection: 'row',
@@ -229,7 +236,7 @@ const styles = StyleSheet.create({
   mainStatValue: {
     fontSize: FONT_SIZE.sm,
     color: 'rgba(255,255,255,0.9)',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   quickStats: {
     flexDirection: 'row',
@@ -247,22 +254,26 @@ const styles = StyleSheet.create({
   },
   quickStatLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginBottom: 4,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   quickStatValue: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   chartSection: {
     marginBottom: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   chartCard: {
     backgroundColor: COLORS.white,
@@ -294,12 +305,14 @@ const styles = StyleSheet.create({
   },
   barLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginBottom: 2,
+    fontWeight: '700',
   },
   barAmount: {
     fontSize: FONT_SIZE.xxs,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   recentSection: {
     marginBottom: SPACING.lg,
@@ -327,16 +340,17 @@ const styles = StyleSheet.create({
   },
   earningDate: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   earningTrips: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   earningAmount: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.accentGreen,
   },
   // Loan Card Styles
@@ -360,7 +374,8 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '900',
     color: '#FFFFFF',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
   },
   loanIcon: {
     width: 96,
@@ -374,14 +389,15 @@ const styles = StyleSheet.create({
   loanTitle: {
     fontSize: 24,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: '#0F172A',
     marginBottom: 8,
     textAlign: 'center',
+    letterSpacing: -0.5,
   },
   loanDesc: {
     fontSize: 14,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     textAlign: 'center',
     marginBottom: 20,
     lineHeight: 20,
@@ -406,7 +422,7 @@ const styles = StyleSheet.create({
   },
   loanFeatureText: {
     fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
 });

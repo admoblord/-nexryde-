@@ -378,8 +378,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   progressCard: {
     marginHorizontal: SPACING.lg,
@@ -393,8 +394,11 @@ const styles = StyleSheet.create({
   },
   progressTitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: SPACING.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   progressValue: {
     fontSize: 48,
@@ -416,7 +420,8 @@ const styles = StyleSheet.create({
   },
   progressLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
+    fontWeight: '700',
   },
   categoriesScroll: {
     maxHeight: 50,
@@ -439,8 +444,8 @@ const styles = StyleSheet.create({
   },
   categoryText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
+    fontWeight: '700',
+    color: '#64748B',
   },
   categoryTextActive: {
     color: COLORS.white,
@@ -491,8 +496,9 @@ const styles = StyleSheet.create({
   },
   badgeName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   levelBadge: {
     backgroundColor: COLORS.lightSurface,
@@ -507,8 +513,9 @@ const styles = StyleSheet.create({
   },
   badgeDescription: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginBottom: SPACING.sm,
+    fontWeight: '700',
   },
   progressSection: {
     marginBottom: SPACING.sm,
@@ -520,12 +527,12 @@ const styles = StyleSheet.create({
   },
   progressText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   progressPercentage: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.accentGreen,
   },
   badgeProgressBar: {
@@ -545,10 +552,11 @@ const styles = StyleSheet.create({
   },
   rewardText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   rewardTextUnlocked: {
     color: COLORS.accentGreen,
-    fontWeight: '600',
+    fontWeight: '700',
   },
 });

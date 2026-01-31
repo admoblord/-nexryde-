@@ -189,14 +189,17 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   label: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   typeContainer: {
     flexDirection: 'row',
@@ -218,8 +221,8 @@ const styles = StyleSheet.create({
   },
   typeText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
+    color: '#0F172A',
+    fontWeight: '700',
   },
   typeTextSelected: {
     color: COLORS.white,
@@ -240,9 +243,10 @@ const styles = StyleSheet.create({
   },
   verificationTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   verificationItem: {
     flexDirection: 'row',
@@ -254,12 +258,13 @@ const styles = StyleSheet.create({
   },
   verificationLabel: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
+    color: '#0F172A',
+    fontWeight: '700',
   },
   verificationStatus: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   uploadButton: {
     flexDirection: 'row',
@@ -273,7 +278,7 @@ const styles = StyleSheet.create({
   uploadButtonText: {
     marginLeft: SPACING.sm,
     color: COLORS.primary,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   saveButton: {
     marginTop: 'auto',

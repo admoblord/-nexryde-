@@ -762,7 +762,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '900',
     color: '#FFFFFF',
-    letterSpacing: -0.3,
+    letterSpacing: -0.5,
   },
   helpButton: {
     width: 40,
@@ -828,8 +828,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     color: '#FFFFFF',
-    letterSpacing: 2,
+    letterSpacing: 2.5,
     marginBottom: 8,
+    textTransform: 'uppercase',
   },
   daysContainer: {
     alignItems: 'center',
@@ -844,11 +845,11 @@ const styles = StyleSheet.create({
   daysText: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
-    fontWeight: '700',
+    fontWeight: '900',
   },
   expiryText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: 'rgba(255, 255, 255, 0.8)',
     marginTop: 12,
   },
@@ -871,10 +872,11 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FFFFFF',
     marginTop: 16,
+    letterSpacing: -0.5,
   },
   trialSubtitle: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#CBD5E1',
     marginTop: 8,
     textAlign: 'center',
@@ -893,7 +895,7 @@ const styles = StyleSheet.create({
   },
   trialButtonText: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   
@@ -920,7 +922,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     color: '#00E676',
-    letterSpacing: 1.5,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   priceRow: {
     flexDirection: 'row',
@@ -939,7 +942,7 @@ const styles = StyleSheet.create({
   },
   priceSubtext: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#CBD5E1',
     marginTop: 4,
   },
@@ -953,9 +956,11 @@ const styles = StyleSheet.create({
   },
   benefitsTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#CBD5E1',
     marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   benefitRow: {
     flexDirection: 'row',
@@ -972,7 +977,7 @@ const styles = StyleSheet.create({
   benefitText: {
     fontSize: 16,
     color: '#FFFFFF',
-    fontWeight: '600',
+    fontWeight: '700',
     flex: 1,
   },
   
@@ -1002,6 +1007,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '900',
     color: '#FFFFFF',
+    letterSpacing: -0.5,
   },
   bankDetailsContainer: {
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
@@ -1023,20 +1029,22 @@ const styles = StyleSheet.create({
   },
   bankDetailLabel: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#CBD5E1',
     marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   bankDetailValue: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   bankDetailValueHighlight: {
     color: '#00E676',
     fontSize: 20,
     fontWeight: '900',
-    letterSpacing: 1.5,
+    letterSpacing: 2,
   },
   copyButton: {
     width: 40,
@@ -1060,6 +1068,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#F59E0B',
     marginBottom: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   stepRow: {
     flexDirection: 'row',
@@ -1082,7 +1092,7 @@ const styles = StyleSheet.create({
   },
   stepText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: '#FDE68A',
     flex: 1,
   },
@@ -1119,7 +1129,7 @@ const styles = StyleSheet.create({
   },
   verifyingText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '900',
     color: '#F59E0B',
   },
   
@@ -1155,10 +1165,12 @@ const styles = StyleSheet.create({
   },
   modalSectionTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#CBD5E1',
     marginBottom: 12,
     marginTop: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   
   // Upload Options
@@ -1183,7 +1195,7 @@ const styles = StyleSheet.create({
   },
   uploadOptionText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '900',
     color: '#FFFFFF',
     marginTop: 10,
   },
@@ -1239,7 +1251,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
 });
