@@ -24,11 +24,58 @@ const COLORS = {
 };
 
 export default function SplashScreen() {
+  const router = useRouter();
+  const { setUser, setIsAuthenticated } = useAppStore();
+  const [checking, setChecking] = useState(true);
+  
   // Start with visible values for web compatibility, animate on mobile
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // 🔐 CHECK FOR SAVED LOGIN ON APP START
+  useEffect(() => {
+    checkSavedLogin();
+  }, []);
+
+  const checkSavedLogin = async () => {
+    try {
+      console.log('🔍 Checking for saved login session...');
+      
+      const isLoggedIn = await isUserLoggedIn();
+      
+      if (isLoggedIn) {
+        const userData = await getUserSession();
+        
+        if (userData) {
+          console.log('✅ Found saved login! Auto-logging in...');
+          console.log('User:', userData.name, '| Role:', userData.role);
+          
+          // Restore user state
+          setUser(userData);
+          setIsAuthenticated(true);
+          
+          // Navigate to appropriate home screen
+          setTimeout(() => {
+            if (userData.role === 'driver') {
+              router.replace('/(driver-tabs)/driver-home');
+            } else {
+              router.replace('/(rider-tabs)/rider-home');
+            }
+          }, 1000); // Small delay for smooth transition
+          
+          return;
+        }
+      }
+      
+      console.log('ℹ️ No saved login found. Showing splash screen.');
+      setChecking(false);
+    } catch (error) {
+      console.error('❌ Error checking saved login:', error);
+      setChecking(false);
+    }
+  };
 
   useEffect(() => {
     // Entry animation (only on mobile)
