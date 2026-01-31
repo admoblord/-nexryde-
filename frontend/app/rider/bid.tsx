@@ -446,14 +446,17 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
+    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.orange,
     marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   scrollContent: {
     padding: 16,
@@ -499,14 +502,15 @@ const styles = StyleSheet.create({
   },
   routeLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.textMuted,
     letterSpacing: 1,
     marginBottom: 2,
+    textTransform: 'uppercase',
   },
   routeAddress: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   surgeCard: {
@@ -528,11 +532,12 @@ const styles = StyleSheet.create({
   },
   surgeTitle: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.orange,
   },
   surgeText: {
     fontSize: 12,
+    fontWeight: '700',
     color: COLORS.textSecondary,
     marginTop: 2,
   },
@@ -541,13 +546,15 @@ const styles = StyleSheet.create({
   },
   priceSectionTitle: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
     textAlign: 'center',
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   priceSectionDesc: {
     fontSize: 14,
+    fontWeight: '700',
     color: COLORS.textMuted,
     textAlign: 'center',
     marginBottom: 24,
@@ -581,16 +588,19 @@ const styles = StyleSheet.create({
   },
   currencySymbol: {
     fontSize: 32,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.green,
     marginRight: 4,
   },
   priceInput: {
     fontSize: 48,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
     minWidth: 120,
     textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   quickPrices: {
     flexDirection: 'row',
@@ -613,7 +623,7 @@ const styles = StyleSheet.create({
   },
   quickPriceText: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.textSecondary,
   },
   quickPriceTextActive: {
@@ -637,7 +647,7 @@ const styles = StyleSheet.create({
   },
   submitText: {
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   waitingSection: {
@@ -666,21 +676,22 @@ const styles = StyleSheet.create({
   },
   waitingTitle: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   waitingDesc: {
     fontSize: 16,
+    fontWeight: '700',
     color: COLORS.textSecondary,
-    fontWeight: '600',
   },
   offersSection: {
     marginBottom: 16,
   },
   offersTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.primary,
     marginBottom: 12,
   },
@@ -715,12 +726,12 @@ const styles = StyleSheet.create({
   },
   driverInitial: {
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   driverName: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.primary,
   },
   ratingRow: {
@@ -731,7 +742,7 @@ const styles = StyleSheet.create({
   },
   rating: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   vehicleType: {
@@ -743,14 +754,19 @@ const styles = StyleSheet.create({
   },
   offerPriceLabel: {
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.textMuted,
     marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   offerPriceValue: {
     fontSize: 22,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.green,
+    textShadowColor: 'rgba(34, 197, 94, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   messageBox: {
     flexDirection: 'row',
@@ -763,6 +779,7 @@ const styles = StyleSheet.create({
   },
   messageText: {
     fontSize: 13,
+    fontWeight: '700',
     color: COLORS.textSecondary,
     fontStyle: 'italic',
     flex: 1,
@@ -780,7 +797,7 @@ const styles = StyleSheet.create({
   },
   acceptText: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '900',
     color: '#FFFFFF',
   },
   noOffersCard: {
@@ -792,7 +809,7 @@ const styles = StyleSheet.create({
   },
   noOffersText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.primary,
     marginTop: 16,
   },
@@ -807,7 +824,7 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     fontSize: 15,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.red,
   },
   howItWorks: {
@@ -818,9 +835,10 @@ const styles = StyleSheet.create({
   },
   howTitle: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.primary,
     marginBottom: 16,
+    letterSpacing: -0.5,
   },
   howStep: {
     flexDirection: 'row',
@@ -837,12 +855,12 @@ const styles = StyleSheet.create({
   },
   howNumber: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.green,
   },
   howText: {
     fontSize: 14,
-    fontWeight: '500',
+    fontWeight: '700',
     color: COLORS.textSecondary,
     flex: 1,
   },
