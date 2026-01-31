@@ -331,8 +331,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   scrollView: {
     flex: 1,
@@ -370,9 +371,10 @@ const styles = StyleSheet.create({
   },
   receiptTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '900',
+    color: '#64748B',
     letterSpacing: 2,
+    textTransform: 'uppercase',
   },
   receiptInfo: {
     alignItems: 'center',
@@ -380,13 +382,15 @@ const styles = StyleSheet.create({
   },
   receiptId: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   receiptDate: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   divider: {
     height: 1,
@@ -398,10 +402,11 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '900',
+    color: '#64748B',
     letterSpacing: 1,
     marginBottom: SPACING.md,
+    textTransform: 'uppercase',
   },
   locationRow: {
     flexDirection: 'row',
@@ -431,13 +436,16 @@ const styles = StyleSheet.create({
   },
   locationLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    fontWeight: '700',
+    color: '#64748B',
     marginBottom: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   locationText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   statsRow: {
     flexDirection: 'row',
@@ -451,8 +459,8 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   infoRow: {
     flexDirection: 'row',
@@ -461,12 +469,15 @@ const styles = StyleSheet.create({
   },
   infoLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   infoValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   fareRow: {
     flexDirection: 'row',
@@ -475,12 +486,15 @@ const styles = StyleSheet.create({
   },
   fareLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   fareValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   totalDivider: {
     height: 1,
@@ -493,13 +507,17 @@ const styles = StyleSheet.create({
   },
   totalLabel: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   totalValue: {
     fontSize: FONT_SIZE.xl,
     fontWeight: '900',
     color: COLORS.accentGreen,
+    textShadowColor: 'rgba(34, 197, 94, 0.3)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   paymentSection: {
     gap: SPACING.md,
@@ -511,7 +529,10 @@ const styles = StyleSheet.create({
   },
   paymentLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   paymentBadge: {
     backgroundColor: COLORS.lightSurface,
@@ -521,8 +542,8 @@ const styles = StyleSheet.create({
   },
   paymentValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   statusBadge: {
     flexDirection: 'row',
@@ -537,7 +558,7 @@ const styles = StyleSheet.create({
   },
   statusText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   footer: {
@@ -549,8 +570,8 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
   },
   footerSubtext: {
@@ -576,12 +597,13 @@ const styles = StyleSheet.create({
   },
   actionButtonText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   helpText: {
     textAlign: 'center',
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
 });

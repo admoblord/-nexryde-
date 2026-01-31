@@ -102,8 +102,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   placeholder: {
     width: 44,
@@ -129,12 +130,14 @@ const styles = StyleSheet.create({
   },
   mapTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   mapSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 4,
   },
   statusCard: {
@@ -161,13 +164,15 @@ const styles = StyleSheet.create({
   },
   statusTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   statusSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginBottom: SPACING.lg,
   },
   routeInfo: {
@@ -186,7 +191,8 @@ const styles = StyleSheet.create({
   },
   routeText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   routeLine: {
     width: 2,
@@ -209,7 +215,7 @@ const styles = StyleSheet.create({
   },
   cancelText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.error,
   },
 });

@@ -658,8 +658,9 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   headerRight: {
     width: 40,
@@ -745,15 +746,16 @@ const styles = StyleSheet.create({
   },
   stopLabel: {
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.accentGreen,
     letterSpacing: 1,
     marginBottom: 2,
+    textTransform: 'uppercase',
   },
   stopInputText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   stopInputPlaceholder: {
     color: COLORS.lightTextMuted,
@@ -826,8 +828,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '900',
+    color: '#64748B',
     marginBottom: SPACING.sm,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
@@ -893,13 +895,14 @@ const styles = StyleSheet.create({
   },
   locationName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
     marginBottom: 2,
   },
   locationAddress: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   currentLocationButton: {
     flexDirection: 'row',
@@ -913,7 +916,7 @@ const styles = StyleSheet.create({
   },
   currentLocationText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentBlue,
   },
   bottomSpacer: {
@@ -951,7 +954,7 @@ const styles = StyleSheet.create({
   },
   continueText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   continueTextDisabled: {
@@ -980,8 +983,9 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   searchContainer: {
     paddingHorizontal: SPACING.md,
@@ -1033,12 +1037,13 @@ const styles = StyleSheet.create({
   },
   resultMain: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   resultSecondary: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 2,
   },
   quickActions: {
@@ -1064,8 +1069,8 @@ const styles = StyleSheet.create({
   },
   quickActionText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   quickActionSubtext: {
     fontSize: FONT_SIZE.sm,
@@ -1133,6 +1138,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   voiceBookingContent: {
     flexDirection: 'row',
@@ -1152,14 +1158,15 @@ const styles = StyleSheet.create({
   },
   voiceTitle: {
     fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   voiceDesc: {
     fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     lineHeight: 18,
   },
 });

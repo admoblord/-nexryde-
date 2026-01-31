@@ -207,8 +207,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   scrollView: {
     flex: 1,
@@ -229,7 +230,8 @@ const styles = StyleSheet.create({
   infoText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
     lineHeight: 20,
   },
   carTypeCard: {
@@ -257,8 +259,10 @@ const styles = StyleSheet.create({
   },
   popularText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   carTypeHeader: {
     flexDirection: 'row',
@@ -278,13 +282,15 @@ const styles = StyleSheet.create({
   },
   carTypeName: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 4,
+    letterSpacing: -0.5,
   },
   carTypeDescription: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   checkbox: {
     width: 28,
@@ -314,13 +320,19 @@ const styles = StyleSheet.create({
   },
   pricingLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    fontWeight: '700',
+    color: '#64748B',
     marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   pricingValue: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    textShadowColor: 'rgba(0, 0, 0, 0.1)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   featuresRow: {
     flexDirection: 'row',
@@ -335,8 +347,8 @@ const styles = StyleSheet.create({
   },
   featureText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#334155',
   },
   saveButton: {
     marginTop: SPACING.lg,
@@ -352,7 +364,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
 });
