@@ -71,7 +71,8 @@ export default function RegisterScreen() {
         setIsAuthenticated(true);
         
         if (selectedRole === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
+          // 🚨 NEW DRIVERS MUST VERIFY FIRST
+          router.replace('/driver/verification');
         } else {
           router.replace('/(rider-tabs)/rider-home');
         }
@@ -91,7 +92,8 @@ export default function RegisterScreen() {
       setIsAuthenticated(true);
       
       if (selectedRole === 'driver') {
-        router.replace('/(driver-tabs)/driver-home');
+        // 🚨 NEW DRIVERS MUST VERIFY FIRST
+        router.replace('/driver/verification');
       } else {
         router.replace('/(rider-tabs)/rider-home');
       }
