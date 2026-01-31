@@ -1044,6 +1044,11 @@
                     case 'payments': loadPayments(); break;
                     case 'verifications': loadVerifications(); break;
                     case 'promos': loadPromos(); break;
+                    case 'fraud': loadFraudAlerts(); break;
+                    case 'users': break; // Users loaded on search
+                    case 'livetrips': loadLiveTrips(); break;
+                    case 'analytics': loadAnalytics('today'); break;
+                    case 'community': loadCommunity(); break;
                 }
             });
         });
