@@ -698,12 +698,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: '900',
-    color: '#000000',
-    letterSpacing: 1,
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.green,
     marginTop: 2,
   },
@@ -788,13 +788,13 @@ const styles = StyleSheet.create({
   stepTitle: {
     fontSize: 20,
     fontWeight: '900',
-    color: '#000000',
-    letterSpacing: 0.5,
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   stepDesc: {
     fontSize: 14,
-    fontWeight: '500',
-    color: '#666666',
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 4,
   },
   inputGroup: {
@@ -802,9 +802,10 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: 12,
-    fontWeight: '800',
-    color: '#666666',
-    letterSpacing: 1,
+    fontWeight: '700',
+    color: '#64748B',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
     marginBottom: 8,
   },
   inputContainer: {
@@ -859,8 +860,8 @@ const styles = StyleSheet.create({
   },
   docDesc: {
     fontSize: 12,
-    fontWeight: '500',
-    color: '#666666',
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 2,
   },
   uploadedBadge: {
@@ -930,13 +931,13 @@ const styles = StyleSheet.create({
   },
   reviewLabel: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#666666',
+    fontWeight: '700',
+    color: '#64748B',
   },
   reviewValue: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#000000',
+    fontWeight: '900',
+    color: '#0F172A',
   },
   docStatus: {
     paddingHorizontal: 10,
