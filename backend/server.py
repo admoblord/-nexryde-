@@ -6340,9 +6340,6 @@ async def seed_promo_codes():
         )
     logger.info("Default promo codes seeded")
 
-# Include router
-app.include_router(api_router)
-
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
 @app.get("/admin/")
