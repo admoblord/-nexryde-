@@ -327,6 +327,10 @@ export default function LoginScreen() {
         setUser(data.user);
         setIsAuthenticated(true);
         
+        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
+        await saveUserSession(data.user);
+        console.log('✅ User session saved - auto-login enabled');
+        
         if (data.user.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
