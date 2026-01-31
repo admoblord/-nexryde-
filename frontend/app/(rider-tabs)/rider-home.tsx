@@ -171,6 +171,61 @@ export default function RiderHomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
+          {/* Quick Access Features */}
+          <View style={styles.featuresSection}>
+            <Text style={styles.sectionTitle}>More Services</Text>
+            <View style={styles.featureGrid}>
+              <FeatureCard
+                icon="cube"
+                label="Package Delivery"
+                color="#FF6B35"
+                onPress={() => router.push('/rider/delivery')}
+              />
+              <FeatureCard
+                icon="calendar"
+                label="Schedule Ride"
+                color="#2979FF"
+                onPress={() => router.push('/rider/schedule')}
+              />
+              <FeatureCard
+                icon="people"
+                label="Family"
+                color="#9C27B0"
+                onPress={() => router.push('/rider/family')}
+              />
+              <FeatureCard
+                icon="pricetag"
+                label="Bid for Ride"
+                color="#00BCD4"
+                onPress={() => router.push('/rider/bid')}
+              />
+              <FeatureCard
+                icon="car-sport"
+                label="Car Preference"
+                color="#FF9100"
+                onPress={() => router.push('/rider/car-type-preference')}
+              />
+              <FeatureCard
+                icon="navigate"
+                label="Live Tracking"
+                color="#4CAF50"
+                onPress={() => router.push('/rider/tracking')}
+              />
+              <FeatureCard
+                icon="wallet"
+                label="Wallet"
+                color="#673AB7"
+                onPress={() => router.push('/rider/wallet')}
+              />
+              <FeatureCard
+                icon="time"
+                label="Trip History"
+                color="#607D8B"
+                onPress={() => router.push('/rider/trips')}
+              />
+            </View>
+          </View>
+
           {/* Quick Actions */}
           <View style={styles.quickActions}>
             <QuickAction icon="time" label="History" onPress={() => router.push('/ride-history')} />
