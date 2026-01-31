@@ -77,19 +77,15 @@ export default function LoginScreen() {
     setLoading(true);
     storePhone(phone);
 
-    // Add timeout controller
     const controller = new AbortController();
     const t = setTimeout(() => {
       controller.abort();
       setLoading(false);
-      Alert.alert(
-        "Connection Timeout", 
-        "Could not reach server. Please check your internet connection and try again."
-      );
+      Alert.alert("Connection Timeout", "Could not reach server. Please check your internet connection and try again.");
     }, 15000); // 15 second timeout
 
     try {
-      // USE ENVIRONMENT VARIABLE
+      // Use environment variable for backend URL
       const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
       const fullPhone = `+234${phone}`;
       const endpoint = `${BASE_URL}/api/auth/request-otp`;
@@ -102,7 +98,7 @@ export default function LoginScreen() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: fullPhone }),
-        signal: controller.signal, // Add timeout signal
+        signal: controller.signal,
       });
 
       console.log("OTP: status", res.status);
@@ -112,8 +108,20 @@ export default function LoginScreen() {
       let data = null;
       try { data = JSON.parse(text); } catch {}
 
-      if (!res.ok || !data?.success) {
-        Alert.alert("OTP failed", data?.message || text || "Unknown error. Please try again.");
+      // Handle rate limiting (429) or other errors
+      if (!res.ok) {
+        if (res.status === 429 && data?.detail) {
+          // Rate limit error - show the wait time
+          Alert.alert("Please Wait", data.detail);
+        } else {
+          Alert.alert("OTP failed", data?.detail || data?.message || text || "Unknown error. Please try again.");
+        }
+        return;
+      }
+
+      // Check for success
+      if (!data?.success) {
+        Alert.alert("OTP failed", data?.message || "Unable to send OTP. Please try again.");
         return;
       }
 
@@ -128,7 +136,8 @@ export default function LoginScreen() {
     } catch (e: any) {
       console.log("OTP: error", String(e));
       if (e.name === 'AbortError') {
-        return; // Timeout already handled above
+        // Timeout already handled above
+        return;
       }
       Alert.alert(
         "Connection Error", 
