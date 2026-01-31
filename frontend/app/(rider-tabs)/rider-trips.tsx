@@ -153,12 +153,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   content: {
@@ -185,11 +187,12 @@ const styles = StyleSheet.create({
   },
   tripStatusText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '800',
     color: COLORS.accentGreen,
   },
   tripDate: {
     fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
     color: COLORS.lightTextMuted,
   },
   locations: {
@@ -219,8 +222,8 @@ const styles = StyleSheet.create({
   locationText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   tripInfo: {
     flexDirection: 'row',
@@ -237,7 +240,8 @@ const styles = StyleSheet.create({
   },
   infoText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
   tripFooter: {
     flexDirection: 'row',
@@ -246,8 +250,8 @@ const styles = StyleSheet.create({
   },
   fareText: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   receiptButton: {
     flexDirection: 'row',
@@ -260,7 +264,7 @@ const styles = StyleSheet.create({
   },
   receiptButtonText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontWeight: '800',
     color: COLORS.accentBlue,
   },
   emptyState: {
@@ -280,12 +284,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
   },
   emptyText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
 });

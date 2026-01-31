@@ -43,11 +43,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   headerSubtext: {
     fontSize: FONT_SIZE.md,
+    fontWeight: '700',
     color: COLORS.gray400,
     marginTop: SPACING.xs,
   },
@@ -72,12 +74,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
   },
   emptyText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
   },
 });
