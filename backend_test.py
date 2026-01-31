@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import uuid
 
 # Backend URL from frontend/.env
-BASE_URL = "https://login-bugfix-3.preview.emergentagent.com/api"
+BASE_URL = "https://nexryde-login.preview.emergentagent.com/api"
 
 class NEXRYDEAPITester:
     def __init__(self):
