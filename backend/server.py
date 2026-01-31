@@ -17,9 +17,14 @@ import math
 import httpx
 import hashlib
 import json
+import asyncio
 
 # Import LLM Chat for AI Assistants
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+# Import Subscription Management System
+from subscription_manager import subscription_router
+from payment_reminder_system import payment_reminder_job
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
@@ -6515,8 +6520,16 @@ async def seed_promo_codes():
         )
     logger.info("Default promo codes seeded")
 
-# Include router
+# Include routers
 app.include_router(api_router)
+app.include_router(subscription_router)
+
+# Payment reminder background job
+@app.on_event("startup")
+async def startup_event():
+    """Start background jobs on app startup"""
+    asyncio.create_task(payment_reminder_job())
+    logger.info("Payment reminder job started")
 
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
@@ -6527,6 +6540,15 @@ async def serve_admin():
     if admin_file.exists():
         return FileResponse(admin_file, media_type="text/html")
     raise HTTPException(status_code=404, detail="Admin panel not found")
+
+@app.get("/admin/subscription-management.html")
+@app.get("/admin/subscription-management")
+async def serve_subscription_admin():
+    """Serve subscription management admin panel"""
+    admin_file = ADMIN_DIR / "subscription-management.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Subscription management panel not found")
 
 # Direct auth routes WITHOUT /api prefix (for compatibility)
 @app.post("/auth/request-otp")
@@ -6542,6 +6564,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount admin static files
+app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
