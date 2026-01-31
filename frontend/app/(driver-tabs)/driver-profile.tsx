@@ -587,7 +587,11 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     width: '100%',
     alignItems: 'center',
-    ...SHADOWS.md,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
   },
   modalButtonText: {
     fontSize: FONT_SIZE.lg,
