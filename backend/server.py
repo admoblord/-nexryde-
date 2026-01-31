@@ -6520,8 +6520,16 @@ async def seed_promo_codes():
         )
     logger.info("Default promo codes seeded")
 
-# Include router
+# Include routers
 app.include_router(api_router)
+app.include_router(subscription_router)
+
+# Payment reminder background job
+@app.on_event("startup")
+async def startup_event():
+    """Start background jobs on app startup"""
+    asyncio.create_task(payment_reminder_job())
+    logger.info("Payment reminder job started")
 
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
