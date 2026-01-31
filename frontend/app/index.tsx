@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform } from 'react-native';
-import { Link } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform, ActivityIndicator } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
+import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 
