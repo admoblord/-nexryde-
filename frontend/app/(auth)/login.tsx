@@ -142,12 +142,8 @@ export default function LoginScreen() {
     setWhatsappLoading(true);
     storePhone(phone);
     
-    // Use environment variable for backend URL
     const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
     const fullPhone = `+234${phone}`;
-    
-    console.log("WhatsApp: BASE_URL", BASE_URL);
-    console.log("WhatsApp: endpoint", `${BASE_URL}/api/auth/request-otp-whatsapp`);
     
     const controller = new AbortController();
     const t = setTimeout(() => {
@@ -164,17 +160,12 @@ export default function LoginScreen() {
         signal: controller.signal,
       });
       
-      console.log('WhatsApp: status', res.status);
       const text = await res.text();
-      console.log('WhatsApp: raw', text);
-      
       let data = null;
       try { data = JSON.parse(text); } catch {}
       
-      // Handle rate limiting (429) or other errors
       if (!res.ok) {
         if (res.status === 429 && data?.detail) {
-          // Rate limit error - show the wait time
           Alert.alert("Please Wait", data.detail);
         } else {
           Alert.alert('WhatsApp OTP failed', data?.detail || data?.message || 'Try SMS instead');
@@ -182,13 +173,11 @@ export default function LoginScreen() {
         return;
       }
 
-      // Check for success
       if (!data?.success) {
         Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
         return;
       }
       
-      console.log('WhatsApp: success, navigating');
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -198,9 +187,8 @@ export default function LoginScreen() {
       });
       
     } catch (e: any) {
-      console.log('WhatsApp: error', String(e));
       if (e.name === 'AbortError') {
-        return; // Timeout already handled
+        return;
       }
       Alert.alert('Connection Error', 'Cannot connect to server. Please try SMS instead.');
     } finally {
