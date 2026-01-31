@@ -80,6 +80,10 @@ export default function VerifyScreen() {
         setUser(data.user);
         setIsAuthenticated(true);
         
+        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
+        await saveUserSession(data.user);
+        console.log('✅ User session saved - auto-login enabled');
+        
         // Route to appropriate app based on role
         if (data.user.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
