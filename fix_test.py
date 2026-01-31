@@ -6,7 +6,7 @@ Quick fix test for failing endpoints
 import requests
 import json
 
-BACKEND_URL = "https://login-bugfix-3.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-login.preview.emergentagent.com/api"
 
 def test_otp_verify():
     """Test OTP verify with correct field name"""
