@@ -259,7 +259,7 @@ export default function LoginScreen() {
       console.log('Processing Google auth with session_id:', sessionId.substring(0, 15) + '...');
       console.log('Using backend URL:', backendUrl);
       
-      const response = await fetch(`${backendUrl}/auth/google/exchange`, {
+      const response = await fetch(`${backendUrl}/api/auth/google/exchange`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
