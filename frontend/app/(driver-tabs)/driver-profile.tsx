@@ -83,7 +83,9 @@ export default function DriverProfileScreen() {
               <View style={styles.statIconWrap}>
                 <Ionicons name="star" size={18} color={COLORS.accent} />
               </View>
-              <Text style={styles.statValue}>{user?.rating?.toFixed(1) || '5.0'}</Text>
+              <Text style={styles.statValue}>
+                {user?.trips_completed > 0 ? (user?.rating?.toFixed(1) || 'N/A') : 'New Driver'}
+              </Text>
               <Text style={styles.statLabel}>Rating</Text>
             </View>
             <View style={styles.statDivider} />
