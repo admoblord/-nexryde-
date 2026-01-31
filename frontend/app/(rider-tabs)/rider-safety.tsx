@@ -80,7 +80,8 @@ const styles = StyleSheet.create({
   },
   headerSubtext: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.gray400,
+    fontWeight: '700',
+    color: '#FDE68A',
     marginTop: SPACING.xs,
   },
   content: {
@@ -96,20 +97,23 @@ const styles = StyleSheet.create({
   },
   sosText: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
     marginTop: SPACING.sm,
+    letterSpacing: -0.5,
   },
   sosSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
+    fontWeight: '700',
+    color: '#FEE2E2',
     marginTop: SPACING.xs,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.3,
   },
   featuresList: {
     gap: SPACING.md,
@@ -135,11 +139,13 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   featureDesc: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
+    marginTop: 2,
   },
 });
