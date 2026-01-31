@@ -310,6 +310,16 @@ const WhyCard = ({ icon, title, color }: { icon: string; title: string; color: s
   </View>
 );
 
+
+const FeatureCard = ({ icon, label, color, onPress }: { icon: string; label: string; color: string; onPress: () => void }) => (
+  <TouchableOpacity style={styles.featureCard} onPress={onPress}>
+    <View style={[styles.featureIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon as any} size={24} color={color} />
+    </View>
+    <Text style={styles.featureLabel}>{label}</Text>
+  </TouchableOpacity>
+);
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
