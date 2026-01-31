@@ -282,6 +282,85 @@ export default function DriverHomeScreen() {
             </View>
           </View>
 
+          {/* Quick Access Features */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Quick Access</Text>
+            <View style={styles.featureGrid}>
+              <FeatureCard
+                icon="radio"
+                label="Radio"
+                color="#FF6B35"
+                onPress={() => router.push('/driver/radio')}
+              />
+              <FeatureCard
+                icon="stats-chart"
+                label="Performance"
+                color="#2979FF"
+                onPress={() => router.push('/driver/performance')}
+              />
+              <FeatureCard
+                icon="trophy"
+                label="Leaderboard"
+                color="#FFD700"
+                onPress={() => router.push('/driver/leaderboard')}
+              />
+              <FeatureCard
+                icon="flame"
+                label="Fuel Tracker"
+                color="#FF5722"
+                onPress={() => router.push('/driver/fuel-tracker')}
+              />
+              <FeatureCard
+                icon="map"
+                label="Heatmap"
+                color="#9C27B0"
+                onPress={() => router.push('/driver/heatmap')}
+              />
+              <FeatureCard
+                icon="bulb"
+                label="AI Tips"
+                color="#00BCD4"
+                onPress={() => router.push('/driver/ai-suggestions')}
+              />
+              <FeatureCard
+                icon="ribbon"
+                label="Badges"
+                color="#FF9100"
+                onPress={() => router.push('/driver/badges')}
+              />
+              <FeatureCard
+                icon="flash"
+                label="Challenges"
+                color="#E91E63"
+                onPress={() => router.push('/driver/challenges')}
+              />
+              <FeatureCard
+                icon="trending-up"
+                label="Traffic"
+                color="#4CAF50"
+                onPress={() => router.push('/driver/traffic-prediction')}
+              />
+              <FeatureCard
+                icon="analytics"
+                label="Insights"
+                color="#673AB7"
+                onPress={() => router.push('/driver/data-insights')}
+              />
+              <FeatureCard
+                icon="car"
+                label="Vehicle"
+                color="#607D8B"
+                onPress={() => router.push('/driver/vehicle')}
+              />
+              <FeatureCard
+                icon="layers"
+                label="Tiers"
+                color="#795548"
+                onPress={() => router.push('/driver/tiers')}
+              />
+            </View>
+          </View>
+
           {/* Zero Commission Banner */}
           <View style={styles.bannerCard}>
             <LinearGradient
