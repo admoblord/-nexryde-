@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL } from '@/src/services/api';
+import { saveUserSession } from '@/utils/authStorage';
 
 export default function VerifyScreen() {
   const router = useRouter();
