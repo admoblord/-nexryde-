@@ -6371,3 +6371,465 @@ app.add_middleware(
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+# ==================== DRIVERS COMMUNITY ====================
+# A powerful feature to unite all NexRyde drivers!
+
+# Community Post Models
+class CommunityPost(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    driver_id: str
+    driver_name: str
+    driver_photo: Optional[str] = None
+    content: str
+    post_type: str = "text"  # text, tip, question, event, achievement
+    images: List[str] = []
+    likes: int = 0
+    comments_count: int = 0
+    shares: int = 0
+    region: str = "lagos"  # lagos, abuja, portharcourt, etc.
+    tags: List[str] = []
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class CommunityComment(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    post_id: str
+    driver_id: str
+    driver_name: str
+    content: str
+    likes: int = 0
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class CommunityEvent(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    title: str
+    description: str
+    organizer_id: str
+    organizer_name: str
+    event_type: str = "meeting"  # meeting, training, social, protest, celebration
+    location: dict  # {address, lat, lng}
+    date: datetime
+    max_attendees: Optional[int] = None
+    attendees: List[str] = []  # driver_ids
+    region: str = "lagos"
+    is_online: bool = False
+    meeting_link: Optional[str] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+class CommunityGroup(BaseModel):
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    name: str
+    description: str
+    type: str = "regional"  # regional, interest, support
+    region: str = "lagos"
+    admin_ids: List[str] = []
+    member_ids: List[str] = []
+    is_public: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+# Request Models
+class CreatePostRequest(BaseModel):
+    content: str
+    post_type: str = "text"
+    images: List[str] = []
+    tags: List[str] = []
+
+class CreateCommentRequest(BaseModel):
+    content: str
+
+class CreateEventRequest(BaseModel):
+    title: str
+    description: str
+    event_type: str
+    location: dict
+    date: str  # ISO format
+    max_attendees: Optional[int] = None
+    is_online: bool = False
+    meeting_link: Optional[str] = None
+
+class CreateGroupRequest(BaseModel):
+    name: str
+    description: str
+    type: str = "regional"
+    is_public: bool = True
+
+# ==================== COMMUNITY FEED ====================
+
+@api_router.get("/community/feed")
+async def get_community_feed(driver_id: str, region: str = "lagos", limit: int = 50):
+    """Get community feed for driver - POWERFUL UNITY FEATURE!"""
+    
+    # Get posts from driver's region
+    posts = await db.community_posts.find({
+        "region": region
+    }).sort("created_at", -1).limit(limit).to_list(limit)
+    
+    # Enrich posts with like status
+    enriched_posts = []
+    for post in posts:
+        # Check if driver liked this post
+        liked_by_me = await db.post_likes.find_one({
+            "post_id": post["id"],
+            "driver_id": driver_id
+        }) is not None
+        
+        post["_id"] = str(post["_id"])
+        post["liked_by_me"] = liked_by_me
+        enriched_posts.append(post)
+    
+    # Get active events
+    upcoming_events = await db.community_events.find({
+        "region": region,
+        "date": {"$gte": datetime.utcnow()}
+    }).sort("date", 1).limit(3).to_list(3)
+    
+    for event in upcoming_events:
+        event["_id"] = str(event["_id"])
+        event["is_attending"] = driver_id in event.get("attendees", [])
+    
+    logger.info(f"👥 Community feed loaded for driver {driver_id} in {region}")
+    
+    return {
+        "posts": enriched_posts,
+        "upcoming_events": upcoming_events,
+        "region": region,
+        "total_drivers": await db.driver_profiles.count_documents({"region": region}),
+        "message": f"Welcome to NexRyde {region.title()} Community! 🤝"
+    }
+
+@api_router.post("/community/posts/create")
+async def create_community_post(driver_id: str, request: CreatePostRequest):
+    """Create a post in drivers community"""
+    
+    # Get driver info
+    driver = await db.users.find_one({"id": driver_id})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
+    
+    # Create post
+    post = {
+        "id": str(uuid.uuid4()),
+        "driver_id": driver_id,
+        "driver_name": driver.get("name", "Driver"),
+        "driver_photo": driver.get("profile_picture"),
+        "content": request.content,
+        "post_type": request.post_type,
+        "images": request.images,
+        "likes": 0,
+        "comments_count": 0,
+        "shares": 0,
+        "region": region,
+        "tags": request.tags,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.community_posts.insert_one(post)
+    
+    logger.info(f"📝 New community post by driver {driver_id} in {region}")
+    
+    return {
+        "success": True,
+        "message": "Post created! Your fellow drivers will see it!",
+        "post": post
+    }
+
+@api_router.post("/community/posts/{post_id}/like")
+async def like_post(post_id: str, driver_id: str):
+    """Like a community post"""
+    
+    # Check if already liked
+    existing_like = await db.post_likes.find_one({
+        "post_id": post_id,
+        "driver_id": driver_id
+    })
+    
+    if existing_like:
+        # Unlike
+        await db.post_likes.delete_one({"_id": existing_like["_id"]})
+        await db.community_posts.update_one(
+            {"id": post_id},
+            {"$inc": {"likes": -1}}
+        )
+        return {"liked": False, "message": "Post unliked"}
+    else:
+        # Like
+        await db.post_likes.insert_one({
+            "post_id": post_id,
+            "driver_id": driver_id,
+            "created_at": datetime.utcnow()
+        })
+        await db.community_posts.update_one(
+            {"id": post_id},
+            {"$inc": {"likes": 1}}
+        )
+        return {"liked": True, "message": "Post liked!"}
+
+@api_router.post("/community/posts/{post_id}/comment")
+async def comment_on_post(post_id: str, driver_id: str, request: CreateCommentRequest):
+    """Comment on a post"""
+    
+    driver = await db.users.find_one({"id": driver_id})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    comment = {
+        "id": str(uuid.uuid4()),
+        "post_id": post_id,
+        "driver_id": driver_id,
+        "driver_name": driver.get("name", "Driver"),
+        "content": request.content,
+        "likes": 0,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.community_comments.insert_one(comment)
+    
+    # Update comment count
+    await db.community_posts.update_one(
+        {"id": post_id},
+        {"$inc": {"comments_count": 1}}
+    )
+    
+    return {"success": True, "comment": comment}
+
+@api_router.get("/community/posts/{post_id}/comments")
+async def get_post_comments(post_id: str):
+    """Get comments for a post"""
+    
+    comments = await db.community_comments.find({
+        "post_id": post_id
+    }).sort("created_at", -1).to_list(100)
+    
+    for comment in comments:
+        comment["_id"] = str(comment["_id"])
+    
+    return {"comments": comments}
+
+# ==================== COMMUNITY EVENTS & MEETINGS ====================
+
+@api_router.post("/community/events/create")
+async def create_community_event(driver_id: str, request: CreateEventRequest):
+    """Create a drivers meeting/event - UNITE THE DRIVERS!"""
+    
+    driver = await db.users.find_one({"id": driver_id})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
+    
+    event = {
+        "id": str(uuid.uuid4()),
+        "title": request.title,
+        "description": request.description,
+        "organizer_id": driver_id,
+        "organizer_name": driver.get("name", "Driver"),
+        "event_type": request.event_type,
+        "location": request.location,
+        "date": datetime.fromisoformat(request.date.replace("Z", "+00:00")),
+        "max_attendees": request.max_attendees,
+        "attendees": [driver_id],  # Organizer auto-attends
+        "region": region,
+        "is_online": request.is_online,
+        "meeting_link": request.meeting_link,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.community_events.insert_one(event)
+    
+    logger.info(f"📅 New community event created by driver {driver_id}: {request.title}")
+    
+    return {
+        "success": True,
+        "message": f"Event '{request.title}' created! Drivers can now join!",
+        "event": event
+    }
+
+@api_router.post("/community/events/{event_id}/join")
+async def join_event(event_id: str, driver_id: str):
+    """Join a community event"""
+    
+    event = await db.community_events.find_one({"id": event_id})
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    
+    # Check if already attending
+    if driver_id in event.get("attendees", []):
+        # Leave event
+        await db.community_events.update_one(
+            {"id": event_id},
+            {"$pull": {"attendees": driver_id}}
+        )
+        return {"attending": False, "message": "You left the event"}
+    
+    # Check max attendees
+    if event.get("max_attendees") and len(event.get("attendees", [])) >= event["max_attendees"]:
+        raise HTTPException(status_code=400, detail="Event is full")
+    
+    # Join event
+    await db.community_events.update_one(
+        {"id": event_id},
+        {"$push": {"attendees": driver_id}}
+    )
+    
+    return {
+        "attending": True,
+        "message": f"You're attending! {len(event.get('attendees', [])) + 1} drivers registered.",
+        "event_details": event
+    }
+
+@api_router.get("/community/events")
+async def get_community_events(region: str = "lagos", upcoming_only: bool = True):
+    """Get community events"""
+    
+    query = {"region": region}
+    if upcoming_only:
+        query["date"] = {"$gte": datetime.utcnow()}
+    
+    events = await db.community_events.find(query).sort("date", 1).to_list(50)
+    
+    for event in events:
+        event["_id"] = str(event["_id"])
+        event["attendees_count"] = len(event.get("attendees", []))
+    
+    return {"events": events, "region": region}
+
+# ==================== COMMUNITY GROUPS ====================
+
+@api_router.post("/community/groups/create")
+async def create_community_group(driver_id: str, request: CreateGroupRequest):
+    """Create a drivers group (regional, interest-based, support)"""
+    
+    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    region = driver_profile.get("region", "lagos") if driver_profile else "lagos"
+    
+    group = {
+        "id": str(uuid.uuid4()),
+        "name": request.name,
+        "description": request.description,
+        "type": request.type,
+        "region": region,
+        "admin_ids": [driver_id],
+        "member_ids": [driver_id],
+        "is_public": request.is_public,
+        "created_at": datetime.utcnow()
+    }
+    
+    await db.community_groups.insert_one(group)
+    
+    return {
+        "success": True,
+        "message": f"Group '{request.name}' created!",
+        "group": group
+    }
+
+@api_router.post("/community/groups/{group_id}/join")
+async def join_group(group_id: str, driver_id: str):
+    """Join a community group"""
+    
+    group = await db.community_groups.find_one({"id": group_id})
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    
+    if driver_id in group.get("member_ids", []):
+        return {"message": "Already a member"}
+    
+    await db.community_groups.update_one(
+        {"id": group_id},
+        {"$push": {"member_ids": driver_id}}
+    )
+    
+    return {
+        "success": True,
+        "message": f"You joined '{group['name']}'!",
+        "members_count": len(group.get("member_ids", [])) + 1
+    }
+
+@api_router.get("/community/groups")
+async def get_community_groups(region: str = "lagos"):
+    """Get all community groups"""
+    
+    groups = await db.community_groups.find({
+        "region": region,
+        "is_public": True
+    }).to_list(50)
+    
+    for group in groups:
+        group["_id"] = str(group["_id"])
+        group["members_count"] = len(group.get("member_ids", []))
+    
+    return {"groups": groups, "region": region}
+
+# ==================== DRIVER PROFILES IN COMMUNITY ====================
+
+@api_router.get("/community/drivers/{driver_id}/profile")
+async def get_driver_community_profile(driver_id: str):
+    """Get driver's community profile"""
+    
+    driver = await db.users.find_one({"id": driver_id})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    
+    # Get stats
+    total_posts = await db.community_posts.count_documents({"driver_id": driver_id})
+    total_likes_received = await db.community_posts.aggregate([
+        {"$match": {"driver_id": driver_id}},
+        {"$group": {"_id": None, "total_likes": {"$sum": "$likes"}}}
+    ]).to_list(1)
+    
+    total_likes = total_likes_received[0]["total_likes"] if total_likes_received else 0
+    
+    # Get groups
+    groups = await db.community_groups.find({
+        "member_ids": driver_id
+    }).to_list(10)
+    
+    return {
+        "driver_id": driver_id,
+        "name": driver.get("name", "Driver"),
+        "photo": driver.get("profile_picture"),
+        "rating": driver.get("rating", 5.0),
+        "total_trips": driver.get("total_trips", 0),
+        "joined_date": driver.get("created_at", datetime.utcnow()).isoformat(),
+        "region": driver_profile.get("region", "lagos") if driver_profile else "lagos",
+        "vehicle": driver_profile.get("vehicle", {}) if driver_profile else {},
+        "community_stats": {
+            "total_posts": total_posts,
+            "total_likes": total_likes,
+            "groups_count": len(groups)
+        },
+        "groups": [{"id": g["id"], "name": g["name"]} for g in groups]
+    }
+
+# ==================== COMMUNITY STATS ====================
+
+@api_router.get("/community/stats")
+async def get_community_stats(region: str = "lagos"):
+    """Get community statistics - Show the POWER of unity!"""
+    
+    total_drivers = await db.driver_profiles.count_documents({"region": region})
+    total_posts = await db.community_posts.count_documents({"region": region})
+    total_events = await db.community_events.count_documents({"region": region})
+    total_groups = await db.community_groups.count_documents({"region": region})
+    
+    # Active drivers (posted in last 7 days)
+    week_ago = datetime.utcnow() - timedelta(days=7)
+    active_drivers = await db.community_posts.distinct("driver_id", {
+        "region": region,
+        "created_at": {"$gte": week_ago}
+    })
+    
+    return {
+        "region": region,
+        "total_drivers": total_drivers,
+        "active_drivers": len(active_drivers),
+        "total_posts": total_posts,
+        "total_events": total_events,
+        "total_groups": total_groups,
+        "message": f"💪 {total_drivers} NexRyde drivers united in {region.title()}!",
+        "unity_score": min(100, (len(active_drivers) / max(total_drivers, 1)) * 100) if total_drivers > 0 else 0
+    }
