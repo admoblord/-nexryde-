@@ -680,4 +680,36 @@ const styles = StyleSheet.create({
   bottomSpacer: {
     height: SPACING.xl,
   },
+  featuresSection: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  featureGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  featureCard: {
+    width: (width - SPACING.md * 2 - SPACING.sm * 3) / 4,
+    alignItems: 'center',
+    padding: SPACING.sm,
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
+  featureIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  featureLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    textAlign: 'center',
+  },
 });
