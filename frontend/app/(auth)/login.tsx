@@ -712,8 +712,11 @@ const styles = StyleSheet.create({
   },
   welcomeText: {
     fontSize: 15,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: 4,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   brandRow: {
     flexDirection: 'row',
@@ -721,29 +724,31 @@ const styles = StyleSheet.create({
   },
   brandNex: {
     fontSize: 32,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
-    letterSpacing: 2,
+    letterSpacing: -0.5,
   },
   brandRyde: {
     fontSize: 32,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.green,
-    letterSpacing: 2,
+    letterSpacing: -0.5,
   },
   subtitleText: {
     fontSize: 13,
-    color: COLORS.textMuted,
+    color: '#475569',
     marginTop: 4,
+    fontWeight: '700',
   },
   formSection: {
     marginBottom: 24,
   },
   formTitle: {
     fontSize: 17,
-    fontWeight: '600',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 16,
+    letterSpacing: -0.5,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -770,8 +775,8 @@ const styles = StyleSheet.create({
   },
   prefixText: {
     fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   input: {
     flex: 1,
@@ -819,10 +824,12 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.surfaceLight,
   },
   orText: {
-    color: COLORS.textMuted,
+    color: '#64748B',
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: '700',
     marginHorizontal: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   googleButton: {
     backgroundColor: COLORS.surface,
@@ -851,7 +858,7 @@ const styles = StyleSheet.create({
   },
   whatsappButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.textMuted,
   },
   whatsappButtonTextActive: {
@@ -875,18 +882,19 @@ const styles = StyleSheet.create({
   },
   googleButtonText: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   termsText: {
     textAlign: 'center',
     fontSize: 13,
-    color: COLORS.textMuted,
+    color: '#475569',
     lineHeight: 20,
+    fontWeight: '700',
   },
   linkText: {
     color: COLORS.green,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   features: {
     gap: 12,
@@ -913,12 +921,14 @@ const styles = StyleSheet.create({
   },
   featureTitle: {
     fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 2,
+    letterSpacing: -0.5,
   },
   featureSubtitle: {
     fontSize: 13,
-    color: COLORS.textMuted,
+    color: '#475569',
+    fontWeight: '700',
   },
 });
