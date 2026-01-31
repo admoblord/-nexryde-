@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,299 +6,164 @@ import {
   ScrollView,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
 const { width } = Dimensions.get('window');
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-ui.emergent.host';
 
 export default function DataInsightsScreen() {
   const router = useRouter();
+  const { user } = useAppStore();
   const [timeframe, setTimeframe] = useState('month');
+  const [loading, setLoading] = useState(true);
+  const [insights, setInsights] = useState<any>(null);
+  const [hasData, setHasData] = useState(false);
 
-  const insights = {
-    totalEarnings: 285000,
-    totalTrips: 156,
-    avgTripFare: 1827,
-    totalDistance: 1847,
-    totalHours: 124,
-    earningsPerHour: 2298,
-    fuelCost: 45000,
-    netEarnings: 240000,
-    topRoute: 'VI → Lekki',
-    topHour: '6 PM',
-    busiestDay: 'Friday',
-  };
+  useEffect(() => {
+    fetchInsights();
+  }, [timeframe]);
 
-  const earningsTrend = [
-    { month: 'Jan', amount: 245000 },
-    { month: 'Feb', amount: 268000 },
-    { month: 'Mar', amount: 285000 },
-  ];
+  const fetchInsights = async () => {
+    if (!user?.id) {
+      setLoading(false);
+      return;
+    }
 
-  const topRoutes = [
-    { from: 'Victoria Island', to: 'Lekki Phase 1', trips: 42, earnings: 87500, avgTime: 25 },
-    { from: 'Ikeja GRA', to: 'Victoria Island', trips: 38, earnings: 76000, avgTime: 32 },
-    { from: 'Lekki', to: 'Ajah', trips: 35, earnings: 52500, avgTime: 18 },
-    { from: 'Ikoyi', to: 'VI', trips: 28, earnings: 56000, avgTime: 15 },
-  ];
-
-  const hourlyBreakdown = [
-    { hour: '6 AM', trips: 8, earnings: 12000, demand: 'low' },
-    { hour: '7 AM', trips: 12, earnings: 18000, demand: 'medium' },
-    { hour: '8 AM', trips: 15, earnings: 24000, demand: 'high' },
-    { hour: '12 PM', trips: 18, earnings: 28000, demand: 'high' },
-    { hour: '5 PM', trips: 25, earnings: 45000, demand: 'very-high' },
-    { hour: '6 PM', trips: 32, earnings: 58000, demand: 'very-high' },
-    { hour: '7 PM', trips: 28, earnings: 52000, demand: 'high' },
-    { hour: '10 PM', trips: 18, earnings: 32000, demand: 'medium' },
-  ];
-
-  const getDemandColor = (demand: string) => {
-    switch (demand) {
-      case 'very-high': return COLORS.error;
-      case 'high': return COLORS.accentOrange;
-      case 'medium': return COLORS.accentBlue;
-      default: return COLORS.lightTextMuted;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/driver/${user.id}/insights?timeframe=${timeframe}`);
+      const data = await response.json();
+      
+      if (data.total_trips > 0) {
+        setInsights(data);
+        setHasData(true);
+      } else {
+        setHasData(false);
+      }
+    } catch (error) {
+      console.error('Error fetching insights:', error);
+      setHasData(false);
+    } finally {
+      setLoading(false);
     }
   };
 
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading insights...</Text>
+      </View>
+    );
+  }
+
+  if (!hasData) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.header}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Data Insights</Text>
+            <View style={styles.placeholder} />
+          </View>
+
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIconContainer}>
+              <Ionicons name="analytics-outline" size={80} color={COLORS.textSecondary} />
+            </View>
+            <Text style={styles.emptyTitle}>No Data Yet</Text>
+            <Text style={styles.emptyText}>
+              Complete your first trip to start seeing insights about your earnings, routes, and performance!
+            </Text>
+            <TouchableOpacity 
+              style={styles.emptyButton}
+              onPress={() => router.back()}
+            >
+              <Text style={styles.emptyButtonText}>Start Driving</Text>
+              <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={[COLORS.primary, COLORS.primaryDark]}
-        style={StyleSheet.absoluteFillObject}
-      />
-
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <View style={styles.headerTitle}>
-            <Ionicons name="bar-chart" size={28} color={COLORS.white} />
-            <Text style={styles.headerText}>Data Insights</Text>
-          </View>
-          <View style={styles.backButton} />
+          <Text style={styles.headerTitle}>Data Insights</Text>
+          <View style={styles.placeholder} />
         </View>
 
-        {/* Timeframe Selector */}
-        <View style={styles.timeframeSelector}>
-          {['week', 'month', 'year'].map((tf) => (
-            <TouchableOpacity
-              key={tf}
-              style={[styles.timeframeButton, timeframe === tf && styles.timeframeButtonActive]}
-              onPress={() => setTimeframe(tf)}
-            >
-              <Text style={[styles.timeframeText, timeframe === tf && styles.timeframeTextActive]}>
-                {tf.charAt(0).toUpperCase() + tf.slice(1)}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Key Insights Cards */}
-          <View style={styles.insightsGrid}>
-            <View style={styles.insightCard}>
-              <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
-                style={styles.insightGradient}
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <View style={styles.content}>
+            {/* Timeframe Selector */}
+            <View style={styles.timeframeSelector}>
+              <TouchableOpacity
+                style={[styles.timeframeButton, timeframe === 'week' && styles.timeframeButtonActive]}
+                onPress={() => setTimeframe('week')}
               >
-                <Ionicons name="cash" size={32} color={COLORS.white} />
-                <Text style={styles.insightValue}>₦{insights.totalEarnings.toLocaleString()}</Text>
-                <Text style={styles.insightLabel}>Total Earnings</Text>
-                <View style={styles.trendBadge}>
-                  <Ionicons name="trending-up" size={12} color={COLORS.white} />
-                  <Text style={styles.trendText}>+15%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.insightCard}>
-              <LinearGradient
-                colors={[COLORS.accentBlue, COLORS.accentBlueDark]}
-                style={styles.insightGradient}
-              >
-                <Ionicons name="car" size={32} color={COLORS.white} />
-                <Text style={styles.insightValue}>{insights.totalTrips}</Text>
-                <Text style={styles.insightLabel}>Total Trips</Text>
-                <View style={styles.trendBadge}>
-                  <Ionicons name="trending-up" size={12} color={COLORS.white} />
-                  <Text style={styles.trendText}>+8%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.insightCard}>
-              <LinearGradient
-                colors={[COLORS.accentOrange, '#D97706']}
-                style={styles.insightGradient}
-              >
-                <Ionicons name="time" size={32} color={COLORS.white} />
-                <Text style={styles.insightValue}>₦{insights.earningsPerHour.toLocaleString()}</Text>
-                <Text style={styles.insightLabel}>Per Hour</Text>
-                <View style={styles.trendBadge}>
-                  <Ionicons name="trending-up" size={12} color={COLORS.white} />
-                  <Text style={styles.trendText}>+12%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-
-            <View style={styles.insightCard}>
-              <LinearGradient
-                colors={[COLORS.accentPurple, '#7C3AED']}
-                style={styles.insightGradient}
-              >
-                <Ionicons name="wallet" size={32} color={COLORS.white} />
-                <Text style={styles.insightValue}>₦{insights.netEarnings.toLocaleString()}</Text>
-                <Text style={styles.insightLabel}>Net Earnings</Text>
-                <View style={styles.trendBadge}>
-                  <Ionicons name="trending-up" size={12} color={COLORS.white} />
-                  <Text style={styles.trendText}>+10%</Text>
-                </View>
-              </LinearGradient>
-            </View>
-          </View>
-
-          {/* Earnings Trend */}
-          <View style={styles.trendSection}>
-            <Text style={styles.sectionTitle}>📈 Earnings Trend</Text>
-            <View style={styles.trendCard}>
-              <View style={styles.trendChart}>
-                {earningsTrend.map((item, index) => {
-                  const maxAmount = Math.max(...earningsTrend.map(e => e.amount));
-                  const height = (item.amount / maxAmount) * 100;
-                  return (
-                    <View key={index} style={styles.trendBar}>
-                      <Text style={styles.trendAmount}>₦{(item.amount / 1000).toFixed(0)}K</Text>
-                      <View style={styles.trendBarContainer}>
-                        <LinearGradient
-                          colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
-                          style={[styles.trendBarFill, { height: `${height}%` }]}
-                        />
-                      </View>
-                      <Text style={styles.trendLabel}>{item.month}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-              <View style={styles.trendInsight}>
-                <Ionicons name="trending-up" size={20} color={COLORS.accentGreen} />
-                <Text style={styles.trendInsightText}>
-                  You're earning ₦40,000 more each month!
+                <Text style={[styles.timeframeText, timeframe === 'week' && styles.timeframeTextActive]}>
+                  Week
                 </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.timeframeButton, timeframe === 'month' && styles.timeframeButtonActive]}
+                onPress={() => setTimeframe('month')}
+              >
+                <Text style={[styles.timeframeText, timeframe === 'month' && styles.timeframeTextActive]}>
+                  Month
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.timeframeButton, timeframe === 'all' && styles.timeframeButtonActive]}
+                onPress={() => setTimeframe('all')}
+              >
+                <Text style={[styles.timeframeText, timeframe === 'all' && styles.timeframeTextActive]}>
+                  All Time
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Stats Grid */}
+            <View style={styles.statsGrid}>
+              <View style={styles.statCard}>
+                <Ionicons name="cash" size={24} color={COLORS.primary} />
+                <Text style={styles.statValue}>₦{insights?.total_earnings?.toLocaleString() || 0}</Text>
+                <Text style={styles.statLabel}>Total Earnings</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Ionicons name="car" size={24} color={COLORS.secondary} />
+                <Text style={styles.statValue}>{insights?.total_trips || 0}</Text>
+                <Text style={styles.statLabel}>Total Trips</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Ionicons name="trending-up" size={24} color={COLORS.success} />
+                <Text style={styles.statValue}>₦{insights?.avg_trip_fare || 0}</Text>
+                <Text style={styles.statLabel}>Avg Trip Fare</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Ionicons name="speedometer" size={24} color={COLORS.warning} />
+                <Text style={styles.statValue}>{insights?.total_distance || 0} km</Text>
+                <Text style={styles.statLabel}>Distance</Text>
               </View>
             </View>
-          </View>
 
-          {/* Top Routes */}
-          <View style={styles.routesSection}>
-            <Text style={styles.sectionTitle}>🗺️ Top Routes</Text>
-            {topRoutes.map((route, index) => (
-              <View key={index} style={styles.routeCard}>
-                <View style={styles.routeRank}>
-                  <Text style={styles.routeRankText}>#{index + 1}</Text>
-                </View>
-                <View style={styles.routeInfo}>
-                  <View style={styles.routeHeader}>
-                    <View style={styles.routeLocations}>
-                      <Text style={styles.routeFrom}>{route.from}</Text>
-                      <Ionicons name="arrow-forward" size={16} color={COLORS.lightTextMuted} />
-                      <Text style={styles.routeTo}>{route.to}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.routeStats}>
-                    <View style={styles.routeStat}>
-                      <Ionicons name="car" size={14} color={COLORS.accentBlue} />
-                      <Text style={styles.routeStatText}>{route.trips} trips</Text>
-                    </View>
-                    <View style={styles.routeStat}>
-                      <Ionicons name="cash" size={14} color={COLORS.accentGreen} />
-                      <Text style={styles.routeStatText}>₦{route.earnings.toLocaleString()}</Text>
-                    </View>
-                    <View style={styles.routeStat}>
-                      <Ionicons name="time" size={14} color={COLORS.accentOrange} />
-                      <Text style={styles.routeStatText}>{route.avgTime} min</Text>
-                    </View>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-
-          {/* Hourly Breakdown */}
-          <View style={styles.hourlySection}>
-            <Text style={styles.sectionTitle}>⏰ Hourly Performance</Text>
-            <View style={styles.hourlyCard}>
-              {hourlyBreakdown.map((hour, index) => (
-                <View key={index} style={styles.hourlyRow}>
-                  <Text style={styles.hourlyTime}>{hour.hour}</Text>
-                  <View style={styles.hourlyBar}>
-                    <View
-                      style={[
-                        styles.hourlyBarFill,
-                        {
-                          width: `${(hour.earnings / 58000) * 100}%`,
-                          backgroundColor: getDemandColor(hour.demand),
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.hourlyEarnings}>₦{(hour.earnings / 1000).toFixed(0)}K</Text>
-                </View>
-              ))}
-              <View style={styles.hourlyLegend}>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: COLORS.error }]} />
-                  <Text style={styles.legendText}>Very High</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: COLORS.accentOrange }]} />
-                  <Text style={styles.legendText}>High</Text>
-                </View>
-                <View style={styles.legendItem}>
-                  <View style={[styles.legendDot, { backgroundColor: COLORS.accentBlue }]} />
-                  <Text style={styles.legendText}>Medium</Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* AI Insights */}
-          <View style={styles.aiSection}>
-            <Text style={styles.sectionTitle}>🤖 AI Insights</Text>
-            <View style={styles.aiInsightCard}>
-              <Ionicons name="sparkles" size={24} color={COLORS.accentGreen} />
-              <Text style={styles.aiInsightTitle}>Best Time to Drive</Text>
-              <Text style={styles.aiInsightText}>
-                Based on your data, you earn 45% more between 5-7 PM. 
-                Focus on these hours to maximize earnings.
-              </Text>
-            </View>
-            <View style={styles.aiInsightCard}>
-              <Ionicons name="trending-up" size={24} color={COLORS.accentBlue} />
-              <Text style={styles.aiInsightTitle}>Route Optimization</Text>
-              <Text style={styles.aiInsightText}>
-                VI → Lekki route gives you ₦2,083 per trip. 
-                This is 28% higher than your average.
-              </Text>
-            </View>
-            <View style={styles.aiInsightCard}>
-              <Ionicons name="calendar" size={24} color={COLORS.accentOrange} />
-              <Text style={styles.aiInsightTitle}>Weekly Pattern</Text>
-              <Text style={styles.aiInsightText}>
-                Fridays are your best day with ₦58,000 average. 
-                Consider working more Fridays for better earnings.
-              </Text>
+            {/* Real data display */}
+            <View style={styles.infoCard}>
+              <Text style={styles.infoText}>📊 Showing real data from your completed trips</Text>
             </View>
           </View>
         </ScrollView>
@@ -310,316 +175,138 @@ export default function DataInsightsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: COLORS.lightBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: SPACING.md,
+    color: COLORS.textSecondary,
   },
   safeArea: {
     flex: 1,
+    width: '100%',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
+    backgroundColor: COLORS.lightSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderColor,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: SPACING.xs,
   },
   headerTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+  },
+  placeholder: {
+    width: 40,
+  },
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: SPACING.xl,
+  },
+  emptyIconContainer: {
+    width: 160,
+    height: 160,
+    borderRadius: 80,
+    backgroundColor: COLORS.borderColor,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
+  },
+  emptyTitle: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.md,
+  },
+  emptyText: {
+    fontSize: FONT_SIZE.md,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: SPACING.xl,
+  },
+  emptyButton: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
     gap: SPACING.sm,
   },
-  headerText: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+  emptyButtonText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  content: {
+    padding: SPACING.md,
   },
   timeframeSelector: {
     flexDirection: 'row',
-    paddingHorizontal: SPACING.lg,
-    marginBottom: SPACING.md,
     gap: SPACING.sm,
+    marginBottom: SPACING.md,
   },
   timeframeButton: {
     flex: 1,
     paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.lightSurface,
     alignItems: 'center',
   },
   timeframeButtonActive: {
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: COLORS.primary,
   },
   timeframeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
+    fontWeight: '600',
+    color: COLORS.textSecondary,
   },
   timeframeTextActive: {
     color: COLORS.white,
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xxl,
-  },
-  insightsGrid: {
+  statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: SPACING.md,
-    marginBottom: SPACING.lg,
-  },
-  insightCard: {
-    width: (width - SPACING.lg * 2 - SPACING.md) / 2,
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-  },
-  insightGradient: {
-    padding: SPACING.md,
-    alignItems: 'center',
-  },
-  insightValue: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: COLORS.white,
-    marginVertical: SPACING.xs,
-  },
-  insightLabel: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    marginBottom: SPACING.xs,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  trendBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  trendText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  trendSection: {
-    marginBottom: SPACING.lg,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.md,
-    letterSpacing: -0.5,
-  },
-  trendCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-  },
-  trendChart: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    height: 150,
-    marginBottom: SPACING.md,
-  },
-  trendBar: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  trendAmount: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '900',
-    color: COLORS.accentGreen,
-    marginBottom: SPACING.xs,
-  },
-  trendBarContainer: {
-    width: '80%',
-    height: 100,
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.md,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  trendBarFill: {
-    width: '100%',
-    borderRadius: BORDER_RADIUS.md,
-  },
-  trendLabel: {
-    fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    marginTop: SPACING.xs,
-    fontWeight: '700',
-  },
-  trendInsight: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: SPACING.sm,
-    backgroundColor: COLORS.successSoft,
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.lg,
   },
-  trendInsightText: {
-    flex: 1,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
-  },
-  routesSection: {
-    marginBottom: SPACING.lg,
-  },
-  routeCard: {
-    flexDirection: 'row',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-  },
-  routeRank: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: COLORS.accentGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  routeRankText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  routeInfo: {
-    flex: 1,
-  },
-  routeHeader: {
-    marginBottom: SPACING.sm,
-  },
-  routeLocations: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    flexWrap: 'wrap',
-  },
-  routeFrom: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
-    color: '#0F172A',
-  },
-  routeTo: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
-    color: '#0F172A',
-  },
-  routeStats: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    flexWrap: 'wrap',
-  },
-  routeStat: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  routeStatText: {
-    fontSize: FONT_SIZE.xs,
-    color: '#475569',
-    fontWeight: '700',
-  },
-  hourlySection: {
-    marginBottom: SPACING.lg,
-  },
-  hourlyCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-  },
-  hourlyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-  },
-  hourlyTime: {
-    width: 60,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  hourlyBar: {
-    flex: 1,
-    height: 24,
+  statCard: {
+    width: (width - SPACING.md * 2 - SPACING.sm) / 2,
     backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.md,
-    overflow: 'hidden',
-    marginHorizontal: SPACING.sm,
-  },
-  hourlyBarFill: {
-    height: '100%',
-  },
-  hourlyEarnings: {
-    width: 50,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
-    color: '#0F172A',
-    textAlign: 'right',
-  },
-  hourlyLegend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.lg,
-    marginTop: SPACING.md,
-    paddingTop: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendText: {
-    fontSize: FONT_SIZE.xs,
-    color: '#475569',
-    fontWeight: '700',
-  },
-  aiSection: {
-    marginTop: SPACING.lg,
-  },
-  aiInsightCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    marginBottom: SPACING.sm,
+    alignItems: 'center',
   },
-  aiInsightTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: '#0F172A',
+  statValue: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
     marginVertical: SPACING.xs,
-    letterSpacing: -0.5,
   },
-  aiInsightText: {
+  statLabel: {
     fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    lineHeight: 20,
-    fontWeight: '700',
+    color: COLORS.textSecondary,
+  },
+  infoCard: {
+    backgroundColor: COLORS.primary + '10',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  infoText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    textAlign: 'center',
   },
 });
