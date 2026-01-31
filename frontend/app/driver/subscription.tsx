@@ -124,7 +124,7 @@ export default function SubscriptionScreen() {
         setSubscription({
           status: 'none',
           days_remaining: 0,
-          monthly_fee: 25000,
+          monthly_fee: pricing.current_price || 18000,
           bank_details: {
             bank_name: 'United Bank for Africa (UBA)',
             account_name: 'ADMOBLORDGROUP LIMITED',
