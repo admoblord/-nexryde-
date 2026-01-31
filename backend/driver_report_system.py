@@ -48,6 +48,13 @@ REPORT_THRESHOLDS = {
 }
 
 CATEGORY_SEVERITY_MAP = {
+    # User-requested categories (PRIMARY)
+    ReportCategory.RUDE_BEHAVIOR: ReportSeverity.MEDIUM,
+    ReportCategory.UNSAFE_DRIVING: ReportSeverity.CRITICAL,
+    ReportCategory.OVERCHARGING: ReportSeverity.HIGH,
+    ReportCategory.FAKE_TRIP: ReportSeverity.CRITICAL,
+    ReportCategory.APP_MISUSE: ReportSeverity.HIGH,
+    # Additional detailed categories
     ReportCategory.ABUSIVE_BEHAVIOR: ReportSeverity.HIGH,
     ReportCategory.OFFENSIVE_LANGUAGE: ReportSeverity.MEDIUM,
     ReportCategory.RECKLESS_DRIVING: ReportSeverity.CRITICAL,
