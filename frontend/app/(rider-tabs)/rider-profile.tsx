@@ -97,7 +97,9 @@ export default function RiderProfileScreen() {
             </View>
             <View style={styles.statDivider} />
             <View style={styles.statItem}>
-              <Text style={styles.statValue}>{user?.rating?.toFixed(1) || '5.0'}</Text>
+              <Text style={styles.statValue}>
+                {user?.trips_completed > 0 ? (user?.rating?.toFixed(1) || 'N/A') : 'New User'}
+              </Text>
               <Text style={styles.statLabel}>Rating</Text>
             </View>
             <View style={styles.statDivider} />
