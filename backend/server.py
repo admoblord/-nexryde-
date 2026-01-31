@@ -6529,6 +6529,8 @@ async def seed_promo_codes():
 # Include routers
 app.include_router(api_router)
 app.include_router(subscription_router)
+app.include_router(map_router)
+app.include_router(call_router)
 
 # Payment reminder background job
 @app.on_event("startup")
