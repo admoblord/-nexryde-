@@ -330,8 +330,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   tabs: {
     flexDirection: 'row',
@@ -354,8 +355,8 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   tabTextActive: {
     color: COLORS.white,
@@ -372,13 +373,15 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   sectionSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
+    fontWeight: '700',
   },
   hotspotCard: {
     backgroundColor: COLORS.white,
@@ -397,9 +400,10 @@ const styles = StyleSheet.create({
   },
   hotspotLocation: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   demandBadge: {
     flexDirection: 'row',
@@ -445,12 +449,15 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statValue: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   hotspotFooter: {
     flexDirection: 'row',
@@ -460,7 +467,8 @@ const styles = StyleSheet.create({
   reasonText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   confidenceBadge: {
     flexDirection: 'row',
@@ -469,7 +477,7 @@ const styles = StyleSheet.create({
   },
   confidenceText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   predictionCard: {
@@ -492,15 +500,16 @@ const styles = StyleSheet.create({
   },
   predictionTime: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentBlue,
     marginBottom: 4,
   },
   predictionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
+    letterSpacing: -0.5,
   },
   earningsRow: {
     flexDirection: 'row',
@@ -510,11 +519,12 @@ const styles = StyleSheet.create({
   },
   earningsLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   earningsValue: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.accentGreen,
   },
   tipBox: {
@@ -529,6 +539,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: FONT_SIZE.sm,
     color: COLORS.accentGreen,
+    fontWeight: '700',
   },
   insightCard: {
     flexDirection: 'row',
@@ -550,18 +561,23 @@ const styles = StyleSheet.create({
   },
   insightTitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
     marginBottom: 4,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   insightValue: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
+    letterSpacing: -0.5,
   },
   insightDescription: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
+    fontWeight: '700',
   },
   aiCard: {
     backgroundColor: COLORS.white,
@@ -572,14 +588,16 @@ const styles = StyleSheet.create({
   },
   aiCardTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginVertical: SPACING.sm,
+    letterSpacing: -0.5,
   },
   aiCardText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     textAlign: 'center',
     lineHeight: 20,
+    fontWeight: '700',
   },
 });

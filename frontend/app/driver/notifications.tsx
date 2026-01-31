@@ -432,8 +432,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   unreadBadge: {
     backgroundColor: COLORS.error,
@@ -445,7 +446,7 @@ const styles = StyleSheet.create({
   },
   unreadText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   filtersScroll: {
@@ -469,8 +470,8 @@ const styles = StyleSheet.create({
   },
   filterText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
   },
   filterTextActive: {
     color: COLORS.white,
@@ -499,14 +500,16 @@ const styles = StyleSheet.create({
   },
   aiTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   aiText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginBottom: SPACING.md,
     lineHeight: 20,
+    fontWeight: '700',
   },
   aiStats: {
     flexDirection: 'row',
@@ -524,13 +527,16 @@ const styles = StyleSheet.create({
   },
   aiStatValue: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
     marginBottom: 4,
   },
   aiStatLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    color: '#64748B',
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   notificationsSection: {
     marginBottom: SPACING.lg,
@@ -567,8 +573,9 @@ const styles = StyleSheet.create({
   notificationTitle: {
     flex: 1,
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   priorityBadge: {
     backgroundColor: COLORS.errorSoft,
@@ -578,18 +585,20 @@ const styles = StyleSheet.create({
   },
   priorityText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.error,
   },
   notificationMessage: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     marginBottom: SPACING.xs,
     lineHeight: 20,
+    fontWeight: '700',
   },
   notificationTime: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   unreadDot: {
     width: 8,
@@ -605,17 +614,19 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.white,
+    color: '#334155',
     marginTop: SPACING.md,
+    fontWeight: '700',
   },
   preferencesSection: {
     marginTop: SPACING.lg,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   preferenceCard: {
     backgroundColor: COLORS.white,
@@ -639,7 +650,7 @@ const styles = StyleSheet.create({
   },
   preferenceLabel: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
 });

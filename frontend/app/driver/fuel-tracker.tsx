@@ -281,8 +281,9 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   scrollView: {
     flex: 1,
@@ -314,8 +315,11 @@ const styles = StyleSheet.create({
   },
   statLabel: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    color: '#64748B',
     marginTop: SPACING.xs,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   insightsCard: {
     backgroundColor: COLORS.white,
@@ -331,8 +335,9 @@ const styles = StyleSheet.create({
   },
   insightsTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   insightsList: {
     gap: SPACING.md,
@@ -345,17 +350,19 @@ const styles = StyleSheet.create({
   insightText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: '#475569',
     lineHeight: 20,
+    fontWeight: '700',
   },
   historySection: {
     marginBottom: SPACING.lg,
   },
   historyTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   fuelCard: {
     backgroundColor: COLORS.white,
@@ -382,21 +389,23 @@ const styles = StyleSheet.create({
   },
   fuelStation: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: 2,
+    letterSpacing: -0.5,
   },
   fuelDate: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
+    fontWeight: '700',
   },
   fuelCost: {
     alignItems: 'flex-end',
   },
   fuelCostValue: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.xs,
   },
   efficiencyBadge: {
@@ -410,7 +419,7 @@ const styles = StyleSheet.create({
   },
   efficiencyText: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.accentGreen,
   },
   fuelDetails: {
@@ -425,8 +434,11 @@ const styles = StyleSheet.create({
   },
   fuelDetailLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    color: '#64748B',
     marginBottom: 4,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   fuelDetailValue: {
     fontSize: FONT_SIZE.sm,
@@ -443,9 +455,10 @@ const styles = StyleSheet.create({
   },
   tipsTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.md,
+    letterSpacing: -0.5,
   },
   tipCard: {
     flexDirection: 'row',
@@ -470,7 +483,7 @@ const styles = StyleSheet.create({
   tipText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.white,
+    fontWeight: '700',
+    color: '#334155',
   },
 });

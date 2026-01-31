@@ -311,7 +311,7 @@ const styles = StyleSheet.create({
   },
   headerText: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   nowPlayingBar: {
@@ -348,11 +348,12 @@ const styles = StyleSheet.create({
   },
   nowPlayingTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.white,
   },
   nowPlayingFreq: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   nowPlayingControls: {
@@ -379,12 +380,13 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
     marginBottom: SPACING.xs,
   },
   sectionSubtitle: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   stationCard: {
@@ -418,8 +420,8 @@ const styles = StyleSheet.create({
   },
   stationName: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   playingBadge: {
     flexDirection: 'row',
