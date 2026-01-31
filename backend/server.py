@@ -6340,9 +6340,6 @@ async def seed_promo_codes():
         )
     logger.info("Default promo codes seeded")
 
-# Include router
-app.include_router(api_router)
-
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
 @app.get("/admin/")
@@ -7660,3 +7657,7 @@ async def get_trip_details(trip_id: str):
         "sos_alerts": sos_alerts,
         "has_issues": len(sos_alerts) > 0 or trip.get("status") == "cancelled"
     }
+
+
+# ==================== INCLUDE ROUTER (MUST BE AFTER ALL ROUTES) ====================
+app.include_router(api_router)
