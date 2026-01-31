@@ -6565,6 +6565,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount admin static files
+app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
+
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
