@@ -349,12 +349,14 @@ const styles = StyleSheet.create({
   },
   userName: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   userPhone: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#1E293B',
     marginTop: SPACING.xs,
   },
   riderBadge: {
@@ -369,8 +371,8 @@ const styles = StyleSheet.create({
   },
   riderBadgeText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.info,
+    fontWeight: '800',
+    color: '#2563EB',
   },
   statsRow: {
     flexDirection: 'row',
@@ -387,13 +389,16 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   statLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#475569',
     marginTop: 2,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   statDivider: {
     width: 1,
@@ -423,13 +428,15 @@ const styles = StyleSheet.create({
   },
   becomeDriverTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.primary,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.3,
   },
   becomeDriverText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.primary,
-    opacity: 0.8,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginTop: 2,
   },
   menuSection: {
     backgroundColor: COLORS.white,
@@ -466,8 +473,8 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: SPACING.md,
     fontSize: FONT_SIZE.md,
-    fontWeight: '500',
-    color: COLORS.textPrimary,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   logoutButton: {
     flexDirection: 'row',
