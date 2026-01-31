@@ -51,10 +51,15 @@ export default function SubscriptionScreen() {
     console.log('Store not available on web');
   }
   const [loading, setLoading] = useState(false); // Start with false for web compatibility
+  const [pricing, setPricing] = useState<any>({
+    current_price: 18000,
+    current_phase: 'early',
+    launch_slots_remaining: 500,
+  });
   const [subscription, setSubscription] = useState<any>({
     status: 'none',
     days_remaining: 0,
-    monthly_fee: 25000,
+    monthly_fee: 18000,
     bank_details: {
       bank_name: 'United Bank for Africa (UBA)',
       account_name: 'ADMOBLORDGROUP LIMITED',
@@ -73,18 +78,34 @@ export default function SubscriptionScreen() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  // Fetch pricing from backend API
+  const fetchPricing = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
+      const data = await response.json();
+      console.log('Pricing data:', data);
+      setPricing(data);
+      return data.current_price;
+    } catch (error) {
+      console.error('Error fetching pricing:', error);
+      return 18000; // Default fallback
+    }
+  };
+
   useEffect(() => {
     // Immediately try to fetch or set default data
     const initSubscription = async () => {
       try {
-        await fetchSubscription();
+        // Fetch pricing first
+        const currentPrice = await fetchPricing();
+        await fetchSubscription(currentPrice);
       } catch (e) {
         console.error('Init error:', e);
         // Ensure loading stops even on error
         setSubscription({
           status: 'none',
           days_remaining: 0,
-          monthly_fee: 25000,
+          monthly_fee: pricing.current_price || 18000,
           bank_details: {
             bank_name: 'United Bank for Africa (UBA)',
             account_name: 'ADMOBLORDGROUP LIMITED',
