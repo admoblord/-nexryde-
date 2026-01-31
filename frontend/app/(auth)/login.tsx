@@ -72,7 +72,6 @@ export default function LoginScreen() {
 
   // OTP request function with 15-second timeout
   const handleContinue = async () => {
-    console.log("OTP: pressed");
     if (phone.length < 10) return;
     setLoading(true);
     storePhone(phone);
@@ -82,17 +81,12 @@ export default function LoginScreen() {
       controller.abort();
       setLoading(false);
       Alert.alert("Connection Timeout", "Could not reach server. Please check your internet connection and try again.");
-    }, 15000); // 15 second timeout
+    }, 15000);
 
     try {
-      // Use environment variable for backend URL
       const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
       const fullPhone = `+234${phone}`;
       const endpoint = `${BASE_URL}/api/auth/request-otp`;
-      
-      console.log("OTP: fullPhone", fullPhone);
-      console.log("OTP: BASE_URL", BASE_URL);
-      console.log("OTP: endpoint", endpoint);
 
       const res = await fetch(endpoint, {
         method: "POST",
@@ -101,17 +95,12 @@ export default function LoginScreen() {
         signal: controller.signal,
       });
 
-      console.log("OTP: status", res.status);
       const text = await res.text();
-      console.log("OTP: raw", text);
-
       let data = null;
       try { data = JSON.parse(text); } catch {}
 
-      // Handle rate limiting (429) or other errors
       if (!res.ok) {
         if (res.status === 429 && data?.detail) {
-          // Rate limit error - show the wait time
           Alert.alert("Please Wait", data.detail);
         } else {
           Alert.alert("OTP failed", data?.detail || data?.message || text || "Unknown error. Please try again.");
@@ -119,13 +108,11 @@ export default function LoginScreen() {
         return;
       }
 
-      // Check for success
       if (!data?.success) {
         Alert.alert("OTP failed", data?.message || "Unable to send OTP. Please try again.");
         return;
       }
 
-      console.log("OTP: success, navigating");
       router.push({
         pathname: '/(auth)/verify',
         params: {
@@ -134,9 +121,7 @@ export default function LoginScreen() {
         }
       });
     } catch (e: any) {
-      console.log("OTP: error", String(e));
       if (e.name === 'AbortError') {
-        // Timeout already handled above
         return;
       }
       Alert.alert(
@@ -145,7 +130,6 @@ export default function LoginScreen() {
       );
     } finally {
       clearTimeout(t);
-      console.log("OTP: finally, stop loading");
       setLoading(false);
     }
   };
