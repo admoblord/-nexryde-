@@ -14,6 +14,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 class ReportCategory(str, Enum):
+    RUDE_BEHAVIOR = "rude_behavior"
+    UNSAFE_DRIVING = "unsafe_driving"
+    OVERCHARGING = "overcharging"
+    FAKE_TRIP = "fake_trip"
+    APP_MISUSE = "app_misuse"
     ABUSIVE_BEHAVIOR = "abusive_behavior"
     OFFENSIVE_LANGUAGE = "offensive_language"
     RECKLESS_DRIVING = "reckless_driving"
