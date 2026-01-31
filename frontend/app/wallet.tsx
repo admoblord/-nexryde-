@@ -419,6 +419,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   promoApplyText: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  // Crypto Card
+  cryptoCard: {
+    marginTop: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  cryptoGradient: {
+    padding: 20,
+  },
+  cryptoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cryptoIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(247, 147, 26, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  cryptoTitleContainer: {
+    flex: 1,
+  },
+  cryptoTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  comingSoonBadge: {
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#A78BFA',
+    letterSpacing: 1,
+  },
+  cryptoDescription: {
+    fontSize: 14,
+    color: '#94A3B8',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  cryptoIcons: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 12,
+  },
+  cryptoCoin: {
+    alignItems: 'center',
+  },
+  cryptoCoinIcon: {
+    fontSize: 24,
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  cryptoCoinLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  notifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  notifyBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#A78BFA',
+  },
   // Modal
   modalOverlay: {
     position: 'absolute',
