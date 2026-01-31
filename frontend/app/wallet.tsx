@@ -190,6 +190,54 @@ export default function WalletScreen() {
               </TouchableOpacity>
             </View>
           </View>
+
+          {/* Crypto Payment - Coming Soon */}
+          <View style={styles.cryptoCard}>
+            <LinearGradient
+              colors={['rgba(99, 102, 241, 0.1)', 'rgba(139, 92, 246, 0.1)']}
+              style={styles.cryptoGradient}
+            >
+              <View style={styles.cryptoHeader}>
+                <View style={styles.cryptoIconContainer}>
+                  <Ionicons name="logo-bitcoin" size={28} color="#F7931A" />
+                </View>
+                <View style={styles.cryptoTitleContainer}>
+                  <Text style={styles.cryptoTitle}>Crypto Payments</Text>
+                  <View style={styles.comingSoonBadge}>
+                    <Text style={styles.comingSoonText}>COMING SOON</Text>
+                  </View>
+                </View>
+              </View>
+              
+              <Text style={styles.cryptoDescription}>
+                Pay for rides with Bitcoin, Ethereum, USDT and more cryptocurrencies.
+              </Text>
+              
+              <View style={styles.cryptoIcons}>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>₿</Text>
+                  <Text style={styles.cryptoCoinLabel}>BTC</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>Ξ</Text>
+                  <Text style={styles.cryptoCoinLabel}>ETH</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinIcon}>₮</Text>
+                  <Text style={styles.cryptoCoinLabel}>USDT</Text>
+                </View>
+                <View style={styles.cryptoCoin}>
+                  <Ionicons name="ellipsis-horizontal" size={20} color="#64748B" />
+                  <Text style={styles.cryptoCoinLabel}>More</Text>
+                </View>
+              </View>
+
+              <TouchableOpacity style={styles.notifyBtn}>
+                <Ionicons name="notifications-outline" size={18} color="#8B5CF6" />
+                <Text style={styles.notifyBtnText}>Notify Me When Available</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
         </ScrollView>
 
         {/* Topup Modal */}
