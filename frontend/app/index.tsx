@@ -117,6 +117,24 @@ export default function SplashScreen() {
     ).start();
   }, []);
 
+  // Show loading screen while checking for saved login
+  if (checking) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={[COLORS.background, COLORS.primary, COLORS.background]}
+          style={StyleSheet.absoluteFillObject}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={styles.loadingText}>Checking login...</Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Background Gradient */}
