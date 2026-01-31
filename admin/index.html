@@ -37,7 +37,7 @@
         }
         .login-logo h1 {
             font-size: 28px;
-            font-weight: 800;
+            font-weight: 900;
             background: linear-gradient(135deg, #00E676, #00C853);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -54,6 +54,9 @@
             color: #94A3B8;
             font-size: 14px;
             margin-bottom: 8px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         .form-group input {
             width: 100%;
@@ -78,7 +81,7 @@
             border-radius: 12px;
             color: #FFFFFF;
             font-size: 16px;
-            font-weight: 700;
+            font-weight: 900;
             cursor: pointer;
             transition: transform 0.2s, box-shadow 0.2s;
         }
@@ -114,7 +117,7 @@
         }
         .sidebar-logo h2 {
             font-size: 22px;
-            font-weight: 800;
+            font-weight: 900;
             color: #00E676;
         }
         .sidebar-logo span {
@@ -160,7 +163,8 @@
         }
         .header h1 {
             font-size: 28px;
-            font-weight: 700;
+            font-weight: 900;
+            color: #FFFFFF;
         }
         .header-actions {
             display: flex;
@@ -185,7 +189,7 @@
             padding: 10px 20px;
             border-radius: 10px;
             cursor: pointer;
-            font-weight: 600;
+            font-weight: 800;
         }
         
         /* Stats Cards */
@@ -217,12 +221,16 @@
         .stat-card .icon.orange { background: rgba(245,158,11,0.15); color: #F59E0B; }
         .stat-card .value {
             font-size: 32px;
-            font-weight: 800;
+            font-weight: 900;
             margin-bottom: 4px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         .stat-card .label {
-            color: #64748B;
+            color: #475569;
             font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         /* Tables */
@@ -241,13 +249,14 @@
         }
         .card-header h3 {
             font-size: 18px;
-            font-weight: 700;
+            font-weight: 900;
+            color: #1E293B;
         }
         .badge {
             padding: 6px 12px;
             border-radius: 20px;
             font-size: 12px;
-            font-weight: 600;
+            font-weight: 800;
         }
         .badge.green { background: rgba(0,230,118,0.15); color: #00E676; }
         .badge.yellow { background: rgba(245,158,11,0.15); color: #F59E0B; }
@@ -264,13 +273,15 @@
             border-bottom: 1px solid rgba(255,255,255,0.05);
         }
         th {
-            color: #64748B;
-            font-weight: 600;
+            color: #475569;
+            font-weight: 800;
             font-size: 13px;
             text-transform: uppercase;
+            letter-spacing: 1px;
         }
         td {
             font-size: 14px;
+            font-weight: 600;
         }
         tr:hover {
             background: rgba(255,255,255,0.02);
@@ -281,7 +292,7 @@
             border-radius: 8px;
             border: none;
             cursor: pointer;
-            font-weight: 600;
+            font-weight: 800;
             font-size: 13px;
             transition: all 0.2s;
         }
@@ -344,7 +355,8 @@
         }
         .modal-header h3 {
             font-size: 20px;
-            font-weight: 700;
+            font-weight: 900;
+            color: #FFFFFF;
         }
         .modal-close {
             background: none;
@@ -601,12 +613,12 @@
                             <i class="ri-flashlight-line" style="font-size: 28px; color: #00E676;"></i>
                         </div>
                         <div style="flex: 1;">
-                            <h3 style="font-size: 18px; font-weight: 700; margin-bottom: 4px; color: #00E676;">Instant Auto-Approval Active</h3>
+                            <h3 style="font-size: 18px; font-weight: 900; margin-bottom: 4px; color: #00E676;">Instant Auto-Approval Active</h3>
                             <p style="color: #94A3B8; font-size: 14px;">Driver subscriptions are automatically approved when payment screenshot is uploaded. All payments are logged below for your records.</p>
                         </div>
                         <div style="text-align: right;">
                             <div style="font-size: 12px; color: #64748B;">Bank Account</div>
-                            <div style="font-size: 15px; font-weight: 700; color: #FFFFFF;">UBA • 1028400669</div>
+                            <div style="font-size: 15px; font-weight: 900; color: #FFFFFF;">UBA • 1028400669</div>
                             <div style="font-size: 13px; color: #94A3B8;">ADMOBLORDGROUP LIMITED</div>
                         </div>
                     </div>
@@ -828,11 +840,11 @@
                 <div style="display: flex; justify-content: space-between; margin-bottom: 16px; padding: 16px; background: rgba(0,0,0,0.3); border-radius: 12px;">
                     <div>
                         <div style="font-size: 12px; color: #64748B;">Driver</div>
-                        <div style="font-size: 16px; font-weight: 700;" id="screenshotDriverName">-</div>
+                        <div style="font-size: 16px; font-weight: 900;" id="screenshotDriverName">-</div>
                     </div>
                     <div style="text-align: center;">
                         <div style="font-size: 12px; color: #64748B;">Amount</div>
-                        <div style="font-size: 16px; font-weight: 700; color: #00E676;" id="screenshotAmount">-</div>
+                        <div style="font-size: 16px; font-weight: 900; color: #00E676;" id="screenshotAmount">-</div>
                     </div>
                     <div style="text-align: right;">
                         <div style="font-size: 12px; color: #64748B;">Submitted</div>
@@ -1392,7 +1404,7 @@
                         <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px;">
                             <div style="display: flex; justify-between; align-items: start; margin-bottom: 12px;">
                                 <div>
-                                    <div style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">${trip.driver_info?.name || 'N/A'} → ${trip.rider_info?.name || 'N/A'}</div>
+                                    <div style="font-size: 16px; font-weight: 900; margin-bottom: 4px;">${trip.driver_info?.name || 'N/A'} → ${trip.rider_info?.name || 'N/A'}</div>
                                     <div style="font-size: 13px; color: #94A3B8;">Trip ID: ${trip.id?.substring(0,8)}...</div>
                                 </div>
                                 <span class="badge ${trip.status === 'ongoing' ? 'blue' : 'yellow'}">${trip.status}</span>
@@ -1400,15 +1412,15 @@
                             <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px;">
                                 <div>
                                     <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">DURATION</div>
-                                    <div style="font-size: 15px; font-weight: 600;">${trip.duration_mins?.toFixed(0) || 0} min</div>
+                                    <div style="font-size: 15px; font-weight: 800;">${trip.duration_mins?.toFixed(0) || 0} min</div>
                                 </div>
                                 <div>
                                     <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">FARE</div>
-                                    <div style="font-size: 15px; font-weight: 600; color: #00E676;">₦${(trip.fare || 0).toLocaleString()}</div>
+                                    <div style="font-size: 15px; font-weight: 900; color: #00E676;">₦${(trip.fare || 0).toLocaleString()}</div>
                                 </div>
                                 <div>
                                     <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">STATUS</div>
-                                    <div style="font-size: 15px; font-weight: 600;">${trip.is_long ? '⚠️ Long' : '✓ Normal'}</div>
+                                    <div style="font-size: 15px; font-weight: 800;">${trip.is_long ? '⚠️ Long' : '✓ Normal'}</div>
                                 </div>
                             </div>
                         </div>
