@@ -99,11 +99,13 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.white,
+    letterSpacing: -0.5,
   },
   headerSubtext: {
     fontSize: FONT_SIZE.md,
+    fontWeight: '700',
     color: COLORS.accent,
     marginTop: SPACING.xs,
   },
@@ -119,13 +121,19 @@ const styles = StyleSheet.create({
   },
   earningsLabel: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
     color: COLORS.gray400,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   earningsAmount: {
     fontSize: FONT_SIZE.hero,
-    fontWeight: '800',
+    fontWeight: '900',
     color: COLORS.accent,
     marginVertical: SPACING.sm,
+    textShadowColor: 'rgba(34, 197, 94, 0.3)',
+    textShadowOffset: { width: 0, height: 4 },
+    textShadowRadius: 8,
   },
   earningsPeriod: {
     flexDirection: 'row',
@@ -143,10 +151,11 @@ const styles = StyleSheet.create({
   },
   periodText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.gray400,
   },
   periodTextActive: {
+    fontWeight: '900',
     color: COLORS.primary,
   },
   statsRow: {
@@ -164,14 +173,17 @@ const styles = StyleSheet.create({
   },
   statValue: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginTop: SPACING.sm,
   },
   statLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#64748B',
     marginTop: SPACING.xs,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   commissionBanner: {
     flexDirection: 'row',
@@ -187,13 +199,14 @@ const styles = StyleSheet.create({
   },
   commissionTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.success,
   },
   commissionText: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
     color: COLORS.success,
-    opacity: 0.8,
+    opacity: 0.9,
   },
   bankCard: {
     flexDirection: 'row',
@@ -217,11 +230,12 @@ const styles = StyleSheet.create({
   },
   bankTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
+    fontWeight: '800',
+    color: '#0F172A',
   },
   bankText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
+    fontWeight: '600',
+    color: '#475569',
   },
 });
