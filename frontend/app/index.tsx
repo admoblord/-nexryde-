@@ -507,4 +507,16 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     fontWeight: '600',
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+  },
 });
