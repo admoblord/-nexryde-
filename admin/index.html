@@ -363,6 +363,19 @@
             .main-content { margin-left: 0; }
             .stats-grid { grid-template-columns: 1fr; }
         }
+
+        /* Live Trip Cards */
+        .trip-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+        }
+        .trip-card:hover {
+            background: rgba(255,255,255,0.08);
+            border-color: rgba(99,102,241,0.3);
+        }
     </style>
 </head>
 <body>
@@ -416,6 +429,15 @@
                 </a>
                 <a class="nav-item" data-page="promos">
                     <i class="ri-coupon-line"></i> Promo Codes
+                </a>
+                <a class="nav-item" data-page="fraud">
+                    <i class="ri-alert-line"></i> Fraud Monitor
+                </a>
+                <a class="nav-item" data-page="analytics">
+                    <i class="ri-line-chart-line"></i> Analytics
+                </a>
+                <a class="nav-item" data-page="live-trips">
+                    <i class="ri-map-pin-time-line"></i> Live Trips
                 </a>
             </nav>
         </aside>
@@ -661,6 +683,112 @@
                     </table>
                 </div>
             </div>
+
+            <!-- Fraud Monitor Page -->
+            <div class="page-section" id="page-fraud">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon red"><i class="ri-alert-line"></i></div>
+                        <div class="value" id="criticalAlerts">0</div>
+                        <div class="label">Critical Alerts</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon orange"><i class="ri-error-warning-line"></i></div>
+                        <div class="value" id="highAlerts">0</div>
+                        <div class="label">High Priority</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon yellow"><i class="ri-information-line"></i></div>
+                        <div class="value" id="mediumAlerts">0</div>
+                        <div class="label">Medium Priority</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-shield-check-line"></i></div>
+                        <div class="value" id="blockedUsers">0</div>
+                        <div class="label">Blocked Users</div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Fraud Alerts</h3>
+                        <span class="badge red" id="alertsCount">0 alerts</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>User</th>
+                                <th>Type</th>
+                                <th>Severity</th>
+                                <th>Details</th>
+                                <th>Time</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="fraudAlertsTable">
+                            <tr><td colspan="6" class="empty-state"><i class="ri-shield-check-line"></i><p>No fraud alerts</p></td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Analytics Page -->
+            <div class="page-section" id="page-analytics">
+                <div style="margin-bottom: 20px; display: flex; gap: 12px;">
+                    <button class="action-btn view" onclick="loadAnalytics('today')">Today</button>
+                    <button class="action-btn view" onclick="loadAnalytics('week')">This Week</button>
+                    <button class="action-btn view" onclick="loadAnalytics('month')">This Month</button>
+                </div>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-car-line"></i></div>
+                        <div class="value" id="analyticsTrips">0</div>
+                        <div class="label">Total Trips</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-checkbox-circle-line"></i></div>
+                        <div class="value" id="analyticsCompleted">0</div>
+                        <div class="label">Completed</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon orange"><i class="ri-money-dollar-circle-line"></i></div>
+                        <div class="value" id="analyticsRevenue">₦0</div>
+                        <div class="label">Revenue</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon red"><i class="ri-close-circle-line"></i></div>
+                        <div class="value" id="analyticsCancelled">0</div>
+                        <div class="label">Cancelled</div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Key Insights</h3>
+                    </div>
+                    <div id="analyticsInsights" style="padding: 20px;">
+                        <p style="color: #64748B;">Loading insights...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Trips Page -->
+            <div class="page-section" id="page-live-trips">
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Active Trips</h3>
+                        <span class="badge blue" id="activeTripsCount">0 active</span>
+                        <button class="action-btn view" onclick="loadLiveTrips()" style="margin-left: auto;">🔄 Refresh</button>
+                    </div>
+                    <div id="liveTripsContainer" style="display: grid; gap: 16px; padding: 16px;">
+                        <div class="empty-state">
+                            <i class="ri-map-pin-time-line" style="font-size: 48px;"></i>
+                            <p>No active trips</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -799,6 +927,9 @@
                     case 'payments': loadPayments(); break;
                     case 'verifications': loadVerifications(); break;
                     case 'promos': loadPromos(); break;
+                    case 'fraud': loadFraudAlerts(); break;
+                    case 'analytics': loadAnalytics('today'); break;
+                    case 'live-trips': loadLiveTrips(); break;
                 }
             });
         });
@@ -1160,6 +1291,143 @@
                 alert('Failed to load driver details');
             }
         }
+
+        // NEW ADVANCED FEATURES
+        async function loadFraudAlerts() {
+            try {
+                const res = await fetch(`${API_URL}/admin/fraud/dashboard`);
+                const data = await res.json();
+                
+                document.getElementById('criticalAlerts').textContent = data.critical_count || 0;
+                document.getElementById('highAlerts').textContent = data.high_count || 0;
+                document.getElementById('mediumAlerts').textContent = data.medium_count || 0;
+                document.getElementById('blockedUsers').textContent = data.blocked_users_count || 0;
+                document.getElementById('alertsCount').textContent = `${data.total_alerts || 0} alerts`;
+                
+                if (data.alerts && data.alerts.length > 0) {
+                    document.getElementById('fraudAlertsTable').innerHTML = data.alerts.map(alert => `
+                        <tr>
+                            <td><strong>${alert.user_name || 'N/A'}</strong><br><small>${alert.user_id?.substring(0,8)}...</small></td>
+                            <td><span class="badge blue">${alert.alert_type}</span></td>
+                            <td><span class="badge ${alert.severity === 'critical' ? 'red' : alert.severity === 'high' ? 'orange' : 'yellow'}">${alert.severity}</span></td>
+                            <td>${alert.description || 'No details'}</td>
+                            <td>${new Date(alert.timestamp).toLocaleString()}</td>
+                            <td>
+                                <button class="action-btn view" onclick="investigateUser('${alert.user_id}')">Investigate</button>
+                            </td>
+                        </tr>
+                    `).join('');
+                } else {
+                    document.getElementById('fraudAlertsTable').innerHTML = '<tr><td colspan="6" class="empty-state"><i class="ri-shield-check-line"></i><p>No fraud alerts</p></td></tr>';
+                }
+            } catch (err) {
+                console.error('Load fraud alerts error:', err);
+            }
+        }
+
+        async function investigateUser(userId) {
+            try {
+                const res = await fetch(`${API_URL}/admin/fraud/investigate/${userId}`, { method: 'POST' });
+                const data = await res.json();
+                
+                const actions = [
+                    {id: 'warn', label: 'Warn User'},
+                    {id: 'suspend', label: 'Suspend Account'},
+                    {id: 'ban', label: 'Ban Permanently'},
+                    {id: 'ignore', label: 'Ignore Alert'}
+                ];
+                
+                const action = prompt(`Investigation Results:\n\nRisk Score: ${data.risk_score}/100\nTotal Trips: ${data.total_trips}\nCancelled: ${data.cancelled_trips}\nReports: ${data.fraud_reports}\n\nActions:\n${actions.map((a, i) => `${i+1}. ${a.label}`).join('\n')}\n\nEnter number (1-4):`);
+                
+                if (action && action >= 1 && action <= 4) {
+                    const selectedAction = actions[parseInt(action) - 1];
+                    const reason = prompt(`Reason for ${selectedAction.label}:`, 'Fraud investigation');
+                    if (reason) {
+                        await fetch(`${API_URL}/admin/fraud/action/${userId}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ action: selectedAction.id, reason })
+                        });
+                        alert(`Action "${selectedAction.label}" completed!`);
+                        loadFraudAlerts();
+                    }
+                }
+            } catch (err) {
+                console.error('Investigate user error:', err);
+                alert('Failed to investigate user');
+            }
+        }
+
+        async function loadAnalytics(period = 'today') {
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/analytics?period=${period}`);
+                const data = await res.json();
+                
+                document.getElementById('analyticsTrips').textContent = data.total_trips || 0;
+                document.getElementById('analyticsCompleted').textContent = data.completed || 0;
+                document.getElementById('analyticsRevenue').textContent = `₦${(data.revenue?.total || 0).toLocaleString()}`;
+                document.getElementById('analyticsCancelled').textContent = data.cancelled || 0;
+                
+                if (data.insights && data.insights.length > 0) {
+                    document.getElementById('analyticsInsights').innerHTML = data.insights.map(insight => 
+                        `<p style="margin-bottom: 12px; color: #E2E8F0;">✓ ${insight}</p>`
+                    ).join('');
+                } else {
+                    document.getElementById('analyticsInsights').innerHTML = '<p style="color: #64748B;">No insights available</p>';
+                }
+            } catch (err) {
+                console.error('Load analytics error:', err);
+            }
+        }
+
+        async function loadLiveTrips() {
+            try {
+                const res = await fetch(`${API_URL}/admin/trips/live`);
+                const data = await res.json();
+                
+                document.getElementById('activeTripsCount').textContent = `${data.count || 0} active`;
+                
+                if (data.active_trips && data.active_trips.length > 0) {
+                    document.getElementById('liveTripsContainer').innerHTML = data.active_trips.map(trip => `
+                        <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 20px;">
+                            <div style="display: flex; justify-between; align-items: start; margin-bottom: 12px;">
+                                <div>
+                                    <div style="font-size: 16px; font-weight: 700; margin-bottom: 4px;">${trip.driver_info?.name || 'N/A'} → ${trip.rider_info?.name || 'N/A'}</div>
+                                    <div style="font-size: 13px; color: #94A3B8;">Trip ID: ${trip.id?.substring(0,8)}...</div>
+                                </div>
+                                <span class="badge ${trip.status === 'ongoing' ? 'blue' : 'yellow'}">${trip.status}</span>
+                            </div>
+                            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 16px;">
+                                <div>
+                                    <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">DURATION</div>
+                                    <div style="font-size: 15px; font-weight: 600;">${trip.duration_mins?.toFixed(0) || 0} min</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">FARE</div>
+                                    <div style="font-size: 15px; font-weight: 600; color: #00E676;">₦${(trip.fare || 0).toLocaleString()}</div>
+                                </div>
+                                <div>
+                                    <div style="font-size: 11px; color: #64748B; margin-bottom: 4px;">STATUS</div>
+                                    <div style="font-size: 15px; font-weight: 600;">${trip.is_long ? '⚠️ Long' : '✓ Normal'}</div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    document.getElementById('liveTripsContainer').innerHTML = '<div class="empty-state"><i class="ri-map-pin-time-line" style="font-size: 48px;"></i><p>No active trips</p></div>';
+                }
+            } catch (err) {
+                console.error('Load live trips error:', err);
+            }
+        }
+
+        // Auto-refresh live trips every 10 seconds when on that page
+        setInterval(() => {
+            const activePage = document.querySelector('.page-section.active');
+            if (activePage && activePage.id === 'page-live-trips') {
+                loadLiveTrips();
+            }
+        }, 10000);
     </script>
 </body>
 </html>
