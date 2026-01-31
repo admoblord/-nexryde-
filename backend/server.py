@@ -6454,6 +6454,234 @@ async def admin_toggle_promo(code: str):
         return {"success": True, "active": new_status}
     return {"success": False, "message": "Promo code not found"}
 
+
+# ============================================================================
+# ADMIN PRICING CONTROL ENDPOINTS (NEXRYDE DYNAMIC PRICING)
+# ============================================================================
+
+@api_router.get("/admin/pricing/current")
+async def admin_get_current_pricing():
+    """Get current subscription pricing configuration"""
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    
+    if not config:
+        # Return default configuration
+        return {
+            "current_phase": "early",
+            "current_price": 18000,
+            "launch_drivers_count": 0,
+            "launch_driver_limit": 500,
+            "phase_prices": {
+                "launch": 15000,
+                "early": 18000,
+                "growth": 20000,
+                "premium": 25000
+            },
+            "trial_duration_hours": 24,
+            "trial_trip_limit": 3,
+            "phase_start_date": datetime.utcnow().isoformat()
+        }
+    
+    config.pop("_id", None)
+    return config
+
+@api_router.post("/admin/pricing/set-phase")
+async def admin_set_pricing_phase(request: Dict[str, Any]):
+    """
+    Change the current subscription phase
+    Body: {"phase": "launch|early|growth|premium"}
+    """
+    phase = request.get("phase")
+    valid_phases = ["launch", "early", "growth", "premium"]
+    
+    if phase not in valid_phases:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid phase. Must be one of: {', '.join(valid_phases)}"
+        )
+    
+    # Map phase to price
+    phase_prices = {
+        "launch": 15000,
+        "early": 18000,
+        "growth": 20000,
+        "premium": 25000
+    }
+    
+    new_price = phase_prices[phase]
+    
+    # Update system configuration
+    await db.system_config.update_one(
+        {"key": "subscription_pricing"},
+        {
+            "$set": {
+                "current_phase": phase,
+                "current_price": new_price,
+                "phase_start_date": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    # Log activity
+    await db.admin_activity.insert_one({
+        "action": "pricing_phase_changed",
+        "old_phase": request.get("old_phase"),
+        "new_phase": phase,
+        "new_price": new_price,
+        "timestamp": datetime.utcnow(),
+        "admin_note": f"Pricing phase changed to {phase.upper()} (₦{new_price:,})"
+    })
+    
+    return {
+        "success": True,
+        "message": f"Pricing phase updated to {phase.upper()}",
+        "current_phase": phase,
+        "current_price": new_price,
+        "phase_prices": phase_prices
+    }
+
+@api_router.post("/admin/pricing/update-price")
+async def admin_update_phase_price(request: Dict[str, Any]):
+    """
+    Update price for a specific phase
+    Body: {"phase": "launch", "new_price": 15000}
+    """
+    phase = request.get("phase")
+    new_price = request.get("new_price")
+    
+    valid_phases = ["launch", "early", "growth", "premium"]
+    
+    if phase not in valid_phases:
+        raise HTTPException(status_code=400, detail="Invalid phase")
+    
+    if not isinstance(new_price, int) or new_price < 5000 or new_price > 50000:
+        raise HTTPException(
+            status_code=400, 
+            detail="Price must be between ₦5,000 and ₦50,000"
+        )
+    
+    # Update the phase price in system config
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    
+    if config:
+        phase_prices = config.get("phase_prices", {})
+        phase_prices[phase] = new_price
+        
+        await db.system_config.update_one(
+            {"key": "subscription_pricing"},
+            {
+                "$set": {
+                    f"phase_prices.{phase}": new_price,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        # If updating current phase, also update current_price
+        if config.get("current_phase") == phase:
+            await db.system_config.update_one(
+                {"key": "subscription_pricing"},
+                {"$set": {"current_price": new_price}}
+            )
+    
+    # Log activity
+    await db.admin_activity.insert_one({
+        "action": "phase_price_updated",
+        "phase": phase,
+        "new_price": new_price,
+        "timestamp": datetime.utcnow(),
+        "admin_note": f"{phase.upper()} phase price updated to ₦{new_price:,}"
+    })
+    
+    return {
+        "success": True,
+        "message": f"{phase.upper()} phase price updated to ₦{new_price:,}",
+        "phase": phase,
+        "new_price": new_price
+    }
+
+@api_router.get("/admin/pricing/usage-stats")
+async def admin_get_pricing_usage_stats():
+    """Get statistics on map and SMS usage for cost monitoring"""
+    # Map usage stats
+    map_usage_today = await db.map_usage.count_documents({
+        "timestamp": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
+    })
+    
+    # SMS/OTP usage stats
+    otp_usage_today = await db.otp_records.count_documents({
+        "created_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
+    })
+    
+    # Get top drivers by map usage
+    pipeline = [
+        {
+            "$match": {
+                "timestamp": {"$gte": datetime.utcnow() - timedelta(days=7)}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$driver_id",
+                "total_requests": {"$sum": 1}
+            }
+        },
+        {
+            "$sort": {"total_requests": -1}
+        },
+        {
+            "$limit": 10
+        }
+    ]
+    
+    top_map_users = await db.map_usage.aggregate(pipeline).to_list(10)
+    
+    return {
+        "map_usage": {
+            "today": map_usage_today,
+            "estimated_cost_today": map_usage_today * 0.005,  # $0.005 per request estimate
+            "top_users_7days": top_map_users
+        },
+        "otp_usage": {
+            "today": otp_usage_today,
+            "estimated_cost_today": otp_usage_today * 0.05,  # $0.05 per SMS estimate
+        },
+        "total_estimated_cost_today": (map_usage_today * 0.005) + (otp_usage_today * 0.05)
+    }
+
+@api_router.post("/admin/pricing/set-driver-limit")
+async def admin_set_driver_limit(request: Dict[str, Any]):
+    """
+    Set maximum driver limit for launch phase
+    Body: {"limit": 500}
+    """
+    limit = request.get("limit")
+    
+    if not isinstance(limit, int) or limit < 0 or limit > 10000:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 0 and 10,000"
+        )
+    
+    await db.system_config.update_one(
+        {"key": "subscription_pricing"},
+        {
+            "$set": {
+                "launch_driver_limit": limit,
+                "updated_at": datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "success": True,
+        "message": f"Launch phase driver limit set to {limit}",
+        "launch_driver_limit": limit
+    }
+
 @api_router.get("/admin/sos-alerts")
 async def admin_get_sos_alerts():
     """Get all SOS alerts"""
