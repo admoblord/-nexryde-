@@ -224,24 +224,6 @@ export default function LoginScreen() {
       setWhatsappLoading(false);
     }
   };
-      }
-      
-      console.log('WhatsApp: success, navigating');
-      router.push({
-        pathname: '/(auth)/verify',
-        params: {
-          phone: phone,
-          provider: 'whatsapp',
-        }
-      });
-      
-    } catch (e: any) {
-      console.log('WhatsApp: error', String(e));
-      Alert.alert('Network error', 'Could not reach server. Please try SMS instead.');
-    } finally {
-      setWhatsappLoading(false);
-    }
-  };
 
   // Get backend URL for Google auth
   const getBackendUrl = () => process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
