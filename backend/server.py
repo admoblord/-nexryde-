@@ -17,9 +17,14 @@ import math
 import httpx
 import hashlib
 import json
+import asyncio
 
 # Import LLM Chat for AI Assistants
 from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+# Import Subscription Management System
+from subscription_manager import subscription_router
+from payment_reminder_system import payment_reminder_job
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
