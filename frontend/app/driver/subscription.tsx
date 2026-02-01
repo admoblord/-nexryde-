@@ -42,14 +42,7 @@ interface SubscriptionData {
 
 export default function SubscriptionScreen() {
   const router = useRouter();
-  // On web, user store might fail due to import.meta - use null safely
-  let user = null;
-  try {
-    const store = useAppStore();
-    user = store?.user;
-  } catch (e) {
-    console.log('Store not available on web');
-  }
+  const { user } = useAppStore();
   const [loading, setLoading] = useState(false); // Start with false for web compatibility
   const [pricing, setPricing] = useState<any>({
     current_price: 18000,
