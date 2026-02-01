@@ -7,17 +7,20 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import * as ImagePicker from 'expo-image-picker';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
   const { user, logout, setUser, subscription } = useAppStore();
   const [showSwitchModal, setShowSwitchModal] = useState(false);
+  const [profileImage, setProfileImage] = useState(user?.profile_image || null);
 
   const handleLogout = () => {
     Alert.alert(
@@ -56,21 +59,88 @@ export default function DriverProfileScreen() {
     );
   };
 
+  // 📸 PROFILE PICTURE UPLOAD
+  const handleProfilePictureUpload = async () => {
+    Alert.alert(
+      'Update Profile Picture',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: async () => {
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission Required', 'Please allow camera access to take a photo.');
+              return;
+            }
+
+            const result = await ImagePicker.launchCameraAsync({
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+              setProfileImage(result.assets[0].uri);
+              if (user) {
+                setUser({ ...user, profile_image: result.assets[0].uri });
+              }
+              Alert.alert('Success', 'Profile picture updated!');
+            }
+          }
+        },
+        {
+          text: 'Choose from Gallery',
+          onPress: async () => {
+            const { status} = await ImagePicker.requestMediaLibraryPermissionsAsync();
+            if (status !== 'granted') {
+              Alert.alert('Permission Required', 'Please allow access to your photos.');
+              return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [1, 1],
+              quality: 0.8,
+            });
+
+            if (!result.canceled && result.assets[0]) {
+              setProfileImage(result.assets[0].uri);
+              if (user) {
+                setUser({ ...user, profile_image: result.assets[0].uri });
+              }
+              Alert.alert('Success', 'Profile picture updated!');
+            }
+          }
+        },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         {/* Profile Header */}
         <View style={styles.profileHeader}>
-          <View style={styles.avatarContainer}>
+          <TouchableOpacity style={styles.avatarContainer} onPress={handleProfilePictureUpload} activeOpacity={0.7}>
             <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {user?.name?.charAt(0)?.toUpperCase() || 'D'}
-              </Text>
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+              ) : (
+                <Text style={styles.avatarText}>
+                  {(user?.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : 'D'}
+                </Text>
+              )}
             </View>
             <View style={styles.verifiedBadge}>
               <Ionicons name="checkmark" size={12} color={COLORS.white} />
             </View>
-          </View>
+            <View style={styles.cameraIcon}>
+              <Ionicons name="camera" size={16} color={COLORS.white} />
+            </View>
+          </TouchableOpacity>
           <Text style={styles.userName}>{user?.name || 'Driver'}</Text>
           <Text style={styles.userPhone}>{user?.phone || '+234'}</Text>
           
@@ -303,6 +373,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...SHADOWS.lg,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 50,
   },
   avatarText: {
     fontSize: FONT_SIZE.display,
@@ -317,6 +393,19 @@ const styles = StyleSheet.create({
     height: 28,
     borderRadius: 14,
     backgroundColor: COLORS.success,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: COLORS.white,
+  },
+  cameraIcon: {
+    position: 'absolute',
+    bottom: 4,
+    left: 4,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: COLORS.accent,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
