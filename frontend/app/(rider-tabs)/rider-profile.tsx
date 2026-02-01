@@ -8,12 +8,14 @@ import {
   Alert,
   Modal,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { sendOTP, verifyOTP } from '@/src/services/api';
 
 export default function RiderProfileScreen() {
   const router = useRouter();
@@ -21,6 +23,8 @@ export default function RiderProfileScreen() {
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [verificationStep, setVerificationStep] = useState(0);
   const [otp, setOtp] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [otpSent, setOtpSent] = useState(false);
 
   const handleLogout = () => {
     Alert.alert(
@@ -42,14 +46,79 @@ export default function RiderProfileScreen() {
     );
   };
 
-  const handleBecomeDriver = () => {
+  const handleBecomeDriver = async () => {
     setShowSwitchModal(true);
     setVerificationStep(0);
+    setOtp('');
+    setOtpSent(false);
+    
+    // Auto-send OTP when modal opens
+    await handleSendOTP();
   };
 
-  const handleVerifyOTP = () => {
-    if (otp.length === 6) {
-      setVerificationStep(1);
+  const handleSendOTP = async () => {
+    if (!user?.phone) {
+      Alert.alert('Error', 'Phone number not found');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await sendOTP(user.phone);
+      setOtpSent(true);
+      Alert.alert(
+        'OTP Sent!',
+        `We've sent a verification code to ${user.phone}. Please enter it to continue.`,
+        [{ text: 'OK' }]
+      );
+    } catch (error: any) {
+      console.error('Send OTP error:', error);
+      Alert.alert(
+        'Error Sending OTP',
+        error.response?.data?.detail || 'Failed to send verification code. Please try again.',
+        [{ text: 'OK' }]
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOTP = async () => {
+    if (otp.length !== 6) {
+      Alert.alert('Invalid OTP', 'Please enter a 6-digit verification code');
+      return;
+    }
+
+    if (!user?.phone) {
+      Alert.alert('Error', 'Phone number not found');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await verifyOTP(user.phone, otp);
+      
+      if (response.data.verified) {
+        // OTP is valid, proceed to next step
+        setVerificationStep(1);
+      } else {
+        Alert.alert(
+          'Invalid Code',
+          'The verification code you entered is incorrect. Please check and try again.',
+          [{ text: 'OK' }]
+        );
+        setOtp('');
+      }
+    } catch (error: any) {
+      console.error('Verify OTP error:', error);
+      Alert.alert(
+        'Verification Failed',
+        error.response?.data?.detail || 'Failed to verify code. Please try again.',
+        [{ text: 'OK' }]
+      );
+      setOtp('');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -218,36 +287,77 @@ export default function RiderProfileScreen() {
                 </View>
                 <Text style={styles.modalTitle}>Verify Your Identity</Text>
                 <Text style={styles.modalSubtitle}>
-                  We'll send an OTP to {user?.phone} to verify it's you
+                  {otpSent 
+                    ? `Enter the 6-digit code sent to ${user?.phone}` 
+                    : `We'll send a verification code to ${user?.phone}`}
                 </Text>
 
-                <View style={styles.otpContainer}>
-                  <TextInput
-                    style={styles.otpInput}
-                    placeholder="Enter 6-digit OTP"
-                    placeholderTextColor={COLORS.gray400}
-                    value={otp}
-                    onChangeText={setOtp}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
-                </View>
+                {otpSent && (
+                  <View style={styles.otpContainer}>
+                    <TextInput
+                      style={styles.otpInput}
+                      placeholder="Enter 6-digit OTP"
+                      placeholderTextColor={COLORS.gray400}
+                      value={otp}
+                      onChangeText={setOtp}
+                      keyboardType="number-pad"
+                      maxLength={6}
+                      editable={!loading}
+                      autoFocus
+                    />
+                  </View>
+                )}
 
-                <View style={styles.otpHint}>
-                  <Ionicons name="information-circle" size={16} color={COLORS.info} />
-                  <Text style={styles.otpHintText}>Demo: Enter any 6 digits</Text>
-                </View>
+                {otpSent && (
+                  <View style={styles.otpHint}>
+                    <Ionicons name="information-circle" size={16} color={COLORS.success} />
+                    <Text style={styles.otpHintText}>OTP sent! Check your SMS</Text>
+                  </View>
+                )}
 
-                <TouchableOpacity
-                  style={[
-                    styles.modalButton,
-                    otp.length !== 6 && styles.modalButtonDisabled
-                  ]}
-                  onPress={handleVerifyOTP}
-                  disabled={otp.length !== 6}
-                >
-                  <Text style={styles.modalButtonText}>Verify & Continue</Text>
-                </TouchableOpacity>
+                {otpSent ? (
+                  <TouchableOpacity
+                    style={[
+                      styles.modalButton,
+                      (otp.length !== 6 || loading) && styles.modalButtonDisabled
+                    ]}
+                    onPress={handleVerifyOTP}
+                    disabled={otp.length !== 6 || loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color={COLORS.primary} size="small" />
+                    ) : (
+                      <Text style={styles.modalButtonText}>Verify & Continue</Text>
+                    )}
+                  </TouchableOpacity>
+                ) : (
+                  <TouchableOpacity
+                    style={[styles.modalButton, loading && styles.modalButtonDisabled]}
+                    onPress={handleSendOTP}
+                    disabled={loading}
+                  >
+                    {loading ? (
+                      <ActivityIndicator color={COLORS.primary} size="small" />
+                    ) : (
+                      <>
+                        <Ionicons name="mail" size={20} color={COLORS.primary} />
+                        <Text style={styles.modalButtonText}>Send OTP</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                )}
+
+                {otpSent && (
+                  <TouchableOpacity
+                    style={styles.resendButton}
+                    onPress={handleSendOTP}
+                    disabled={loading}
+                  >
+                    <Text style={styles.resendText}>
+                      {loading ? 'Sending...' : 'Resend OTP'}
+                    </Text>
+                  </TouchableOpacity>
+                )}
               </>
             ) : (
               // Step 2: Confirmation
@@ -624,5 +734,15 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.md,
     color: COLORS.textPrimary,
     flex: 1,
+  },
+  resendButton: {
+    marginTop: SPACING.md,
+    padding: SPACING.sm,
+  },
+  resendText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.accent,
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
