@@ -1,5 +1,5 @@
 import React, { Component, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 interface Props {
@@ -40,7 +40,14 @@ export class ErrorBoundary extends Component<Props, State> {
   componentDidCatch(error: Error, errorInfo: any) {
     // Log error details for debugging
     console.error('🚨 ErrorBoundary caught an error:', error);
+    console.error('Error message:', error.message);
+    console.error('Error stack:', error.stack);
     console.error('Component stack:', errorInfo.componentStack);
+    
+    // Log to help identify the issue
+    if (error.message) {
+      console.error('📋 Specific error:', error.message);
+    }
     
     this.setState({
       error,
