@@ -1125,9 +1125,9 @@ async def send_otp(request: OTPRequest):
                         data = response.json()
                         message_id = data.get('message_id')
                         
-                        # Save OTP to database
+                        # Save OTP to database with NORMALIZED phone
                         await save_otp_record(
-                            phone=request.phone,
+                            phone=normalized_phone,
                             otp=otp_code,
                             provider="termii",
                             message_id=message_id
@@ -1150,19 +1150,19 @@ async def send_otp(request: OTPRequest):
         
         # Fallback: Mock OTP (for testing/development)
         await save_otp_record(
-            phone=request.phone,
+            phone=normalized_phone,
             otp=otp_code,
             provider="mock"
         )
         
         # Also keep in memory for backward compatibility
-        otp_store[request.phone] = {
+        otp_store[normalized_phone] = {
             "otp": otp_code,
             "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
         
-        logger.info(f"Mock OTP for {request.phone}: {otp_code}")
+        logger.info(f"Mock OTP for {normalized_phone}: {otp_code}")
         return {
             "success": True,
             "message": "OTP sent successfully (test mode)",
@@ -1277,11 +1277,14 @@ async def send_otp_whatsapp(request: OTPRequest):
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify):
     """Verify OTP with retry limiting"""
-    # First try database record
-    db_record = await get_otp_record(request.phone)
+    # Normalize phone number to match storage format
+    normalized_phone = normalize_phone(request.phone)
+    
+    # First try database record with normalized phone
+    db_record = await get_otp_record(normalized_phone)
     
     # Fall back to in-memory store if no DB record
-    stored = db_record or otp_store.get(request.phone)
+    stored = db_record or otp_store.get(normalized_phone)
     
     if not stored:
         raise HTTPException(status_code=400, detail="OTP not found. Please request a new code.")
@@ -1289,17 +1292,17 @@ async def verify_otp(request: OTPVerify):
     # Check expiry
     expiry = stored.get("expires_at") or stored.get("expires")
     if expiry and datetime.utcnow() > expiry:
-        await delete_otp_record(request.phone)
-        if request.phone in otp_store:
-            del otp_store[request.phone]
+        await delete_otp_record(normalized_phone)
+        if normalized_phone in otp_store:
+            del otp_store[normalized_phone]
         raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
     
     # Check attempt limit
     current_attempts = stored.get("attempts", 0)
     if current_attempts >= OTP_MAX_ATTEMPTS:
-        await delete_otp_record(request.phone)
-        if request.phone in otp_store:
-            del otp_store[request.phone]
+        await delete_otp_record(normalized_phone)
+        if normalized_phone in otp_store:
+            del otp_store[normalized_phone]
         raise HTTPException(
             status_code=400, 
             detail="Too many failed attempts. Please request a new code."
@@ -1309,13 +1312,13 @@ async def verify_otp(request: OTPVerify):
     stored_otp = stored.get("otp")
     if stored_otp != request.otp:
         # Increment attempts
-        new_attempts = await increment_otp_attempts(request.phone)
+        new_attempts = await increment_otp_attempts(normalized_phone)
         remaining = OTP_MAX_ATTEMPTS - new_attempts
         
         if remaining <= 0:
-            await delete_otp_record(request.phone)
-            if request.phone in otp_store:
-                del otp_store[request.phone]
+            await delete_otp_record(normalized_phone)
+            if normalized_phone in otp_store:
+                del otp_store[normalized_phone]
             raise HTTPException(
                 status_code=400, 
                 detail="Too many failed attempts. Please request a new code."
@@ -1326,20 +1329,20 @@ async def verify_otp(request: OTPVerify):
             detail=f"Invalid OTP code. {remaining} attempt(s) remaining."
         )
     
-    # OTP verified successfully - clean up
-    await delete_otp_record(request.phone)
-    if request.phone in otp_store:
-        del otp_store[request.phone]
+    # OTP verified successfully - clean up with normalized phone
+    await delete_otp_record(normalized_phone)
+    if normalized_phone in otp_store:
+        del otp_store[normalized_phone]
     
-    # Check if user exists
-    user = await db.users.find_one({"phone": request.phone})
+    # Check if user exists (use normalized phone for consistency)
+    user = await db.users.find_one({"phone": normalized_phone})
     if user:
-        await db.users.update_one({"phone": request.phone}, {"$set": {"is_verified": True}})
+        await db.users.update_one({"phone": normalized_phone}, {"$set": {"is_verified": True}})
         user["is_verified"] = True
         user["_id"] = str(user["_id"])
-        return {"message": "Login successful", "user": user, "is_new_user": False}
+        return {"message": "Login successful", "user": user, "is_new_user": False, "verified": True}
     
-    return {"message": "OTP verified", "is_new_user": True}
+    return {"message": "OTP verified", "is_new_user": True, "verified": True}
 
 @api_router.get("/auth/otp-status/{phone}")
 async def get_otp_status(phone: str):
