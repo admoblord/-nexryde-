@@ -280,24 +280,28 @@ export default function RiderProfileScreen() {
             </TouchableOpacity>
 
             {verificationStep === 0 ? (
-              // Step 1: OTP Verification
+              // Step 1: OTP Verification - POLISHED
               <>
+                {/* Premium Icon with Glow */}
                 <View style={styles.modalIconWrap}>
-                  <Ionicons name="shield-checkmark" size={40} color={COLORS.accent} />
+                  <View style={styles.iconGlow} />
+                  <Ionicons name="shield-checkmark" size={48} color={COLORS.accent} />
                 </View>
+                
+                {/* Titles with Better Hierarchy */}
                 <Text style={styles.modalTitle}>Verify Your Identity</Text>
                 <Text style={styles.modalSubtitle}>
                   {otpSent 
-                    ? `Enter the 6-digit code sent to ${user?.phone}` 
-                    : `We'll send a verification code to ${user?.phone}`}
+                    ? `Enter the 6-digit code we sent to\n${user?.phone}` 
+                    : `We'll send a secure verification code to\n${user?.phone}`}
                 </Text>
 
                 {otpSent && (
                   <View style={styles.otpContainer}>
                     <TextInput
                       style={styles.otpInput}
-                      placeholder="Enter 6-digit OTP"
-                      placeholderTextColor={COLORS.gray400}
+                      placeholder="• • • • • •"
+                      placeholderTextColor={COLORS.gray300}
                       value={otp}
                       onChangeText={setOtp}
                       keyboardType="number-pad"
@@ -309,12 +313,14 @@ export default function RiderProfileScreen() {
                 )}
 
                 {otpSent && (
-                  <View style={styles.otpHint}>
-                    <Ionicons name="information-circle" size={16} color={COLORS.success} />
-                    <Text style={styles.otpHintText}>OTP sent! Check your SMS</Text>
+                  <View style={styles.otpSuccessBadge}>
+                    <View style={styles.successDot} />
+                    <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                    <Text style={styles.otpSuccessText}>Code sent successfully!</Text>
                   </View>
                 )}
 
+                {/* Premium Buttons */}
                 {otpSent ? (
                   <TouchableOpacity
                     style={[
@@ -323,11 +329,15 @@ export default function RiderProfileScreen() {
                     ]}
                     onPress={handleVerifyOTP}
                     disabled={otp.length !== 6 || loading}
+                    activeOpacity={0.8}
                   >
                     {loading ? (
                       <ActivityIndicator color={COLORS.primary} size="small" />
                     ) : (
-                      <Text style={styles.modalButtonText}>Verify & Continue</Text>
+                      <>
+                        <Text style={styles.modalButtonText}>Verify & Continue</Text>
+                        <Ionicons name="arrow-forward-circle" size={22} color={COLORS.primary} />
+                      </>
                     )}
                   </TouchableOpacity>
                 ) : (
@@ -335,13 +345,14 @@ export default function RiderProfileScreen() {
                     style={[styles.modalButton, loading && styles.modalButtonDisabled]}
                     onPress={handleSendOTP}
                     disabled={loading}
+                    activeOpacity={0.8}
                   >
                     {loading ? (
                       <ActivityIndicator color={COLORS.primary} size="small" />
                     ) : (
                       <>
-                        <Ionicons name="mail" size={20} color={COLORS.primary} />
-                        <Text style={styles.modalButtonText}>Send OTP</Text>
+                        <Ionicons name="mail" size={22} color={COLORS.primary} />
+                        <Text style={styles.modalButtonText}>Send Verification Code</Text>
                       </>
                     )}
                   </TouchableOpacity>
@@ -352,62 +363,99 @@ export default function RiderProfileScreen() {
                     style={styles.resendButton}
                     onPress={handleSendOTP}
                     disabled={loading}
+                    activeOpacity={0.7}
                   >
+                    <Ionicons name="refresh" size={16} color={COLORS.accent} />
                     <Text style={styles.resendText}>
-                      {loading ? 'Sending...' : 'Resend OTP'}
+                      {loading ? 'Sending...' : 'Resend Code'}
                     </Text>
                   </TouchableOpacity>
                 )}
               </>
             ) : (
-              // Step 2: Confirmation
+              // Step 2: Confirmation - POLISHED
               <>
-                <View style={[styles.modalIconWrap, { backgroundColor: COLORS.accentSoft }]}>
-                  <Ionicons name="car-sport" size={40} color={COLORS.accent} />
+                {/* Premium Car Icon with Animation Feel */}
+                <View style={[styles.modalIconWrap, styles.modalIconWrapSuccess]}>
+                  <View style={styles.iconGlowGreen} />
+                  <Ionicons name="car-sport" size={52} color={COLORS.accent} />
                 </View>
+                
                 <Text style={styles.modalTitle}>Ready to Earn?</Text>
                 <Text style={styles.modalSubtitle}>
-                  You're about to become a NEXRYDE driver. Here's what you'll get:
+                  You're about to become a NEXRYDE driver.{'\n'}Here's what you'll get:
                 </Text>
 
+                {/* Premium Benefits Cards */}
                 <View style={styles.benefitsList}>
-                  <View style={styles.benefitItem}>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={14} color={COLORS.white} />
+                  <View style={styles.benefitCard}>
+                    <View style={styles.benefitIconWrap}>
+                      <Ionicons name="cash" size={24} color={COLORS.success} />
                     </View>
-                    <Text style={styles.benefitText}>Keep 100% of your earnings</Text>
+                    <View style={styles.benefitContent}>
+                      <Text style={styles.benefitTitle}>100% Earnings</Text>
+                      <Text style={styles.benefitDesc}>Keep every Naira you earn</Text>
+                    </View>
+                    <View style={styles.benefitCheck}>
+                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                    </View>
                   </View>
-                  <View style={styles.benefitItem}>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={14} color={COLORS.white} />
+
+                  <View style={styles.benefitCard}>
+                    <View style={styles.benefitIconWrap}>
+                      <Ionicons name="wallet" size={24} color={COLORS.info} />
                     </View>
-                    <Text style={styles.benefitText}>Flat ₦25,000/month - No commissions</Text>
+                    <View style={styles.benefitContent}>
+                      <Text style={styles.benefitTitle}>Flat ₦25,000/month</Text>
+                      <Text style={styles.benefitDesc}>No hidden commissions</Text>
+                    </View>
+                    <View style={styles.benefitCheck}>
+                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                    </View>
                   </View>
-                  <View style={styles.benefitItem}>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={14} color={COLORS.white} />
+
+                  <View style={styles.benefitCard}>
+                    <View style={styles.benefitIconWrap}>
+                      <Ionicons name="time" size={24} color={COLORS.warning} />
                     </View>
-                    <Text style={styles.benefitText}>Work on your own schedule</Text>
+                    <View style={styles.benefitContent}>
+                      <Text style={styles.benefitTitle}>Your Schedule</Text>
+                      <Text style={styles.benefitDesc}>Work whenever you want</Text>
+                    </View>
+                    <View style={styles.benefitCheck}>
+                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                    </View>
                   </View>
-                  <View style={styles.benefitItem}>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={14} color={COLORS.white} />
+
+                  <View style={styles.benefitCard}>
+                    <View style={styles.benefitIconWrap}>
+                      <Ionicons name="trophy" size={24} color={COLORS.accent} />
                     </View>
-                    <Text style={styles.benefitText}>Access to driver benefits & rewards</Text>
+                    <View style={styles.benefitContent}>
+                      <Text style={styles.benefitTitle}>Exclusive Benefits</Text>
+                      <Text style={styles.benefitDesc}>Rewards & bonuses</Text>
+                    </View>
+                    <View style={styles.benefitCheck}>
+                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                    </View>
                   </View>
                 </View>
 
+                {/* Premium Action Button with Gradient Feel */}
                 <TouchableOpacity
                   style={styles.modalButton}
                   onPress={handleCompleteSwitch}
+                  activeOpacity={0.8}
                 >
                   <Text style={styles.modalButtonText}>Become a Driver</Text>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+                  <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
                 </TouchableOpacity>
 
+                {/* Secondary Button */}
                 <TouchableOpacity
                   style={styles.modalSecondaryButton}
                   onPress={() => setShowSwitchModal(false)}
+                  activeOpacity={0.7}
                 >
                   <Text style={styles.modalSecondaryText}>Maybe Later</Text>
                 </TouchableOpacity>
@@ -616,10 +664,10 @@ const styles = StyleSheet.create({
     color: COLORS.gray400,
     textAlign: 'center',
   },
-  // Modal Styles
+  // Modal Styles - PREMIUM POLISH
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.6)',
+    backgroundColor: 'rgba(0,0,0,0.75)',
     justifyContent: 'flex-end',
   },
   modalContent: {
@@ -627,38 +675,67 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: BORDER_RADIUS.xxxl,
     borderTopRightRadius: BORDER_RADIUS.xxxl,
     padding: SPACING.xl,
-    paddingTop: SPACING.lg,
+    paddingTop: SPACING.xxl,
+    paddingBottom: SPACING.xxl + SPACING.lg,
     alignItems: 'center',
+    ...SHADOWS.lg,
   },
   modalClose: {
     position: 'absolute',
-    top: SPACING.md,
-    right: SPACING.md,
+    top: SPACING.lg,
+    right: SPACING.lg,
     padding: SPACING.sm,
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.full,
+    zIndex: 10,
   },
   modalIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: COLORS.gray100,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: COLORS.accentSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.xl,
+    ...SHADOWS.md,
+    position: 'relative',
+    overflow: 'visible',
+  },
+  modalIconWrapSuccess: {
+    backgroundColor: COLORS.successSoft,
+  },
+  iconGlow: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: COLORS.accent,
+    opacity: 0.15,
+  },
+  iconGlowGreen: {
+    position: 'absolute',
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: COLORS.success,
+    opacity: 0.15,
   },
   modalTitle: {
-    fontSize: FONT_SIZE.xxl,
+    fontSize: FONT_SIZE.xxxl,
     fontWeight: '900',
     color: '#0F172A',
     marginBottom: SPACING.sm,
-    letterSpacing: -0.5,
+    letterSpacing: -0.8,
+    textAlign: 'center',
   },
   modalSubtitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#1E293B',
+    fontWeight: '600',
+    color: '#475569',
     textAlign: 'center',
-    marginBottom: SPACING.lg,
-    lineHeight: 22,
+    marginBottom: SPACING.xl,
+    lineHeight: 24,
+    paddingHorizontal: SPACING.sm,
   },
   otpContainer: {
     width: '100%',
@@ -667,70 +744,121 @@ const styles = StyleSheet.create({
   otpInput: {
     backgroundColor: COLORS.gray50,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '600',
+    padding: SPACING.xl,
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: '800',
     textAlign: 'center',
-    letterSpacing: 8,
-    borderWidth: 2,
-    borderColor: COLORS.gray200,
+    letterSpacing: 12,
+    borderWidth: 3,
+    borderColor: COLORS.accent,
+    color: '#0F172A',
+    ...SHADOWS.sm,
   },
-  otpHint: {
+  otpSuccessBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
+    backgroundColor: COLORS.successSoft,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.full,
     marginBottom: SPACING.lg,
   },
-  otpHintText: {
+  successDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.success,
+  },
+  otpSuccessText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.info,
+    fontWeight: '800',
+    color: COLORS.success,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   modalButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.accent,
-    paddingVertical: SPACING.lg,
+    paddingVertical: SPACING.lg + SPACING.xs,
     paddingHorizontal: SPACING.xl,
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: BORDER_RADIUS.xxl,
     width: '100%',
-    gap: SPACING.sm,
+    gap: SPACING.md,
     ...SHADOWS.gold,
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
   modalButtonDisabled: {
     backgroundColor: COLORS.gray200,
     shadowOpacity: 0,
+    borderColor: COLORS.gray300,
   },
   modalButtonText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
+    fontWeight: '900',
     color: COLORS.primary,
+    letterSpacing: 0.5,
   },
   modalSecondaryButton: {
-    marginTop: SPACING.md,
+    marginTop: SPACING.lg,
     padding: SPACING.md,
   },
   modalSecondaryText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: COLORS.gray500,
   },
   benefitsList: {
     width: '100%',
     gap: SPACING.md,
     marginBottom: SPACING.xl,
   },
-  benefitItem: {
+  benefitCard: {
     flexDirection: 'row',
     alignItems: 'center',
+    backgroundColor: COLORS.gray50,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.md,
+    ...SHADOWS.sm,
+    borderWidth: 2,
+    borderColor: COLORS.gray100,
+  },
+  benefitIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...SHADOWS.sm,
+  },
+  benefitContent: {
+    flex: 1,
+  },
+  benefitTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 2,
+    letterSpacing: -0.3,
+  },
+  benefitDesc: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: '#64748B',
   },
   benefitCheck: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: COLORS.success,
     alignItems: 'center',
     justifyContent: 'center',
+    ...SHADOWS.sm,
   },
   benefitText: {
     fontSize: FONT_SIZE.lg,
@@ -740,13 +868,20 @@ const styles = StyleSheet.create({
     letterSpacing: -0.3,
   },
   resendButton: {
-    marginTop: SPACING.md,
-    padding: SPACING.sm,
+    marginTop: SPACING.lg,
+    padding: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: SPACING.lg,
   },
   resendText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.accent,
-    fontWeight: '600',
-    textDecorationLine: 'underline',
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 });
