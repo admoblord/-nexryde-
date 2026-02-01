@@ -399,7 +399,30 @@ async def register_driver_subscription(
 
 @subscription_router.get("/pricing")
 async def get_pricing_info():
-    """Get current pricing information"""
+    """Get current pricing information - reads from database (admin-controlled)"""
+    from motor.motor_asyncio import AsyncIOMotorClient
+    import os
+    
+    # Connect to database
+    mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ.get('DB_NAME', 'nexryde_db')]
+    
+    # Try to get config from database (set by admin)
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    
+    if config:
+        # Return admin-controlled pricing
+        return {
+            "current_phase": config.get("current_phase", "early"),
+            "current_price": config.get("current_price", 18000),
+            "launch_slots_remaining": config.get("launch_driver_limit", 500) - config.get("launch_drivers_count", 0),
+            "phase_prices": config.get("phase_prices", SUBSCRIPTION_PRICES),
+            "trial_duration_hours": TRIAL_DURATION_HOURS,
+            "trial_trip_limit": TRIAL_TRIP_LIMIT
+        }
+    
+    # Fallback to default if no config exists
     manager = SubscriptionManager()
     return manager.pricing.get_pricing_info()
 

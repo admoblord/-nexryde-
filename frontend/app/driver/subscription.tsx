@@ -51,10 +51,15 @@ export default function SubscriptionScreen() {
     console.log('Store not available on web');
   }
   const [loading, setLoading] = useState(false); // Start with false for web compatibility
+  const [pricing, setPricing] = useState<any>({
+    current_price: 18000,
+    current_phase: 'early',
+    launch_slots_remaining: 500,
+  });
   const [subscription, setSubscription] = useState<any>({
     status: 'none',
     days_remaining: 0,
-    monthly_fee: 25000,
+    monthly_fee: 18000,
     bank_details: {
       bank_name: 'United Bank for Africa (UBA)',
       account_name: 'ADMOBLORDGROUP LIMITED',
@@ -73,18 +78,34 @@ export default function SubscriptionScreen() {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
+  // Fetch pricing from backend API
+  const fetchPricing = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
+      const data = await response.json();
+      console.log('Pricing data:', data);
+      setPricing(data);
+      return data.current_price;
+    } catch (error) {
+      console.error('Error fetching pricing:', error);
+      return 18000; // Default fallback
+    }
+  };
+
   useEffect(() => {
     // Immediately try to fetch or set default data
     const initSubscription = async () => {
       try {
-        await fetchSubscription();
+        // Fetch pricing first
+        const currentPrice = await fetchPricing();
+        await fetchSubscription(currentPrice);
       } catch (e) {
         console.error('Init error:', e);
         // Ensure loading stops even on error
         setSubscription({
           status: 'none',
           days_remaining: 0,
-          monthly_fee: 25000,
+          monthly_fee: pricing.current_price || 18000,
           bank_details: {
             bank_name: 'United Bank for Africa (UBA)',
             account_name: 'ADMOBLORDGROUP LIMITED',
@@ -103,7 +124,7 @@ export default function SubscriptionScreen() {
         setSubscription({
           status: 'none',
           days_remaining: 0,
-          monthly_fee: 25000,
+          monthly_fee: pricing.current_price || 18000,
           bank_details: {
             bank_name: 'United Bank for Africa (UBA)',
             account_name: 'ADMOBLORDGROUP LIMITED',
@@ -157,15 +178,16 @@ export default function SubscriptionScreen() {
     };
   }, []);
 
-  const fetchSubscription = async () => {
-    console.log('fetchSubscription called, user:', user?.id);
+  const fetchSubscription = async (currentPrice?: number) => {
+    const price = currentPrice || pricing.current_price || 18000;
+    console.log('fetchSubscription called, user:', user?.id, 'price:', price);
     if (!user?.id) {
       console.log('No user, setting default subscription');
       // Set default subscription data for demo/testing when no user is logged in
       setSubscription({
         status: 'none',
         days_remaining: 0,
-        monthly_fee: 25000,
+        monthly_fee: price,
         bank_details: {
           bank_name: 'United Bank for Africa (UBA)',
           account_name: 'ADMOBLORDGROUP LIMITED',
@@ -180,6 +202,10 @@ export default function SubscriptionScreen() {
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}`);
       const data = await response.json();
       console.log('Subscription data:', data);
+      // Use API price if not set in subscription data
+      if (!data.monthly_fee) {
+        data.monthly_fee = price;
+      }
       setSubscription(data);
       setLoading(false);
     } catch (error) {
@@ -188,7 +214,7 @@ export default function SubscriptionScreen() {
       setSubscription({
         status: 'none',
         days_remaining: 0,
-        monthly_fee: 25000,
+        monthly_fee: price,
         bank_details: {
           bank_name: 'United Bank for Africa (UBA)',
           account_name: 'ADMOBLORDGROUP LIMITED',
@@ -453,9 +479,16 @@ export default function SubscriptionScreen() {
               </View>
               <View style={styles.priceRow}>
                 <Text style={styles.currencySymbol}>₦</Text>
-                <Text style={styles.priceValue}>25,000</Text>
+                <Text style={styles.priceValue}>{(pricing.current_price || subscription?.monthly_fee || 18000).toLocaleString()}</Text>
               </View>
               <Text style={styles.priceSubtext}>per month • No commission fees</Text>
+              {pricing.current_phase && (
+                <Text style={styles.phaseBadge}>
+                  {pricing.current_phase === 'launch' ? '🚀 LAUNCH PRICE' : 
+                   pricing.current_phase === 'early' ? '⭐ EARLY ADOPTER' : 
+                   pricing.current_phase === 'growth' ? '📈 GROWTH PHASE' : '💎 PREMIUM'}
+                </Text>
+              )}
             </View>
             
             <View style={styles.divider} />

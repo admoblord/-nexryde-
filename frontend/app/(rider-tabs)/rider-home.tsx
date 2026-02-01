@@ -171,6 +171,61 @@ export default function RiderHomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
+          {/* Quick Access Features */}
+          <View style={styles.featuresSection}>
+            <Text style={styles.sectionTitle}>More Services</Text>
+            <View style={styles.featureGrid}>
+              <FeatureCard
+                icon="cube"
+                label="Package Delivery"
+                color="#FF6B35"
+                onPress={() => router.push('/rider/delivery')}
+              />
+              <FeatureCard
+                icon="calendar"
+                label="Schedule Ride"
+                color="#2979FF"
+                onPress={() => router.push('/rider/schedule')}
+              />
+              <FeatureCard
+                icon="people"
+                label="Family"
+                color="#9C27B0"
+                onPress={() => router.push('/rider/family')}
+              />
+              <FeatureCard
+                icon="pricetag"
+                label="Bid for Ride"
+                color="#00BCD4"
+                onPress={() => router.push('/rider/bid')}
+              />
+              <FeatureCard
+                icon="car-sport"
+                label="Car Preference"
+                color="#FF9100"
+                onPress={() => router.push('/rider/car-type-preference')}
+              />
+              <FeatureCard
+                icon="navigate"
+                label="Live Tracking"
+                color="#4CAF50"
+                onPress={() => router.push('/rider/tracking')}
+              />
+              <FeatureCard
+                icon="wallet"
+                label="Wallet"
+                color="#673AB7"
+                onPress={() => router.push('/rider/wallet')}
+              />
+              <FeatureCard
+                icon="time"
+                label="Trip History"
+                color="#607D8B"
+                onPress={() => router.push('/rider/trips')}
+              />
+            </View>
+          </View>
+
           {/* Quick Actions */}
           <View style={styles.quickActions}>
             <QuickAction icon="time" label="History" onPress={() => router.push('/ride-history')} />
@@ -253,6 +308,16 @@ const WhyCard = ({ icon, title, color }: { icon: string; title: string; color: s
     </View>
     <Text style={styles.whyTitle}>{title}</Text>
   </View>
+);
+
+
+const FeatureCard = ({ icon, label, color, onPress }: { icon: string; label: string; color: string; onPress: () => void }) => (
+  <TouchableOpacity style={styles.featureCard} onPress={onPress}>
+    <View style={[styles.featureIcon, { backgroundColor: color + '15' }]}>
+      <Ionicons name={icon as any} size={24} color={color} />
+    </View>
+    <Text style={styles.featureLabel}>{label}</Text>
+  </TouchableOpacity>
 );
 
 const styles = StyleSheet.create({
@@ -614,5 +679,37 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: SPACING.xl,
+  },
+  featuresSection: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  featureGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  featureCard: {
+    width: (width - SPACING.md * 2 - SPACING.sm * 3) / 4,
+    alignItems: 'center',
+    padding: SPACING.sm,
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.md,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+  },
+  featureIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  featureLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    textAlign: 'center',
   },
 });

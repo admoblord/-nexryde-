@@ -85,7 +85,9 @@ export default function DriverProfileScreen() {
               <View style={styles.statIconWrap}>
                 <Ionicons name="star" size={18} color={COLORS.accent} />
               </View>
-              <Text style={styles.statValue}>{user?.rating?.toFixed(1) || '5.0'}</Text>
+              <Text style={styles.statValue}>
+                {user?.trips_completed > 0 ? (user?.rating?.toFixed(1) || 'N/A') : 'New Driver'}
+              </Text>
               <Text style={styles.statLabel}>Rating</Text>
             </View>
             <View style={styles.statDivider} />
@@ -502,8 +504,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0F172A',
   },
-    color: COLORS.textPrimary,
-  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -589,7 +589,11 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.xl,
     width: '100%',
     alignItems: 'center',
-    ...SHADOWS.md,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 4,
   },
   modalButtonText: {
     fontSize: FONT_SIZE.lg,

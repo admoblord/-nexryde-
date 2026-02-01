@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL } from '@/src/services/api';
+import { saveUserSession } from '@/utils/authStorage';
 
 export default function VerifyScreen() {
   const router = useRouter();
@@ -78,6 +79,10 @@ export default function VerifyScreen() {
         // Existing user - log them in
         setUser(data.user);
         setIsAuthenticated(true);
+        
+        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
+        await saveUserSession(data.user);
+        console.log('✅ User session saved - auto-login enabled');
         
         // Route to appropriate app based on role
         if (data.user.role === 'driver') {
