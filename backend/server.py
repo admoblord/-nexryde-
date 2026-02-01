@@ -6454,6 +6454,234 @@ async def admin_toggle_promo(code: str):
         return {"success": True, "active": new_status}
     return {"success": False, "message": "Promo code not found"}
 
+
+# ============================================================================
+# ADMIN PRICING CONTROL ENDPOINTS (NEXRYDE DYNAMIC PRICING)
+# ============================================================================
+
+@api_router.get("/admin/pricing/current")
+async def admin_get_current_pricing():
+    """Get current subscription pricing configuration"""
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    
+    if not config:
+        # Return default configuration
+        return {
+            "current_phase": "early",
+            "current_price": 18000,
+            "launch_drivers_count": 0,
+            "launch_driver_limit": 500,
+            "phase_prices": {
+                "launch": 15000,
+                "early": 18000,
+                "growth": 20000,
+                "premium": 25000
+            },
+            "trial_duration_hours": 24,
+            "trial_trip_limit": 3,
+            "phase_start_date": datetime.utcnow().isoformat()
+        }
+    
+    config.pop("_id", None)
+    return config
+
+@api_router.post("/admin/pricing/set-phase")
+async def admin_set_pricing_phase(request: Dict[str, Any]):
+    """
+    Change the current subscription phase
+    Body: {"phase": "launch|early|growth|premium"}
+    """
+    phase = request.get("phase")
+    valid_phases = ["launch", "early", "growth", "premium"]
+    
+    if phase not in valid_phases:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid phase. Must be one of: {', '.join(valid_phases)}"
+        )
+    
+    # Map phase to price
+    phase_prices = {
+        "launch": 15000,
+        "early": 18000,
+        "growth": 20000,
+        "premium": 25000
+    }
+    
+    new_price = phase_prices[phase]
+    
+    # Update system configuration
+    await db.system_config.update_one(
+        {"key": "subscription_pricing"},
+        {
+            "$set": {
+                "current_phase": phase,
+                "current_price": new_price,
+                "phase_start_date": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    # Log activity
+    await db.admin_activity.insert_one({
+        "action": "pricing_phase_changed",
+        "old_phase": request.get("old_phase"),
+        "new_phase": phase,
+        "new_price": new_price,
+        "timestamp": datetime.utcnow(),
+        "admin_note": f"Pricing phase changed to {phase.upper()} (₦{new_price:,})"
+    })
+    
+    return {
+        "success": True,
+        "message": f"Pricing phase updated to {phase.upper()}",
+        "current_phase": phase,
+        "current_price": new_price,
+        "phase_prices": phase_prices
+    }
+
+@api_router.post("/admin/pricing/update-price")
+async def admin_update_phase_price(request: Dict[str, Any]):
+    """
+    Update price for a specific phase
+    Body: {"phase": "launch", "new_price": 15000}
+    """
+    phase = request.get("phase")
+    new_price = request.get("new_price")
+    
+    valid_phases = ["launch", "early", "growth", "premium"]
+    
+    if phase not in valid_phases:
+        raise HTTPException(status_code=400, detail="Invalid phase")
+    
+    if not isinstance(new_price, int) or new_price < 5000 or new_price > 50000:
+        raise HTTPException(
+            status_code=400, 
+            detail="Price must be between ₦5,000 and ₦50,000"
+        )
+    
+    # Update the phase price in system config
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    
+    if config:
+        phase_prices = config.get("phase_prices", {})
+        phase_prices[phase] = new_price
+        
+        await db.system_config.update_one(
+            {"key": "subscription_pricing"},
+            {
+                "$set": {
+                    f"phase_prices.{phase}": new_price,
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        
+        # If updating current phase, also update current_price
+        if config.get("current_phase") == phase:
+            await db.system_config.update_one(
+                {"key": "subscription_pricing"},
+                {"$set": {"current_price": new_price}}
+            )
+    
+    # Log activity
+    await db.admin_activity.insert_one({
+        "action": "phase_price_updated",
+        "phase": phase,
+        "new_price": new_price,
+        "timestamp": datetime.utcnow(),
+        "admin_note": f"{phase.upper()} phase price updated to ₦{new_price:,}"
+    })
+    
+    return {
+        "success": True,
+        "message": f"{phase.upper()} phase price updated to ₦{new_price:,}",
+        "phase": phase,
+        "new_price": new_price
+    }
+
+@api_router.get("/admin/pricing/usage-stats")
+async def admin_get_pricing_usage_stats():
+    """Get statistics on map and SMS usage for cost monitoring"""
+    # Map usage stats
+    map_usage_today = await db.map_usage.count_documents({
+        "timestamp": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
+    })
+    
+    # SMS/OTP usage stats
+    otp_usage_today = await db.otp_records.count_documents({
+        "created_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
+    })
+    
+    # Get top drivers by map usage
+    pipeline = [
+        {
+            "$match": {
+                "timestamp": {"$gte": datetime.utcnow() - timedelta(days=7)}
+            }
+        },
+        {
+            "$group": {
+                "_id": "$driver_id",
+                "total_requests": {"$sum": 1}
+            }
+        },
+        {
+            "$sort": {"total_requests": -1}
+        },
+        {
+            "$limit": 10
+        }
+    ]
+    
+    top_map_users = await db.map_usage.aggregate(pipeline).to_list(10)
+    
+    return {
+        "map_usage": {
+            "today": map_usage_today,
+            "estimated_cost_today": map_usage_today * 0.005,  # $0.005 per request estimate
+            "top_users_7days": top_map_users
+        },
+        "otp_usage": {
+            "today": otp_usage_today,
+            "estimated_cost_today": otp_usage_today * 0.05,  # $0.05 per SMS estimate
+        },
+        "total_estimated_cost_today": (map_usage_today * 0.005) + (otp_usage_today * 0.05)
+    }
+
+@api_router.post("/admin/pricing/set-driver-limit")
+async def admin_set_driver_limit(request: Dict[str, Any]):
+    """
+    Set maximum driver limit for launch phase
+    Body: {"limit": 500}
+    """
+    limit = request.get("limit")
+    
+    if not isinstance(limit, int) or limit < 0 or limit > 10000:
+        raise HTTPException(
+            status_code=400,
+            detail="Limit must be between 0 and 10,000"
+        )
+    
+    await db.system_config.update_one(
+        {"key": "subscription_pricing"},
+        {
+            "$set": {
+                "launch_driver_limit": limit,
+                "updated_at": datetime.utcnow()
+            }
+        },
+        upsert=True
+    )
+    
+    return {
+        "success": True,
+        "message": f"Launch phase driver limit set to {limit}",
+        "launch_driver_limit": limit
+    }
+
 @api_router.get("/admin/sos-alerts")
 async def admin_get_sos_alerts():
     """Get all SOS alerts"""
@@ -6508,6 +6736,298 @@ async def admin_get_activity_log(limit: int = 50):
     activities.sort(key=lambda x: x.get("timestamp", datetime.min), reverse=True)
     
     return {"activities": activities[:limit]}
+
+
+
+# ============================================================================
+# PERFORMANCE REWARDS SYSTEM ENDPOINTS
+# ============================================================================
+
+from performance_rewards import PerformanceRewardsManager
+
+@api_router.get("/admin/rewards/top-drivers")
+async def admin_get_top_drivers(period: str = "monthly", limit: int = 10):
+    """Get top performing drivers for rewards"""
+    rewards_manager = PerformanceRewardsManager(db)
+    
+    if period == "monthly":
+        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
+    else:
+        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
+    
+    return {
+        "period": period,
+        "top_drivers": top_drivers,
+        "total_qualified": len(top_drivers)
+    }
+
+@api_router.post("/admin/rewards/grant-free-month")
+async def admin_grant_free_month(request: Dict[str, Any]):
+    """Manually grant free month to a driver"""
+    driver_id = request.get("driver_id")
+    reason = request.get("reason", "admin_grant")
+    
+    if not driver_id:
+        raise HTTPException(status_code=400, detail="driver_id required")
+    
+    rewards_manager = PerformanceRewardsManager(db)
+    result = await rewards_manager.grant_free_month(driver_id, reason=reason)
+    
+    return result
+
+@api_router.post("/admin/rewards/process-monthly")
+async def admin_process_monthly_rewards():
+    """Process monthly performance rewards (top 10 drivers)"""
+    rewards_manager = PerformanceRewardsManager(db)
+    result = await rewards_manager.process_monthly_rewards()
+    
+    return result
+
+@api_router.get("/drivers/{driver_id}/rewards")
+async def get_driver_rewards(driver_id: str):
+    """Get driver's reward history"""
+    rewards = await db.rewards_log.find({"driver_id": driver_id}).sort("granted_at", -1).to_list(100)
+    
+    for reward in rewards:
+        reward.pop("_id", None)
+    
+    return {
+        "driver_id": driver_id,
+        "total_rewards": len(rewards),
+        "rewards": rewards
+    }
+
+# ============================================================================
+# TRIAL ABUSE PREVENTION ENDPOINTS
+# ============================================================================
+
+from trial_abuse_prevention import TrialAbuseDetector, validate_trial_eligibility
+
+@api_router.post("/auth/validate-trial-eligibility")
+async def validate_trial(request: Dict[str, Any]):
+    """
+    Validate if user is eligible for trial
+    Prevents abuse by checking phone, NIN, license, device
+    """
+    phone = request.get("phone")
+    nin = request.get("nin")
+    license_number = request.get("license_number")
+    device_id = request.get("device_id")
+    ip_address = request.get("ip_address")
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number required")
+    
+    detector = TrialAbuseDetector(db)
+    is_allowed, reason, checks = await detector.comprehensive_trial_check(
+        phone=phone,
+        nin=nin,
+        license_number=license_number,
+        device_id=device_id,
+        ip_address=ip_address
+    )
+    
+    return {
+        "eligible": is_allowed,
+        "reason": reason,
+        "checks": checks
+    }
+
+@api_router.get("/admin/abuse-prevention/stats")
+async def admin_get_abuse_stats():
+    """Get trial abuse prevention statistics"""
+    detector = TrialAbuseDetector(db)
+    stats = await detector.get_abuse_statistics()
+    
+    return stats
+
+@api_router.post("/admin/abuse-prevention/blacklist")
+async def admin_blacklist_phone(request: Dict[str, Any]):
+    """Manually blacklist a phone number"""
+    phone = request.get("phone")
+    reason = request.get("reason", "admin_blacklist")
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Phone number required")
+    
+    detector = TrialAbuseDetector(db)
+    await detector.blacklist_phone(phone, reason=reason)
+    
+    return {
+        "success": True,
+        "message": f"Phone {phone} has been blacklisted"
+    }
+
+@api_router.get("/admin/abuse-prevention/blacklist")
+async def admin_get_blacklist(limit: int = 100):
+    """Get blacklisted phone numbers"""
+    blacklist = await db.trial_blacklist.find({"status": "active"}).sort("blacklisted_at", -1).to_list(limit)
+    
+    for entry in blacklist:
+        entry.pop("_id", None)
+    
+    return {
+        "total": len(blacklist),
+        "blacklist": blacklist
+    }
+
+# ============================================================================
+# DRIVER REPORT SYSTEM ENDPOINTS
+# ============================================================================
+
+from driver_report_system import DriverReportSystem, ReportCategory, ReportSeverity
+
+@api_router.post("/reports/submit")
+async def submit_driver_report(request: Dict[str, Any]):
+    """
+    Submit a report against a driver
+    Available to riders only
+    """
+    rider_id = request.get("rider_id")
+    driver_id = request.get("driver_id")
+    trip_id = request.get("trip_id")
+    category = request.get("category")
+    description = request.get("description", "")
+    evidence_urls = request.get("evidence_urls", [])
+    
+    # Validate required fields
+    if not all([rider_id, driver_id, trip_id, category]):
+        raise HTTPException(
+            status_code=400,
+            detail="rider_id, driver_id, trip_id, and category are required"
+        )
+    
+    # Validate category
+    valid_categories = [c.value for c in ReportCategory]
+    if category not in valid_categories:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+        )
+    
+    report_system = DriverReportSystem(db)
+    result = await report_system.submit_report(
+        rider_id=rider_id,
+        driver_id=driver_id,
+        trip_id=trip_id,
+        category=category,
+        description=description,
+        evidence_urls=evidence_urls
+    )
+    
+    return result
+
+@api_router.get("/reports/driver/{driver_id}")
+async def get_driver_reports(driver_id: str, include_resolved: bool = False):
+    """Get all reports for a specific driver"""
+    report_system = DriverReportSystem(db)
+    reports = await report_system.get_driver_reports(driver_id, include_resolved=include_resolved)
+    
+    return {
+        "driver_id": driver_id,
+        "total_reports": len(reports),
+        "reports": reports
+    }
+
+@api_router.get("/reports/driver/{driver_id}/statistics")
+async def get_driver_report_statistics(driver_id: str):
+    """Get report statistics for a driver"""
+    report_system = DriverReportSystem(db)
+    stats = await report_system.get_report_statistics(driver_id)
+    
+    return stats
+
+@api_router.get("/admin/reports/all")
+async def admin_get_all_reports(
+    status: Optional[str] = None,
+    severity: Optional[str] = None,
+    limit: int = 100
+):
+    """Get all driver reports (admin only)"""
+    query = {}
+    
+    if status:
+        query["status"] = status
+    
+    if severity:
+        query["severity"] = severity
+    
+    reports = await db.driver_reports.find(query).sort("created_at", -1).to_list(limit)
+    
+    for report in reports:
+        report.pop("_id", None)
+    
+    return {
+        "total": len(reports),
+        "reports": reports
+    }
+
+@api_router.post("/admin/reports/{report_id}/resolve")
+async def admin_resolve_report(report_id: str, request: Dict[str, Any]):
+    """Resolve a driver report (admin only)"""
+    resolution_notes = request.get("resolution_notes", "")
+    action_taken = request.get("action_taken", "none")
+    
+    result = await db.driver_reports.update_one(
+        {"report_id": report_id},
+        {
+            "$set": {
+                "status": "resolved",
+                "resolution_notes": resolution_notes,
+                "action_taken": action_taken,
+                "resolved_at": datetime.utcnow(),
+                "reviewed_by": "admin",
+                "updated_at": datetime.utcnow()
+            }
+        }
+    )
+    
+    if result.modified_count == 0:
+        raise HTTPException(status_code=404, detail="Report not found")
+    
+    return {
+        "success": True,
+        "message": "Report resolved successfully",
+        "report_id": report_id
+    }
+
+@api_router.get("/admin/reports/categories")
+async def get_report_categories():
+    """Get available report categories"""
+    categories = [
+        {
+            "value": cat.value,
+            "label": cat.value.replace('_', ' ').title(),
+            "severity": CATEGORY_SEVERITY_MAP.get(cat, ReportSeverity.MEDIUM).value
+        }
+        for cat in ReportCategory
+    ]
+    
+    return {"categories": categories}
+
+@api_router.get("/drivers/{driver_id}/suspension-status")
+async def get_driver_suspension_status(driver_id: str):
+    """Check if driver is suspended"""
+    suspension = await db.driver_suspensions.find_one({
+        "driver_id": driver_id,
+        "status": "active"
+    })
+    
+    if not suspension:
+        return {
+            "is_suspended": False,
+            "message": "Driver is in good standing"
+        }
+    
+    suspension.pop("_id", None)
+    
+    return {
+        "is_suspended": True,
+        "suspension": suspension
+    }
+
+# Import for category severity map
+from driver_report_system import CATEGORY_SEVERITY_MAP
 
 # Seed default promo codes on startup
 @app.on_event("startup")

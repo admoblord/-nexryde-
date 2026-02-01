@@ -20,6 +20,7 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
+import { saveUserSession } from '@/utils/authStorage';
 
 const { width, height } = Dimensions.get('window');
 
@@ -325,6 +326,10 @@ export default function LoginScreen() {
         console.log('Existing user, logging in');
         setUser(data.user);
         setIsAuthenticated(true);
+        
+        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
+        await saveUserSession(data.user);
+        console.log('✅ User session saved - auto-login enabled');
         
         if (data.user.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');

@@ -1,19 +1,116 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-ui.emergent.host';
 
 export default function TiersScreen() {
   const router = useRouter();
+  const [pricingData, setPricingData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetchPricingData();
+  }, []);
+
+  const fetchPricingData = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
+      const data = await response.json();
+      setPricingData(data);
+    } catch (error) {
+      console.error('Error fetching pricing:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.container}>
+        <ActivityIndicator size="large" color={COLORS.primary} />
+        <Text style={styles.loadingText}>Loading pricing phases...</Text>
+      </View>
+    );
+  }
+
+  const phases = [
+    {
+      id: 'launch',
+      name: '🚀 LAUNCH',
+      price: pricingData?.phase_prices?.launch || 15000,
+      badge: 'FIRST 500 ONLY',
+      color: '#FF6B35',
+      benefits: [
+        '✓ Lowest price ever',
+        '✓ Lock-in rate forever',
+        '✓ Early adopter benefits',
+        '✓ Priority support',
+        '✓ Lifetime discount guarantee'
+      ],
+      available: pricingData?.launch_slots_remaining > 0,
+      slotsLeft: pricingData?.launch_slots_remaining || 0
+    },
+    {
+      id: 'early',
+      name: '⭐ EARLY ADOPTER',
+      price: pricingData?.phase_prices?.early || 18000,
+      badge: 'ACTIVE PHASE',
+      color: '#00BCD4',
+      benefits: [
+        '✓ Great value pricing',
+        '✓ Full platform access',
+        '✓ Standard support',
+        '✓ Stable pricing',
+        '✓ No hidden fees'
+      ],
+      available: true,
+      current: pricingData?.current_phase === 'early'
+    },
+    {
+      id: 'growth',
+      name: '📈 GROWTH',
+      price: pricingData?.phase_prices?.growth || 20000,
+      badge: 'COMING SOON',
+      color: '#9C27B0',
+      benefits: [
+        '✓ Premium features',
+        '✓ Priority matching',
+        '✓ Enhanced visibility',
+        '✓ Advanced analytics',
+        '✓ Premium support'
+      ],
+      available: false,
+      current: pricingData?.current_phase === 'growth'
+    },
+    {
+      id: 'premium',
+      name: '💎 PREMIUM',
+      price: pricingData?.phase_prices?.premium || 25000,
+      badge: 'FUTURE PHASE',
+      color: '#FFD700',
+      benefits: [
+        '✓ All premium features',
+        '✓ VIP support 24/7',
+        '✓ Highest priority',
+        '✓ Exclusive perks',
+        '✓ Market leader access'
+      ],
+      available: false,
+      current: pricingData?.current_phase === 'premium'
+    }
+  ];
 
   return (
     <View style={styles.container}>
@@ -26,116 +123,95 @@ export default function TiersScreen() {
           >
             <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Driver Tiers</Text>
+          <Text style={styles.headerTitle}>Subscription Phases</Text>
           <View style={styles.placeholder} />
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          {/* Current Tier Card */}
-          <View style={styles.currentTierCard}>
-            <LinearGradient
-              colors={[COLORS.accentGreen, COLORS.accentBlue]}
-              style={styles.currentTierGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <Ionicons name="information-circle" size={24} color={COLORS.primary} />
+            <View style={styles.infoContent}>
+              <Text style={styles.infoTitle}>Dynamic Pricing System</Text>
+              <Text style={styles.infoText}>
+                NEXRYDE uses phased pricing. Join early to lock in the best rates. Prices increase as we grow!
+              </Text>
+            </View>
+          </View>
+
+          {/* Current Phase Indicator */}
+          <View style={styles.currentPhaseCard}>
+            <Text style={styles.currentPhaseLabel}>CURRENT ACTIVE PHASE</Text>
+            <Text style={styles.currentPhaseName}>
+              {phases.find(p => p.current)?.name || '⭐ EARLY ADOPTER'}
+            </Text>
+            <Text style={styles.currentPhasePrice}>
+              ₦{(pricingData?.current_price || 18000).toLocaleString()}/month
+            </Text>
+          </View>
+
+          {/* Phase Cards */}
+          {phases.map((phase) => (
+            <View 
+              key={phase.id} 
+              style={[
+                styles.phaseCard,
+                phase.current && styles.activePhaseCard,
+                !phase.available && styles.lockedPhaseCard
+              ]}
             >
-              <View>
-                <Text style={styles.currentTierLabel}>Your Current Tier</Text>
-                <Text style={styles.currentTierName}>Basic Driver</Text>
+              {/* Badge */}
+              <View style={[styles.phaseBadge, { backgroundColor: phase.color }]}>
+                <Text style={styles.phaseBadgeText}>{phase.badge}</Text>
               </View>
-              <View style={styles.multiplierBadge}>
-                <Text style={styles.multiplierText}>1.0x</Text>
-                <Text style={styles.multiplierLabel}>Earnings</Text>
+
+              {/* Header */}
+              <View style={styles.phaseHeader}>
+                <Text style={styles.phaseName}>{phase.name}</Text>
+                <Text style={styles.phasePrice}>₦{phase.price.toLocaleString()}</Text>
+                <Text style={styles.phasePriceLabel}>per month</Text>
               </View>
-            </LinearGradient>
+
+              {/* Slots Remaining */}
+              {phase.id === 'launch' && phase.slotsLeft > 0 && (
+                <View style={styles.slotsCard}>
+                  <Ionicons name="time" size={16} color="#FF6B35" />
+                  <Text style={styles.slotsText}>
+                    Only {phase.slotsLeft} spots remaining!
+                  </Text>
+                </View>
+              )}
+
+              {/* Benefits */}
+              <View style={styles.benefitsList}>
+                {phase.benefits.map((benefit, index) => (
+                  <Text key={index} style={styles.benefitText}>{benefit}</Text>
+                ))}
+              </View>
+
+              {/* Status */}
+              {phase.current ? (
+                <View style={styles.currentBadge}>
+                  <Ionicons name="checkmark-circle" size={20} color="#00FF00" />
+                  <Text style={styles.currentBadgeText}>Your Current Phase</Text>
+                </View>
+              ) : !phase.available ? (
+                <View style={styles.lockedBadge}>
+                  <Ionicons name="lock-closed" size={20} color={COLORS.textSecondary} />
+                  <Text style={styles.lockedBadgeText}>Not Available Yet</Text>
+                </View>
+              ) : null}
+            </View>
+          ))}
+
+          {/* Note */}
+          <View style={styles.noteCard}>
+            <Text style={styles.noteText}>
+              💡 <Text style={styles.noteBold}>Smart Tip:</Text> Join during the Launch or Early phase to lock in the lowest rates forever. Your subscription price never increases once you join!
+            </Text>
           </View>
 
-          {/* Basic Tier */}
-          <View style={[styles.tierCard, styles.tierCardActive]}>
-            <View style={styles.tierHeader}>
-              <View style={[styles.tierIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                <Ionicons name="car" size={24} color={COLORS.accentGreen} />
-              </View>
-              <View style={styles.tierInfo}>
-                <Text style={styles.tierName}>Basic</Text>
-                <Text style={styles.tierPrice}>{CURRENCY}{SUBSCRIPTION_PRICE.toLocaleString()}/month</Text>
-              </View>
-              <View style={styles.tierMultiplier}>
-                <Text style={styles.tierMultiplierText}>1x</Text>
-              </View>
-            </View>
-            <View style={styles.tierBenefits}>
-              <Text style={styles.tierBenefit}>• Standard fare rates</Text>
-              <Text style={styles.tierBenefit}>• Basic support</Text>
-              <Text style={styles.tierBenefit}>• Standard visibility</Text>
-            </View>
-            <View style={styles.currentBadge}>
-              <Text style={styles.currentBadgeText}>Current Tier</Text>
-            </View>
-          </View>
-
-          {/* Premium Tier */}
-          <View style={styles.tierCard}>
-            <View style={styles.recommendedBadge}>
-              <Text style={styles.recommendedText}>RECOMMENDED</Text>
-            </View>
-            <View style={styles.tierHeader}>
-              <View style={[styles.tierIcon, { backgroundColor: COLORS.warningSoft }]}>
-                <Ionicons name="star" size={24} color={COLORS.gold} />
-              </View>
-              <View style={styles.tierInfo}>
-                <Text style={styles.tierName}>Premium</Text>
-                <Text style={styles.tierPrice}>{CURRENCY}{SUBSCRIPTION_PRICE.toLocaleString()}/month</Text>
-              </View>
-              <View style={[styles.tierMultiplier, { backgroundColor: COLORS.warningSoft }]}>
-                <Text style={[styles.tierMultiplierText, { color: COLORS.gold }]}>1.2x</Text>
-              </View>
-            </View>
-            <View style={styles.tierBenefits}>
-              <Text style={styles.tierBenefit}>• 20% higher fares</Text>
-              <Text style={styles.tierBenefit}>• Priority support</Text>
-              <Text style={styles.tierBenefit}>• Featured in app</Text>
-              <Text style={styles.tierBenefit}>• Premium badge</Text>
-            </View>
-            <View style={styles.requirementsSection}>
-              <Text style={styles.requirementsTitle}>Requirements</Text>
-              <Text style={styles.requirementItem}>• 4.8+ rating</Text>
-              <Text style={styles.requirementItem}>• Vehicle under 5 years</Text>
-              <Text style={styles.requirementItem}>• 95% completion rate</Text>
-            </View>
-            <TouchableOpacity style={styles.upgradeButton}>
-              <LinearGradient
-                colors={[COLORS.gold, '#FFB800']}
-                style={styles.upgradeGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={styles.upgradeText}>Upgrade to Premium</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-
-          {/* Elite Tier */}
-          <View style={styles.tierCard}>
-            <View style={styles.tierHeader}>
-              <View style={[styles.tierIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                <Ionicons name="diamond" size={24} color={COLORS.accentBlue} />
-              </View>
-              <View style={styles.tierInfo}>
-                <Text style={styles.tierName}>Elite</Text>
-                <Text style={styles.tierPrice}>{CURRENCY}{SUBSCRIPTION_PRICE.toLocaleString()}/month</Text>
-              </View>
-              <View style={[styles.tierMultiplier, { backgroundColor: COLORS.accentBlueSoft }]}>
-                <Text style={[styles.tierMultiplierText, { color: COLORS.accentBlue }]}>1.5x</Text>
-              </View>
-            </View>
-            <View style={styles.tierBenefits}>
-              <Text style={styles.tierBenefit}>• 50% higher fares</Text>
-              <Text style={styles.tierBenefit}>• VIP support 24/7</Text>
-              <Text style={styles.tierBenefit}>• Top of search results</Text>
-              <Text style={styles.tierBenefit}>• Elite badge & benefits</Text>
-            </View>
-          </View>
+          <View style={styles.bottomSpacer} />
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -146,203 +222,202 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.lightBackground,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: SPACING.md,
+    color: COLORS.textSecondary,
   },
   safeArea: {
     flex: 1,
+    width: '100%',
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
+    backgroundColor: COLORS.lightSurface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.borderColor,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    padding: SPACING.xs,
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
   },
   placeholder: {
-    width: 44,
+    width: 40,
   },
   scrollContent: {
-    paddingHorizontal: SPACING.lg,
-    paddingBottom: SPACING.xxl,
+    padding: SPACING.md,
   },
-  currentTierCard: {
-    borderRadius: BORDER_RADIUS.xxl,
-    overflow: 'hidden',
-    marginBottom: SPACING.lg,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  currentTierGradient: {
+  infoCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: SPACING.lg,
-  },
-  currentTierLabel: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.8)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  currentTierName: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: -0.5,
-  },
-  multiplierBadge: {
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: COLORS.primary + '10',
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    alignItems: 'center',
-  },
-  multiplierText: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  multiplierLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.8)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  tierCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.lg,
     marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    gap: SPACING.sm,
   },
-  tierCardActive: {
-    borderColor: COLORS.accentGreen,
-    borderWidth: 2,
-  },
-  recommendedBadge: {
-    position: 'absolute',
-    top: SPACING.md,
-    right: SPACING.md,
-    backgroundColor: COLORS.gold,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.sm,
-  },
-  recommendedText: {
-    fontSize: FONT_SIZE.xxs,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  tierHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  tierIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.md,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  tierInfo: {
+  infoContent: {
     flex: 1,
   },
-  tierName: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  tierPrice: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
-  },
-  tierMultiplier: {
-    backgroundColor: COLORS.accentGreenSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  tierMultiplierText: {
+  infoTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+    marginBottom: SPACING.xs,
   },
-  tierBenefits: {
+  infoText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+  },
+  currentPhaseCard: {
+    backgroundColor: COLORS.primary,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    alignItems: 'center',
+  },
+  currentPhaseLabel: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.white,
+    opacity: 0.8,
+    marginBottom: SPACING.xs,
+    letterSpacing: 1,
+  },
+  currentPhaseName: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: 'bold',
+    color: COLORS.white,
+    marginBottom: SPACING.xs,
+  },
+  currentPhasePrice: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: 'bold',
+    color: COLORS.secondary,
+  },
+  phaseCard: {
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 2,
+    borderColor: COLORS.borderColor,
+  },
+  activePhaseCard: {
+    borderColor: '#00FF00',
+    backgroundColor: '#00FF0010',
+  },
+  lockedPhaseCard: {
+    opacity: 0.6,
+  },
+  phaseBadge: {
+    position: 'absolute',
+    top: -8,
+    right: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+  },
+  phaseBadgeText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: 'bold',
+    color: COLORS.white,
+  },
+  phaseHeader: {
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+    paddingTop: SPACING.sm,
+  },
+  phaseName: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: 'bold',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.xs,
+  },
+  phasePrice: {
+    fontSize: FONT_SIZE.xxl,
+    fontWeight: 'bold',
+    color: COLORS.primary,
+  },
+  phasePriceLabel: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textSecondary,
+  },
+  slotsCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF6B3520',
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.sm,
+    marginBottom: SPACING.md,
+    gap: SPACING.xs,
+  },
+  slotsText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: '#FF6B35',
+  },
+  benefitsList: {
     marginBottom: SPACING.md,
   },
-  tierBenefit: {
+  benefitText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
-    marginBottom: 4,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.xs,
+    lineHeight: 22,
   },
   currentBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: COLORS.accentGreenSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.full,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#00FF0020',
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.sm,
+    gap: SPACING.xs,
   },
   currentBadgeText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.accentGreen,
+    color: '#00AA00',
   },
-  requirementsSection: {
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.md,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-  },
-  requirementsTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: SPACING.xs,
-  },
-  requirementItem: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
-    marginBottom: 2,
-  },
-  upgradeButton: {
-    borderRadius: BORDER_RADIUS.xl,
-    overflow: 'hidden',
-  },
-  upgradeGradient: {
-    paddingVertical: SPACING.md,
+  lockedBadge: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.textSecondary + '20',
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.sm,
+    gap: SPACING.xs,
   },
-  upgradeText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+  lockedBadgeText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  noteCard: {
+    backgroundColor: '#FFD70020',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  noteText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.textPrimary,
+    lineHeight: 22,
+  },
+  noteBold: {
+    fontWeight: 'bold',
+  },
+  bottomSpacer: {
+    height: 40,
   },
 });

@@ -1,8 +1,10 @@
-import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform } from 'react-native';
-import { Link } from 'expo-router';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform, ActivityIndicator } from 'react-native';
+import { Link, useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
+import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 
@@ -22,11 +24,58 @@ const COLORS = {
 };
 
 export default function SplashScreen() {
+  const router = useRouter();
+  const { setUser, setIsAuthenticated } = useAppStore();
+  const [checking, setChecking] = useState(true);
+  
   // Start with visible values for web compatibility, animate on mobile
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // 🔐 CHECK FOR SAVED LOGIN ON APP START
+  useEffect(() => {
+    checkSavedLogin();
+  }, []);
+
+  const checkSavedLogin = async () => {
+    try {
+      console.log('🔍 Checking for saved login session...');
+      
+      const isLoggedIn = await isUserLoggedIn();
+      
+      if (isLoggedIn) {
+        const userData = await getUserSession();
+        
+        if (userData) {
+          console.log('✅ Found saved login! Auto-logging in...');
+          console.log('User:', userData.name, '| Role:', userData.role);
+          
+          // Restore user state
+          setUser(userData);
+          setIsAuthenticated(true);
+          
+          // Navigate to appropriate home screen
+          setTimeout(() => {
+            if (userData.role === 'driver') {
+              router.replace('/(driver-tabs)/driver-home');
+            } else {
+              router.replace('/(rider-tabs)/rider-home');
+            }
+          }, 1000); // Small delay for smooth transition
+          
+          return;
+        }
+      }
+      
+      console.log('ℹ️ No saved login found. Showing splash screen.');
+      setChecking(false);
+    } catch (error) {
+      console.error('❌ Error checking saved login:', error);
+      setChecking(false);
+    }
+  };
 
   useEffect(() => {
     // Entry animation (only on mobile)
@@ -67,6 +116,24 @@ export default function SplashScreen() {
       ])
     ).start();
   }, []);
+
+  // Show loading screen while checking for saved login
+  if (checking) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={[COLORS.background, COLORS.primary, COLORS.background]}
+          style={StyleSheet.absoluteFillObject}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+        />
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.green} />
+          <Text style={styles.loadingText}>Checking login...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -439,5 +506,17 @@ const styles = StyleSheet.create({
     fontSize: 10,
     letterSpacing: 2,
     fontWeight: '600',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  loadingText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
   },
 });
