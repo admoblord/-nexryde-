@@ -43,30 +43,35 @@ export default function SplashScreen() {
     try {
       console.log('🔍 Checking for saved login session...');
       
-      const isLoggedIn = await isUserLoggedIn();
-      
-      if (isLoggedIn) {
-        const userData = await getUserSession();
+      // Wrap in try-catch to handle SecureStore errors gracefully
+      try {
+        const isLoggedIn = await isUserLoggedIn();
         
-        if (userData) {
-          console.log('✅ Found saved login! Auto-logging in...');
-          console.log('User:', userData.name, '| Role:', userData.role);
+        if (isLoggedIn) {
+          const userData = await getUserSession();
           
-          // Restore user state
-          setUser(userData);
-          setIsAuthenticated(true);
-          
-          // Navigate to appropriate home screen
-          setTimeout(() => {
-            if (userData.role === 'driver') {
-              router.replace('/(driver-tabs)/driver-home');
-            } else {
-              router.replace('/(rider-tabs)/rider-home');
-            }
-          }, 1000); // Small delay for smooth transition
-          
-          return;
+          if (userData) {
+            console.log('✅ Found saved login! Auto-logging in...');
+            console.log('User:', userData.name, '| Role:', userData.role);
+            
+            // Restore user state
+            setUser(userData);
+            setIsAuthenticated(true);
+            
+            // Navigate to appropriate home screen
+            setTimeout(() => {
+              if (userData.role === 'driver') {
+                router.replace('/(driver-tabs)/driver-home');
+              } else {
+                router.replace('/(rider-tabs)/rider-home');
+              }
+            }, 1000); // Small delay for smooth transition
+            
+            return;
+          }
         }
+      } catch (storageError) {
+        console.log('⚠️ Storage not available (first install?), skipping auto-login');
       }
       
       console.log('ℹ️ No saved login found. Showing splash screen.');
