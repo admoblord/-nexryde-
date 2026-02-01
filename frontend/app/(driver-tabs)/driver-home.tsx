@@ -42,7 +42,7 @@ export default function DriverHomeScreen() {
 
   useEffect(() => {
     loadDriverData();
-  }, []);
+  }, []); // ✅ FIX: Empty array = run once on mount (user.id checked inside function)
 
   const loadDriverData = async () => {
     if (!user?.id) return;
@@ -111,7 +111,9 @@ export default function DriverHomeScreen() {
                 colors={[COLORS.green, COLORS.blue]}
                 style={styles.profileGradient}
               >
-                <Text style={styles.profileInitial}>{user?.name?.charAt(0) || 'D'}</Text>
+                <Text style={styles.profileInitial}>
+                  {(user?.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : 'D'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>

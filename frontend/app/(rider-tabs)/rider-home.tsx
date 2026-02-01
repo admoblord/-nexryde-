@@ -38,7 +38,9 @@ export default function RiderHomeScreen() {
                 colors={[COLORS.accentGreen, COLORS.accentBlue]}
                 style={styles.profileGradient}
               >
-                <Text style={styles.profileInitial}>{user?.name?.charAt(0) || 'R'}</Text>
+                <Text style={styles.profileInitial}>
+                  {(user?.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : 'R'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </View>
