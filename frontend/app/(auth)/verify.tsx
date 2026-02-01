@@ -77,6 +77,11 @@ export default function VerifyScreen() {
         });
       } else {
         // Existing user - log them in
+        // ✅ CRITICAL FIX: Add null check for data.user
+        if (!data.user) {
+          throw new Error('Invalid user data received from server');
+        }
+        
         setUser(data.user);
         setIsAuthenticated(true);
         
@@ -85,7 +90,8 @@ export default function VerifyScreen() {
         console.log('✅ User session saved - auto-login enabled');
         
         // Route to appropriate app based on role
-        if (data.user.role === 'driver') {
+        // ✅ CRITICAL FIX: Safe navigation with null check
+        if (data.user?.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');

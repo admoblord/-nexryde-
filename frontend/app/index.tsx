@@ -37,7 +37,7 @@ export default function SplashScreen() {
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
     checkSavedLogin();
-  }, []);
+  }, []); // ✅ FIX: Added empty dependency array (runs once on mount)
 
   const checkSavedLogin = async () => {
     try {

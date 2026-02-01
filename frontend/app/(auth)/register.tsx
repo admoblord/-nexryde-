@@ -67,8 +67,18 @@ export default function RegisterScreen() {
       const data = await response.json();
 
       if (response.ok) {
+        // ✅ CRITICAL FIX: Add null check for data.user
+        if (!data.user) {
+          throw new Error('Invalid user data received from server');
+        }
+        
         setUser(data.user);
         setIsAuthenticated(true);
+        
+        // ✅ CRITICAL FIX: Validate selectedRole before navigation
+        if (!selectedRole) {
+          throw new Error('Role selection is required');
+        }
         
         if (selectedRole === 'driver') {
           // 🚨 NEW DRIVERS MUST VERIFY FIRST

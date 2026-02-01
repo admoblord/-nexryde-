@@ -324,6 +324,12 @@ export default function LoginScreen() {
       } else {
         // Existing user - log them in
         console.log('Existing user, logging in');
+        
+        // ✅ CRITICAL FIX: Add null check for data.user
+        if (!data.user) {
+          throw new Error('Invalid user data received from server');
+        }
+        
         setUser(data.user);
         setIsAuthenticated(true);
         
@@ -331,7 +337,8 @@ export default function LoginScreen() {
         await saveUserSession(data.user);
         console.log('✅ User session saved - auto-login enabled');
         
-        if (data.user.role === 'driver') {
+        // ✅ CRITICAL FIX: Safe navigation with null check
+        if (data.user?.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
