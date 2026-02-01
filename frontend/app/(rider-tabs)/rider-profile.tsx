@@ -647,13 +647,15 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
+    fontWeight: '900',
+    color: '#0F172A',
     marginBottom: SPACING.sm,
+    letterSpacing: -0.5,
   },
   modalSubtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    fontWeight: '700',
+    color: '#1E293B',
     textAlign: 'center',
     marginBottom: SPACING.lg,
     lineHeight: 22,
@@ -731,9 +733,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   benefitText: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: '#0F172A',
     flex: 1,
+    letterSpacing: -0.3,
   },
   resendButton: {
     marginTop: SPACING.md,
