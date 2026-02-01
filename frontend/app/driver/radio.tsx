@@ -229,8 +229,8 @@ export default function RadioScreen() {
             <Ionicons name="arrow-back" size={24} color={COLORS.white} />
           </TouchableOpacity>
           <View style={styles.headerTitle}>
-            <Ionicons name="radio" size={28} color={COLORS.white} />
-            <Text style={styles.headerText}>Nigeria Radio</Text>
+            <Ionicons name="musical-notes" size={28} color={COLORS.white} />
+            <Text style={styles.headerText}>Driver Wellness Suite</Text>
           </View>
           <TouchableOpacity style={styles.backButton} onPress={handleStop}>
             {isPlaying && <Ionicons name="stop-circle" size={24} color="#FF6B6B" />}
@@ -280,9 +280,49 @@ export default function RadioScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          {/* Wellness Suite Info */}
+          <View style={styles.wellnessCard}>
+            <LinearGradient
+              colors={['#00B4D8', '#0077B6']}
+              style={styles.wellnessGradient}
+            >
+              <View style={styles.wellnessHeader}>
+                <Ionicons name="heart" size={24} color="#FF6B6B" />
+                <Text style={styles.wellnessTitle}>🎵 Driver Wellness Suite</Text>
+              </View>
+              <Text style={styles.wellnessSubtitle}>Anti-Fatigue Radio Entertainment</Text>
+              
+              <View style={styles.wellnessFeatures}>
+                <View style={styles.wellnessFeature}>
+                  <Ionicons name="checkmark-circle" size={18} color="#00FF00" />
+                  <Text style={styles.wellnessFeatureText}>8 Nigerian Stations (Afrobeats, News, Jazz)</Text>
+                </View>
+                <View style={styles.wellnessFeature}>
+                  <Ionicons name="checkmark-circle" size={18} color="#00FF00" />
+                  <Text style={styles.wellnessFeatureText}>Background Playback While Driving</Text>
+                </View>
+                <View style={styles.wellnessFeature}>
+                  <Ionicons name="checkmark-circle" size={18} color="#00FF00" />
+                  <Text style={styles.wellnessFeatureText}>Zero Ads, Zero Cost (just data)</Text>
+                </View>
+              </View>
+
+              {/* Data Warning */}
+              <View style={styles.dataWarning}>
+                <Ionicons name="alert-circle" size={20} color="#FFD700" />
+                <View style={styles.dataWarningContent}>
+                  <Text style={styles.dataWarningTitle}>⚠️ Data Usage Notice</Text>
+                  <Text style={styles.dataWarningText}>
+                    Radio streaming uses ~50-100MB per hour. Connect to WiFi or ensure you have enough data. Estimated cost: ₦200-400/hour (MTN rates)
+                  </Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </View>
+
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>🎵 Afrobeat & Nigerian Music</Text>
-            <Text style={styles.sectionSubtitle}>Live streaming from Lagos</Text>
+            <Text style={styles.sectionTitle}>📻 Available Stations</Text>
+            <Text style={styles.sectionSubtitle}>Live streaming from Lagos & Online</Text>
           </View>
 
           {NIGERIA_RADIO_STATIONS.map((station) => (
@@ -326,11 +366,11 @@ export default function RadioScreen() {
           ))}
 
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle" size={24} color={COLORS.secondary} />
+            <Ionicons name="fitness" size={24} color="#00FF00" />
             <View style={styles.infoContent}>
-              <Text style={styles.infoTitle}>📡 Free Live Radio</Text>
+              <Text style={styles.infoTitle}>💪 Combat Driver Fatigue</Text>
               <Text style={styles.infoText}>
-                Stream Nigerian radio stations free! Data charges apply. Best experienced with WiFi or 4G connection.
+                Studies show music reduces fatigue by 20% and improves focus during long drives. Stay alert, entertained, and motivated with NexRyde's wellness suite.
               </Text>
             </View>
           </View>
@@ -518,5 +558,77 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 40,
+  },
+  wellnessCard: {
+    marginBottom: SPACING.lg,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4.65,
+  },
+  wellnessGradient: {
+    padding: SPACING.lg,
+  },
+  wellnessHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.xs,
+  },
+  wellnessTitle: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '900',
+    color: COLORS.white,
+    letterSpacing: -0.5,
+  },
+  wellnessSubtitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
+    opacity: 0.9,
+  },
+  wellnessFeatures: {
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  wellnessFeature: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+  },
+  wellnessFeatureText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.white,
+    flex: 1,
+  },
+  dataWarning: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 215, 0, 0.15)',
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 215, 0, 0.3)',
+    gap: SPACING.sm,
+  },
+  dataWarningContent: {
+    flex: 1,
+  },
+  dataWarningTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: '#FFD700',
+    marginBottom: SPACING.xs,
+  },
+  dataWarningText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.white,
+    lineHeight: 18,
+    opacity: 0.9,
   },
 });

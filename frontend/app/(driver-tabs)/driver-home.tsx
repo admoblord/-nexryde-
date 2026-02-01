@@ -287,9 +287,9 @@ export default function DriverHomeScreen() {
             <Text style={styles.sectionTitle}>Quick Access</Text>
             <View style={styles.featureGrid}>
               <FeatureCard
-                icon="radio"
-                label="Radio"
-                color="#FF6B35"
+                icon="heart"
+                label="Wellness Suite"
+                color="#00B4D8"
                 onPress={() => router.push('/driver/radio')}
               />
               <FeatureCard
