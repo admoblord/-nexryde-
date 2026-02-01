@@ -521,8 +521,7 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: SPACING.md,
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
   },
   content: {
     padding: SPACING.md,
@@ -545,9 +544,8 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
   infoCard: {
     marginBottom: SPACING.md,
@@ -563,15 +561,13 @@ const styles = StyleSheet.create({
   },
   infoTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
     marginBottom: SPACING.xs,
   },
   infoText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
     lineHeight: 20,
   },
   features: {
@@ -587,8 +583,7 @@ const styles = StyleSheet.create({
   featureText: {
     marginLeft: SPACING.sm,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#334155',
+    color: COLORS.textPrimary,
   },
   createButton: {
     marginBottom: SPACING.lg,
@@ -615,13 +610,11 @@ const styles = StyleSheet.create({
   },
   familyName: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.white,
-    letterSpacing: -0.5,
   },
   familyMemberCount: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
     color: 'rgba(255,255,255,0.8)',
   },
   trustScoreBadge: {
@@ -633,15 +626,12 @@ const styles = StyleSheet.create({
   },
   trustScoreText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.white,
   },
   trustScoreLabel: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
     color: 'rgba(255,255,255,0.8)',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   safetyCircleButton: {
     flexDirection: 'row',
@@ -655,7 +645,7 @@ const styles = StyleSheet.create({
   safetyCircleText: {
     marginLeft: SPACING.sm,
     color: COLORS.white,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   addButton: {
     marginBottom: SPACING.md,
@@ -665,9 +655,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
     marginBottom: SPACING.md,
   },
   memberCard: {
@@ -704,7 +693,7 @@ const styles = StyleSheet.create({
   },
   memberInitial: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   memberDetails: {
@@ -719,14 +708,12 @@ const styles = StyleSheet.create({
   },
   memberName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
   memberPhone: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
     marginBottom: SPACING.xs,
   },
   memberActions: {
@@ -749,7 +736,7 @@ const styles = StyleSheet.create({
   bookButtonText: {
     marginLeft: SPACING.xs,
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.primary,
   },
   removeButton: {
@@ -762,9 +749,8 @@ const styles = StyleSheet.create({
   },
   howItWorksTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
+    fontWeight: '600',
     color: COLORS.info,
-    letterSpacing: -0.5,
     marginBottom: SPACING.md,
   },
   step: {
@@ -791,14 +777,12 @@ const styles = StyleSheet.create({
   },
   stepTitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
   },
   stepText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
   },
   modalOverlay: {
     flex: 1,
@@ -819,9 +803,8 @@ const styles = StyleSheet.create({
   },
   modalTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
   input: {
     backgroundColor: COLORS.gray100,
@@ -833,10 +816,8 @@ const styles = StyleSheet.create({
   },
   relationshipLabel: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
     marginBottom: SPACING.sm,
   },
   relationshipOptions: {
@@ -858,12 +839,11 @@ const styles = StyleSheet.create({
   },
   relationshipOptionText: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
   },
   relationshipOptionTextSelected: {
     color: COLORS.white,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   modalButton: {
     marginTop: SPACING.md,

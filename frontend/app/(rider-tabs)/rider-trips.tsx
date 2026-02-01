@@ -5,19 +5,23 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function RiderTripsScreen() {
   const router = useRouter();
+  const { user } = useAppStore();
   
   // Sample trip data (will come from API later)
-  const [trips] = useState([
+  const [trips, setTrips] = useState([
     {
       id: '1',
+      driverId: 'drv-001',
       date: 'Today, 3:45 PM',
       from: 'Victoria Island, Lagos',
       to: 'Lekki Phase 1, Lagos',
@@ -28,9 +32,11 @@ export default function RiderTripsScreen() {
       plate: 'ABC-123XY',
       distance: '12.5',
       duration: '25',
+      isFavorite: false,
     },
     {
       id: '2',
+      driverId: 'drv-002',
       date: 'Yesterday, 9:20 AM',
       from: 'Ikeja GRA, Lagos',
       to: 'Victoria Island, Lagos',
@@ -41,6 +47,7 @@ export default function RiderTripsScreen() {
       plate: 'XYZ-789AB',
       distance: '8.3',
       duration: '18',
+      isFavorite: false,
     },
   ]);
 
@@ -65,6 +72,40 @@ export default function RiderTripsScreen() {
         status: trip.status,
       }
     });
+  };
+
+  // ⭐ ADD TO FAVORITES
+  const handleToggleFavorite = async (trip: any) => {
+    try {
+      const newFavoriteStatus = !trip.isFavorite;
+      
+      if (newFavoriteStatus) {
+        // Add to favorites
+        Alert.alert(
+          '⭐ Added to Favorites!',
+          `${trip.driver} has been added to your favorite drivers. You can request rides from them directly!`,
+          [{ text: 'Great!' }]
+        );
+      } else {
+        // Remove from favorites
+        Alert.alert(
+          'Removed from Favorites',
+          `${trip.driver} has been removed from your favorites.`,
+          [{ text: 'OK' }]
+        );
+      }
+      
+      // Update local state
+      setTrips(trips.map(t => 
+        t.id === trip.id ? { ...t, isFavorite: newFavoriteStatus } : t
+      ));
+      
+      // TODO: Call API to save to backend
+      // await addFavoriteDriver(user?.id, trip.driverId);
+      
+    } catch (error) {
+      Alert.alert('Error', 'Failed to update favorites. Please try again.');
+    }
   };
 
   return (
@@ -115,13 +156,28 @@ export default function RiderTripsScreen() {
               {/* Footer */}
               <View style={styles.tripFooter}>
                 <Text style={styles.fareText}>₦{trip.fare.toLocaleString()}</Text>
-                <TouchableOpacity 
-                  style={styles.receiptButton}
-                  onPress={() => handleViewReceipt(trip)}
-                >
-                  <Ionicons name="receipt-outline" size={18} color={COLORS.accentBlue} />
-                  <Text style={styles.receiptButtonText}>View Receipt</Text>
-                </TouchableOpacity>
+                <View style={styles.tripActions}>
+                  {/* Favorite Button */}
+                  <TouchableOpacity 
+                    style={[styles.actionButton, trip.isFavorite && styles.favoriteActive]}
+                    onPress={() => handleToggleFavorite(trip)}
+                  >
+                    <Ionicons 
+                      name={trip.isFavorite ? "star" : "star-outline"} 
+                      size={20} 
+                      color={trip.isFavorite ? COLORS.accent : COLORS.accentBlue} 
+                    />
+                  </TouchableOpacity>
+                  
+                  {/* Receipt Button */}
+                  <TouchableOpacity 
+                    style={styles.receiptButton}
+                    onPress={() => handleViewReceipt(trip)}
+                  >
+                    <Ionicons name="receipt-outline" size={18} color={COLORS.accentBlue} />
+                    <Text style={styles.receiptButtonText}>Receipt</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
           ))
@@ -252,6 +308,25 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xl,
     fontWeight: '900',
     color: '#0F172A',
+  },
+  tripActions: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    alignItems: 'center',
+  },
+  actionButton: {
+    width: 42,
+    height: 42,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.accentBlue + '10',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: COLORS.accentBlue + '30',
+  },
+  favoriteActive: {
+    backgroundColor: COLORS.accent + '20',
+    borderColor: COLORS.accent + '50',
   },
   receiptButton: {
     flexDirection: 'row',

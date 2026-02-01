@@ -404,17 +404,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
-    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.cyan,
     marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   scrollContent: {
     padding: 16,
@@ -445,13 +442,11 @@ const styles = StyleSheet.create({
   },
   routeTitle: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
-    letterSpacing: -0.5,
   },
   routeDesc: {
     fontSize: 13,
-    fontWeight: '700',
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -476,15 +471,14 @@ const styles = StyleSheet.create({
   },
   locationLabel: {
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.textMuted,
     letterSpacing: 1,
     marginBottom: 2,
-    textTransform: 'uppercase',
   },
   locationValue: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.primary,
   },
   routeLine: {
@@ -503,10 +497,9 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
     marginBottom: 14,
-    letterSpacing: -0.5,
   },
   sizeGrid: {
     flexDirection: 'row',
@@ -539,7 +532,7 @@ const styles = StyleSheet.create({
   },
   sizeLabel: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
     marginBottom: 4,
   },
@@ -548,13 +541,12 @@ const styles = StyleSheet.create({
   },
   sizeDesc: {
     fontSize: 11,
-    fontWeight: '700',
     color: COLORS.textMuted,
     marginBottom: 8,
   },
   sizePrice: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.textSecondary,
   },
   sizePriceActive: {
@@ -610,7 +602,7 @@ const styles = StyleSheet.create({
   },
   fareLabel: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.primary,
   },
   fareNote: {
@@ -620,11 +612,8 @@ const styles = StyleSheet.create({
   },
   fareValue: {
     fontSize: 24,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.cyan,
-    textShadowColor: 'rgba(6, 182, 212, 0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
   },
   submitButton: {
     borderRadius: 16,
@@ -645,7 +634,7 @@ const styles = StyleSheet.create({
   },
   submitText: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
   infoCard: {
@@ -661,12 +650,11 @@ const styles = StyleSheet.create({
   },
   infoTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   infoDesc: {
     fontSize: 12,
-    fontWeight: '700',
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -688,14 +676,12 @@ const styles = StyleSheet.create({
   },
   successTitle: {
     fontSize: 26,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
     marginBottom: 8,
-    letterSpacing: -0.5,
   },
   successDesc: {
     fontSize: 15,
-    fontWeight: '700',
     color: COLORS.textSecondary,
     textAlign: 'center',
     marginBottom: 32,
@@ -719,14 +705,11 @@ const styles = StyleSheet.create({
   },
   successLabel: {
     fontSize: 14,
-    fontWeight: '700',
     color: COLORS.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   successValue: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   homeButton: {
@@ -741,7 +724,7 @@ const styles = StyleSheet.create({
   },
   homeText: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
 });

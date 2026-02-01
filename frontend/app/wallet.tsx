@@ -348,7 +348,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { fontSize: 22, fontWeight: '900', color: '#FFFFFF', letterSpacing: -0.5 },
+  headerTitle: { fontSize: 22, fontWeight: '900', color: '#FFFFFF', letterSpacing: -0.3 },
   content: { flex: 1, padding: 16 },
   balanceCard: {
     borderRadius: 24,
@@ -356,17 +356,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  balanceLabel: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.9)', textTransform: 'uppercase', letterSpacing: 0.5 },
-  balanceAmount: { 
-    fontSize: 48, 
-    fontWeight: '900', 
-    color: '#FFFFFF', 
-    marginTop: 8, 
-    letterSpacing: -1,
-    textShadowColor: 'rgba(0,0,0,0.3)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
+  balanceLabel: { fontSize: 16, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
+  balanceAmount: { fontSize: 48, fontWeight: '900', color: '#FFFFFF', marginTop: 8, letterSpacing: -1 },
   topupBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -507,7 +498,6 @@ const styles = StyleSheet.create({
   },
   cryptoDescription: {
     fontSize: 14,
-    fontWeight: '700',
     color: '#94A3B8',
     lineHeight: 20,
     marginBottom: 16,
@@ -530,7 +520,7 @@ const styles = StyleSheet.create({
   },
   cryptoCoinLabel: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#64748B',
   },
   notifyBtn: {
@@ -578,10 +568,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 20,
   },
-  currencyPrefix: { fontSize: 32, fontWeight: '900', color: '#00E676', marginRight: 4 },
+  currencyPrefix: { fontSize: 32, fontWeight: '700', color: '#00E676', marginRight: 4 },
   amountInput: {
     fontSize: 48,
-    fontWeight: '900',
+    fontWeight: '800',
     color: '#FFFFFF',
     minWidth: 120,
     textAlign: 'center',
@@ -650,7 +640,7 @@ const styles = StyleSheet.create({
   },
   comingSoonDesc: {
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#A5B4FC',
     textAlign: 'center',
     marginBottom: 16,
