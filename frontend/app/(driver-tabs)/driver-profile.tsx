@@ -30,7 +30,9 @@ export default function DriverProfileScreen() {
           style: 'destructive',
           onPress: () => {
             logout();
-            router.replace('/');
+            // Clear all navigation state and go to login
+            router.dismissAll();
+            router.replace('/(auth)/login');
           }
         }
       ]
