@@ -202,7 +202,7 @@ export default function RiderProfileScreen() {
         {/* Menu Items */}
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>Account</Text>
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/edit-profile')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
               <Ionicons name="person-outline" size={20} color={COLORS.info} />
             </View>
@@ -210,7 +210,7 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/ratings')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
               <Ionicons name="star-outline" size={20} color={COLORS.accent} />
             </View>
@@ -218,7 +218,7 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/saved-places')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
               <Ionicons name="location-outline" size={20} color={COLORS.success} />
             </View>
@@ -229,7 +229,7 @@ export default function RiderProfileScreen() {
 
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>Preferences</Text>
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/notifications')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
               <Ionicons name="notifications-outline" size={20} color={COLORS.warning} />
             </View>
@@ -237,7 +237,7 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="settings-outline" size={20} color={COLORS.gray600} />
             </View>
@@ -245,7 +245,7 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
             </View>

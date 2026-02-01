@@ -178,7 +178,7 @@ export default function DriverProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/documents')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
               <Ionicons name="document-text-outline" size={20} color={COLORS.info} />
             </View>
@@ -190,7 +190,7 @@ export default function DriverProfileScreen() {
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>Account</Text>
           
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/edit-profile')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="person-outline" size={20} color={COLORS.gray600} />
             </View>
@@ -198,7 +198,7 @@ export default function DriverProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/notifications')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="notifications-outline" size={20} color={COLORS.gray600} />
             </View>
@@ -206,7 +206,7 @@ export default function DriverProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem}>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
             </View>
