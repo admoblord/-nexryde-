@@ -172,9 +172,8 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
   infoCard: {
     flexDirection: 'row',
@@ -186,16 +185,13 @@ const styles = StyleSheet.create({
     flex: 1,
     marginLeft: SPACING.sm,
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
     color: COLORS.info,
     lineHeight: 22,
   },
   label: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#64748B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
     marginBottom: SPACING.sm,
   },
   bankScroll: {
@@ -216,8 +212,8 @@ const styles = StyleSheet.create({
   },
   bankText: {
     fontSize: FONT_SIZE.sm,
-    color: '#334155',
-    fontWeight: '700',
+    color: COLORS.textPrimary,
+    fontWeight: '500',
   },
   bankTextSelected: {
     color: COLORS.white,
@@ -241,9 +237,8 @@ const styles = StyleSheet.create({
   },
   previewTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
+    fontWeight: '600',
     color: COLORS.primary,
-    letterSpacing: -0.5,
     marginBottom: SPACING.md,
   },
   previewRow: {
@@ -253,18 +248,16 @@ const styles = StyleSheet.create({
   },
   previewLabel: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#64748B',
+    color: COLORS.textSecondary,
   },
   previewValue: {
     fontSize: FONT_SIZE.md,
-    color: '#0F172A',
-    fontWeight: '900',
+    color: COLORS.textPrimary,
+    fontWeight: '600',
   },
   previewNote: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
+    color: COLORS.textSecondary,
     fontStyle: 'italic',
     marginTop: SPACING.sm,
     paddingTop: SPACING.sm,

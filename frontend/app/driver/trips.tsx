@@ -321,9 +321,8 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
   },
   currentTripCard: {
     margin: SPACING.md,
@@ -340,7 +339,7 @@ const styles = StyleSheet.create({
   },
   currentTripFare: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   currentTripActions: {
@@ -379,11 +378,11 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.xs,
     fontSize: FONT_SIZE.sm,
     color: COLORS.primary,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   tripFare: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   tripRoute: {
@@ -405,16 +404,13 @@ const styles = StyleSheet.create({
   },
   routeLabel: {
     fontSize: FONT_SIZE.xs,
-    color: '#64748B',
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    color: COLORS.textSecondary,
     marginBottom: 2,
   },
   routeAddress: {
     fontSize: FONT_SIZE.md,
-    color: '#334155',
-    fontWeight: '700',
+    color: COLORS.textPrimary,
+    fontWeight: '500',
   },
   routeLine: {
     width: 2,
@@ -438,8 +434,7 @@ const styles = StyleSheet.create({
   metaText: {
     marginLeft: SPACING.xs,
     fontSize: FONT_SIZE.sm,
-    color: '#475569',
-    fontWeight: '700',
+    color: COLORS.textSecondary,
   },
   acceptButton: {
     marginTop: SPACING.sm,
@@ -452,15 +447,13 @@ const styles = StyleSheet.create({
   },
   emptyTitle: {
     fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '600',
+    color: COLORS.textPrimary,
     marginTop: SPACING.md,
   },
   emptyText: {
     fontSize: FONT_SIZE.md,
-    color: '#475569',
-    fontWeight: '700',
+    color: COLORS.textSecondary,
     textAlign: 'center',
     marginTop: SPACING.sm,
   },

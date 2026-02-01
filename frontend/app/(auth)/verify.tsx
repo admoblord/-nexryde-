@@ -18,7 +18,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL } from '@/src/services/api';
-import { saveUserSession } from '@/utils/authStorage';
 
 export default function VerifyScreen() {
   const router = useRouter();
@@ -77,21 +76,11 @@ export default function VerifyScreen() {
         });
       } else {
         // Existing user - log them in
-        // ✅ CRITICAL FIX: Add null check for data.user
-        if (!data.user) {
-          throw new Error('Invalid user data received from server');
-        }
-        
         setUser(data.user);
         setIsAuthenticated(true);
         
-        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
-        await saveUserSession(data.user);
-        console.log('✅ User session saved - auto-login enabled');
-        
         // Route to appropriate app based on role
-        // ✅ CRITICAL FIX: Safe navigation with null check
-        if (data.user?.role === 'driver') {
+        if (data.user.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
@@ -295,21 +284,19 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxxl,
-    fontWeight: '900',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: COLORS.white,
     marginBottom: SPACING.sm,
-    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: '#475569',
+    color: COLORS.textSecondary,
     textAlign: 'center',
-    fontWeight: '700',
   },
   phone: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
+    fontWeight: '600',
+    color: COLORS.white,
     marginTop: SPACING.xs,
   },
   providerBadge: {
@@ -325,9 +312,7 @@ const styles = StyleSheet.create({
   providerText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.accentGreen,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontWeight: '600',
   },
   form: {
     alignItems: 'center',
@@ -339,8 +324,8 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.lg,
     paddingHorizontal: SPACING.xl,
     fontSize: FONT_SIZE.xxxl,
-    fontWeight: '900',
-    color: '#0F172A',
+    fontWeight: '700',
+    color: COLORS.white,
     textAlign: 'center',
     letterSpacing: 16,
     borderWidth: 2,
@@ -360,7 +345,7 @@ const styles = StyleSheet.create({
   otpHintText: {
     fontSize: FONT_SIZE.sm,
     color: COLORS.gold,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   verifyButton: {
     width: '100%',
@@ -383,7 +368,7 @@ const styles = StyleSheet.create({
   },
   verifyButtonText: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.textMuted,
   },
   verifyButtonTextActive: {
@@ -403,17 +388,16 @@ const styles = StyleSheet.create({
   },
   resendText: {
     fontSize: FONT_SIZE.md,
-    color: '#475569',
-    fontWeight: '700',
+    color: COLORS.textSecondary,
   },
   resendLink: {
     fontSize: FONT_SIZE.md,
     color: COLORS.accentGreen,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   resendTimer: {
     fontSize: FONT_SIZE.md,
     color: COLORS.textMuted,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });

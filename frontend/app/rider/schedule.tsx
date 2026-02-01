@@ -442,17 +442,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
-    letterSpacing: -0.5,
   },
   headerSubtitle: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.purple,
     marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   scrollContent: {
     padding: 16,
@@ -483,13 +480,11 @@ const styles = StyleSheet.create({
   },
   formTitle: {
     fontSize: 20,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
-    letterSpacing: -0.5,
   },
   formDesc: {
     fontSize: 13,
-    fontWeight: '700',
     color: COLORS.textMuted,
     marginTop: 2,
   },
@@ -512,15 +507,14 @@ const styles = StyleSheet.create({
   },
   locationLabel: {
     fontSize: 10,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.textMuted,
     letterSpacing: 1,
     marginBottom: 2,
-    textTransform: 'uppercase',
   },
   locationValue: {
     fontSize: 15,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.primary,
   },
   dateTimeRow: {
@@ -546,15 +540,13 @@ const styles = StyleSheet.create({
   },
   dateTimeLabel: {
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.textMuted,
     marginBottom: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   dateTimeValue: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   scheduleButton: {
@@ -575,7 +567,7 @@ const styles = StyleSheet.create({
   },
   scheduleText: {
     fontSize: 17,
-    fontWeight: '900',
+    fontWeight: '800',
     color: '#FFFFFF',
   },
   scheduledSection: {
@@ -589,9 +581,8 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
-    letterSpacing: -0.5,
   },
   countBadge: {
     backgroundColor: COLORS.purple,
@@ -601,7 +592,7 @@ const styles = StyleSheet.create({
   },
   countText: {
     fontSize: 12,
-    fontWeight: '900',
+    fontWeight: '700',
     color: '#FFFFFF',
   },
   rideCard: {
@@ -631,7 +622,7 @@ const styles = StyleSheet.create({
   },
   rideDateText: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.purple,
   },
   rideTimeBadge: {
@@ -645,7 +636,7 @@ const styles = StyleSheet.create({
   },
   rideTimeText: {
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: '600',
     color: COLORS.blue,
   },
   rideRoute: {
@@ -671,7 +662,7 @@ const styles = StyleSheet.create({
   rideAddress: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '500',
     color: COLORS.textSecondary,
   },
   rideFooter: {
@@ -684,11 +675,8 @@ const styles = StyleSheet.create({
   },
   fareEstimate: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.green,
-    textShadowColor: 'rgba(34, 197, 94, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
   },
   cancelRideBtn: {
     paddingHorizontal: 16,
@@ -698,7 +686,7 @@ const styles = StyleSheet.create({
   },
   cancelRideText: {
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.red,
   },
   benefitsCard: {
@@ -708,10 +696,9 @@ const styles = StyleSheet.create({
   },
   benefitsTitle: {
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '800',
     color: COLORS.primary,
     marginBottom: 16,
-    letterSpacing: -0.5,
   },
   benefit: {
     flexDirection: 'row',
@@ -731,12 +718,11 @@ const styles = StyleSheet.create({
   },
   benefitTitle: {
     fontSize: 14,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.primary,
   },
   benefitDesc: {
     fontSize: 12,
-    fontWeight: '700',
     color: COLORS.textMuted,
     marginTop: 2,
   },

@@ -67,22 +67,11 @@ export default function RegisterScreen() {
       const data = await response.json();
 
       if (response.ok) {
-        // ✅ CRITICAL FIX: Add null check for data.user
-        if (!data.user) {
-          throw new Error('Invalid user data received from server');
-        }
-        
         setUser(data.user);
         setIsAuthenticated(true);
         
-        // ✅ CRITICAL FIX: Validate selectedRole before navigation
-        if (!selectedRole) {
-          throw new Error('Role selection is required');
-        }
-        
         if (selectedRole === 'driver') {
-          // 🚨 NEW DRIVERS MUST VERIFY FIRST
-          router.replace('/driver/verification');
+          router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
         }
@@ -102,8 +91,7 @@ export default function RegisterScreen() {
       setIsAuthenticated(true);
       
       if (selectedRole === 'driver') {
-        // 🚨 NEW DRIVERS MUST VERIFY FIRST
-        router.replace('/driver/verification');
+        router.replace('/(driver-tabs)/driver-home');
       } else {
         router.replace('/(rider-tabs)/rider-home');
       }
@@ -319,18 +307,16 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
     textAlign: 'center',
     marginBottom: SPACING.xs,
-    letterSpacing: -0.5,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: '#475569',
+    color: COLORS.lightTextSecondary,
     textAlign: 'center',
     marginBottom: SPACING.xl,
-    fontWeight: '700',
   },
   roleContainer: {
     flexDirection: 'row',
@@ -364,10 +350,8 @@ const styles = StyleSheet.create({
   },
   premiumText: {
     fontSize: FONT_SIZE.xxs,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.white,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   radioOuter: {
     width: 24,
@@ -399,9 +383,8 @@ const styles = StyleSheet.create({
   },
   roleTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
   },
   roleTitleActive: {
     color: COLORS.accentGreen,
@@ -411,8 +394,8 @@ const styles = StyleSheet.create({
   },
   rolePrice: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
-    color: '#0F172A',
+    fontWeight: '700',
+    color: COLORS.lightTextSecondary,
   },
   rolePriceActive: {
     color: COLORS.accentGreen,
@@ -425,8 +408,7 @@ const styles = StyleSheet.create({
   },
   roleFeature: {
     fontSize: FONT_SIZE.xs,
-    color: '#475569',
-    fontWeight: '700',
+    color: COLORS.lightTextSecondary,
   },
   roleFeatureActive: {
     color: COLORS.accentGreenDark,
@@ -439,11 +421,9 @@ const styles = StyleSheet.create({
   },
   inputLabel: {
     fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
     marginBottom: SPACING.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
   textInput: {
     backgroundColor: COLORS.white,
@@ -479,8 +459,8 @@ const styles = StyleSheet.create({
   },
   phonePrefix: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#64748B',
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
   },
   phoneInput: {
     flex: 1,
@@ -522,18 +502,17 @@ const styles = StyleSheet.create({
   },
   continueText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
+    fontWeight: '700',
     color: COLORS.white,
   },
   termsText: {
     fontSize: FONT_SIZE.sm,
-    color: '#475569',
+    color: COLORS.lightTextSecondary,
     textAlign: 'center',
     lineHeight: 20,
-    fontWeight: '700',
   },
   termsLink: {
     color: COLORS.accentGreen,
-    fontWeight: '700',
+    fontWeight: '600',
   },
 });
