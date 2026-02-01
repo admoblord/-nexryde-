@@ -33,7 +33,9 @@ export default function RiderProfileScreen() {
           style: 'destructive',
           onPress: () => {
             logout();
-            router.replace('/');
+            // Clear all navigation state and go to login
+            router.dismissAll();
+            router.replace('/(auth)/login');
           }
         }
       ]
@@ -63,7 +65,13 @@ export default function RiderProfileScreen() {
     Alert.alert(
       'Welcome, Driver!',
       'Your account has been upgraded to Driver. You can now earn with NEXRYDE!',
-      [{ text: 'Start Earning', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
+      [{ 
+        text: 'Start Earning', 
+        onPress: () => {
+          // Navigate to driver verification/onboarding first
+          router.replace('/driver/verification');
+        }
+      }]
     );
   };
 
