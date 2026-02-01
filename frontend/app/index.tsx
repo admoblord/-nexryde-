@@ -25,14 +25,49 @@ const COLORS = {
 
 export default function SplashScreen() {
   const router = useRouter();
-  const { setUser, setIsAuthenticated } = useAppStore();
   const [checking, setChecking] = useState(true);
+  
+  // ✅ SAFE STORE ACCESS WITH ERROR HANDLING
+  const [storeError, setStoreError] = useState<Error | null>(null);
+  let setUser, setIsAuthenticated;
+  
+  try {
+    const store = useAppStore();
+    setUser = store.setUser;
+    setIsAuthenticated = store.setIsAuthenticated;
+  } catch (error) {
+    console.error('🚨 STORE ACCESS ERROR:', error);
+    setStoreError(error as Error);
+  }
   
   // Start with visible values for web compatibility, animate on mobile
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  
+  // Show error screen if store fails
+  if (storeError) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>
+          Failed to initialize app
+        </Text>
+        <Text style={{ color: '#94A3B8', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 }}>
+          Store Error: {storeError.message}
+        </Text>
+        <TouchableOpacity 
+          style={{ marginTop: 20, backgroundColor: '#22C55E', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 }}
+          onPress={() => {
+            setStoreError(null);
+            setChecking(true);
+          }}
+        >
+          <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
 
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
