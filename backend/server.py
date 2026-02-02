@@ -79,15 +79,181 @@ logger = logging.getLogger(__name__)
 
 # ==================== CONFIGURATION ====================
 
+# ==================== NIGERIAN MARKET FARE CONFIGURATION ====================
+# Comprehensive pricing for Nigerian ride-hailing market
 FARE_CONFIG = {
     "lagos": {
-        "economy": {"base_fare": 800, "per_km": 120, "per_min": 20, "min_fare": 1500, "max_multiplier": 1.2},
-        "premium": {"base_fare": 1200, "per_km": 180, "per_min": 30, "min_fare": 2500, "max_multiplier": 1.2}
+        "economy": {
+            "base_fare": 500,           # ₦500 flat fee to start
+            "per_km": 150,              # ₦150 per kilometer
+            "per_min": 25,              # ₦25 per minute (for traffic/waiting)
+            "booking_fee": 100,         # ₦100 platform service fee
+            "min_fare": 800,            # ₦800 minimum fare
+            "max_multiplier": 2.5,      # Max 2.5x surge pricing
+            "cancellation_fee": 300,    # ₦300 if rider cancels after driver accepts
+        },
+        "comfort": {
+            "base_fare": 700,           # ₦700 flat fee to start
+            "per_km": 200,              # ₦200 per kilometer
+            "per_min": 35,              # ₦35 per minute
+            "booking_fee": 150,         # ₦150 platform service fee
+            "min_fare": 1200,           # ₦1,200 minimum fare
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+        "premium": {
+            "base_fare": 1000,          # ₦1,000 flat fee to start
+            "per_km": 350,              # ₦350 per kilometer
+            "per_min": 50,              # ₦50 per minute
+            "booking_fee": 200,         # ₦200 platform service fee
+            "min_fare": 2000,           # ₦2,000 minimum fare
+            "max_multiplier": 3.0,      # Premium can surge up to 3x
+            "cancellation_fee": 500,
+        },
+        "xl": {
+            "base_fare": 800,           # ₦800 flat fee to start
+            "per_km": 250,              # ₦250 per kilometer
+            "per_min": 40,              # ₦40 per minute
+            "booking_fee": 150,         # ₦150 platform service fee
+            "min_fare": 1500,           # ₦1,500 minimum fare
+            "max_multiplier": 2.5,
+            "cancellation_fee": 450,
+        },
+    },
+    "abuja": {
+        "economy": {
+            "base_fare": 400,
+            "per_km": 130,
+            "per_min": 20,
+            "booking_fee": 100,
+            "min_fare": 700,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 250,
+        },
+        "comfort": {
+            "base_fare": 600,
+            "per_km": 180,
+            "per_min": 30,
+            "booking_fee": 150,
+            "min_fare": 1000,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 350,
+        },
+        "premium": {
+            "base_fare": 900,
+            "per_km": 300,
+            "per_min": 45,
+            "booking_fee": 200,
+            "min_fare": 1800,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 450,
+        },
+        "xl": {
+            "base_fare": 700,
+            "per_km": 220,
+            "per_min": 35,
+            "booking_fee": 150,
+            "min_fare": 1300,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+    },
+    "port_harcourt": {
+        "economy": {
+            "base_fare": 450,
+            "per_km": 140,
+            "per_min": 22,
+            "booking_fee": 100,
+            "min_fare": 750,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 280,
+        },
+        "comfort": {
+            "base_fare": 650,
+            "per_km": 190,
+            "per_min": 32,
+            "booking_fee": 150,
+            "min_fare": 1100,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 380,
+        },
+        "premium": {
+            "base_fare": 950,
+            "per_km": 320,
+            "per_min": 48,
+            "booking_fee": 200,
+            "min_fare": 1900,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 480,
+        },
+        "xl": {
+            "base_fare": 750,
+            "per_km": 230,
+            "per_min": 38,
+            "booking_fee": 150,
+            "min_fare": 1400,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 420,
+        },
     },
     "default": {
-        "economy": {"base_fare": 800, "per_km": 120, "per_min": 20, "min_fare": 1500, "max_multiplier": 1.2},
-        "premium": {"base_fare": 1200, "per_km": 180, "per_min": 30, "min_fare": 2500, "max_multiplier": 1.2}
+        "economy": {
+            "base_fare": 500,
+            "per_km": 150,
+            "per_min": 25,
+            "booking_fee": 100,
+            "min_fare": 800,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 300,
+        },
+        "comfort": {
+            "base_fare": 700,
+            "per_km": 200,
+            "per_min": 35,
+            "booking_fee": 150,
+            "min_fare": 1200,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+        "premium": {
+            "base_fare": 1000,
+            "per_km": 350,
+            "per_min": 50,
+            "booking_fee": 200,
+            "min_fare": 2000,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 500,
+        },
+        "xl": {
+            "base_fare": 800,
+            "per_km": 250,
+            "per_min": 40,
+            "booking_fee": 150,
+            "min_fare": 1500,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 450,
+        },
     }
+}
+
+# Surge Pricing Configuration
+SURGE_CONFIG = {
+    "high_demand_threshold": 0.7,      # 70% of drivers busy = start surge
+    "very_high_demand_threshold": 0.85, # 85% = higher surge
+    "critical_demand_threshold": 0.95,  # 95% = max surge
+    "surge_levels": {
+        "normal": 1.0,
+        "high": 1.3,
+        "very_high": 1.8,
+        "critical": 2.5,
+    },
+    "peak_hours": {
+        "morning": {"start": 7, "end": 9, "multiplier": 1.2},   # 7-9 AM
+        "evening": {"start": 17, "end": 20, "multiplier": 1.3}, # 5-8 PM
+    },
+    "weekend_multiplier": 1.1,  # 10% increase on weekends
+    "rain_multiplier": 1.4,     # 40% increase during rain
+    "holiday_multiplier": 1.5,  # 50% increase on holidays
 }
 
 # Driver Certification Levels
