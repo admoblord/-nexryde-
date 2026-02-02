@@ -55,13 +55,42 @@ interface VehicleOption {
   icon: string;
   description: string;
   multiplier: number; // Price multiplier relative to base fare
+  examples?: string; // Example car models
 }
 
 const VEHICLE_OPTIONS: VehicleOption[] = [
-  { type: 'economy', name: 'Economy', icon: 'car-outline', description: 'Standard cars', multiplier: 1.0 },
-  { type: 'comfort', name: 'Comfort', icon: 'car-sport-outline', description: 'Premium comfort', multiplier: 1.25 },
-  { type: 'premium', name: 'Premium', icon: 'car', description: 'Luxury sedans', multiplier: 1.5 },
-  { type: 'suv', name: 'SUV', icon: 'car-sport', description: 'Large vehicles', multiplier: 1.8 },
+  { 
+    type: 'economy', 
+    name: 'Economy', 
+    icon: 'car-outline', 
+    description: 'Standard cars', 
+    multiplier: 1.0,
+    examples: 'Toyota Corolla, Honda Civic'
+  },
+  { 
+    type: 'comfort', 
+    name: 'Comfort', 
+    icon: 'car-sport-outline', 
+    description: 'Premium comfort', 
+    multiplier: 1.25,
+    examples: 'Camry, Accord'
+  },
+  { 
+    type: 'suv', 
+    name: 'SUV', 
+    icon: 'car-sport', 
+    description: 'Large vehicles', 
+    multiplier: 1.5,
+    examples: 'Prado, Highlander'
+  },
+  { 
+    type: 'premium', 
+    name: 'Premium', 
+    icon: 'car', 
+    description: 'Luxury sedans', 
+    multiplier: 2.0,
+    examples: 'Mercedes, BMW, Lexus'
+  },
 ];
 
 export default function BookScreen() {
@@ -148,25 +177,31 @@ export default function BookScreen() {
   };
 
   // ⭐ DYNAMIC PRICING CALCULATION
-  const calculatePrice = (distance: number, vehicleType: VehicleType, rideType: RideType): number => {
+  const calculatePrice = (distance: number, vehicleType: VehicleType, rideType: RideType, estimatedTime?: number): number => {
+    const vehicleMultiplier = VEHICLE_OPTIONS.find(v => v.type === vehicleType)?.multiplier || 1.0;
+    
     if (rideType === 'intra_city') {
       // INTRA-CITY PRICING (within city, max 50km)
       // Base fare: ₦200
       // Per km: ₦100/km
-      // Formula: 200 + (distance * 100) * vehicle_multiplier
+      // Formula: (200 + (distance * 100)) * vehicle_multiplier
       const baseFare = 200;
       const perKm = 100;
-      const vehicleMultiplier = VEHICLE_OPTIONS.find(v => v.type === vehicleType)?.multiplier || 1.0;
       return Math.round((baseFare + (distance * perKm)) * vehicleMultiplier);
     } else {
       // INTER-CITY PRICING (city to city, 50km+)
-      // Base fare: ₦1000
-      // Per km: ₦150/km
-      // Formula: 1000 + (distance * 150) * vehicle_multiplier
+      // Base fare: ₦1,000
+      // Per km: ₦120/km
+      // Per hour: ₦800/hour (compensates driver's time)
+      // Formula: (1000 + (distance * 120) + (hours * 800)) * vehicle_multiplier
       const baseFare = 1000;
-      const perKm = 150;
-      const vehicleMultiplier = VEHICLE_OPTIONS.find(v => v.type === vehicleType)?.multiplier || 1.0;
-      return Math.round((baseFare + (distance * perKm)) * vehicleMultiplier);
+      const perKm = 120;
+      const perHour = 800;
+      
+      // Estimate time if not provided (rough estimate: 60-80 km/hour average for inter-city)
+      const hours = estimatedTime || (distance / 70); // 70 km/h average
+      
+      return Math.round((baseFare + (distance * perKm) + (hours * perHour)) * vehicleMultiplier);
     }
   };
 
@@ -777,13 +812,16 @@ export default function BookScreen() {
                 <>
                   <Text style={styles.pricingInfoText}>• Base fare: ₦200</Text>
                   <Text style={styles.pricingInfoText}>• Per kilometer: ₦100/km</Text>
-                  <Text style={styles.pricingInfoText}>• Comfort: +25% • Premium: +50% • SUV: +80%</Text>
+                  <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
+                  <Text style={styles.pricingInfoNote}>Map-calculated distance pricing</Text>
                 </>
               ) : (
                 <>
                   <Text style={styles.pricingInfoText}>• Base fare: ₦1,000</Text>
-                  <Text style={styles.pricingInfoText}>• Per kilometer: ₦150/km</Text>
-                  <Text style={styles.pricingInfoText}>• Comfort: +25% • Premium: +50% • SUV: +80%</Text>
+                  <Text style={styles.pricingInfoText}>• Per kilometer: ₦120/km</Text>
+                  <Text style={styles.pricingInfoText}>• Per hour of driving: ₦800/hour</Text>
+                  <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
+                  <Text style={styles.pricingInfoNote}>Distance + Time pricing for fairness</Text>
                 </>
               )}
             </View>
@@ -1286,6 +1324,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#475569',
+  },
+  pricingInfoNote: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#3B82F6',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
   confirmButton: {
     borderRadius: 16,
