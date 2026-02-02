@@ -399,9 +399,9 @@ export default function DriverHomeScreen() {
               />
               <FeatureCard
                 icon="car"
-                label="Vehicle"
+                label="My Vehicle"
                 color="#607D8B"
-                onPress={() => router.push('/driver/vehicle')}
+                onPress={() => router.push('/driver/vehicle-registration')}
               />
               <FeatureCard
                 icon="layers"
@@ -411,6 +411,26 @@ export default function DriverHomeScreen() {
               />
             </View>
           </View>
+
+          {/* 🚗 VEHICLE REGISTRATION BANNER */}
+          <TouchableOpacity 
+            style={styles.vehicleBanner}
+            onPress={() => router.push('/driver/vehicle-registration')}
+          >
+            <LinearGradient
+              colors={['#1a1a2e', '#16213e']}
+              style={styles.vehicleBannerGradient}
+            >
+              <View style={styles.vehicleBannerContent}>
+                <Text style={styles.vehicleBannerEmoji}>🚗🚙🚘</Text>
+                <View style={styles.vehicleBannerText}>
+                  <Text style={styles.vehicleBannerTitle}>REGISTER YOUR VEHICLE</Text>
+                  <Text style={styles.vehicleBannerDesc}>Select Economy, Comfort, Premium or XL category</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="#fff" />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
 
           {/* Zero Commission Banner */}
           <View style={styles.bannerCard}>
