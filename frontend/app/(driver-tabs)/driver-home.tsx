@@ -366,14 +366,14 @@ const styles = StyleSheet.create({
 
   // Hero
   heroSection: { paddingHorizontal: 20, marginBottom: 24 },
-  heroCard: { borderRadius: 28, overflow: 'hidden', backgroundColor: '#FFF', elevation: 8, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 12 },
+  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16 },
   heroContentSection: { padding: 24, position: 'relative' },
   heroImageContainer: { width: '100%', height: 320, position: 'relative', borderRadius: 28, overflow: 'hidden' },
   heroBackgroundImage: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 28 },
   heroImage: { width: '100%', height: 320, borderRadius: 28, overflow: 'hidden' },
   heroImageStyle: { borderRadius: 28 },
   heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 24, justifyContent: 'flex-end' },
-  statusBadge: { position: 'absolute', top: 16, right: 16, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.9)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
+  statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 12 },
   statusBadgeOnline: { backgroundColor: 'rgba(16,185,129,0.95)' },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF', marginRight: 8 },
   statusDotOnline: {},
