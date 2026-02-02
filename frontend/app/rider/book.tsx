@@ -6,931 +6,461 @@ import {
   TouchableOpacity,
   ScrollView,
   TextInput,
-  ActivityIndicator,
-  Platform,
   Animated,
   Easing,
   Dimensions,
-  Modal,
-  Keyboard,
   Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-// Falling Flower Component
-const FallingFlower = ({ delay, startX }: { delay: number; startX: number }) => {
-  const translateY = useRef(new Animated.Value(-50)).current;
-  const translateX = useRef(new Animated.Value(startX)).current;
-  const rotate = useRef(new Animated.Value(0)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-
+// ========== ANIMATED CAR COMPONENT ==========
+const AnimatedCar = ({ style, emoji }: { style?: any; emoji: string }) => {
+  const bounce = useRef(new Animated.Value(0)).current;
+  
   useEffect(() => {
-    const startAnimation = () => {
-      translateY.setValue(-50);
-      translateX.setValue(startX);
-      rotate.setValue(0);
-      opacity.setValue(1);
-
-      Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: SCREEN_HEIGHT + 50,
-          duration: 4000 + Math.random() * 2000,
-          easing: Easing.linear,
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, {
+          toValue: -8,
+          duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-        Animated.timing(translateX, {
-          toValue: startX + (Math.random() - 0.5) * 100,
-          duration: 4000 + Math.random() * 2000,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(rotate, {
-          toValue: 360 * (Math.random() > 0.5 ? 1 : -1),
-          duration: 4000 + Math.random() * 2000,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacity, {
+        Animated.timing(bounce, {
           toValue: 0,
-          duration: 4000 + Math.random() * 2000,
-          easing: Easing.in(Easing.ease),
+          duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
-      ]).start(() => startAnimation());
-    };
-
-    const timer = setTimeout(startAnimation, delay);
-    return () => clearTimeout(timer);
-  }, [delay, startX]);
-
-  const spin = rotate.interpolate({
-    inputRange: [0, 360],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  const flowers = ['🌸', '🌺', '🌷', '💮', '🏵️', '✿', '❀'];
-  const flower = flowers[Math.floor(Math.random() * flowers.length)];
+      ])
+    ).start();
+  }, []);
 
   return (
-    <Animated.Text
-      style={[
-        styles.fallingFlower,
-        {
-          transform: [
-            { translateY },
-            { translateX },
-            { rotate: spin },
-          ],
-          opacity,
-        },
-      ]}
-    >
-      {flower}
+    <Animated.Text style={[{ fontSize: 50, transform: [{ translateY: bounce }] }, style]}>
+      {emoji}
     </Animated.Text>
   );
 };
 
-// Floating Particles for City Ride
-const FloatingParticle = ({ delay, startX }: { delay: number; startX: number }) => {
-  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+// ========== SPARKLE EFFECT ==========
+const Sparkle = ({ delay, x, y }: { delay: number; x: number; y: number }) => {
+  const scale = useRef(new Animated.Value(0)).current;
   const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.5)).current;
 
   useEffect(() => {
-    const startAnimation = () => {
-      translateY.setValue(SCREEN_HEIGHT);
-      opacity.setValue(0.7);
-      scale.setValue(0.5 + Math.random() * 0.5);
-
+    const animate = () => {
+      scale.setValue(0);
+      opacity.setValue(1);
+      
       Animated.parallel([
-        Animated.timing(translateY, {
-          toValue: -50,
-          duration: 6000 + Math.random() * 3000,
-          easing: Easing.linear,
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 600,
+          easing: Easing.out(Easing.ease),
           useNativeDriver: true,
         }),
-        Animated.sequence([
-          Animated.timing(opacity, {
-            toValue: 1,
-            duration: 1000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(opacity, {
-            toValue: 0,
-            duration: 5000,
-            useNativeDriver: true,
-          }),
-        ]),
-      ]).start(() => startAnimation());
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+      ]).start(() => setTimeout(animate, 2000 + Math.random() * 2000));
     };
-
-    const timer = setTimeout(startAnimation, delay);
-    return () => clearTimeout(timer);
-  }, [delay]);
+    
+    setTimeout(animate, delay);
+  }, []);
 
   return (
-    <Animated.View
-      style={[
-        styles.floatingParticle,
-        {
-          left: startX,
-          transform: [{ translateY }, { scale }],
-          opacity,
-        },
-      ]}
-    />
+    <Animated.Text
+      style={{
+        position: 'absolute',
+        left: x,
+        top: y,
+        fontSize: 16,
+        transform: [{ scale }],
+        opacity,
+      }}
+    >
+      ✨
+    </Animated.Text>
   );
 };
 
-const { width, height } = Dimensions.get('window');
-const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-
-interface RouteStop {
-  id: string;
-  type: 'pickup' | 'stop' | 'dropoff';
-  address: string;
-  coordinates?: { latitude: number; longitude: number };
-  isEditing: boolean;
-}
-
-interface PlacePrediction {
-  place_id: string;
-  description: string;
-  structured_formatting: {
-    main_text: string;
-    secondary_text: string;
-  };
-}
-
-// Lagos, Nigeria default location
-const DEFAULT_REGION = {
-  latitude: 6.5244,
-  longitude: 3.3792,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
-};
-
-// Inter-City Popular Routes (Pre-cached for cost savings)
+// ========== INTER-CITY ROUTES ==========
 const INTER_CITY_ROUTES = [
-  { id: 'lagos-ibadan', from: 'Lagos', to: 'Ibadan', distance: '127 km', duration: '~2h', price: '₦15,000' },
-  { id: 'lagos-abuja', from: 'Lagos', to: 'Abuja', distance: '536 km', duration: '~7h', price: '₦45,000' },
-  { id: 'lagos-benin', from: 'Lagos', to: 'Benin City', distance: '305 km', duration: '~4h', price: '₦25,000' },
-  { id: 'lagos-ore', from: 'Lagos', to: 'Ore', distance: '192 km', duration: '~2.5h', price: '₦18,000' },
-  { id: 'lagos-abeokuta', from: 'Lagos', to: 'Abeokuta', distance: '77 km', duration: '~1.5h', price: '₦10,000' },
+  { id: 'lagos-ibadan', from: 'Lagos', to: 'Ibadan', distance: '127 km', duration: '2h', price: 15000, emoji: '🚗', color: ['#667eea', '#764ba2'] },
+  { id: 'lagos-abuja', from: 'Lagos', to: 'Abuja', distance: '536 km', duration: '7h', price: 45000, emoji: '✈️', color: ['#f093fb', '#f5576c'] },
+  { id: 'lagos-benin', from: 'Lagos', to: 'Benin', distance: '305 km', duration: '4h', price: 25000, emoji: '🚙', color: ['#4facfe', '#00f2fe'] },
+  { id: 'lagos-ore', from: 'Lagos', to: 'Ore', distance: '192 km', duration: '2.5h', price: 18000, emoji: '🚕', color: ['#43e97b', '#38f9d7'] },
+  { id: 'lagos-abeokuta', from: 'Lagos', to: 'Abeokuta', distance: '77 km', duration: '1.5h', price: 10000, emoji: '🛺', color: ['#fa709a', '#fee140'] },
+];
+
+// ========== CAR TYPES ==========
+const CAR_TYPES = [
+  { id: 'economy', name: 'Economy', emoji: '🚗', price: 150, desc: 'Affordable', color: '#4CAF50' },
+  { id: 'comfort', name: 'Comfort', emoji: '🚙', price: 200, desc: 'Spacious', color: '#2196F3' },
+  { id: 'premium', name: 'Premium', emoji: '🚘', price: 350, desc: 'Luxury', color: '#9C27B0' },
+  { id: 'xl', name: 'SUV/XL', emoji: '🚐', price: 250, desc: '6+ Seats', color: '#FF9800' },
 ];
 
 export default function BookScreen() {
   const router = useRouter();
-  
-  // Trip Type: 'city' or 'intercity'
   const [tripType, setTripType] = useState<'city' | 'intercity'>('city');
-  const [selectedInterCityRoute, setSelectedInterCityRoute] = useState<string | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
+  const [selectedCar, setSelectedCar] = useState('economy');
+  const [pickup, setPickup] = useState('');
+  const [dropoff, setDropoff] = useState('');
   
-  const [stops, setStops] = useState<RouteStop[]>([
-    { id: '1', type: 'pickup', address: '', isEditing: false },
-    { id: '2', type: 'dropoff', address: '', isEditing: false },
-  ]);
-  
-  const [activeStopId, setActiveStopId] = useState<string | null>(null);
-  const [showMapPicker, setShowMapPicker] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [predictions, setPredictions] = useState<PlacePrediction[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [isLoadingLocation, setIsLoadingLocation] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{
-    latitude: number;
-    longitude: number;
-  } | null>(null);
+  // Animations
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+  const scaleAnim = useRef(new Animated.Value(1)).current;
 
-  // Get current location on mount
   useEffect(() => {
-    getCurrentLocation();
-  }, []);
+    // Animate on trip type change
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 300,
+          useNativeDriver: true,
+        }),
+        Animated.spring(scaleAnim, {
+          toValue: 1,
+          friction: 5,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    });
+  }, [tripType]);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission denied');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-      const coords = {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-      };
-      setCurrentLocation(coords);
-    } catch (error) {
-      console.error('Error getting location:', error);
-    }
-  };
-
-  // Search places using Google Places API
-  const searchPlaces = async (query: string) => {
-    if (query.length < 2) {
-      setPredictions([]);
+  const handleBookRide = () => {
+    if (tripType === 'city' && (!pickup || !dropoff)) {
+      Alert.alert('Missing Location', 'Please enter pickup and dropoff locations');
       return;
     }
-
-    setIsSearching(true);
-    try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          query
-        )}&components=country:ng&key=${GOOGLE_MAPS_API_KEY}`
-      );
-      const data = await response.json();
-      
-      if (data.predictions) {
-        setPredictions(data.predictions);
-      }
-    } catch (error) {
-      console.error('Error searching places:', error);
+    if (tripType === 'intercity' && !selectedRoute) {
+      Alert.alert('Select Route', 'Please select an inter-city route');
+      return;
     }
-    setIsSearching(false);
-  };
-
-  // Get place details (coordinates) from place_id
-  const getPlaceDetails = async (placeId: string): Promise<{
-    latitude: number;
-    longitude: number;
-    address: string;
-  } | null> => {
-    try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address&key=${GOOGLE_MAPS_API_KEY}`
-      );
-      const data = await response.json();
-      
-      if (data.result) {
-        return {
-          latitude: data.result.geometry.location.lat,
-          longitude: data.result.geometry.location.lng,
-          address: data.result.formatted_address,
-        };
-      }
-    } catch (error) {
-      console.error('Error getting place details:', error);
-    }
-    return null;
-  };
-
-  // Reverse geocode coordinates to address
-  const reverseGeocode = async (latitude: number, longitude: number): Promise<string> => {
-    try {
-      const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
-      );
-      const data = await response.json();
-      
-      if (data.results && data.results.length > 0) {
-        return data.results[0].formatted_address;
-      }
-    } catch (error) {
-      console.error('Error reverse geocoding:', error);
-    }
-    return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
-  };
-
-  // Handle place selection from search
-  const handleSelectPrediction = async (prediction: PlacePrediction) => {
-    Keyboard.dismiss();
-    setIsLoadingLocation(true);
-    
-    const details = await getPlaceDetails(prediction.place_id);
-    if (details && activeStopId) {
-      setStops(stops.map(stop =>
-        stop.id === activeStopId
-          ? {
-              ...stop,
-              address: details.address,
-              coordinates: {
-                latitude: details.latitude,
-                longitude: details.longitude,
-              },
-            }
-          : stop
-      ));
-    }
-    
-    setSearchQuery('');
-    setPredictions([]);
-    setShowMapPicker(false);
-    setActiveStopId(null);
-    setIsLoadingLocation(false);
-  };
-
-  // Use current location
-  const useCurrentLocation = async () => {
-    if (!currentLocation) {
-      await getCurrentLocation();
-    }
-    
-    if (currentLocation) {
-      setIsLoadingLocation(true);
-      const address = await reverseGeocode(currentLocation.latitude, currentLocation.longitude);
-      
-      if (activeStopId) {
-        setStops(stops.map(stop =>
-          stop.id === activeStopId
-            ? {
-                ...stop,
-                address: address,
-                coordinates: currentLocation,
-              }
-            : stop
-        ));
-        setActiveStopId(null);
-      }
-      setIsLoadingLocation(false);
-    }
-  };
-
-  // Open location picker for a specific stop
-  const openLocationPicker = (stopId: string) => {
-    console.log('Opening location picker for stop:', stopId);
-    setActiveStopId(stopId);
-    setShowMapPicker(true);
-  };
-
-  // Add a new stop
-  const addStop = () => {
-    const newStop: RouteStop = {
-      id: Date.now().toString(),
-      type: 'stop',
-      address: '',
-      isEditing: true,
-    };
-    const newStops = [...stops];
-    newStops.splice(stops.length - 1, 0, newStop);
-    setStops(newStops);
-  };
-
-  // Remove a stop
-  const removeStop = (id: string) => {
-    const stop = stops.find(s => s.id === id);
-    if (stop?.type === 'pickup' || stop?.type === 'dropoff') return;
-    setStops(stops.filter(stop => stop.id !== id));
-  };
-
-  // Select from saved/recent locations
-  const selectSavedLocation = async (address: string, name: string) => {
-    if (!activeStopId) {
-      const emptyStop = stops.find(s => !s.address);
-      if (emptyStop) {
-        setActiveStopId(emptyStop.id);
-      } else {
-        return;
-      }
-    }
-    
-    const mockCoords: { [key: string]: { latitude: number; longitude: number } } = {
-      'Home': { latitude: 6.4281, longitude: 3.4219 },
-      'Work': { latitude: 6.4355, longitude: 3.4567 },
-      'Shoprite Mall': { latitude: 6.4298, longitude: 3.4736 },
-      'Murtala Mohammed Airport': { latitude: 6.5774, longitude: 3.3212 },
-      'Palms Shopping Mall': { latitude: 6.4315, longitude: 3.4234 },
-    };
-    
-    const coords = mockCoords[name] || { latitude: 6.5244, longitude: 3.3792 };
-    
-    const targetStopId = activeStopId || stops.find(s => !s.address)?.id;
-    if (targetStopId) {
-      setStops(stops.map(stop =>
-        stop.id === targetStopId
-          ? { ...stop, address, coordinates: coords }
-          : stop
-      ));
-    }
-    setActiveStopId(null);
-  };
-
-  const savedLocations = [
-    { id: 'home', name: 'Home', address: '123 Victoria Island, Lagos', icon: 'home' },
-    { id: 'work', name: 'Work', address: '456 Lekki Phase 1, Lagos', icon: 'briefcase' },
-  ];
-
-  const recentLocations = [
-    { id: 'recent1', name: 'Shoprite Mall', address: 'Lekki, Lagos' },
-    { id: 'recent2', name: 'Murtala Mohammed Airport', address: 'Ikeja, Lagos' },
-    { id: 'recent3', name: 'Palms Shopping Mall', address: 'Victoria Island, Lagos' },
-  ];
-
-  const canContinue = 
-    stops.find(s => s.type === 'pickup')?.address && 
-    stops.find(s => s.type === 'dropoff')?.address;
-
-  const handleContinue = () => {
-    if (canContinue) {
-      router.push('/rider/tracking');
-    }
-  };
-
-  const getStopIcon = (type: string) => {
-    if (type === 'pickup') {
-      return (
-        <View style={[styles.stopIndicator, styles.pickupIndicator]}>
-          <View style={styles.pickupDot} />
-        </View>
-      );
-    }
-    if (type === 'dropoff') {
-      return (
-        <View style={[styles.stopIndicator, styles.dropoffIndicator]}>
-          <View style={styles.dropoffDot} />
-        </View>
-      );
-    }
-    return (
-      <View style={[styles.stopIndicator, styles.middleIndicator]}>
-        <Ionicons name="search" size={16} color={COLORS.accentGreen} />
-      </View>
-    );
-  };
-
-  const getPlaceholder = (type: string) => {
-    switch (type) {
-      case 'pickup': return 'Pickup location';
-      case 'dropoff': return 'Dropoff location';
-      default: return 'Add stop';
-    }
+    router.push('/rider/tracking');
   };
 
   return (
     <View style={styles.container}>
-      {/* 🌸 Falling Flowers Animation for Inter-City - Premium Effect */}
-      {tripType === 'intercity' && (
-        <>
-          {Array.from({ length: 15 }, (_, i) => (
-            <FallingFlower
-              key={`flower-${i}`}
-              delay={i * 600}
-              startX={Math.random() * SCREEN_WIDTH}
-            />
-          ))}
-        </>
-      )}
-      
-      {/* ✨ Floating Particles for City Ride */}
-      {tripType === 'city' && (
-        <>
-          {Array.from({ length: 12 }, (_, i) => (
-            <FloatingParticle
-              key={`particle-${i}`}
-              delay={i * 500}
-              startX={Math.random() * SCREEN_WIDTH}
-            />
-          ))}
-        </>
-      )}
-      
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity 
-            style={styles.closeButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Your route</Text>
-          <View style={styles.headerRight} />
-        </View>
-
-        {/* 🚗 TRIP TYPE TOGGLE - City vs Inter-City */}
-        <View style={styles.tripTypeContainer}>
-          <TouchableOpacity
-            style={[
-              styles.tripTypeButton,
-              tripType === 'city' && styles.tripTypeButtonActive
-            ]}
-            onPress={() => setTripType('city')}
-          >
-            <Ionicons 
-              name="car" 
-              size={18} 
-              color={tripType === 'city' ? COLORS.white : COLORS.lightTextSecondary} 
-            />
-            <Text style={[
-              styles.tripTypeText,
-              tripType === 'city' && styles.tripTypeTextActive
-            ]}>City Ride</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[
-              styles.tripTypeButton,
-              tripType === 'intercity' && styles.tripTypeButtonActive
-            ]}
-            onPress={() => setTripType('intercity')}
-          >
-            <Ionicons 
-              name="map" 
-              size={18} 
-              color={tripType === 'intercity' ? COLORS.white : COLORS.lightTextSecondary} 
-            />
-            <Text style={[
-              styles.tripTypeText,
-              tripType === 'intercity' && styles.tripTypeTextActive
-            ]}>Inter-City</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Inter-City Popular Routes - Beautiful Premium Design */}
+      {/* ========== BEAUTIFUL GRADIENT HEADER ========== */}
+      <LinearGradient
+        colors={tripType === 'city' ? ['#1a1a2e', '#16213e', '#0f3460'] : ['#667eea', '#764ba2', '#f093fb']}
+        style={styles.headerGradient}
+      >
+        {/* Sparkle Effects */}
         {tripType === 'intercity' && (
-          <LinearGradient
-            colors={['#FF6B9D', '#C44569', '#8B2FC9']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.interCityGradient}
-          >
-            {/* Decorative Elements */}
-            <View style={styles.decorCircleTopRight} />
-            <View style={styles.decorCircleBottomLeft} />
-            
-            <View style={styles.interCityHeader}>
-              <View>
-                <Text style={styles.interCityTitle}>🌸 Inter-City Travel</Text>
-                <Text style={styles.interCitySubtitle}>Beautiful journeys across Nigeria</Text>
-              </View>
-              <View style={styles.interCityBadge}>
-                <Text style={styles.interCityBadgeText}>SAVE 40%</Text>
-              </View>
-            </View>
-            
-            <ScrollView 
-              horizontal 
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.routesScrollContent}
+          <>
+            <Sparkle delay={0} x={50} y={80} />
+            <Sparkle delay={500} x={150} y={60} />
+            <Sparkle delay={1000} x={280} y={90} />
+            <Sparkle delay={1500} x={100} y={120} />
+            <Sparkle delay={2000} x={320} y={70} />
+          </>
+        )}
+
+        <SafeAreaView>
+          {/* Close Button */}
+          <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
+            <Ionicons name="close" size={28} color="#fff" />
+          </TouchableOpacity>
+
+          {/* Header Content */}
+          <View style={styles.headerContent}>
+            <AnimatedCar emoji={tripType === 'city' ? '🚖' : '✈️'} />
+            <Text style={styles.headerTitle}>
+              {tripType === 'city' ? 'City Ride' : 'Inter-City Travel'}
+            </Text>
+            <Text style={styles.headerSubtitle}>
+              {tripType === 'city' 
+                ? 'Fast & affordable rides within Lagos' 
+                : '🌟 Explore Nigeria in comfort & style'}
+            </Text>
+          </View>
+
+          {/* ========== BEAUTIFUL TRIP TYPE TOGGLE ========== */}
+          <View style={styles.toggleContainer}>
+            <TouchableOpacity
+              style={[styles.toggleBtn, tripType === 'city' && styles.toggleBtnActive]}
+              onPress={() => setTripType('city')}
             >
+              <Text style={styles.toggleEmoji}>🏙️</Text>
+              <Text style={[styles.toggleText, tripType === 'city' && styles.toggleTextActive]}>
+                City Ride
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.toggleBtn, tripType === 'intercity' && styles.toggleBtnActive]}
+              onPress={() => setTripType('intercity')}
+            >
+              <Text style={styles.toggleEmoji}>🛣️</Text>
+              <Text style={[styles.toggleText, tripType === 'intercity' && styles.toggleTextActive]}>
+                Inter-City
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
+
+      {/* ========== MAIN CONTENT ========== */}
+      <ScrollView 
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
+          
+          {/* ========== CITY RIDE INTERFACE ========== */}
+          {tripType === 'city' && (
+            <>
+              {/* Location Inputs */}
+              <View style={styles.locationCard}>
+                <View style={styles.locationHeader}>
+                  <Ionicons name="location" size={20} color={COLORS.accentGreen} />
+                  <Text style={styles.locationTitle}>Where to?</Text>
+                </View>
+
+                {/* Pickup */}
+                <View style={styles.inputRow}>
+                  <View style={[styles.dot, { backgroundColor: COLORS.accentGreen }]} />
+                  <TextInput
+                    style={styles.locationInput}
+                    placeholder="Enter pickup location"
+                    placeholderTextColor="#999"
+                    value={pickup}
+                    onChangeText={setPickup}
+                  />
+                  <TouchableOpacity style={styles.inputIcon}>
+                    <Ionicons name="locate" size={20} color={COLORS.primary} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.inputDivider} />
+
+                {/* Dropoff */}
+                <View style={styles.inputRow}>
+                  <View style={[styles.dot, { backgroundColor: COLORS.error }]} />
+                  <TextInput
+                    style={styles.locationInput}
+                    placeholder="Enter destination"
+                    placeholderTextColor="#999"
+                    value={dropoff}
+                    onChangeText={setDropoff}
+                  />
+                  <TouchableOpacity style={styles.inputIcon}>
+                    <Ionicons name="star" size={20} color="#FFD700" />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Quick Locations */}
+                <View style={styles.quickLocations}>
+                  <TouchableOpacity style={styles.quickBtn} onPress={() => setPickup('📍 Current Location')}>
+                    <Ionicons name="navigate" size={16} color={COLORS.accentGreen} />
+                    <Text style={styles.quickBtnText}>Current</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.quickBtn} onPress={() => setDropoff('🏠 Home')}>
+                    <Ionicons name="home" size={16} color={COLORS.primary} />
+                    <Text style={styles.quickBtnText}>Home</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.quickBtn} onPress={() => setDropoff('💼 Work')}>
+                    <Ionicons name="briefcase" size={16} color="#FF9800" />
+                    <Text style={styles.quickBtnText}>Work</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              {/* ========== CAR TYPE SELECTION ========== */}
+              <Text style={styles.sectionTitle}>🚗 Choose Your Ride</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carScroll}>
+                {CAR_TYPES.map((car) => (
+                  <TouchableOpacity
+                    key={car.id}
+                    style={[
+                      styles.carCard,
+                      selectedCar === car.id && { borderColor: car.color, borderWidth: 3 }
+                    ]}
+                    onPress={() => setSelectedCar(car.id)}
+                  >
+                    <View style={[styles.carIconWrap, { backgroundColor: car.color + '20' }]}>
+                      <Text style={styles.carEmoji}>{car.emoji}</Text>
+                    </View>
+                    <Text style={styles.carName}>{car.name}</Text>
+                    <Text style={styles.carDesc}>{car.desc}</Text>
+                    <Text style={[styles.carPrice, { color: car.color }]}>
+                      {CURRENCY}{car.price}/km
+                    </Text>
+                    {selectedCar === car.id && (
+                      <View style={[styles.selectedBadge, { backgroundColor: car.color }]}>
+                        <Ionicons name="checkmark" size={14} color="#fff" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+
+              {/* Voice Booking Promo */}
+              <TouchableOpacity 
+                style={styles.voicePromo}
+                onPress={() => router.push('/rider/voice-booking')}
+              >
+                <LinearGradient
+                  colors={['#667eea', '#764ba2']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.voicePromoGradient}
+                >
+                  <View style={styles.voiceIcon}>
+                    <Text style={{ fontSize: 28 }}>🎤</Text>
+                  </View>
+                  <View style={styles.voiceContent}>
+                    <Text style={styles.voiceTitle}>Voice Booking</Text>
+                    <Text style={styles.voiceSubtitle}>
+                      "Book me go Lekki" - Speak in Pidgin, Yoruba, Igbo!
+                    </Text>
+                  </View>
+                  <View style={styles.voiceNewBadge}>
+                    <Text style={styles.voiceNewText}>NEW</Text>
+                  </View>
+                </LinearGradient>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {/* ========== INTER-CITY INTERFACE ========== */}
+          {tripType === 'intercity' && (
+            <>
+              {/* Beautiful Hero Section */}
+              <View style={styles.interCityHero}>
+                <Text style={styles.interCityTitle}>🌍 Explore Nigeria</Text>
+                <Text style={styles.interCitySubtitle}>
+                  Premium inter-city rides • Fixed prices • Verified drivers
+                </Text>
+                <View style={styles.saveBadge}>
+                  <Text style={styles.saveText}>💰 SAVE UP TO 40%</Text>
+                </View>
+              </View>
+
+              {/* Route Cards */}
+              <Text style={styles.sectionTitle}>🛣️ Popular Routes</Text>
+              
               {INTER_CITY_ROUTES.map((route) => (
                 <TouchableOpacity
                   key={route.id}
                   style={[
-                    styles.interCityRouteCard,
-                    selectedInterCityRoute === route.id && styles.interCityRouteCardSelected
+                    styles.routeCard,
+                    selectedRoute === route.id && styles.routeCardSelected
                   ]}
-                  onPress={() => {
-                    setSelectedInterCityRoute(route.id);
-                    // Auto-fill the stops
-                    setStops([
-                      { id: '1', type: 'pickup', address: `${route.from} (City Center)`, isEditing: false, coordinates: { latitude: 6.5244, longitude: 3.3792 } },
-                      { id: '2', type: 'dropoff', address: `${route.to} (City Center)`, isEditing: false, coordinates: { latitude: 7.3775, longitude: 3.9470 } },
-                    ]);
-                  }}
-                  activeOpacity={0.9}
+                  onPress={() => setSelectedRoute(route.id)}
+                  activeOpacity={0.8}
                 >
-                  <View style={styles.routeCardGlow} />
-                  <View style={styles.routeHeader}>
-                    <Text style={styles.routeFromTo}>{route.from}</Text>
-                    <View style={styles.routeArrowContainer}>
-                      <Ionicons name="airplane" size={16} color="#FF6B9D" />
+                  <LinearGradient
+                    colors={route.color as any}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.routeGradient}
+                  >
+                    {/* Decorative Elements */}
+                    <View style={styles.routeDecor1} />
+                    <View style={styles.routeDecor2} />
+
+                    {/* Route Content */}
+                    <View style={styles.routeTop}>
+                      <View style={styles.routeCities}>
+                        <Text style={styles.routeFrom}>{route.from}</Text>
+                        <View style={styles.routeArrow}>
+                          <Text style={{ fontSize: 24 }}>{route.emoji}</Text>
+                        </View>
+                        <Text style={styles.routeTo}>{route.to}</Text>
+                      </View>
+                      {selectedRoute === route.id && (
+                        <View style={styles.routeCheckmark}>
+                          <Ionicons name="checkmark-circle" size={28} color="#fff" />
+                        </View>
+                      )}
                     </View>
-                    <Text style={styles.routeFromTo}>{route.to}</Text>
-                  </View>
-                  <View style={styles.routeDivider} />
-                  <View style={styles.routeDetails}>
-                    <View style={styles.routeDetail}>
-                      <Ionicons name="speedometer-outline" size={14} color={COLORS.lightTextSecondary} />
-                      <Text style={styles.routeDetailText}>{route.distance}</Text>
+
+                    <View style={styles.routeBottom}>
+                      <View style={styles.routeStat}>
+                        <Ionicons name="speedometer" size={16} color="rgba(255,255,255,0.9)" />
+                        <Text style={styles.routeStatText}>{route.distance}</Text>
+                      </View>
+                      <View style={styles.routeStat}>
+                        <Ionicons name="time" size={16} color="rgba(255,255,255,0.9)" />
+                        <Text style={styles.routeStatText}>{route.duration}</Text>
+                      </View>
+                      <View style={styles.routePriceTag}>
+                        <Text style={styles.routePrice}>{CURRENCY}{route.price.toLocaleString()}</Text>
+                      </View>
                     </View>
-                    <View style={styles.routeDetail}>
-                      <Ionicons name="time-outline" size={14} color={COLORS.lightTextSecondary} />
-                      <Text style={styles.routeDetailText}>{route.duration}</Text>
-                    </View>
-                  </View>
-                  <View style={styles.routePriceContainer}>
-                    <Text style={styles.routePriceLabel}>From</Text>
-                    <Text style={styles.routePrice}>{route.price}</Text>
-                  </View>
-                  {selectedInterCityRoute === route.id && (
-                    <View style={styles.selectedBadge}>
-                      <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />
-                    </View>
-                  )}
+                  </LinearGradient>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
-            
-            {/* Voice Booking Promo in Inter-City */}
-            <TouchableOpacity style={styles.voicePromoCard}>
-              <View style={styles.voicePromoIcon}>
-                <Ionicons name="mic" size={20} color="#FFFFFF" />
+
+              {/* Inter-City Features */}
+              <View style={styles.featuresRow}>
+                <View style={styles.featureItem}>
+                  <Text style={styles.featureEmoji}>🛡️</Text>
+                  <Text style={styles.featureText}>Verified Drivers</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Text style={styles.featureEmoji}>💳</Text>
+                  <Text style={styles.featureText}>Fixed Price</Text>
+                </View>
+                <View style={styles.featureItem}>
+                  <Text style={styles.featureEmoji}>📍</Text>
+                  <Text style={styles.featureText}>Live Tracking</Text>
+                </View>
               </View>
-              <View style={styles.voicePromoContent}>
-                <Text style={styles.voicePromoTitle}>🎤 Voice Booking</Text>
-                <Text style={styles.voicePromoText}>Say "Book me to Abuja" in Yoruba, Igbo, or Pidgin!</Text>
-              </View>
-              <View style={styles.comingSoonTag}>
-                <Text style={styles.comingSoonText}>SOON</Text>
-              </View>
-            </TouchableOpacity>
+            </>
+          )}
+
+        </Animated.View>
+      </ScrollView>
+
+      {/* ========== BOOK NOW BUTTON ========== */}
+      <View style={styles.bottomBar}>
+        <View style={styles.pricePreview}>
+          <Text style={styles.priceLabel}>Estimated</Text>
+          <Text style={styles.priceValue}>
+            {tripType === 'city' 
+              ? `${CURRENCY}${(CAR_TYPES.find(c => c.id === selectedCar)?.price || 150) * 10}`
+              : selectedRoute 
+                ? `${CURRENCY}${(INTER_CITY_ROUTES.find(r => r.id === selectedRoute)?.price || 0).toLocaleString()}`
+                : '---'
+            }
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.bookButton} onPress={handleBookRide}>
+          <LinearGradient
+            colors={['#00C853', '#00E676']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={styles.bookButtonGradient}
+          >
+            <Text style={styles.bookButtonText}>Book Now</Text>
+            <Ionicons name="arrow-forward" size={20} color="#fff" />
           </LinearGradient>
-        )}
-
-        {/* Route Card - Only show for city rides or if intercity route selected */}
-        {(tripType === 'city' || selectedInterCityRoute) && (
-        <View style={styles.routeCard}>
-          {stops.map((stop, index) => (
-            <View key={stop.id}>
-              {index > 0 && (
-                <View style={styles.connectionLine}>
-                  <View style={styles.dashedLine} />
-                </View>
-              )}
-              
-              <View style={styles.stopRow}>
-                {getStopIcon(stop.type)}
-
-                <TouchableOpacity 
-                  style={[
-                    styles.stopInputContainer,
-                    activeStopId === stop.id && styles.stopInputActive
-                  ]}
-                  onPress={() => openLocationPicker(stop.id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.stopInputContent}>
-                    <Text style={styles.stopLabel}>
-                      {stop.type === 'pickup' ? 'PICKUP' : stop.type === 'dropoff' ? 'DROP-OFF' : 'STOP'}
-                    </Text>
-                    <Text 
-                      style={[
-                        styles.stopInputText,
-                        !stop.address && styles.stopInputPlaceholder
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {stop.address || getPlaceholder(stop.type)}
-                    </Text>
-                  </View>
-                  <View style={styles.stopInputIcon}>
-                    <Ionicons name="search" size={18} color={COLORS.lightTextMuted} />
-                  </View>
-                </TouchableOpacity>
-
-                {stop.type === 'pickup' ? (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={addStop}
-                  >
-                    <View style={styles.addButtonInner}>
-                      <Ionicons name="add" size={20} color={COLORS.white} />
-                    </View>
-                  </TouchableOpacity>
-                ) : stop.type === 'stop' ? (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => removeStop(stop.id)}
-                  >
-                    <View style={styles.removeButtonInner}>
-                      <Ionicons name="close" size={18} color={COLORS.error} />
-                    </View>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-            </View>
-          ))}
-        </View>
-        )}
-
-        {/* 🔥 VOICE BOOKING - COMING SOON */}
-        <View style={styles.voiceBookingCard}>
-          <View style={styles.voiceBookingBadge}>
-            <Text style={styles.voiceBookingBadgeText}>COMING SOON</Text>
-          </View>
-          <View style={styles.voiceBookingContent}>
-            <View style={styles.voiceIcon}>
-              <Ionicons name="mic" size={28} color="#8B5CF6" />
-            </View>
-            <View style={styles.voiceText}>
-              <Text style={styles.voiceTitle}>🎤 Voice Booking</Text>
-              <Text style={styles.voiceDesc}>Book rides by voice in Yoruba, Igbo, Hausa & Pidgin!</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Location Suggestions */}
-        <ScrollView 
-          style={styles.suggestionsContainer}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Saved Places */}
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Saved Places</Text>
-            {savedLocations.map((location) => (
-              <TouchableOpacity 
-                key={location.id}
-                style={styles.savedLocationItem}
-                onPress={() => selectSavedLocation(location.address, location.name)}
-              >
-                <View style={styles.savedLocationIcon}>
-                  <Ionicons name={location.icon as any} size={20} color={COLORS.white} />
-                </View>
-                <View style={styles.locationContent}>
-                  <Text style={styles.locationName}>{location.name}</Text>
-                  <Text style={styles.locationAddress}>{location.address}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Recent Locations */}
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Recent</Text>
-            {recentLocations.map((location) => (
-              <TouchableOpacity 
-                key={location.id}
-                style={styles.recentLocationItem}
-                onPress={() => selectSavedLocation(location.address, location.name)}
-              >
-                <View style={styles.recentLocationIcon}>
-                  <Ionicons name="time" size={18} color={COLORS.lightTextSecondary} />
-                </View>
-                <View style={styles.locationContent}>
-                  <Text style={styles.locationName}>{location.name}</Text>
-                  <Text style={styles.locationAddress}>{location.address}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Use Current Location */}
-          <TouchableOpacity 
-            style={styles.currentLocationButton}
-            onPress={useCurrentLocation}
-            disabled={isLoadingLocation}
-          >
-            <View style={[styles.locationIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-              {isLoadingLocation ? (
-                <ActivityIndicator size="small" color={COLORS.accentBlue} />
-              ) : (
-                <Ionicons name="navigate" size={18} color={COLORS.accentBlue} />
-              )}
-            </View>
-            <Text style={styles.currentLocationText}>Use current location</Text>
-          </TouchableOpacity>
-
-          <View style={styles.bottomSpacer} />
-        </ScrollView>
-
-        {/* Bottom Button */}
-        <View style={styles.bottomContainer}>
-          <TouchableOpacity 
-            style={[
-              styles.continueButton,
-              !canContinue && styles.continueButtonDisabled
-            ]}
-            onPress={handleContinue}
-            disabled={!canContinue}
-          >
-            <Text style={[
-              styles.continueText,
-              !canContinue && styles.continueTextDisabled
-            ]}>
-              Continue
-            </Text>
-            <Ionicons 
-              name="arrow-forward" 
-              size={20} 
-              color={canContinue ? COLORS.white : COLORS.lightTextMuted} 
-            />
-          </TouchableOpacity>
-        </View>
-
-        {/* Location Search Modal */}
-        <Modal
-          visible={showMapPicker}
-          animationType="slide"
-          presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-          transparent={false}
-        >
-          <SafeAreaView style={styles.modalContainer}>
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <TouchableOpacity 
-                style={styles.modalCloseButton}
-                onPress={() => {
-                  setShowMapPicker(false);
-                  setSearchQuery('');
-                  setPredictions([]);
-                }}
-              >
-                <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Search Location</Text>
-              <View style={{ width: 40 }} />
-            </View>
-
-            {/* Search Bar */}
-            <View style={styles.searchContainer}>
-              <View style={styles.searchInputContainer}>
-                <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
-                <TextInput
-                  style={styles.searchInput}
-                  placeholder="Search for a place"
-                  placeholderTextColor={COLORS.lightTextMuted}
-                  value={searchQuery}
-                  onChangeText={(text) => {
-                    setSearchQuery(text);
-                    searchPlaces(text);
-                  }}
-                  autoFocus
-                />
-                {searchQuery.length > 0 && (
-                  <TouchableOpacity 
-                    onPress={() => {
-                      setSearchQuery('');
-                      setPredictions([]);
-                    }}
-                  >
-                    <Ionicons name="close-circle" size={20} color={COLORS.lightTextMuted} />
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-
-            {/* Loading */}
-            {isSearching && (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={COLORS.accentGreen} />
-              </View>
-            )}
-
-            {/* Search Results */}
-            <ScrollView 
-              style={styles.resultsList}
-              keyboardShouldPersistTaps="handled"
-            >
-              {predictions.map((prediction) => (
-                <TouchableOpacity
-                  key={prediction.place_id}
-                  style={styles.resultItem}
-                  onPress={() => handleSelectPrediction(prediction)}
-                >
-                  <View style={styles.resultIcon}>
-                    <Ionicons name="location-outline" size={20} color={COLORS.lightTextSecondary} />
-                  </View>
-                  <View style={styles.resultContent}>
-                    <Text style={styles.resultMain}>
-                      {prediction.structured_formatting.main_text}
-                    </Text>
-                    <Text style={styles.resultSecondary}>
-                      {prediction.structured_formatting.secondary_text}
-                    </Text>
-                  </View>
-                </TouchableOpacity>
-              ))}
-
-              {/* Quick Actions */}
-              {predictions.length === 0 && !isSearching && (
-                <View style={styles.quickActions}>
-                  <TouchableOpacity 
-                    style={styles.quickActionItem}
-                    onPress={() => {
-                      useCurrentLocation();
-                      setShowMapPicker(false);
-                    }}
-                  >
-                    <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                      <Ionicons name="navigate" size={20} color={COLORS.accentBlue} />
-                    </View>
-                    <Text style={styles.quickActionText}>Use current location</Text>
-                  </TouchableOpacity>
-
-                  {savedLocations.map((location) => (
-                    <TouchableOpacity 
-                      key={location.id}
-                      style={styles.quickActionItem}
-                      onPress={() => {
-                        selectSavedLocation(location.address, location.name);
-                        setShowMapPicker(false);
-                      }}
-                    >
-                      <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                        <Ionicons name={location.icon as any} size={20} color={COLORS.accentGreen} />
-                      </View>
-                      <View>
-                        <Text style={styles.quickActionText}>{location.name}</Text>
-                        <Text style={styles.quickActionSubtext}>{location.address}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
-            </ScrollView>
-          </SafeAreaView>
-        </Modal>
-      </SafeAreaView>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -938,750 +468,450 @@ export default function BookScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#f5f7fa',
   },
-  safeArea: {
-    flex: 1,
+  headerGradient: {
+    paddingBottom: SPACING.lg,
+    borderBottomLeftRadius: 30,
+    borderBottomRightRadius: 30,
+    overflow: 'hidden',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
+  closeBtn: {
+    position: 'absolute',
+    top: SPACING.lg,
+    left: SPACING.lg,
+    zIndex: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  headerContent: {
+    alignItems: 'center',
+    paddingTop: SPACING.xxl + 20,
+    paddingBottom: SPACING.md,
   },
   headerTitle: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#fff',
+    marginTop: SPACING.md,
   },
-  headerRight: {
-    width: 40,
+  headerSubtitle: {
+    fontSize: FONT_SIZE.md,
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: SPACING.xs,
+    textAlign: 'center',
   },
-  // Trip Type Toggle Styles
-  tripTypeContainer: {
+  toggleContainer: {
     flexDirection: 'row',
     marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
-    backgroundColor: COLORS.lightCardBackground,
-    borderRadius: BORDER_RADIUS.full,
-    padding: 4,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 20,
+    padding: 6,
   },
-  tripTypeButton: {
+  toggleBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.full,
-    gap: 6,
+    paddingVertical: SPACING.md,
+    borderRadius: 16,
+    gap: 8,
   },
-  tripTypeButtonActive: {
-    backgroundColor: COLORS.primary,
+  toggleBtnActive: {
+    backgroundColor: '#fff',
   },
-  tripTypeText: {
-    fontSize: FONT_SIZE.sm,
+  toggleEmoji: {
+    fontSize: 20,
+  },
+  toggleText: {
+    fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.9)',
   },
-  tripTypeTextActive: {
-    color: COLORS.white,
+  toggleTextActive: {
+    color: '#1a1a2e',
   },
-  // Falling Flower Animation Styles
-  fallingFlower: {
-    position: 'absolute',
-    fontSize: 24,
-    zIndex: 1000,
+  scrollView: {
+    flex: 1,
   },
-  floatingParticle: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.accentGreen,
-    opacity: 0.5,
-  },
-  // Inter-City Premium Gradient Styles
-  interCityGradient: {
-    marginHorizontal: SPACING.md,
-    marginTop: SPACING.md,
-    borderRadius: BORDER_RADIUS.xxl,
+  scrollContent: {
     padding: SPACING.lg,
-    overflow: 'hidden',
-    position: 'relative',
+    paddingBottom: 120,
   },
-  decorCircleTopRight: {
-    position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.15)',
+  // Location Card
+  locationCard: {
+    backgroundColor: '#fff',
+    borderRadius: 24,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 5,
   },
-  decorCircleBottomLeft: {
-    position: 'absolute',
-    bottom: -30,
-    left: -30,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  interCityHeader: {
+  locationHeader: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: SPACING.sm,
     marginBottom: SPACING.md,
   },
-  interCitySection: {
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
+  locationTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: '#1a1a2e',
   },
-  interCityTitle: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: -0.5,
-  },
-  interCitySubtitle: {
-    fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.85)',
-    marginTop: 4,
-  },
-  interCityBadge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  interCityBadgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#1a1a1a',
-    letterSpacing: 0.5,
-  },
-  routesScrollContent: {
-    paddingRight: SPACING.lg,
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: SPACING.md,
-    paddingVertical: SPACING.xs,
   },
-  interCityRouteCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    minWidth: 170,
-    borderWidth: 3,
-    borderColor: 'transparent',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 16,
-    elevation: 8,
-    position: 'relative',
-    overflow: 'hidden',
+  dot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
-  interCityRouteCardSelected: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: '#F0FDF4',
-  },
-  routeCardGlow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 4,
-    backgroundColor: '#FF6B9D',
-  },
-  routeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: SPACING.sm,
-    gap: SPACING.xs,
-  },
-  routeArrowContainer: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FFE0EB',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  routeFromTo: {
+  locationInput: {
+    flex: 1,
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: '#1a1a2e',
+    paddingVertical: SPACING.md,
   },
-  routeDivider: {
+  inputIcon: {
+    padding: SPACING.sm,
+  },
+  inputDivider: {
     height: 1,
-    backgroundColor: COLORS.lightBorder,
-    marginBottom: SPACING.sm,
+    backgroundColor: '#eee',
+    marginLeft: 28,
+    marginVertical: SPACING.sm,
   },
-  routeDetails: {
+  quickLocations: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: SPACING.lg,
-    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
   },
-  routeDetail: {
+  quickBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    gap: 6,
+    backgroundColor: '#f5f7fa',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
   },
-  routeDetailText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+  quickBtnText: {
+    fontSize: FONT_SIZE.sm,
     fontWeight: '600',
+    color: '#666',
   },
-  routePriceContainer: {
-    alignItems: 'center',
-    backgroundColor: '#F0FDF4',
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  routePriceLabel: {
-    fontSize: 10,
-    color: COLORS.lightTextSecondary,
-    fontWeight: '600',
-  },
-  routePrice: {
+  // Section Title
+  sectionTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '900',
-    color: COLORS.accentGreen,
+    color: '#1a1a2e',
+    marginBottom: SPACING.md,
+  },
+  // Car Selection
+  carScroll: {
+    marginBottom: SPACING.lg,
+    marginHorizontal: -SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+  },
+  carCard: {
+    width: 130,
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: SPACING.md,
+    marginRight: SPACING.md,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  carIconWrap: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
+  },
+  carEmoji: {
+    fontSize: 32,
+  },
+  carName: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: '#1a1a2e',
+  },
+  carDesc: {
+    fontSize: FONT_SIZE.xs,
+    color: '#999',
+    marginTop: 2,
+  },
+  carPrice: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '900',
+    marginTop: SPACING.sm,
   },
   selectedBadge: {
     position: 'absolute',
-    top: SPACING.sm,
-    right: SPACING.sm,
+    top: 8,
+    right: 8,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  // Voice Promo Card in Inter-City
-  voicePromoCard: {
+  // Voice Promo
+  voicePromo: {
+    marginBottom: SPACING.lg,
+  },
+  voicePromoGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.md,
-    marginTop: SPACING.md,
-    gap: SPACING.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  voicePromoIcon: {
-    width: 40,
-    height: 40,
     borderRadius: 20,
+    gap: SPACING.md,
+  },
+  voiceIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  voicePromoContent: {
+  voiceContent: {
     flex: 1,
   },
-  voicePromoTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: COLORS.white,
+  voiceTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+    color: '#fff',
   },
-  voicePromoText: {
+  voiceSubtitle: {
     fontSize: FONT_SIZE.xs,
     color: 'rgba(255,255,255,0.9)',
     marginTop: 2,
   },
-  comingSoonTag: {
+  voiceNewBadge: {
     backgroundColor: '#FFD700',
     paddingHorizontal: SPACING.sm,
     paddingVertical: 4,
     borderRadius: BORDER_RADIUS.sm,
   },
-  comingSoonText: {
-    fontSize: 9,
+  voiceNewText: {
+    fontSize: 10,
     fontWeight: '900',
-    color: '#1a1a1a',
-    letterSpacing: 0.5,
+    color: '#000',
   },
+  // Inter-City
+  interCityHero: {
+    alignItems: 'center',
+    marginBottom: SPACING.xl,
+  },
+  interCityTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#1a1a2e',
+  },
+  interCitySubtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: '#666',
+    marginTop: SPACING.xs,
+    textAlign: 'center',
+  },
+  saveBadge: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    marginTop: SPACING.md,
+  },
+  saveText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '900',
+    color: '#000',
+  },
+  // Route Cards
   routeCard: {
-    backgroundColor: COLORS.white,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderRadius: 24,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
     shadowRadius: 12,
-    elevation: 4,
+    elevation: 6,
   },
-  stopRow: {
+  routeCardSelected: {
+    transform: [{ scale: 1.02 }],
+  },
+  routeGradient: {
+    padding: SPACING.lg,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  routeDecor1: {
+    position: 'absolute',
+    top: -30,
+    right: -30,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  routeDecor2: {
+    position: 'absolute',
+    bottom: -20,
+    left: -20,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  routeTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
+  routeCities: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
   },
-  stopIndicator: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
+  routeFrom: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#fff',
   },
-  pickupIndicator: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: COLORS.accentGreenSoft,
-  },
-  pickupDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.accentGreen,
-  },
-  dropoffIndicator: {
-    borderColor: COLORS.error,
-    backgroundColor: '#FEE2E2',
-  },
-  dropoffDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.error,
-  },
-  middleIndicator: {
-    borderColor: COLORS.accentBlue,
-    backgroundColor: COLORS.accentBlueSoft,
-  },
-  connectionLine: {
-    marginLeft: 15,
-    height: 28,
-    justifyContent: 'center',
-  },
-  dashedLine: {
-    width: 3,
-    height: '100%',
-    backgroundColor: COLORS.lightBorder,
-    borderRadius: 2,
-  },
-  stopInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    borderWidth: 2,
-    borderColor: COLORS.lightBorder,
-    minHeight: 60,
-  },
-  stopInputActive: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: COLORS.white,
-  },
-  stopInputContent: {
-    flex: 1,
-  },
-  stopLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
-    letterSpacing: 1,
-    marginBottom: 2,
-  },
-  stopInputText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-  },
-  stopInputPlaceholder: {
-    color: COLORS.lightTextMuted,
-    fontWeight: '400',
-  },
-  stopInputIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: SPACING.sm,
-  },
-  mapButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.accentBlueSoft,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.md,
-    gap: 4,
-  },
-  mapButtonText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.accentBlue,
-  },
-  mapIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dragHandle: {
-    paddingLeft: SPACING.sm,
-  },
-  actionButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: SPACING.xs,
-  },
-  addButtonInner: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.accentGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  removeButtonInner: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FEE2E2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionsContainer: {
-    flex: 1,
-    paddingHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-  },
-  sectionContainer: {
-    marginBottom: SPACING.lg,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    marginBottom: SPACING.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  locationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  savedLocationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  savedLocationIcon: {
+  routeArrow: {
     width: 44,
     height: 44,
     borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
-    backgroundColor: COLORS.accentGreen,
   },
-  recentLocationItem: {
+  routeTo: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  routeCheckmark: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeBottom: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    gap: SPACING.lg,
   },
-  recentLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  routeStat: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-    backgroundColor: COLORS.lightSurface,
+    gap: 6,
   },
-  locationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  locationContent: {
-    flex: 1,
-  },
-  locationName: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-    marginBottom: 2,
-  },
-  locationAddress: {
+  routeStatText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
   },
-  currentLocationButton: {
+  routePriceTag: {
+    marginLeft: 'auto',
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.xs,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  routePrice: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: '#fff',
+  },
+  // Features
+  featuresRow: {
     flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: SPACING.lg,
+    marginTop: SPACING.md,
+  },
+  featureItem: {
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    marginBottom: SPACING.lg,
   },
-  currentLocationText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.accentBlue,
+  featureEmoji: {
+    fontSize: 28,
+    marginBottom: SPACING.xs,
   },
-  bottomSpacer: {
-    height: 100,
+  featureText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: '#666',
   },
-  bottomContainer: {
+  // Bottom Bar
+  bottomBar: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.lightBackground,
+    paddingVertical: SPACING.md,
+    paddingBottom: SPACING.xl,
     borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
+    borderTopColor: '#eee',
+    gap: SPACING.md,
   },
-  continueButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.accentGreen,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingVertical: SPACING.lg,
-    gap: SPACING.sm,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  continueButtonDisabled: {
-    backgroundColor: COLORS.lightBorder,
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  continueText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  continueTextDisabled: {
-    color: COLORS.lightTextMuted,
-  },
-  // Modal Styles
-  modalContainer: {
-    flex: 1,
-    backgroundColor: COLORS.lightBackground,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-    backgroundColor: COLORS.white,
-  },
-  modalCloseButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
-  },
-  searchContainer: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    gap: SPACING.sm,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
-    paddingVertical: SPACING.xs,
-  },
-  loadingContainer: {
-    padding: SPACING.lg,
-    alignItems: 'center',
-  },
-  resultsList: {
+  pricePreview: {
     flex: 1,
   },
-  resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-    backgroundColor: COLORS.white,
-  },
-  resultIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.lightSurface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  resultContent: {
-    flex: 1,
-  },
-  resultMain: {
-    fontSize: FONT_SIZE.md,
+  priceLabel: {
+    fontSize: FONT_SIZE.xs,
     fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    color: '#999',
   },
-  resultSecondary: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    marginTop: 2,
-  },
-  quickActions: {
-    padding: SPACING.lg,
-  },
-  quickActionItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  quickActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  quickActionText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-  },
-  quickActionSubtext: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    marginTop: 2,
-  },
-  // Voice Booking Card
-  voiceBookingCard: {
-    backgroundColor: 'rgba(139,92,246,0.1)',
-    borderRadius: 20,
-    padding: 16,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
-    borderWidth: 2,
-    borderColor: 'rgba(139,92,246,0.3)',
-  },
-  voiceBookingBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  voiceBookingBadgeText: {
-    fontSize: 10,
+  priceValue: {
+    fontSize: 24,
     fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
+    color: '#1a1a2e',
   },
-  voiceBookingContent: {
+  bookButton: {
+    flex: 1.5,
+  },
+  bookButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-  },
-  voiceIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(139,92,246,0.2)',
-    alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14,
+    gap: SPACING.sm,
+    paddingVertical: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
   },
-  voiceText: {
-    flex: 1,
-  },
-  voiceTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-    marginBottom: 4,
-  },
-  voiceDesc: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    lineHeight: 18,
-  },
-  // Animation Styles
-  fallingFlower: {
-    position: 'absolute',
-    fontSize: 20,
-    zIndex: 1000,
-  },
-  floatingParticle: {
-    position: 'absolute',
-    width: 4,
-    height: 4,
-    backgroundColor: COLORS.accentGreen,
-    borderRadius: 2,
-    zIndex: 1000,
+  bookButtonText: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: '#fff',
   },
 });
