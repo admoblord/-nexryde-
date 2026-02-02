@@ -10,7 +10,7 @@
    - Phased pricing with auto-progression
    - Trial system (24 hours or 3 trips)
    - Upgrade system (City → Road Warrior)
-   - Price locking for first 200 Road Warriors
+   - Flexible pricing based on current phase
 
 2. **✅ Route Caching Service** (`route_cache_service.py`)
    - Google Maps API integration
@@ -45,7 +45,6 @@
 | **API Calls/Month** | 1,000 | 3,000 (3x more) |
 | **Route Matching** | Standard | Priority |
 | **Smart Route Planner** | ❌ No | ✅ Yes |
-| **Price Lock** | ❌ No | ✅ Yes (first 200) |
 | **Route Owner Bonus** | ✅ Yes | ✅ Yes |
 
 ---
@@ -60,8 +59,8 @@
 
 ### **Revenue Maximization:**
 - ✅ Two-tier pricing creates upsell path
-- ✅ Price locking creates FOMO
-- ✅ Phased pricing increases revenue over time
+- ✅ Phased pricing creates urgency for early adopters
+- ✅ Price increases with driver count
 - ✅ Road Warrior tier = 60%+ higher ARPU
 
 ### **Driver Earnings:**

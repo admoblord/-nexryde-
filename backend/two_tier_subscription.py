@@ -40,7 +40,7 @@ CITY_RIDER_PRICES = {
 }
 
 ROAD_WARRIOR_PRICES = {
-    "launch": 25000,   # First 200 - LOCKED FOREVER
+    "launch": 25000,   # First 200
     "early": 30000,    # Next 300
     "growth": 35000,   # After 500
     "premium": 40000   # Long-term
@@ -73,7 +73,7 @@ class DriverSubscription(BaseModel):
     tier: SubscriptionTier
     phase: SubscriptionPhase
     monthly_price: int
-    price_locked: bool = False  # True for first 200 Road Warriors
+    price_locked: bool = False  # Not used - kept for backward compatibility
     
     # Status
     status: SubscriptionStatus
@@ -222,7 +222,7 @@ async def get_pricing_info():
                 "✅ Smart Route Planner (AI)",
                 "✅ 3x API call allowance",
                 "✅ Road Warrior badge",
-                "✅ Price LOCKED FOREVER (first 200)"
+                "✅ Access to all routes nationwide"
             ],
             "max_api_calls": API_LIMITS["road_warrior"]["google_maps_calls"],
             "benefits_over_city": [
@@ -292,15 +292,13 @@ async def subscribe_to_tier(tier: str, driver_id: str):
         if count < ROAD_WARRIOR_LAUNCH_LIMIT:
             price = ROAD_WARRIOR_PRICES["launch"]
             phase = "launch"
-            price_locked = True  # LOCKED FOREVER!
         elif count < 500:
             price = ROAD_WARRIOR_PRICES["early"]
             phase = "early"
-            price_locked = False
         else:
             price = ROAD_WARRIOR_PRICES[current_phase]
             phase = current_phase
-            price_locked = False
+        price_locked = False  # Prices adjust with current phase
         can_do_intercity = True
         max_api_calls = API_LIMITS["road_warrior"]["google_maps_calls"]
     
@@ -352,10 +350,6 @@ async def subscribe_to_tier(tier: str, driver_id: str):
     tier_number = count + 1
     
     message = f"🎉 Welcome to {tier_name} #{tier_number} at ₦{price:,}/month!"
-    
-    if price_locked:
-        message += "\n\n🔒 PRICE LOCKED FOREVER at ₦25,000! You're one of the first 200!"
-    
     message += f"\n\n⏱️ 24-hour FREE trial active with {TRIAL_TRIP_LIMIT} trips included!"
     
     return {
@@ -411,15 +405,13 @@ async def upgrade_to_road_warrior(driver_id: str):
     if road_warrior_count < ROAD_WARRIOR_LAUNCH_LIMIT:
         price = ROAD_WARRIOR_PRICES["launch"]
         phase = "launch"
-        price_locked = True
     elif road_warrior_count < 500:
         price = ROAD_WARRIOR_PRICES["early"]
         phase = "early"
-        price_locked = False
     else:
         price = ROAD_WARRIOR_PRICES["growth"]
         phase = "growth"
-        price_locked = False
+    price_locked = False  # Prices adjust with current phase
     
     # Upgrade subscription
     now = datetime.utcnow()
@@ -453,15 +445,13 @@ async def upgrade_to_road_warrior(driver_id: str):
     )
     
     message = f"🚀 Upgraded to Road Warrior at ₦{price:,}/month!"
-    if price_locked:
-        message += "\n\n🔒 PRICE LOCKED FOREVER! You're in the first 200!"
     
     return {
         "success": True,
         "new_tier": "road_warrior",
         "new_price": price,
         "phase": phase,
-        "price_locked": price_locked,
+        "price_locked": False,
         "can_do_intercity": True,
         "message": message
     }
