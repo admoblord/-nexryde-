@@ -7815,13 +7815,14 @@ async def estimate_fare_google(request: GoogleFareRequest):
             "base_fare": base_fare,
             "distance_fee": round(distance_fee, 2),
             "time_fee": round(time_fee, 2),
-            "subtotal": round(subtotal, 2),
-            "vehicle_type": request.vehicle_type,
-            "multiplier": multiplier,
+            "distance_rate": distance_rate,
+            "time_rate": time_rate,
             "total_fare": round(total_fare, 2),
+            "vehicle_type": request.vehicle_type,
             "trip_type": request.trip_type,
             "traffic_considered": 'duration_in_traffic' in element,
-            "source": "Google Maps API"
+            "source": "Google Maps API",
+            "pricing_model": "Market-Competitive (Bolt/inDrive/Lag Ride Analysis)"
         }
         
     except HTTPException:
