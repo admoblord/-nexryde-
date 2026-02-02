@@ -272,21 +272,26 @@ export default function SplashScreen() {
 
         {/* CTA Button - Premium Design */}
         <View style={styles.buttonContainer}>
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity activeOpacity={0.9} style={styles.buttonWrapper}>
-              <LinearGradient
-                colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
-                style={styles.ctaButton}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={styles.ctaText}>Begin Your Journey</Text>
-                <View style={styles.arrowCircle}>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity 
+            activeOpacity={0.9} 
+            style={styles.buttonWrapper}
+            onPress={() => {
+              console.log('🚀 Navigating to login...');
+              router.push('/(auth)/login');
+            }}
+          >
+            <LinearGradient
+              colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
+              style={styles.ctaButton}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.ctaText}>Begin Your Journey</Text>
+              <View style={styles.arrowCircle}>
+                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
         {/* Secondary Options */}
