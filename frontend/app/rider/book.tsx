@@ -467,20 +467,20 @@ export default function BookScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Falling Flowers Animation for Inter-City */}
+      {/* 🌸 Falling Flowers Animation for Inter-City - Premium Effect */}
       {tripType === 'intercity' && (
         <>
-          {Array.from({ length: 8 }, (_, i) => (
+          {Array.from({ length: 15 }, (_, i) => (
             <FallingFlower
               key={`flower-${i}`}
-              delay={i * 800}
+              delay={i * 600}
               startX={Math.random() * SCREEN_WIDTH}
             />
           ))}
         </>
       )}
       
-      {/* Floating Particles for City Ride */}
+      {/* ✨ Floating Particles for City Ride */}
       {tripType === 'city' && (
         <>
           {Array.from({ length: 12 }, (_, i) => (
