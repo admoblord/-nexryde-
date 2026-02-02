@@ -141,8 +141,8 @@ def test_min_fare_removal():
     premium_trip_payload = {
         "pickup_lat": 6.5244,
         "pickup_lng": 3.3792,
-        "destination_lat": 6.5264,
-        "destination_lng": 3.3812,  # ~2km distance, 8min
+        "dropoff_lat": 6.5264,
+        "dropoff_lng": 3.3812,  # ~2km distance, 8min
         "service_type": "premium",
         "city": "lagos"
     }
