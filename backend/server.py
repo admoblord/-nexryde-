@@ -7099,17 +7099,17 @@ class VehicleRegistrationRequest(BaseModel):
     plate_number: str
     category: str  # economy, comfort, premium, xl
 
-# Vehicle category requirements
+# Vehicle category requirements - Updated to be more inclusive
 VEHICLE_CATEGORY_REQUIREMENTS = {
     "economy": {
         "name": "Economy",
-        "min_year": 2015,
+        "min_year": 2005,  # Accept older vehicles
         "luxury_only": False,
         "earnings_per_km": 150,
     },
     "comfort": {
         "name": "Comfort",
-        "min_year": 2018,
+        "min_year": 2015,  # Lowered from 2018
         "luxury_only": False,
         "earnings_per_km": 200,
     },
@@ -7122,7 +7122,7 @@ VEHICLE_CATEGORY_REQUIREMENTS = {
     },
     "xl": {
         "name": "SUV / XL",
-        "min_year": 2017,
+        "min_year": 2015,  # Lowered from 2017
         "luxury_only": False,
         "earnings_per_km": 250,
     },
