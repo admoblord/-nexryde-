@@ -20,113 +20,61 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
-import { BlurView } from 'expo-blur';
 import { useAppStore } from '@/src/store/appStore';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-interface SubscriptionData {
-  status: string;
-  days_remaining: number;
-  trial_end_date?: string;
-  end_date?: string;
-  start_date?: string;
-  monthly_fee: number;
-  bank_details: {
-    bank_name: string;
-    account_name: string;
-    account_number: string;
+interface PricingData {
+  city_rider: {
+    current_price: number;
+    current_phase: string;
+    launch_slots_remaining: number;
+  };
+  road_warrior: {
+    current_price: number;
+    current_phase: string;
+    launch_slots_remaining: number;
+  };
+}
+
+interface SubscriptionStatus {
+  tier: 'city_rider' | 'road_warrior' | 'none';
+  status: 'trial' | 'active' | 'expired' | 'pending_verification';
+  monthly_price: number;
+  trial_active: boolean;
+  trial_hours_remaining?: number;
+  trial_trips_remaining?: number;
+  days_remaining?: number;
+  can_upgrade: boolean;
+  upgrade_requirements?: {
+    rating_met: boolean;
+    trips_met: boolean;
+    current_rating: number;
+    current_trips: number;
   };
 }
 
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAppStore();
-  const [loading, setLoading] = useState(false); // Start with false for web compatibility
-  const [pricing, setPricing] = useState<any>({
-    current_price: 18000,
-    current_phase: 'early',
-    launch_slots_remaining: 500,
-  });
-  const [subscription, setSubscription] = useState<any>({
-    status: 'none',
-    days_remaining: 0,
-    monthly_fee: 18000,
-    bank_details: {
-      bank_name: 'United Bank for Africa (UBA)',
-      account_name: 'ADMOBLORDGROUP LIMITED',
-      account_number: '1028400669',
-    },
-  });
+  const [loading, setLoading] = useState(true);
+  const [pricing, setPricing] = useState<PricingData | null>(null);
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [selectedTier, setSelectedTier] = useState<'city_rider' | 'road_warrior' | null>(null);
   const [paymentScreenshot, setPaymentScreenshot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [paymentReference, setPaymentReference] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   
-  // Animations - start with visible values for web compatibility
+  // Animations
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 50)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-
-  // Fetch pricing from backend API
-  const fetchPricing = async () => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
-      const data = await response.json();
-      console.log('Pricing data:', data);
-      setPricing(data);
-      return data.current_price;
-    } catch (error) {
-      console.error('Error fetching pricing:', error);
-      return 18000; // Default fallback
-    }
-  };
 
   useEffect(() => {
-    // Immediately try to fetch or set default data
-    const initSubscription = async () => {
-      try {
-        // Fetch pricing first
-        const currentPrice = await fetchPricing();
-        await fetchSubscription(currentPrice);
-      } catch (e) {
-        console.error('Init error:', e);
-        // Ensure loading stops even on error
-        setSubscription({
-          status: 'none',
-          days_remaining: 0,
-          monthly_fee: pricing.current_price || 18000,
-          bank_details: {
-            bank_name: 'United Bank for Africa (UBA)',
-            account_name: 'ADMOBLORDGROUP LIMITED',
-            account_number: '1028400669',
-          },
-        });
-        setLoading(false);
-      }
-    };
-    
-    initSubscription();
-    
-    // Fallback timeout - ensure loading stops after 5 seconds
-    const timeout = setTimeout(() => {
-      if (loading) {
-        setSubscription({
-          status: 'none',
-          days_remaining: 0,
-          monthly_fee: pricing.current_price || 18000,
-          bank_details: {
-            bank_name: 'United Bank for Africa (UBA)',
-            account_name: 'ADMOBLORDGROUP LIMITED',
-            account_number: '1028400669',
-          },
-        });
-        setLoading(false);
-      }
-    }, 5000);
+    initializeData();
     
     // Entry animations
     Animated.parallel([
@@ -140,103 +88,122 @@ export default function SubscriptionScreen() {
         duration: 600,
         useNativeDriver: true,
       }),
-      Animated.spring(scaleAnim, {
-        toValue: 1,
-        friction: 8,
-        tension: 40,
-        useNativeDriver: true,
-      }),
     ]).start();
-
-    // Pulse animation for active status
-    const pulse = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.05,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 1000,
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    pulse.start();
-    
-    return () => {
-      pulse.stop();
-      clearTimeout(timeout);
-    };
   }, []);
 
-  const fetchSubscription = async (currentPrice?: number) => {
-    const price = currentPrice || pricing.current_price || 18000;
-    console.log('fetchSubscription called, user:', user?.id, 'price:', price);
-    if (!user?.id) {
-      console.log('No user, setting default subscription');
-      // Set default subscription data for demo/testing when no user is logged in
-      setSubscription({
-        status: 'none',
-        days_remaining: 0,
-        monthly_fee: price,
-        bank_details: {
-          bank_name: 'United Bank for Africa (UBA)',
-          account_name: 'ADMOBLORDGROUP LIMITED',
-          account_number: '1028400669',
-        },
-      });
-      setLoading(false);
-      return;
-    }
+  const initializeData = async () => {
     try {
-      console.log('Fetching subscription for user:', user?.id);
-      const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}`);
-      const data = await response.json();
-      console.log('Subscription data:', data);
-      // Use API price if not set in subscription data
-      if (!data.monthly_fee) {
-        data.monthly_fee = price;
-      }
-      setSubscription(data);
-      setLoading(false);
+      await Promise.all([fetchPricing(), fetchSubscriptionStatus()]);
     } catch (error) {
-      console.error('Error fetching subscription:', error);
-      // Set default data on error
-      setSubscription({
-        status: 'none',
-        days_remaining: 0,
-        monthly_fee: price,
-        bank_details: {
-          bank_name: 'United Bank for Africa (UBA)',
-          account_name: 'ADMOBLORDGROUP LIMITED',
-          account_number: '1028400669',
-        },
-      });
+      console.error('Error initializing:', error);
+      Alert.alert('Error', 'Failed to load subscription data');
+    } finally {
       setLoading(false);
     }
   };
 
-  const startTrial = async () => {
-    setLoading(true);
+  const fetchPricing = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}/start-trial`, {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
+      const data = await response.json();
+      setPricing(data);
+    } catch (error) {
+      console.error('Error fetching pricing:', error);
+      // Set default pricing
+      setPricing({
+        city_rider: { current_price: 18000, current_phase: 'early', launch_slots_remaining: 450 },
+        road_warrior: { current_price: 30000, current_phase: 'early', launch_slots_remaining: 180 },
+      });
+    }
+  };
+
+  const fetchSubscriptionStatus = async () => {
+    if (!user?.id) {
+      setSubscription({
+        tier: 'none',
+        status: 'expired',
+        monthly_price: 0,
+        trial_active: false,
+        can_upgrade: false,
+      });
+      return;
+    }
+
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/status/${user.id}`);
+      const data = await response.json();
+      setSubscription(data);
+    } catch (error) {
+      console.error('Error fetching subscription:', error);
+      setSubscription({
+        tier: 'none',
+        status: 'expired',
+        monthly_price: 0,
+        trial_active: false,
+        can_upgrade: false,
+      });
+    }
+  };
+
+  const startTrial = async (tier: 'city_rider' | 'road_warrior') => {
+    if (!user?.id) {
+      Alert.alert('Error', 'Please login first');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/subscribe/${tier}?driver_id=${user.id}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
       });
       const data = await response.json();
       
       if (response.ok) {
-        Alert.alert('Welcome to NEXRYDE!', data.message);
-        fetchSubscription();
+        Alert.alert(
+          'Trial Started! 🎉',
+          `You now have 24 hours OR 3 trips (whichever comes first) to try ${tier === 'city_rider' ? 'City Rider' : 'Road Warrior'} features for FREE!`,
+          [{ text: 'Start Driving!', onPress: () => fetchSubscriptionStatus() }]
+        );
       } else {
         Alert.alert('Error', data.detail || 'Failed to start trial');
       }
     } catch (error) {
       Alert.alert('Error', 'Something went wrong');
     }
-    setLoading(false);
+    setSubmitting(false);
+  };
+
+  const upgradeToRoadWarrior = async () => {
+    if (!user?.id) return;
+
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/upgrade-to-road-warrior/${user.id}`, {
+        method: 'POST',
+      });
+      const data = await response.json();
+      
+      if (response.ok) {
+        Alert.alert(
+          'Upgraded! 🚀',
+          'You are now a Road Warrior! Enjoy unlimited inter-city trips and advanced AI features.',
+          [{ text: 'Awesome!', onPress: () => {
+            setShowUpgradeModal(false);
+            fetchSubscriptionStatus();
+          }}]
+        );
+      } else {
+        Alert.alert('Cannot Upgrade', data.detail || 'Requirements not met');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to upgrade');
+    }
+    setSubmitting(false);
+  };
+
+  const openPaymentModal = (tier: 'city_rider' | 'road_warrior') => {
+    setSelectedTier(tier);
+    setShowPaymentModal(true);
   };
 
   const copyToClipboard = (text: string, field: string) => {
@@ -279,21 +246,26 @@ export default function SubscriptionScreen() {
   };
 
   const submitPayment = async () => {
-    if (!paymentScreenshot) {
+    if (!paymentScreenshot || !selectedTier) {
       Alert.alert('Error', 'Please upload a payment screenshot');
       return;
     }
 
     setSubmitting(true);
     try {
+      const tierPrice = selectedTier === 'city_rider' 
+        ? pricing?.city_rider.current_price 
+        : pricing?.road_warrior.current_price;
+
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}/submit-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           driver_id: user?.id,
           screenshot: paymentScreenshot,
-          amount: subscription?.monthly_fee || 25000,
+          amount: tierPrice,
           payment_reference: paymentReference,
+          tier: selectedTier,
         }),
       });
       
@@ -304,8 +276,9 @@ export default function SubscriptionScreen() {
         setShowPaymentModal(false);
         setPaymentScreenshot(null);
         setPaymentReference('');
+        setSelectedTier(null);
         
-        setTimeout(() => fetchSubscription(), 3000);
+        setTimeout(() => fetchSubscriptionStatus(), 3000);
       } else {
         Alert.alert('Error', data.detail || 'Failed to submit payment');
       }
@@ -315,70 +288,64 @@ export default function SubscriptionScreen() {
     setSubmitting(false);
   };
 
-  const getStatusConfig = (status: string) => {
-    switch (status) {
-      case 'active':
-        return {
-          gradient: ['#00C853', '#00E676'] as const,
-          icon: 'checkmark-shield',
-          label: 'ACTIVE',
-          bgColor: 'rgba(0, 200, 83, 0.1)',
-        };
-      case 'trial':
-        return {
-          gradient: ['#6366F1', '#8B5CF6'] as const,
-          icon: 'gift',
-          label: 'FREE TRIAL',
-          bgColor: 'rgba(99, 102, 241, 0.1)',
-        };
-      case 'pending_verification':
-        return {
-          gradient: ['#F59E0B', '#FBBF24'] as const,
-          icon: 'time',
-          label: 'VERIFYING',
-          bgColor: 'rgba(245, 158, 11, 0.1)',
-        };
-      default:
-        return {
-          gradient: ['#EF4444', '#F87171'] as const,
-          icon: 'alert-circle',
-          label: 'EXPIRED',
-          bgColor: 'rgba(239, 68, 68, 0.1)',
-        };
+  const getTierBadgeConfig = (tier: string) => {
+    if (tier === 'city_rider') {
+      return {
+        gradient: ['#00D084', '#00C853'] as const,
+        icon: 'car-sport',
+        label: 'CITY RIDER',
+        bgColor: 'rgba(0, 208, 132, 0.1)',
+      };
+    } else if (tier === 'road_warrior') {
+      return {
+        gradient: ['#FFD700', '#FFA500'] as const,
+        icon: 'navigate',
+        label: 'ROAD WARRIOR',
+        bgColor: 'rgba(255, 215, 0, 0.1)',
+      };
+    }
+    return {
+      gradient: ['#64748B', '#475569'] as const,
+      icon: 'alert-circle',
+      label: 'NO SUBSCRIPTION',
+      bgColor: 'rgba(100, 116, 139, 0.1)',
+    };
+  };
+
+  const getPhaseLabel = (phase: string) => {
+    switch (phase) {
+      case 'launch': return '🚀 LAUNCH PRICE';
+      case 'early': return '⭐ EARLY ADOPTER';
+      case 'growth': return '📈 GROWTH PHASE';
+      default: return '💎 PREMIUM';
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-NG', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric',
-    });
-  };
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#00D084" />
+        <Text style={styles.loadingText}>Loading subscription...</Text>
+      </View>
+    );
+  }
 
-  // Web preview has issues with import.meta, so skip loading screen
-  const statusConfig = getStatusConfig(subscription?.status || 'expired');
+  const tierConfig = getTierBadgeConfig(subscription?.tier || 'none');
 
   return (
     <View style={styles.container}>
-      {/* Background Gradient */}
       <LinearGradient
         colors={['#0F172A', '#1E293B', '#0F172A']}
         style={StyleSheet.absoluteFill}
       />
-      
-      {/* Decorative Circles */}
-      <View style={styles.decorCircle1} />
-      <View style={styles.decorCircle2} />
-      <View style={styles.decorCircle3} />
 
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={[styles.header, { opacity: 1 }]}>
+        <View style={styles.header}>
           <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Subscription</Text>
+          <Text style={styles.headerTitle}>Subscription Tiers</Text>
           <TouchableOpacity style={styles.helpButton}>
             <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
           </TouchableOpacity>
@@ -388,133 +355,235 @@ export default function SubscriptionScreen() {
           showsVerticalScrollIndicator={false} 
           contentContainerStyle={styles.scrollContent}
         >
-          {/* Status Card - Hero Section */}
-          <Animated.View 
-            style={[
-              styles.heroCard,
-              Platform.OS !== 'web' && {
-                opacity: fadeAnim,
-                transform: [{ translateY: slideAnim }, { scale: scaleAnim }],
-              }
-            ]}
-          >
-            <LinearGradient
-              colors={statusConfig.gradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.heroGradient}
-            >
-              {/* Floating particles effect */}
-              <View style={styles.particle1} />
-              <View style={styles.particle2} />
-              <View style={styles.particle3} />
-              
-              <Animated.View style={[
-                styles.statusIconContainer,
-                subscription?.status === 'active' && { transform: [{ scale: pulseAnim }] }
-              ]}>
-                <Ionicons name={statusConfig.icon as any} size={40} color="#FFFFFF" />
-              </Animated.View>
-              
-              <Text style={styles.statusLabel}>{statusConfig.label}</Text>
-              
-              {subscription && subscription.days_remaining !== undefined && (
-                <View style={styles.daysContainer}>
-                  <Text style={styles.daysNumber}>{subscription.days_remaining}</Text>
-                  <Text style={styles.daysText}>days remaining</Text>
-                </View>
-              )}
-              
-              {subscription?.end_date && (
-                <Text style={styles.expiryText}>
-                  {subscription.status === 'trial' ? 'Trial ends' : 'Renews'}: {formatDate(subscription.end_date)}
-                </Text>
-              )}
-            </LinearGradient>
-          </Animated.View>
-
-          {/* No Subscription - Start Trial */}
-          {!subscription && (
-            <Animated.View style={[styles.trialCard, { opacity: fadeAnim }]}>
+          {/* Current Subscription Badge */}
+          {subscription && subscription.tier !== 'none' && (
+            <Animated.View style={[styles.currentTierCard, { opacity: fadeAnim }]}>
               <LinearGradient
-                colors={['rgba(99, 102, 241, 0.2)', 'rgba(139, 92, 246, 0.1)']}
-                style={styles.trialGradient}
+                colors={tierConfig.gradient}
+                style={styles.currentTierGradient}
               >
-                <Ionicons name="sparkles" size={48} color="#8B5CF6" />
-                <Text style={styles.trialTitle}>Start Your Journey!</Text>
-                <Text style={styles.trialSubtitle}>Get 7 days free to experience premium features</Text>
-                
-                <TouchableOpacity style={styles.trialButton} onPress={startTrial}>
-                  <LinearGradient
-                    colors={['#6366F1', '#8B5CF6']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.trialButtonGradient}
-                  >
-                    <Ionicons name="rocket" size={20} color="#FFFFFF" />
-                    <Text style={styles.trialButtonText}>Start Free Trial</Text>
-                  </LinearGradient>
-                </TouchableOpacity>
+                <View style={styles.currentTierIcon}>
+                  <Ionicons name={tierConfig.icon as any} size={32} color="#FFFFFF" />
+                </View>
+                <View style={styles.currentTierInfo}>
+                  <Text style={styles.currentTierLabel}>YOUR CURRENT TIER</Text>
+                  <Text style={styles.currentTierName}>{tierConfig.label}</Text>
+                  <Text style={styles.currentTierPrice}>
+                    ₦{subscription.monthly_price.toLocaleString()}/month
+                  </Text>
+                  {subscription.trial_active && (
+                    <View style={styles.trialBadge}>
+                      <Ionicons name="gift" size={14} color="#FFFFFF" />
+                      <Text style={styles.trialBadgeText}>
+                        Trial: {subscription.trial_hours_remaining}h or {subscription.trial_trips_remaining} trips left
+                      </Text>
+                    </View>
+                  )}
+                  {!subscription.trial_active && subscription.status === 'active' && subscription.days_remaining && (
+                    <Text style={styles.daysRemainingText}>
+                      {subscription.days_remaining} days remaining
+                    </Text>
+                  )}
+                </View>
               </LinearGradient>
             </Animated.View>
           )}
 
-          {/* Price Card */}
-          <Animated.View 
-            style={[
-              styles.glassCard,
-              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <View style={styles.priceHeader}>
-              <View style={styles.priceBadge}>
-                <Text style={styles.priceBadgeText}>MONTHLY</Text>
-              </View>
-              <View style={styles.priceRow}>
-                <Text style={styles.currencySymbol}>₦</Text>
-                <Text style={styles.priceValue}>{(pricing.current_price || subscription?.monthly_fee || 18000).toLocaleString()}</Text>
-              </View>
-              <Text style={styles.priceSubtext}>per month • No commission fees</Text>
-              {pricing.current_phase && (
-                <Text style={styles.phaseBadge}>
-                  {pricing.current_phase === 'launch' ? '🚀 LAUNCH PRICE' : 
-                   pricing.current_phase === 'early' ? '⭐ EARLY ADOPTER' : 
-                   pricing.current_phase === 'growth' ? '📈 GROWTH PHASE' : '💎 PREMIUM'}
-                </Text>
-              )}
-            </View>
-            
-            <View style={styles.divider} />
-            
-            <View style={styles.benefitsContainer}>
-              <Text style={styles.benefitsTitle}>What's Included</Text>
-              {[
-                { icon: 'infinite', text: 'Unlimited ride requests', color: '#00E676' },
-                { icon: 'cash', text: '100% earnings - Zero commission', color: '#FFD700' },
-                { icon: 'shield-checkmark', text: 'Full insurance coverage', color: '#00B0FF' },
-                { icon: 'headset', text: 'Priority customer support', color: '#FF6B6B' },
-                { icon: 'flash', text: 'Real-time ride matching', color: '#8B5CF6' },
-              ].map((benefit, index) => (
-                <View key={index} style={styles.benefitRow}>
-                  <View style={[styles.benefitIcon, { backgroundColor: `${benefit.color}20` }]}>
-                    <Ionicons name={benefit.icon as any} size={18} color={benefit.color} />
+          {/* Tier Selection Cards */}
+          <View style={styles.tiersContainer}>
+            {/* CITY RIDER CARD */}
+            <Animated.View style={[styles.tierCard, { opacity: fadeAnim }]}>
+              <LinearGradient
+                colors={['rgba(0, 208, 132, 0.1)', 'rgba(0, 208, 132, 0.05)']}
+                style={styles.tierCardGradient}
+              >
+                <View style={styles.tierHeader}>
+                  <View style={[styles.tierIconBg, { backgroundColor: '#00D08420' }]}>
+                    <Ionicons name="car-sport" size={28} color="#00D084" />
                   </View>
-                  <Text style={styles.benefitText}>{benefit.text}</Text>
+                  <View style={styles.tierHeaderText}>
+                    <Text style={styles.tierTitle}>CITY RIDER</Text>
+                    <Text style={styles.tierSubtitle}>Perfect for intra-city trips</Text>
+                  </View>
                 </View>
-              ))}
-            </View>
-          </Animated.View>
+
+                <View style={styles.tierPricing}>
+                  <Text style={styles.tierPriceLabel}>
+                    {pricing && getPhaseLabel(pricing.city_rider.current_phase)}
+                  </Text>
+                  <View style={styles.tierPriceRow}>
+                    <Text style={styles.tierCurrency}>₦</Text>
+                    <Text style={styles.tierPrice}>
+                      {pricing?.city_rider.current_price.toLocaleString() || '18,000'}
+                    </Text>
+                    <Text style={styles.tierPeriod}>/month</Text>
+                  </View>
+                  {pricing && pricing.city_rider.launch_slots_remaining > 0 && (
+                    <Text style={styles.slotsRemaining}>
+                      🔥 Only {pricing.city_rider.launch_slots_remaining} slots left at this price!
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.tierFeatures}>
+                  <Text style={styles.featuresTitle}>WHAT YOU GET:</Text>
+                  {[
+                    { icon: 'location', text: 'Unlimited intra-city trips (max 50km)', color: '#00D084' },
+                    { icon: 'cash', text: 'Keep 100% of your earnings', color: '#FFD700' },
+                    { icon: 'shield-checkmark', text: 'Basic insurance coverage', color: '#00B0FF' },
+                    { icon: 'headset', text: 'Standard customer support', color: '#FF6B6B' },
+                    { icon: 'flash', text: 'Real-time ride matching', color: '#8B5CF6' },
+                  ].map((feature, index) => (
+                    <View key={index} style={styles.featureRow}>
+                      <View style={[styles.featureIcon, { backgroundColor: `${feature.color}20` }]}>
+                        <Ionicons name={feature.icon as any} size={16} color={feature.color} />
+                      </View>
+                      <Text style={styles.featureText}>{feature.text}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {subscription?.tier === 'city_rider' ? (
+                  <View style={styles.currentTierButton}>
+                    <Ionicons name="checkmark-circle" size={20} color="#00D084" />
+                    <Text style={styles.currentTierButtonText}>Current Tier</Text>
+                  </View>
+                ) : subscription?.tier === 'none' || !subscription ? (
+                  <TouchableOpacity 
+                    style={styles.selectButton}
+                    onPress={() => startTrial('city_rider')}
+                    disabled={submitting}
+                  >
+                    <LinearGradient
+                      colors={['#00D084', '#00C853']}
+                      style={styles.selectButtonGradient}
+                    >
+                      {submitting ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="gift" size={20} color="#FFFFFF" />
+                          <Text style={styles.selectButtonText}>Start 24h FREE Trial</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ) : null}
+              </LinearGradient>
+            </Animated.View>
+
+            {/* ROAD WARRIOR CARD */}
+            <Animated.View style={[styles.tierCard, styles.featuredTier, { opacity: fadeAnim }]}>
+              <View style={styles.recommendedBadge}>
+                <Text style={styles.recommendedText}>⭐ RECOMMENDED</Text>
+              </View>
+              <LinearGradient
+                colors={['rgba(255, 215, 0, 0.15)', 'rgba(255, 165, 0, 0.05)']}
+                style={styles.tierCardGradient}
+              >
+                <View style={styles.tierHeader}>
+                  <View style={[styles.tierIconBg, { backgroundColor: '#FFD70030' }]}>
+                    <Ionicons name="navigate" size={28} color="#FFD700" />
+                  </View>
+                  <View style={styles.tierHeaderText}>
+                    <Text style={[styles.tierTitle, { color: '#FFD700' }]}>ROAD WARRIOR</Text>
+                    <Text style={styles.tierSubtitle}>Unlimited nationwide trips</Text>
+                  </View>
+                </View>
+
+                <View style={styles.tierPricing}>
+                  <Text style={[styles.tierPriceLabel, { color: '#FFD700' }]}>
+                    {pricing && getPhaseLabel(pricing.road_warrior.current_phase)}
+                  </Text>
+                  <View style={styles.tierPriceRow}>
+                    <Text style={[styles.tierCurrency, { color: '#FFD700' }]}>₦</Text>
+                    <Text style={styles.tierPrice}>
+                      {pricing?.road_warrior.current_price.toLocaleString() || '30,000'}
+                    </Text>
+                    <Text style={styles.tierPeriod}>/month</Text>
+                  </View>
+                  {pricing && pricing.road_warrior.launch_slots_remaining > 0 && (
+                    <Text style={styles.slotsRemaining}>
+                      🔥 Only {pricing.road_warrior.launch_slots_remaining} slots left!
+                    </Text>
+                  )}
+                </View>
+
+                <View style={styles.tierFeatures}>
+                  <Text style={styles.featuresTitle}>EVERYTHING IN CITY RIDER, PLUS:</Text>
+                  {[
+                    { icon: 'navigate-circle', text: 'Unlimited inter-city/interstate trips', color: '#FFD700' },
+                    { icon: 'map', text: 'Smart Route Planner (AI-powered)', color: '#00D084' },
+                    { icon: 'repeat', text: 'Auto return trip matching', color: '#FF6B6B' },
+                    { icon: 'cash-outline', text: 'Route discovery bonuses (₦5K)', color: '#00B0FF' },
+                    { icon: 'flash', text: '3x API call limits', color: '#8B5CF6' },
+                    { icon: 'shield', text: 'Premium insurance coverage', color: '#00C853' },
+                    { icon: 'headset', text: 'Priority 24/7 support', color: '#FF9800' },
+                  ].map((feature, index) => (
+                    <View key={index} style={styles.featureRow}>
+                      <View style={[styles.featureIcon, { backgroundColor: `${feature.color}20` }]}>
+                        <Ionicons name={feature.icon as any} size={16} color={feature.color} />
+                      </View>
+                      <Text style={styles.featureText}>{feature.text}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {subscription?.tier === 'road_warrior' ? (
+                  <View style={[styles.currentTierButton, { backgroundColor: '#FFD70020', borderColor: '#FFD700' }]}>
+                    <Ionicons name="checkmark-circle" size={20} color="#FFD700" />
+                    <Text style={[styles.currentTierButtonText, { color: '#FFD700' }]}>Current Tier</Text>
+                  </View>
+                ) : subscription?.tier === 'city_rider' && subscription?.can_upgrade ? (
+                  <TouchableOpacity 
+                    style={styles.selectButton}
+                    onPress={() => setShowUpgradeModal(true)}
+                  >
+                    <LinearGradient
+                      colors={['#FFD700', '#FFA500']}
+                      style={styles.selectButtonGradient}
+                    >
+                      <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
+                      <Text style={styles.selectButtonText}>Upgrade Now</Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ) : subscription?.tier === 'city_rider' && !subscription?.can_upgrade ? (
+                  <View style={styles.lockedButton}>
+                    <Ionicons name="lock-closed" size={18} color="#94A3B8" />
+                    <Text style={styles.lockedButtonText}>
+                      Requires: 4.5★ + 50 trips
+                    </Text>
+                  </View>
+                ) : subscription?.tier === 'none' || !subscription ? (
+                  <TouchableOpacity 
+                    style={styles.selectButton}
+                    onPress={() => startTrial('road_warrior')}
+                    disabled={submitting}
+                  >
+                    <LinearGradient
+                      colors={['#FFD700', '#FFA500']}
+                      style={styles.selectButtonGradient}
+                    >
+                      {submitting ? (
+                        <ActivityIndicator color="#FFFFFF" />
+                      ) : (
+                        <>
+                          <Ionicons name="gift" size={20} color="#FFFFFF" />
+                          <Text style={styles.selectButtonText}>Start 24h FREE Trial</Text>
+                        </>
+                      )}
+                    </LinearGradient>
+                  </TouchableOpacity>
+                ) : null}
+              </LinearGradient>
+            </Animated.View>
+          </View>
 
           {/* Bank Details Card */}
-          <Animated.View 
-            style={[
-              styles.bankCard,
-              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
-            ]}
-          >
+          <Animated.View style={[styles.bankCard, { opacity: fadeAnim }]}>
             <View style={styles.bankHeader}>
               <LinearGradient
-                colors={['#00E676', '#00C853']}
+                colors={['#00D084', '#00C853']}
                 style={styles.bankIconBg}
               >
                 <Ionicons name="card" size={20} color="#FFFFFF" />
@@ -543,14 +612,14 @@ export default function SubscriptionScreen() {
                 highlight
               />
             </View>
-            
+
             <View style={styles.stepsContainer}>
-              <Text style={styles.stepsTitle}>Quick Steps</Text>
+              <Text style={styles.stepsTitle}>How to Subscribe</Text>
               {[
-                'Transfer ₦25,000 to the account above',
-                'Screenshot your payment receipt',
-                'Upload & submit for verification',
-                'Get activated within minutes!',
+                'Choose your tier above',
+                'Transfer the amount to account above',
+                'Screenshot your payment',
+                'Upload screenshot for instant verification',
               ].map((step, index) => (
                 <View key={index} style={styles.stepRow}>
                   <View style={styles.stepNumber}>
@@ -562,36 +631,6 @@ export default function SubscriptionScreen() {
             </View>
           </Animated.View>
 
-          {/* Action Button */}
-          {(subscription?.status === 'trial' || 
-            subscription?.status === 'expired' || 
-            subscription?.status === 'pending_payment' ||
-            !subscription) && (
-            <TouchableOpacity 
-              style={styles.actionButton} 
-              onPress={() => setShowPaymentModal(true)}
-              activeOpacity={0.9}
-            >
-              <LinearGradient
-                colors={['#00E676', '#00C853']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-                style={styles.actionButtonGradient}
-              >
-                <Ionicons name="cloud-upload" size={22} color="#FFFFFF" />
-                <Text style={styles.actionButtonText}>Upload Payment Proof</Text>
-                <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
-              </LinearGradient>
-            </TouchableOpacity>
-          )}
-
-          {subscription?.status === 'pending_verification' && (
-            <View style={styles.verifyingContainer}>
-              <ActivityIndicator size="small" color="#F59E0B" />
-              <Text style={styles.verifyingText}>Verifying your payment...</Text>
-            </View>
-          )}
-          
           <View style={{ height: 40 }} />
         </ScrollView>
 
@@ -673,7 +712,7 @@ export default function SubscriptionScreen() {
                     <ActivityIndicator color="#FFFFFF" />
                   ) : (
                     <LinearGradient
-                      colors={paymentScreenshot ? ['#00E676', '#00C853'] : ['#475569', '#475569']}
+                      colors={paymentScreenshot ? ['#00D084', '#00C853'] : ['#475569', '#475569']}
                       style={styles.submitButtonGradient}
                     >
                       <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
@@ -683,6 +722,71 @@ export default function SubscriptionScreen() {
                 </TouchableOpacity>
               </ScrollView>
             </SafeAreaView>
+          </View>
+        </Modal>
+
+        {/* Upgrade Modal */}
+        <Modal visible={showUpgradeModal} animationType="fade" transparent>
+          <View style={styles.upgradeModalOverlay}>
+            <View style={styles.upgradeModalContainer}>
+              <LinearGradient
+                colors={['#FFD700', '#FFA500']}
+                style={styles.upgradeModalGradient}
+              >
+                <Ionicons name="rocket" size={64} color="#FFFFFF" />
+                <Text style={styles.upgradeModalTitle}>Upgrade to Road Warrior</Text>
+                <Text style={styles.upgradeModalSubtitle}>
+                  Unlock unlimited inter-city trips and advanced AI features!
+                </Text>
+
+                {subscription?.upgrade_requirements && (
+                  <View style={styles.upgradeRequirements}>
+                    <View style={styles.requirementRow}>
+                      <Ionicons 
+                        name={subscription.upgrade_requirements.rating_met ? "checkmark-circle" : "close-circle"} 
+                        size={20} 
+                        color={subscription.upgrade_requirements.rating_met ? "#00C853" : "#EF4444"} 
+                      />
+                      <Text style={styles.requirementText}>
+                        Rating: {subscription.upgrade_requirements.current_rating.toFixed(1)}/4.5 ⭐
+                      </Text>
+                    </View>
+                    <View style={styles.requirementRow}>
+                      <Ionicons 
+                        name={subscription.upgrade_requirements.trips_met ? "checkmark-circle" : "close-circle"} 
+                        size={20} 
+                        color={subscription.upgrade_requirements.trips_met ? "#00C853" : "#EF4444"} 
+                      />
+                      <Text style={styles.requirementText}>
+                        Trips: {subscription.upgrade_requirements.current_trips}/50
+                      </Text>
+                    </View>
+                  </View>
+                )}
+
+                <View style={styles.upgradeModalButtons}>
+                  <TouchableOpacity 
+                    style={styles.upgradeCancelButton}
+                    onPress={() => setShowUpgradeModal(false)}
+                  >
+                    <Text style={styles.upgradeCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity 
+                    style={styles.upgradeConfirmButton}
+                    onPress={upgradeToRoadWarrior}
+                    disabled={submitting || !subscription?.can_upgrade}
+                  >
+                    {submitting ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text style={styles.upgradeConfirmText}>
+                        Upgrade - ₦{pricing?.road_warrior.current_price.toLocaleString()}
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </LinearGradient>
+            </View>
           </View>
         </Modal>
       </SafeAreaView>
@@ -714,7 +818,7 @@ const BankDetailRow = ({
       <Ionicons 
         name={copied ? "checkmark" : "copy-outline"} 
         size={20} 
-        color={copied ? "#00E676" : "#94A3B8"} 
+        color={copied ? "#00D084" : "#94A3B8"} 
       />
     </TouchableOpacity>
   </View>
@@ -732,43 +836,14 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#0F172A',
   },
   loadingText: {
     marginTop: 12,
     color: '#94A3B8',
     fontSize: 14,
+    fontWeight: '700',
   },
-  
-  // Decorative elements
-  decorCircle1: {
-    position: 'absolute',
-    top: -100,
-    right: -100,
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: 'rgba(99, 102, 241, 0.1)',
-  },
-  decorCircle2: {
-    position: 'absolute',
-    bottom: 100,
-    left: -80,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: 'rgba(0, 230, 118, 0.08)',
-  },
-  decorCircle3: {
-    position: 'absolute',
-    top: '40%',
-    right: -50,
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-  },
-  
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -785,7 +860,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '900',
     color: '#FFFFFF',
     letterSpacing: -0.5,
@@ -796,223 +871,261 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
   },
   
-  // Hero Card
-  heroCard: {
-    borderRadius: 24,
+  // Current Tier Card
+  currentTierCard: {
+    borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 20,
   },
-  heroGradient: {
-    padding: 28,
+  currentTierGradient: {
+    flexDirection: 'row',
     alignItems: 'center',
-    position: 'relative',
-    overflow: 'hidden',
+    padding: 20,
   },
-  particle1: {
-    position: 'absolute',
-    top: 20,
-    left: 30,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  particle2: {
-    position: 'absolute',
-    top: 60,
-    right: 40,
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  particle3: {
-    position: 'absolute',
-    bottom: 30,
-    left: 60,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.4)',
-  },
-  statusIconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  currentTierIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginRight: 16,
   },
-  statusLabel: {
-    fontSize: 16,
+  currentTierInfo: {
+    flex: 1,
+  },
+  currentTierLabel: {
+    fontSize: 11,
     fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 2.5,
-    marginBottom: 8,
-    textTransform: 'uppercase',
-  },
-  daysContainer: {
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  daysNumber: {
-    fontSize: 64,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    lineHeight: 68,
-  },
-  daysText: {
-    fontSize: 16,
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontWeight: '900',
-  },
-  expiryText: {
-    fontSize: 15,
-    fontWeight: '700',
     color: 'rgba(255, 255, 255, 0.8)',
-    marginTop: 12,
+    letterSpacing: 1.5,
+    marginBottom: 4,
   },
-  
-  // Trial Card
-  trialCard: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    marginBottom: 20,
-  },
-  trialGradient: {
-    padding: 28,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-    borderRadius: 24,
-  },
-  trialTitle: {
-    fontSize: 26,
+  currentTierName: {
+    fontSize: 22,
     fontWeight: '900',
     color: '#FFFFFF',
-    marginTop: 16,
-    letterSpacing: -0.5,
+    marginBottom: 4,
   },
-  trialSubtitle: {
+  currentTierPrice: {
     fontSize: 16,
     fontWeight: '700',
-    color: '#CBD5E1',
-    marginTop: 8,
-    textAlign: 'center',
+    color: 'rgba(255, 255, 255, 0.9)',
   },
-  trialButton: {
-    marginTop: 24,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  trialButtonGradient: {
+  trialBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 28,
-    paddingVertical: 14,
-    gap: 10,
+    marginTop: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    gap: 6,
   },
-  trialButtonText: {
-    fontSize: 18,
-    fontWeight: '900',
+  trialBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
     color: '#FFFFFF',
   },
-  
-  // Glass Card (Price)
-  glassCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 20,
-    borderWidth: 1,
+  daysRemainingText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.8)',
+    marginTop: 6,
+  },
+
+  // Tiers Container
+  tiersContainer: {
+    gap: 16,
+  },
+  tierCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  priceHeader: {
-    alignItems: 'center',
+  featuredTier: {
+    borderColor: '#FFD700',
+    borderWidth: 2,
   },
-  priceBadge: {
-    backgroundColor: 'rgba(0, 230, 118, 0.15)',
+  recommendedBadge: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    backgroundColor: '#FFD700',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 20,
+    zIndex: 10,
+  },
+  recommendedText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#000000',
+    letterSpacing: 1,
+  },
+  tierCardGradient: {
+    padding: 20,
+  },
+  tierHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 16,
   },
-  priceBadgeText: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#00E676',
-    letterSpacing: 2,
-    textTransform: 'uppercase',
+  tierIconBg: {
+    width: 56,
+    height: 56,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  priceRow: {
+  tierHeaderText: {
+    flex: 1,
+  },
+  tierTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#00D084',
+    letterSpacing: -0.5,
+    marginBottom: 2,
+  },
+  tierSubtitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+  tierPricing: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+  },
+  tierPriceLabel: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#00D084',
+    marginBottom: 8,
+    letterSpacing: 1,
+  },
+  tierPriceRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
   },
-  currencySymbol: {
-    fontSize: 28,
+  tierCurrency: {
+    fontSize: 24,
     fontWeight: '900',
-    color: '#00E676',
-    marginTop: 8,
+    color: '#00D084',
+    marginTop: 4,
   },
-  priceValue: {
-    fontSize: 52,
+  tierPrice: {
+    fontSize: 44,
     fontWeight: '900',
     color: '#FFFFFF',
   },
-  priceSubtext: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#CBD5E1',
-    marginTop: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginVertical: 20,
-  },
-  benefitsContainer: {
-    gap: 14,
-  },
-  benefitsTitle: {
+  tierPeriod: {
     fontSize: 16,
+    fontWeight: '700',
+    color: '#94A3B8',
+    marginTop: 20,
+  },
+  slotsRemaining: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#F59E0B',
+    marginTop: 8,
+  },
+  tierFeatures: {
+    marginBottom: 16,
+  },
+  featuresTitle: {
+    fontSize: 12,
     fontWeight: '900',
     color: '#CBD5E1',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginBottom: 12,
+    letterSpacing: 1,
   },
-  benefitRow: {
+  featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    marginBottom: 10,
+    gap: 10,
   },
-  benefitIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+  featureIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  benefitText: {
-    fontSize: 16,
-    color: '#FFFFFF',
+  featureText: {
+    fontSize: 14,
     fontWeight: '700',
+    color: '#E2E8F0',
     flex: 1,
   },
-  
+  currentTierButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 208, 132, 0.15)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: '#00D084',
+  },
+  currentTierButtonText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#00D084',
+  },
+  selectButton: {
+    borderRadius: 14,
+    overflow: 'hidden',
+  },
+  selectButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 10,
+  },
+  selectButtonText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  lockedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(148, 163, 184, 0.1)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(148, 163, 184, 0.3)',
+  },
+  lockedButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#94A3B8',
+  },
+
   // Bank Card
   bankCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 24,
-    padding: 24,
-    marginBottom: 20,
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 16,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -1020,7 +1133,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   bankIconBg: {
     width: 40,
@@ -1030,136 +1143,96 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   bankTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '900',
     color: '#FFFFFF',
-    letterSpacing: -0.5,
   },
   bankDetailsContainer: {
     backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   bankDetailRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   bankDetailRowHighlight: {
-    backgroundColor: 'rgba(0, 230, 118, 0.1)',
+    backgroundColor: 'rgba(0, 208, 132, 0.1)',
   },
   bankDetailLabel: {
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
-    color: '#CBD5E1',
+    color: '#94A3B8',
     marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   bankDetailValue: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '900',
     color: '#FFFFFF',
   },
   bankDetailValueHighlight: {
-    color: '#00E676',
-    fontSize: 20,
-    fontWeight: '900',
-    letterSpacing: 2,
+    color: '#00D084',
+    fontSize: 18,
+    letterSpacing: 1.5,
   },
   copyButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 36,
+    height: 36,
+    borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
-  // Steps
   stepsContainer: {
     backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 14,
+    padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.2)',
   },
   stepsTitle: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '900',
     color: '#F59E0B',
-    marginBottom: 12,
+    marginBottom: 10,
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 10,
+    gap: 10,
+    marginBottom: 8,
   },
   stepNumber: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#F59E0B',
     alignItems: 'center',
     justifyContent: 'center',
   },
   stepNumberText: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '900',
     color: '#000000',
   },
   stepText: {
-    fontSize: 15,
+    fontSize: 13,
     fontWeight: '700',
     color: '#FDE68A',
     flex: 1,
   },
-  
-  // Action Button
-  actionButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginTop: 4,
-  },
-  actionButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 18,
-    gap: 12,
-  },
-  actionButtonText: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  
-  // Verifying
-  verifyingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-    marginTop: 4,
-  },
-  verifyingText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#F59E0B',
-  },
-  
-  // Modal
+
+  // Payment Modal
   modalContainer: {
     flex: 1,
   },
@@ -1181,7 +1254,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: '900',
     color: '#FFFFFF',
   },
@@ -1190,7 +1263,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   modalSectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '900',
     color: '#CBD5E1',
     marginBottom: 12,
@@ -1198,8 +1271,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
-  
-  // Upload Options
   uploadOptionsContainer: {
     flexDirection: 'row',
     gap: 12,
@@ -1207,7 +1278,7 @@ const styles = StyleSheet.create({
   },
   uploadOption: {
     flex: 1,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
   },
   uploadOptionGradient: {
@@ -1217,26 +1288,24 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     borderStyle: 'dashed',
-    borderRadius: 16,
+    borderRadius: 14,
   },
   uploadOptionText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '900',
     color: '#FFFFFF',
-    marginTop: 10,
+    marginTop: 8,
   },
-  
-  // Screenshot Preview
   screenshotPreview: {
     position: 'relative',
     marginBottom: 24,
-    borderRadius: 16,
+    borderRadius: 14,
     overflow: 'hidden',
   },
   screenshotImage: {
     width: '100%',
     height: 220,
-    borderRadius: 16,
+    borderRadius: 14,
     backgroundColor: '#1E293B',
   },
   removeImageButton: {
@@ -1246,21 +1315,18 @@ const styles = StyleSheet.create({
     backgroundColor: '#0F172A',
     borderRadius: 16,
   },
-  
-  // Reference Input
   referenceInput: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 14,
     fontSize: 15,
+    fontWeight: '700',
     color: '#FFFFFF',
     marginBottom: 24,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  
-  // Submit Button
   submitButton: {
     borderRadius: 14,
     overflow: 'hidden',
@@ -1279,5 +1345,86 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+
+  // Upgrade Modal
+  upgradeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  upgradeModalContainer: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  upgradeModalGradient: {
+    padding: 32,
+    alignItems: 'center',
+  },
+  upgradeModalTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  upgradeModalSubtitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: 'rgba(255, 255, 255, 0.9)',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  upgradeRequirements: {
+    width: '100%',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 24,
+    gap: 12,
+  },
+  requirementRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  requirementText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  upgradeModalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  upgradeCancelButton: {
+    flex: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  upgradeCancelText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+  upgradeConfirmButton: {
+    flex: 2,
+    backgroundColor: '#FFFFFF',
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  upgradeConfirmText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#FFD700',
   },
 });
