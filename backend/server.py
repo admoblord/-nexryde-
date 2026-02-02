@@ -995,41 +995,93 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
     
     return None
 
-def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: int, service_type: str = "economy", city: str = "lagos") -> dict:
+def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: int, service_type: str = "economy", city: str = "lagos", is_surge: bool = False, surge_multiplier: float = 1.0) -> dict:
+    """
+    Calculate fare for Nigerian market with comprehensive pricing formula:
+    Total Fare = (Base Fare + (Distance × Rate/km) + (Time × Rate/min) + Traffic Fee + Booking Fee) × Surge Multiplier
+    """
     city_config = FARE_CONFIG.get(city.lower(), FARE_CONFIG["default"])
-    config = city_config.get(service_type, city_config["economy"])
+    config = city_config.get(service_type.lower(), city_config.get("economy", FARE_CONFIG["default"]["economy"]))
     
-    base_fare = config["base_fare"]
-    per_km = config["per_km"]
-    per_min = config["per_min"]
-    min_fare = config["min_fare"]
-    max_multiplier = config["max_multiplier"]
+    # Extract pricing components
+    base_fare = config.get("base_fare", 500)
+    per_km = config.get("per_km", 150)
+    per_min = config.get("per_min", 25)
+    booking_fee = config.get("booking_fee", 100)
+    min_fare = config.get("min_fare", 800)
+    max_multiplier = config.get("max_multiplier", 2.5)
+    cancellation_fee = config.get("cancellation_fee", 300)
     
-    distance_fee = distance_km * per_km
-    time_fee = duration_min * per_min
+    # Step 1: Calculate distance fee
+    distance_fee = round(distance_km * per_km, 2)
+    
+    # Step 2: Calculate time fee (for time spent in traffic/waiting)
+    time_fee = round(duration_min * per_min, 2)
+    
+    # Step 3: Calculate extra traffic fee (when traffic time exceeds normal duration)
     extra_traffic_min = max(0, traffic_duration_min - duration_min)
-    traffic_fee = min(extra_traffic_min * per_min, base_fare * 0.3)
+    traffic_fee = round(min(extra_traffic_min * per_min, base_fare * 0.5), 2)  # Cap at 50% of base fare
     
-    subtotal = base_fare + distance_fee + time_fee + traffic_fee
+    # Step 4: Calculate subtotal before surge
+    subtotal = base_fare + distance_fee + time_fee + traffic_fee + booking_fee
+    
+    # Step 5: Apply minimum fare rule
     subtotal = max(min_fare, subtotal)
     
-    current_hour = datetime.utcnow().hour + 1
-    is_peak = current_hour in [7, 8, 9, 17, 18, 19, 20]
-    multiplier = min(1.1 if is_peak else 1.0, max_multiplier)
+    # Step 6: Calculate surge/dynamic pricing
+    current_hour = datetime.utcnow().hour + 1  # Nigerian time (WAT = UTC+1)
+    is_weekend = datetime.utcnow().weekday() >= 5
     
-    total_fare = round(subtotal * multiplier, 2)
+    # Peak hours: Morning rush (7-9 AM) and Evening rush (5-8 PM)
+    is_morning_peak = 7 <= current_hour <= 9
+    is_evening_peak = 17 <= current_hour <= 20
+    is_peak = is_morning_peak or is_evening_peak
+    
+    # Calculate dynamic multiplier
+    dynamic_multiplier = 1.0
+    if is_surge and surge_multiplier > 1.0:
+        dynamic_multiplier = min(surge_multiplier, max_multiplier)
+    elif is_peak:
+        peak_config = SURGE_CONFIG.get("peak_hours", {})
+        if is_morning_peak:
+            dynamic_multiplier = peak_config.get("morning", {}).get("multiplier", 1.2)
+        elif is_evening_peak:
+            dynamic_multiplier = peak_config.get("evening", {}).get("multiplier", 1.3)
+    
+    # Add weekend multiplier
+    if is_weekend:
+        dynamic_multiplier *= SURGE_CONFIG.get("weekend_multiplier", 1.1)
+    
+    # Cap the multiplier
+    dynamic_multiplier = min(dynamic_multiplier, max_multiplier)
+    
+    # Step 7: Calculate final fare
+    total_fare = round(subtotal * dynamic_multiplier, 2)
+    
+    # Round to nearest ₦50 for cleaner prices
+    total_fare = round(total_fare / 50) * 50
     
     return {
         "base_fare": base_fare,
-        "distance_fee": round(distance_fee, 2),
-        "time_fee": round(time_fee, 2),
-        "traffic_fee": round(traffic_fee, 2),
+        "distance_km": round(distance_km, 2),
+        "distance_fee": distance_fee,
+        "duration_min": duration_min,
+        "time_fee": time_fee,
+        "traffic_duration_min": traffic_duration_min,
+        "traffic_fee": traffic_fee,
+        "booking_fee": booking_fee,
         "subtotal": round(subtotal, 2),
-        "multiplier": multiplier,
+        "surge_multiplier": round(dynamic_multiplier, 2),
         "total_fare": total_fare,
         "min_fare": min_fare,
+        "cancellation_fee": cancellation_fee,
         "is_peak": is_peak,
-        "currency": "NGN"
+        "is_weekend": is_weekend,
+        "peak_type": "morning" if is_morning_peak else ("evening" if is_evening_peak else None),
+        "service_type": service_type,
+        "city": city,
+        "currency": "NGN",
+        "price_breakdown": f"₦{base_fare} base + ₦{distance_fee} ({distance_km}km) + ₦{time_fee} ({duration_min}min) + ₦{traffic_fee} traffic + ₦{booking_fee} booking"
     }
 
 def generate_otp() -> str:
