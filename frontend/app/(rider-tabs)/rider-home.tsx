@@ -19,9 +19,8 @@ import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 
-// PREMIUM IMAGES - Happy smiling passengers booking rides
-const RIDER_HERO = 'https://images.unsplash.com/photo-1527877083249-88d406b6ac27?w=800&q=80'; // Beautiful smiling woman in car
-const RIDER_SECONDARY = 'https://images.unsplash.com/photo-1719089648087-9aa6fd9b35cd?w=400&q=80'; // Smiling man in car
+// PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
+const RIDER_HERO = 'https://images.unsplash.com/photo-1694286080685-279d3b3c8dfb?w=800&q=80'; // Three Nigerian women smiling together - representing Igbo, Yoruba, Hausa unity!
 
 export default function RiderHomeScreen() {
   const router = useRouter();
