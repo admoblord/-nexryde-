@@ -129,7 +129,7 @@ export default function DriverHomeScreen() {
             <View style={styles.heroCard}>
               {/* Nigerian Driver Image - VISIBLE AT TOP */}
               <Image
-                source={{ uri: DRIVER_HERO }}
+                source={DRIVER_HERO}
                 style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
                 contentFit="cover"
               />
