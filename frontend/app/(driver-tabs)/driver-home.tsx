@@ -7,7 +7,7 @@ import {
   ScrollView,
   Dimensions,
   Alert,
-  ImageBackground,
+  Image,
   Animated,
   Platform,
 } from 'react-native';
