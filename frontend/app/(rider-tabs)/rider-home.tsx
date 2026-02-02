@@ -19,8 +19,8 @@ import { Image } from 'expo-image';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-// Using placeholder.com which definitely works on web
-const RIDER_HERO = 'https://via.placeholder.com/400x200/10B981/FFFFFF?text=Nigerian+Riders';
+// These images will display properly on the native mobile app
+const RIDER_HERO = 'https://images.pexels.com/photos/6146978/pexels-photo-6146978.jpeg?auto=compress&cs=tinysrgb&w=600&h=300&dpr=1'; // Three African friends smiling!
 
 export default function RiderHomeScreen() {
   const router = useRouter();
