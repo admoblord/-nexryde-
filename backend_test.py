@@ -253,15 +253,15 @@ class NexrydeAPITester:
             self.log_result("/fare/estimate", "POST", "BROKEN", f"Failed: {response['data']}")
     
     async def test_surge_status(self):
-        """Test GET /api/surge/status"""
-        response = await self.make_request("GET", "/surge/status?lat=6.5244&lng=3.3792")
+        """Test GET /api/surge/check"""
+        response = await self.make_request("GET", "/surge/check?lat=6.5244&lng=3.3792")
         
         if response["success"]:
             surge_data = response["data"]
-            self.log_result("/surge/status", "GET", "WORKING", 
+            self.log_result("/surge/check", "GET", "WORKING", 
                           f"Surge multiplier: {surge_data.get('multiplier', 1.0)}x")
         else:
-            self.log_result("/surge/status", "GET", "BROKEN", f"Failed: {response['data']}")
+            self.log_result("/surge/check", "GET", "BROKEN", f"Failed: {response['data']}")
     
     async def test_request_trip(self):
         """Test POST /api/trips/request"""
