@@ -6,16 +6,15 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
-  ImageBackground,
   Animated,
   Platform,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { Image } from 'expo-image';
 
 const { width, height } = Dimensions.get('window');
 
