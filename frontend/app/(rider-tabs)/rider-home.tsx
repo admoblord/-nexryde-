@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
+  ImageBackground,
   Animated,
   Platform,
   Image,
@@ -19,8 +20,7 @@ import { useAppStore } from '@/src/store/appStore';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-// Using relative path for guaranteed compatibility
-const RIDER_HERO = require('../../assets/images/nigerian-riders.jpg');
+const RIDER_HERO = 'https://images.unsplash.com/photo-1739301674016-45dddb02e2dd?w=800&q=80'; // Three Nigerian women friends sitting together smiling - Igbo, Yoruba, Hausa!
 
 export default function RiderHomeScreen() {
   const router = useRouter();
@@ -82,57 +82,48 @@ export default function RiderHomeScreen() {
             </TouchableOpacity>
           </Animated.View>
 
-          {/* 🌟 HERO SECTION - Nigerian Riders (Igbo, Yoruba, Hausa) */}
+          {/* 🌟 HERO SECTION - Smiling Rider Image */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
             <TouchableOpacity 
               activeOpacity={0.95}
               onPress={() => router.push('/rider/book')}
               style={styles.heroCard}
             >
-              {/* Nigerian People Image - MOBILE OPTIMIZED */}
-              <View style={styles.imageContainer}>
-                <Image
-                  source={RIDER_HERO}
-                  style={styles.heroImage}
-                  resizeMode="cover"
-                  onError={(e) => console.log('Image load error:', e.nativeEvent.error)}
-                  onLoad={() => console.log('✅ Rider hero image loaded successfully!')}
-                />
-                {/* Gradient overlay for better text readability */}
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.3)']}
-                  style={styles.imageOverlay}
-                />
-              </View>
-              
-              {/* Content Section Below Image */}
-              <LinearGradient
-                colors={['#10B981', '#059669']}
-                style={styles.heroContentSection}
+              <ImageBackground
+                source={{ uri: RIDER_HERO }}
+                style={styles.heroImage}
+                imageStyle={styles.heroImageStyle}
               >
-                {/* LIVE Badge */}
-                <View style={styles.liveBadge}>
-                  <View style={styles.liveIndicator} />
-                  <Text style={styles.liveText}>LIVE NOW</Text>
-                </View>
-
-                <Text style={styles.heroTagline}>🇳🇬 FOR ALL NIGERIANS</Text>
-                <Text style={styles.heroTitle}>Where would you{'\n'}like to go?</Text>
-                
-                {/* Search Box */}
-                <Animated.View style={[styles.searchBox, { transform: [{ translateY: bounceAnim }] }]}>
-                  <View style={styles.searchIconWrap}>
-                    <Ionicons name="search" size={24} color="#10B981" />
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']}
+                  style={styles.heroOverlay}
+                >
+                  {/* LIVE Badge */}
+                  <View style={styles.liveBadge}>
+                    <View style={styles.liveIndicator} />
+                    <Text style={styles.liveText}>LIVE NOW</Text>
                   </View>
-                  <Text style={styles.searchPlaceholder}>Enter your destination</Text>
-                  <LinearGradient
-                    colors={['#10B981', '#06B6D4']}
-                    style={styles.searchArrow}
-                  >
-                    <Ionicons name="arrow-forward" size={20} color="#FFF" />
-                  </LinearGradient>
-                </Animated.View>
-              </LinearGradient>
+
+                  <View style={styles.heroContent}>
+                    <Text style={styles.heroTagline}>🇳🇬 FOR ALL NIGERIANS</Text>
+                    <Text style={styles.heroTitle}>Where would{'\n'}you like to go?</Text>
+                    
+                    {/* Search Box */}
+                    <Animated.View style={[styles.searchBox, { transform: [{ translateY: bounceAnim }] }]}>
+                      <View style={styles.searchIconWrap}>
+                        <Ionicons name="search" size={24} color="#10B981" />
+                      </View>
+                      <Text style={styles.searchPlaceholder}>Enter your destination</Text>
+                      <LinearGradient
+                        colors={['#10B981', '#06B6D4']}
+                        style={styles.searchArrow}
+                      >
+                        <Ionicons name="arrow-forward" size={20} color="#FFF" />
+                      </LinearGradient>
+                    </Animated.View>
+                  </View>
+                </LinearGradient>
+              </ImageBackground>
             </TouchableOpacity>
           </Animated.View>
 
@@ -368,23 +359,18 @@ const styles = StyleSheet.create({
   profileGradient: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
   profileInitial: { fontSize: 24, fontWeight: '800', color: '#FFF' },
 
-  // Hero - MOBILE OPTIMIZED
+  // Hero
   heroSection: { paddingHorizontal: 20, marginBottom: 20 },
-  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 12, shadowColor: '#10B981', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, backgroundColor: '#fff' },
-  imageContainer: { width: '100%', height: 220, overflow: 'hidden', position: 'relative' },
-  heroImage: { width: '100%', height: '100%', borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-  imageOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
-  heroImageContainer: { width: '100%', height: 340, position: 'relative', borderRadius: 28, overflow: 'hidden' },
-  heroBackgroundImage: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 28 },
+  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 12, shadowColor: '#10B981', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 },
+  heroImage: { width: '100%', height: 340 },
   heroImageStyle: { borderRadius: 28 },
-  heroContentSection: { padding: 24, borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
-  heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 24, justifyContent: 'flex-end' },
-  liveBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 12 },
+  heroOverlay: { flex: 1, padding: 24, justifyContent: 'flex-end' },
+  liveBadge: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16,185,129,0.9)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   liveIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF', marginRight: 8 },
   liveText: { fontSize: 12, fontWeight: '800', color: '#FFF', letterSpacing: 1 },
   heroContent: {},
-  heroTagline: { fontSize: 13, fontWeight: '700', color: '#FFF', letterSpacing: 2, marginBottom: 8 },
-  heroTitle: { fontSize: 32, fontWeight: '900', color: '#FFF', lineHeight: 40, marginBottom: 20 },
+  heroTagline: { fontSize: 13, fontWeight: '700', color: '#10B981', letterSpacing: 2, marginBottom: 8 },
+  heroTitle: { fontSize: 36, fontWeight: '900', color: '#FFF', lineHeight: 44, marginBottom: 24 },
   searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF', borderRadius: 20, padding: 14, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 10, elevation: 5 },
   searchIconWrap: { width: 48, height: 48, borderRadius: 14, backgroundColor: '#ECFDF5', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
   searchPlaceholder: { flex: 1, fontSize: 17, color: '#64748B', fontWeight: '600' },
