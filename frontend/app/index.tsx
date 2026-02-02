@@ -72,11 +72,25 @@ export default function SplashScreen() {
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
     checkSavedLogin();
+    
+    // Safety timeout - if checking takes too long, show splash screen anyway
+    const timeout = setTimeout(() => {
+      setChecking(false);
+    }, 3000);
+    
+    return () => clearTimeout(timeout);
   }, []); // ✅ FIX: Added empty dependency array (runs once on mount)
 
   const checkSavedLogin = async () => {
     try {
       console.log('🔍 Checking for saved login session...');
+      
+      // On web, skip storage check and show splash directly
+      if (Platform.OS === 'web') {
+        console.log('ℹ️ Web platform - showing splash screen.');
+        setChecking(false);
+        return;
+      }
       
       // Wrap in try-catch to handle SecureStore errors gracefully
       try {
@@ -90,8 +104,8 @@ export default function SplashScreen() {
             console.log('User:', userData.name, '| Role:', userData.role);
             
             // Restore user state
-            setUser(userData);
-            setIsAuthenticated(true);
+            if (setUser) setUser(userData);
+            if (setIsAuthenticated) setIsAuthenticated(true);
             
             // Navigate to appropriate home screen
             setTimeout(() => {
