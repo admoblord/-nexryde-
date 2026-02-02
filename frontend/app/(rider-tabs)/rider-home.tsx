@@ -89,11 +89,14 @@ export default function RiderHomeScreen() {
               onPress={() => router.push('/rider/book')}
               style={styles.heroCard}
             >
-              <ImageBackground
-                source={{ uri: RIDER_HERO }}
-                style={styles.heroImage}
-                imageStyle={styles.heroImageStyle}
-              >
+              <View style={styles.heroImageContainer}>
+                {/* Background Image */}
+                <Image
+                  source={{ uri: RIDER_HERO }}
+                  style={styles.heroBackgroundImage}
+                  resizeMode="cover"
+                />
+                {/* Overlay Gradient */}
                 <LinearGradient
                   colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']}
                   style={styles.heroOverlay}
