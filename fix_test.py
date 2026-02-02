@@ -6,7 +6,7 @@ Quick fix test for failing endpoints
 import requests
 import json
 
-BACKEND_URL = "https://rideshare-revamp-1.preview.emergentagent.com/api"
+BACKEND_URL = "https://rider-driver-rebuild.preview.emergentagent.com/api"
 
 def test_otp_verify():
     """Test OTP verify with correct field name"""

@@ -4,7 +4,7 @@ from datetime import datetime
 
 class AdminAPITester:
     def __init__(self):
-        self.base_url = "https://rideshare-revamp-1.preview.emergentagent.com/api"
+        self.base_url = "https://rider-driver-rebuild.preview.emergentagent.com/api"
         self.session = requests.Session()
         self.test_results = []
         

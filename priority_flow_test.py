@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime, timedelta
 
-BASE_URL = "https://rideshare-revamp-1.preview.emergentagent.com/api"
+BASE_URL = "https://rider-driver-rebuild.preview.emergentagent.com/api"
 
 class PriorityFlowTester:
     def __init__(self):
