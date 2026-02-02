@@ -271,6 +271,33 @@ export default function RiderHomeScreen() {
             </View>
           </View>
 
+          {/* 🛡️ SAFETY & SECURITY FEATURES */}
+          <View style={styles.servicesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Safety & Security</Text>
+              <View style={[styles.sectionBadge, { backgroundColor: '#EF444420' }]}>
+                <Text style={[styles.sectionBadgeText, { color: '#EF4444' }]}>SAFE</Text>
+              </View>
+            </View>
+            <View style={styles.servicesGrid}>
+              <ServiceCard
+                icon="shield-checkmark"
+                title="Safety Check"
+                desc="Check area danger"
+                color="#EF4444"
+                onPress={() => router.push('/rider/safety-check')}
+                badge="NEW"
+              />
+              <ServiceCard
+                icon="share-social"
+                title="Share Trip"
+                desc="With family"
+                color="#F59E0B"
+                onPress={() => router.push('/rider/share-trip')}
+              />
+            </View>
+          </View>
+
           {/* Quick Actions */}
           <View style={styles.quickActions}>
             <QuickAction icon="time" label="History" onPress={() => router.push('/ride-history')} />
