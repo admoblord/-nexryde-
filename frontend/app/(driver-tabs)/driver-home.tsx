@@ -130,7 +130,7 @@ export default function DriverHomeScreen() {
               <Image
                 source={{ uri: DRIVER_HERO }}
                 style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
-                resizeMode="cover"
+                contentFit="cover"
               />
               
               {/* Content Section Below Image */}
