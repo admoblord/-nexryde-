@@ -467,6 +467,32 @@ export default function BookScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Falling Flowers Animation for Inter-City */}
+      {tripType === 'intercity' && (
+        <>
+          {Array.from({ length: 8 }, (_, i) => (
+            <FallingFlower
+              key={`flower-${i}`}
+              delay={i * 800}
+              startX={Math.random() * SCREEN_WIDTH}
+            />
+          ))}
+        </>
+      )}
+      
+      {/* Floating Particles for City Ride */}
+      {tripType === 'city' && (
+        <>
+          {Array.from({ length: 12 }, (_, i) => (
+            <FloatingParticle
+              key={`particle-${i}`}
+              delay={i * 500}
+              startX={Math.random() * SCREEN_WIDTH}
+            />
+          ))}
+        </>
+      )}
+      
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
