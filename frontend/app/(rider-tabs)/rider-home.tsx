@@ -95,6 +95,8 @@ export default function RiderHomeScreen() {
                   source={RIDER_HERO}
                   style={styles.heroImage}
                   resizeMode="cover"
+                  onError={(e) => console.log('Image load error:', e.nativeEvent.error)}
+                  onLoad={() => console.log('✅ Rider hero image loaded successfully!')}
                 />
                 {/* Gradient overlay for better text readability */}
                 <LinearGradient
