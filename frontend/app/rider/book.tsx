@@ -482,18 +482,7 @@ export default function BookScreen() {
 
       {/* ========== BOOK NOW BUTTON ========== */}
       <View style={styles.bottomBar}>
-        <View style={styles.pricePreview}>
-          <Text style={styles.priceLabel}>ESTIMATED</Text>
-          <Text style={styles.priceValue}>
-            {tripType === 'city' 
-              ? `${CURRENCY}${((CAR_TYPES.find(c => c.id === selectedCar)?.price || 150) * 10).toLocaleString()}`
-              : selectedRoute 
-                ? `${CURRENCY}${(INTER_CITY_ROUTES.find(r => r.id === selectedRoute)?.price || 0).toLocaleString()}`
-                : '---'
-            }
-          </Text>
-        </View>
-        <TouchableOpacity style={styles.bookButton} onPress={handleBookRide}>
+        <TouchableOpacity style={styles.bookButtonFull} onPress={handleBookRide}>
           <LinearGradient
             colors={['#00C853', '#00E676', '#69F0AE']}
             start={{ x: 0, y: 0 }}
