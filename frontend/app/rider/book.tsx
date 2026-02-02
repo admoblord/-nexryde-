@@ -119,6 +119,8 @@ export default function BookScreen() {
     longitude: number;
   } | null>(null);
   const [estimatedDistance, setEstimatedDistance] = useState<number | null>(null);
+  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null); // in hours
+  const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
 
   // Fetch driver subscription status
   useEffect(() => {
@@ -163,8 +165,63 @@ export default function BookScreen() {
     }
   };
 
-  // Calculate distance between two points (Haversine formula)
-  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  // ⭐ GOOGLE MAPS API - Get REAL distance and duration with traffic!
+  const getRouteDetails = async (
+    originLat: number,
+    originLng: number,
+    destLat: number,
+    destLng: number
+  ): Promise<{ distance: number; duration: number } | null> => {
+    try {
+      setIsCalculatingRoute(true);
+      
+      // Google Maps Distance Matrix API - provides distance + duration with traffic
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originLat},${originLng}&destinations=${destLat},${destLng}&mode=driving&departure_time=now&key=${GOOGLE_MAPS_API_KEY}`
+      );
+      
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.rows[0]?.elements[0]?.status === 'OK') {
+        const element = data.rows[0].elements[0];
+        
+        // Distance in meters, convert to kilometers
+        const distanceKm = element.distance.value / 1000;
+        
+        // Duration in seconds (with traffic!), convert to hours
+        const durationHours = element.duration.value / 3600;
+        
+        console.log('✅ Google Maps Route:', {
+          distance: `${distanceKm.toFixed(1)} km`,
+          duration: `${durationHours.toFixed(2)} hours`,
+          durationText: element.duration.text,
+        });
+        
+        setIsCalculatingRoute(false);
+        return { distance: distanceKm, duration: durationHours };
+      } else {
+        console.error('❌ Google Maps API error:', data.status);
+        setIsCalculatingRoute(false);
+        
+        // Fallback to Haversine if API fails
+        return fallbackDistanceCalculation(originLat, originLng, destLat, destLng);
+      }
+    } catch (error) {
+      console.error('❌ Error calling Google Maps API:', error);
+      setIsCalculatingRoute(false);
+      
+      // Fallback to Haversine if API fails
+      return fallbackDistanceCalculation(originLat, originLng, destLat, destLng);
+    }
+  };
+
+  // Fallback: Calculate distance using Haversine formula (straight-line distance)
+  const fallbackDistanceCalculation = (
+    lat1: number,
+    lon1: number,
+    lat2: number,
+    lon2: number
+  ): { distance: number; duration: number } => {
     const R = 6371; // Earth's radius in km
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -173,58 +230,89 @@ export default function BookScreen() {
       Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
       Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+    const distance = R * c;
+    
+    // Estimate duration (fallback: assume 60 km/h average)
+    const duration = distance / 60;
+    
+    console.log('⚠️ Using fallback calculation (Haversine)');
+    return { distance, duration };
   };
 
-  // ⭐ DYNAMIC PRICING CALCULATION
-  const calculatePrice = (distance: number, vehicleType: VehicleType, rideType: RideType, estimatedTime?: number): number => {
+  // ⭐ DYNAMIC PRICING CALCULATION (With Real-Time Traffic!)
+  const calculatePrice = (
+    distance: number, 
+    vehicleType: VehicleType, 
+    rideType: RideType, 
+    duration?: number // Real duration from Google Maps API!
+  ): number => {
     const vehicleMultiplier = VEHICLE_OPTIONS.find(v => v.type === vehicleType)?.multiplier || 1.0;
     
     if (rideType === 'intra_city') {
       // INTRA-CITY PRICING (within city, max 50km)
-      // Base fare: ₦200
-      // Per km: ₦100/km
-      // Formula: (200 + (distance * 100)) * vehicle_multiplier
+      // Components:
+      // 1. Base Fare: ₦200
+      // 2. Distance Rate: ₦100/km
+      // 3. Optional: Time Rate for traffic (₦5/minute)
       const baseFare = 200;
       const perKm = 100;
-      return Math.round((baseFare + (distance * perKm)) * vehicleMultiplier);
+      const perMinute = 5; // Traffic compensation
+      
+      // Calculate base price
+      let price = baseFare + (distance * perKm);
+      
+      // Add time cost if duration provided (compensates for traffic)
+      if (duration) {
+        const minutes = duration * 60;
+        price += minutes * perMinute;
+      }
+      
+      return Math.round(price * vehicleMultiplier);
     } else {
       // INTER-CITY PRICING (city to city, 50km+)
-      // Base fare: ₦1,000
-      // Per km: ₦120/km
-      // Per hour: ₦800/hour (compensates driver's time)
-      // Formula: (1000 + (distance * 120) + (hours * 800)) * vehicle_multiplier
+      // Components:
+      // 1. Base Fare: ₦1,000
+      // 2. Distance Rate: ₦120/km
+      // 3. Time Rate: ₦800/hour (driver's time is valuable!)
       const baseFare = 1000;
       const perKm = 120;
       const perHour = 800;
       
-      // Estimate time if not provided (rough estimate: 60-80 km/hour average for inter-city)
-      const hours = estimatedTime || (distance / 70); // 70 km/h average
+      // Use real duration from Google Maps, or fallback estimate
+      const hours = duration || (distance / 70); // Fallback: 70 km/h average
       
-      return Math.round((baseFare + (distance * perKm) + (hours * perHour)) * vehicleMultiplier);
+      const price = baseFare + (distance * perKm) + (hours * perHour);
+      
+      return Math.round(price * vehicleMultiplier);
     }
   };
 
-  // Update estimated distance when both pickup and dropoff are set
+  // ⭐ Update route details when both pickup and dropoff are set
+  // Uses Google Maps API for REAL distance and duration with traffic!
   useEffect(() => {
     const pickup = stops.find(s => s.type === 'pickup');
     const dropoff = stops.find(s => s.type === 'dropoff');
     
     if (pickup?.coordinates && dropoff?.coordinates) {
-      const distance = calculateDistance(
+      // Call Google Maps API to get real distance and duration
+      getRouteDetails(
         pickup.coordinates.latitude,
         pickup.coordinates.longitude,
         dropoff.coordinates.latitude,
         dropoff.coordinates.longitude
-      );
-      setEstimatedDistance(distance);
-      
-      // Auto-switch to inter-city if distance > 50km
-      if (distance > 50 && subscription?.can_access_intercity) {
-        setRideType('inter_city');
-      } else if (distance <= 50) {
-        setRideType('intra_city');
-      }
+      ).then((routeData) => {
+        if (routeData) {
+          setEstimatedDistance(routeData.distance);
+          setEstimatedDuration(routeData.duration);
+          
+          // Auto-switch to inter-city if distance > 50km
+          if (routeData.distance > 50 && subscription?.can_access_intercity) {
+            setRideType('inter_city');
+          } else if (routeData.distance <= 50) {
+            setRideType('intra_city');
+          }
+        }
+      });
     }
   }, [stops, subscription]);
 
@@ -395,7 +483,12 @@ export default function BookScreen() {
     const dropoff = stops.find(s => s.type === 'dropoff');
     
     if (pickup?.coordinates && dropoff?.coordinates) {
-      const estimatedPrice = calculatePrice(estimatedDistance || 0, selectedVehicle, rideType);
+      const estimatedPrice = calculatePrice(
+        estimatedDistance || 0, 
+        selectedVehicle, 
+        rideType,
+        estimatedDuration || undefined
+      );
       
       router.push({
         pathname: '/rider/bid',
@@ -560,13 +653,35 @@ export default function BookScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Distance Display */}
-            {estimatedDistance !== null && (
+            {/* Distance & Duration Display */}
+            {isCalculatingRoute && (
+              <View style={styles.distanceCard}>
+                <ActivityIndicator size="small" color="#3B82F6" />
+                <Text style={styles.distanceText}>Calculating route...</Text>
+              </View>
+            )}
+            
+            {!isCalculatingRoute && estimatedDistance !== null && (
               <View style={styles.distanceCard}>
                 <Ionicons name="map-outline" size={20} color="#3B82F6" />
-                <Text style={styles.distanceText}>
-                  Estimated distance: <Text style={styles.distanceValue}>{estimatedDistance.toFixed(1)} km</Text>
-                </Text>
+                <View style={styles.routeDetails}>
+                  <Text style={styles.distanceText}>
+                    Distance: <Text style={styles.distanceValue}>{estimatedDistance.toFixed(1)} km</Text>
+                  </Text>
+                  {estimatedDuration !== null && (
+                    <Text style={styles.distanceText}>
+                      Duration: <Text style={styles.distanceValue}>
+                        {estimatedDuration < 1 
+                          ? `${Math.round(estimatedDuration * 60)} mins`
+                          : `${estimatedDuration.toFixed(1)} hours`
+                        }
+                      </Text>
+                    </Text>
+                  )}
+                  <Text style={styles.trafficNote}>
+                    <Ionicons name="checkmark-circle" size={12} color="#22C55E" /> With real-time traffic
+                  </Text>
+                </View>
               </View>
             )}
           </ScrollView>
@@ -762,7 +877,12 @@ export default function BookScreen() {
             <Text style={styles.vehiclesSectionSubtitle}>Prices based on distance and vehicle type</Text>
             
             {VEHICLE_OPTIONS.map((vehicle) => {
-              const price = calculatePrice(estimatedDistance || 0, vehicle.type, rideType);
+              const price = calculatePrice(
+                estimatedDistance || 0, 
+                vehicle.type, 
+                rideType,
+                estimatedDuration || undefined
+              );
               const isSelected = selectedVehicle === vehicle.type;
               
               return (
@@ -810,18 +930,19 @@ export default function BookScreen() {
             <View style={styles.pricingInfoContent}>
               {rideType === 'intra_city' ? (
                 <>
-                  <Text style={styles.pricingInfoText}>• Base fare: ₦200</Text>
-                  <Text style={styles.pricingInfoText}>• Per kilometer: ₦100/km</Text>
+                  <Text style={styles.pricingInfoText}>• Base Fare: ₦200</Text>
+                  <Text style={styles.pricingInfoText}>• Distance Rate: ₦100/km</Text>
+                  <Text style={styles.pricingInfoText}>• Time Rate: ₦5/minute (traffic)</Text>
                   <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
-                  <Text style={styles.pricingInfoNote}>Map-calculated distance pricing</Text>
+                  <Text style={styles.pricingInfoNote}>✅ Real-time traffic included</Text>
                 </>
               ) : (
                 <>
-                  <Text style={styles.pricingInfoText}>• Base fare: ₦1,000</Text>
-                  <Text style={styles.pricingInfoText}>• Per kilometer: ₦120/km</Text>
-                  <Text style={styles.pricingInfoText}>• Per hour of driving: ₦800/hour</Text>
+                  <Text style={styles.pricingInfoText}>• Base Fare: ₦1,000</Text>
+                  <Text style={styles.pricingInfoText}>• Distance Rate: ₦120/km</Text>
+                  <Text style={styles.pricingInfoText}>• Time Rate: ₦800/hour</Text>
                   <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
-                  <Text style={styles.pricingInfoNote}>Distance + Time pricing for fairness</Text>
+                  <Text style={styles.pricingInfoNote}>✅ Real-time traffic & duration included</Text>
                 </>
               )}
             </View>
@@ -841,7 +962,7 @@ export default function BookScreen() {
               end={{ x: 1, y: 0 }}
             >
               <Text style={styles.confirmText}>
-                Confirm Ride • ₦{calculatePrice(estimatedDistance || 0, selectedVehicle, rideType).toLocaleString()}
+                Confirm Ride • ₦{calculatePrice(estimatedDistance || 0, selectedVehicle, rideType, estimatedDuration || undefined).toLocaleString()}
               </Text>
               <Ionicons name="checkmark-circle" size={24} color="#FFFFFF" />
             </LinearGradient>
@@ -1011,21 +1132,35 @@ const styles = StyleSheet.create({
   },
   distanceCard: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+    alignItems: 'flex-start',
+    gap: 12,
     backgroundColor: '#EFF6FF',
-    padding: 12,
+    padding: 14,
     borderRadius: 12,
     marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#DBEAFE',
+  },
+  routeDetails: {
+    flex: 1,
   },
   distanceText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#475569',
+    marginBottom: 4,
   },
   distanceValue: {
     fontWeight: '800',
     color: '#3B82F6',
+  },
+  trafficNote: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#22C55E',
+    marginTop: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   bottomContainer: {
     padding: 16,
