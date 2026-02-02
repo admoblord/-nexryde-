@@ -71,10 +71,18 @@ export default function SplashScreen() {
 
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
+    // On web, immediately show splash (SecureStore doesn't work reliably)
+    if (typeof window !== 'undefined') {
+      console.log('ℹ️ Web environment detected - showing splash screen.');
+      setChecking(false);
+      return;
+    }
+    
     checkSavedLogin();
     
     // Safety timeout - if checking takes too long, show splash screen anyway
     const timeout = setTimeout(() => {
+      console.log('⏰ Timeout reached - showing splash screen.');
       setChecking(false);
     }, 3000);
     
@@ -84,13 +92,6 @@ export default function SplashScreen() {
   const checkSavedLogin = async () => {
     try {
       console.log('🔍 Checking for saved login session...');
-      
-      // On web, skip storage check and show splash directly
-      if (Platform.OS === 'web') {
-        console.log('ℹ️ Web platform - showing splash screen.');
-        setChecking(false);
-        return;
-      }
       
       // Wrap in try-catch to handle SecureStore errors gracefully
       try {
