@@ -19,8 +19,8 @@ import { Image } from 'expo-image';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-// These images will display properly on the native mobile app
-const RIDER_HERO = 'https://images.pexels.com/photos/6146978/pexels-photo-6146978.jpeg?auto=compress&cs=tinysrgb&w=600&h=300&dpr=1'; // Three African friends smiling!
+// LOCAL IMAGE - Will definitely show!
+const RIDER_HERO = require('@/assets/images/nigerian-riders.jpg');
 
 export default function RiderHomeScreen() {
   const router = useRouter();
