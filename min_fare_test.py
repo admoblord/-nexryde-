@@ -31,8 +31,8 @@ def test_min_fare_removal():
     short_trip_payload = {
         "pickup_lat": 6.5244,
         "pickup_lng": 3.3792,
-        "destination_lat": 6.5254, 
-        "destination_lng": 3.3802,  # Very short distance (~1km)
+        "dropoff_lat": 6.5254, 
+        "dropoff_lng": 3.3802,  # Very short distance (~1km)
         "service_type": "economy",
         "city": "lagos"
     }
