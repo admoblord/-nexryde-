@@ -1,9 +1,9 @@
 /**
  * NEXRYDE Multi-Language System
- * Supports: English, Yoruba, Igbo, Hausa
+ * Supports: English, Yoruba, Igbo, Hausa, Nigerian Pidgin
  */
 
-export type SupportedLanguage = 'en' | 'yo' | 'ig' | 'ha';
+export type SupportedLanguage = 'en' | 'yo' | 'ig' | 'ha' | 'pcm';
 
 export interface LanguageConfig {
   code: SupportedLanguage;
@@ -19,6 +19,13 @@ export const SUPPORTED_LANGUAGES: LanguageConfig[] = [
     name: 'English',
     nativeName: 'English',
     flag: '🇬🇧',
+    rtl: false,
+  },
+  {
+    code: 'pcm',
+    name: 'Nigerian Pidgin',
+    nativeName: 'Naija Pidgin',
+    flag: '🇳🇬',
     rtl: false,
   },
   {
@@ -600,12 +607,152 @@ export const ha = {
   },
 };
 
+// Nigerian Pidgin Translations
+export const pcm = {
+  common: {
+    welcome: 'You welcome',
+    hello: 'How far',
+    thanks: 'I dey tank you',
+    yes: 'Yes na',
+    no: 'No be so',
+    ok: 'E don do',
+    cancel: 'Make you cancel am',
+    save: 'Keep am',
+    delete: 'Comot am',
+    edit: 'Change am',
+    loading: 'E dey load...',
+    error: 'Wahala don happen',
+    success: 'E don work',
+    confirm: 'Confam am',
+    back: 'Go back',
+    next: 'Next one',
+    done: 'Done',
+    search: 'Find am',
+    filter: 'Filter am',
+    settings: 'Settings',
+  },
+  
+  auth: {
+    login: 'Enter',
+    logout: 'Comot',
+    register: 'Sign up',
+    phoneNumber: 'Phone number',
+    enterPhone: 'Put your phone number',
+    verifyOTP: 'Check the code',
+    enterOTP: 'Put the code wey we send you',
+    resendOTP: 'Send code again',
+    continueText: 'Make we continue',
+  },
+  
+  home: {
+    whereTo: 'Wetin you wan do?',
+    enterDestination: 'Where you dey go?',
+    bookRide: 'Book ride',
+    myTrips: 'My trips dem',
+    wallet: 'My money',
+    more: 'More thing',
+  },
+  
+  ride: {
+    pickupLocation: 'Where we go pick you',
+    dropoffLocation: 'Where we go drop you',
+    selectOnMap: 'Show us for map',
+    confirmPickup: 'Confam where we go pick you',
+    confirmDropoff: 'Confam where we go drop you',
+    searchingDriver: 'We dey find driver for you...',
+    driverFound: 'We don see driver!',
+    arrivedPickup: 'Driver don reach',
+    tripStarted: 'Journey don start',
+    tripCompleted: 'Journey don end',
+    rateDriver: 'Rate the driver',
+    fare: 'Price',
+    distance: 'How far e be',
+    duration: 'How long',
+  },
+  
+  driver: {
+    goOnline: 'Go online',
+    goOffline: 'Go offline',
+    acceptRide: 'Accept ride',
+    rejectRide: 'Reject am',
+    startTrip: 'Start trip',
+    completeTrip: 'Finish trip',
+    earnings: 'Your money',
+    todayEarnings: 'Money wey you make today',
+    weeklyEarnings: 'Money for this week',
+    totalRides: 'All the trips',
+    rating: 'Your rating',
+  },
+  
+  safety: {
+    emergencySOS: 'Emergency wahala',
+    shareTrip: 'Share trip',
+    emergencyContacts: 'People wey go help you',
+    addContact: 'Add person',
+    trustedDrivers: 'Drivers wey you trust',
+    safetyTips: 'Safety tips',
+  },
+  
+  wallet: {
+    balance: 'Money wey remain',
+    addMoney: 'Add money',
+    withdraw: 'Collect money',
+    transactions: 'All your money move',
+    topUp: 'Add money',
+    payment: 'Pay',
+  },
+  
+  profile: {
+    myProfile: 'My profile',
+    editProfile: 'Change profile',
+    personalInfo: 'Your information',
+    name: 'Name',
+    email: 'Email',
+    phone: 'Phone',
+    language: 'Language',
+    changeLanguage: 'Change language',
+    notifications: 'Notifications',
+    helpSupport: 'Help',
+  },
+  
+  verification: {
+    driverVerification: 'Driver verification',
+    uploadDocuments: 'Upload papers',
+    ninVerified: 'NIN don confam',
+    licenseVerified: 'License don confam',
+    vehicleVerified: 'Motor don confam',
+    backgroundCheck: 'Background check',
+    trustScore: 'Trust level',
+  },
+  
+  wellness: {
+    driverWellness: 'Driver wellness',
+    takeBreak: 'Rest small',
+    wellnessScore: 'Wellness score',
+    drivingTime: 'Time wey you drive',
+    breakTime: 'Time wey you rest',
+    restReminder: 'Time to rest!',
+    safetyFirst: 'Your safety come first',
+  },
+  
+  smartMode: {
+    smartMode: 'Smart mode',
+    autoAccept: 'Accept ride by yourself',
+    customizeRules: 'Set your own rules',
+    minDistance: 'Shortest distance',
+    maxDistance: 'Longest distance',
+    minRating: 'Lowest rating',
+    surgePricing: 'Extra price',
+  },
+};
+
 // Translation type for TypeScript
 export type TranslationKeys = typeof en;
 
 // All translations
 export const translations = {
   en,
+  pcm,
   yo,
   ig,
   ha,
