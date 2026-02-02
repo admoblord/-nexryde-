@@ -125,11 +125,14 @@ export default function DriverHomeScreen() {
 
           {/* 🌟 HERO - SMILING DRIVER IMAGE */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
-            <ImageBackground
-              source={{ uri: DRIVER_HERO }}
-              style={styles.heroImage}
-              imageStyle={styles.heroImageStyle}
-            >
+            <View style={styles.heroImageContainer}>
+              {/* Background Image of Nigerian Driver */}
+              <Image
+                source={{ uri: DRIVER_HERO }}
+                style={styles.heroBackgroundImage}
+                resizeMode="cover"
+              />
+              {/* Overlay Gradient */}
               <LinearGradient
                 colors={isOnline 
                   ? ['rgba(16,185,129,0.4)', 'rgba(16,185,129,0.7)', 'rgba(6,182,212,0.9)']
