@@ -20,7 +20,7 @@ import { useAppStore } from '@/src/store/appStore';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-const RIDER_HERO = 'https://images.pexels.com/photos/6146978/pexels-photo-6146978.jpeg?auto=compress&cs=tinysrgb&w=800'; // Three African friends smiling together!
+const RIDER_HERO = 'https://randomuser.me/api/portraits/women/44.jpg'; // African woman - will replace with proper group image
 
 export default function RiderHomeScreen() {
   const router = useRouter();
