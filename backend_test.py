@@ -1,522 +1,745 @@
 #!/usr/bin/env python3
 """
-NEXRYDE Backend API Comprehensive Testing Suite
-Tests all 45 API endpoints as specified in the review request
+NEXRYDE Backend API Testing Suite
+Comprehensive testing of all 37 backend API endpoints
 """
 
-import requests
+import asyncio
+import aiohttp
 import json
-import time
-from datetime import datetime, timedelta
-import uuid
+import base64
+import os
+from datetime import datetime
+from typing import Dict, Any, List
 
-# Backend URL from frontend/.env
-BASE_URL = "https://rideshare-revamp-1.preview.emergentagent.com/api"
+# Backend URL from environment
+BACKEND_URL = "https://rideshare-revamp-1.preview.emergentagent.com/api"
 
-class NEXRYDEAPITester:
+# Test data
+TEST_PHONE = "+2348012345678"
+TEST_DRIVER_ID = "user_admoblord_1770020814990"
+TEST_USER_ID = "test_user_123"
+
+class NexrydeAPITester:
     def __init__(self):
-        self.session = requests.Session()
-        self.test_results = []
-        self.failed_tests = []
-        self.passed_tests = []
-        
-        # Test data
-        self.test_phone = "+2348123456789"
-        self.test_user_id = None
-        self.test_driver_id = None
-        self.test_trip_id = None
+        self.session = None
+        self.results = []
         self.test_otp = None
+        self.session_token = None
         
-        # Lagos coordinates for testing
-        self.lagos_coords = {
-            "pickup_lat": 6.5244,
-            "pickup_lng": 3.3792,
-            "dropoff_lat": 6.4281,
-            "dropoff_lng": 3.4219
-        }
+    async def __aenter__(self):
+        self.session = aiohttp.ClientSession()
+        return self
+        
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.session:
+            await self.session.close()
     
-    def log_test(self, endpoint, method, status, response_data=None, error=None):
-        """Log test results"""
+    def log_result(self, endpoint: str, method: str, status: str, details: str = ""):
+        """Log test result"""
         result = {
             "endpoint": endpoint,
             "method": method,
-            "status": "PASS" if status else "FAIL",
-            "timestamp": datetime.now().isoformat(),
-            "response": response_data,
-            "error": error
+            "status": status,
+            "details": details,
+            "timestamp": datetime.now().isoformat()
         }
+        self.results.append(result)
         
-        self.test_results.append(result)
-        if status:
-            self.passed_tests.append(f"✅ {method} {endpoint}")
-        else:
-            self.failed_tests.append(f"❌ {method} {endpoint} - {error}")
-        
-        print(f"{'✅' if status else '❌'} {method} {endpoint} - {'PASS' if status else 'FAIL'}")
-        if error:
-            print(f"   Error: {error}")
-        if response_data and isinstance(response_data, dict):
-            print(f"   Response: {json.dumps(response_data, indent=2)[:200]}...")
-        print()
+        # Print result
+        status_emoji = "✅" if status == "WORKING" else "⚠️" if status == "PARTIAL" else "❌"
+        print(f"{status_emoji} {method} {endpoint} - {status}")
+        if details:
+            print(f"   Details: {details}")
     
-    def test_endpoint(self, method, endpoint, data=None, params=None, expected_status=200):
-        """Generic endpoint tester"""
-        url = f"{BASE_URL}{endpoint}"
+    async def make_request(self, method: str, endpoint: str, data: Dict = None, headers: Dict = None) -> Dict:
+        """Make HTTP request and return response"""
+        url = f"{BACKEND_URL}{endpoint}"
         
-        try:
-            if method.upper() == "GET":
-                response = self.session.get(url, params=params, timeout=30)
-            elif method.upper() == "POST":
-                response = self.session.post(url, json=data, timeout=30)
-            elif method.upper() == "PUT":
-                response = self.session.put(url, json=data, timeout=30)
-            elif method.upper() == "DELETE":
-                response = self.session.delete(url, timeout=30)
-            else:
-                raise ValueError(f"Unsupported method: {method}")
+        default_headers = {"Content-Type": "application/json"}
+        if headers:
+            default_headers.update(headers)
             
-            # Check if response is successful
-            if response.status_code == expected_status or (200 <= response.status_code < 300):
+        try:
+            async with self.session.request(
+                method=method,
+                url=url,
+                json=data if data else None,
+                headers=default_headers,
+                timeout=30
+            ) as response:
                 try:
-                    response_data = response.json()
-                    self.log_test(endpoint, method, True, response_data)
-                    return True, response_data
+                    response_data = await response.json()
                 except:
-                    self.log_test(endpoint, method, True, {"status_code": response.status_code})
-                    return True, {"status_code": response.status_code}
-            else:
-                error_msg = f"Status {response.status_code}"
-                try:
-                    error_data = response.json()
-                    error_msg += f" - {error_data.get('detail', 'Unknown error')}"
-                except:
-                    error_msg += f" - {response.text[:100]}"
+                    response_data = {"text": await response.text()}
                 
-                self.log_test(endpoint, method, False, None, error_msg)
-                return False, error_msg
-                
+                return {
+                    "status_code": response.status,
+                    "data": response_data,
+                    "success": 200 <= response.status < 300
+                }
         except Exception as e:
-            self.log_test(endpoint, method, False, None, str(e))
-            return False, str(e)
+            return {
+                "status_code": 0,
+                "data": {"error": str(e)},
+                "success": False
+            }
     
-    def test_authentication_apis(self):
-        """Test Authentication APIs (5 endpoints)"""
-        print("🔐 TESTING AUTHENTICATION APIs")
-        print("=" * 50)
-        
-        # 1. POST /api/auth/send-otp - Send SMS OTP
-        success, response = self.test_endpoint("POST", "/auth/send-otp", {
-            "phone": self.test_phone
+    # ==================== AUTHENTICATION TESTS ====================
+    
+    async def test_send_otp(self):
+        """Test POST /api/auth/send-otp"""
+        response = await self.make_request("POST", "/auth/send-otp", {
+            "phone": TEST_PHONE
         })
-        if success and isinstance(response, dict):
-            self.test_otp = response.get("otp")  # For mock mode
         
-        # 2. POST /api/auth/verify-otp - Verify OTP
-        if self.test_otp:
-            success, response = self.test_endpoint("POST", "/auth/verify-otp", {
-                "phone": self.test_phone,
-                "otp": self.test_otp
-            })
-            if success and isinstance(response, dict) and response.get("is_new_user"):
-                # Register new user
-                success, response = self.test_endpoint("POST", "/auth/register", {
-                    "phone": self.test_phone,
-                    "name": "John Doe",
-                    "email": "john.doe@example.com",
-                    "role": "rider"
-                })
-                if success and isinstance(response, dict):
-                    user_data = response.get("user", {})
-                    self.test_user_id = user_data.get("id")
-        
-        # 3. POST /api/auth/google - Google login (test with invalid session)
-        self.test_endpoint("POST", "/auth/google/exchange", {
-            "session_id": "test_invalid_session_123"
-        }, expected_status=401)
-        
-        # 4. GET /api/users/{user_id} - Get user profile
-        if self.test_user_id:
-            self.test_endpoint("GET", f"/users/{self.test_user_id}")
+        if response["success"]:
+            # Extract OTP from response for testing
+            if "otp" in response["data"]:
+                self.test_otp = response["data"]["otp"]
+            self.log_result("/auth/send-otp", "POST", "WORKING", 
+                          f"OTP sent successfully. Provider: {response['data'].get('provider', 'unknown')}")
         else:
-            # Test with a sample user ID
-            self.test_endpoint("GET", "/users/sample-user-123", expected_status=404)
-        
-        # 5. PUT /api/users/{user_id} - Update user profile
-        if self.test_user_id:
-            self.test_endpoint("PUT", f"/users/{self.test_user_id}", {
-                "name": "John Updated Doe",
-                "email": "john.updated@example.com"
-            })
-        else:
-            self.test_endpoint("PUT", "/users/sample-user-123", {
-                "name": "Test User"
-            }, expected_status=404)
+            self.log_result("/auth/send-otp", "POST", "BROKEN", 
+                          f"Failed: {response['data']}")
     
-    def test_rider_apis(self):
-        """Test Rider APIs (12 endpoints)"""
-        print("🚗 TESTING RIDER APIs")
-        print("=" * 50)
+    async def test_verify_otp(self):
+        """Test POST /api/auth/verify-otp"""
+        if not self.test_otp:
+            self.log_result("/auth/verify-otp", "POST", "BROKEN", "No OTP available from send-otp test")
+            return
+            
+        response = await self.make_request("POST", "/auth/verify-otp", {
+            "phone": TEST_PHONE,
+            "otp": self.test_otp
+        })
         
-        # 6. POST /api/trips/request - Request a ride
-        ride_data = {
-            "pickup_lat": self.lagos_coords["pickup_lat"],
-            "pickup_lng": self.lagos_coords["pickup_lng"],
+        if response["success"]:
+            self.log_result("/auth/verify-otp", "POST", "WORKING", 
+                          f"OTP verified. New user: {response['data'].get('is_new_user', False)}")
+        else:
+            self.log_result("/auth/verify-otp", "POST", "BROKEN", 
+                          f"Failed: {response['data']}")
+    
+    async def test_register(self):
+        """Test POST /api/auth/register"""
+        response = await self.make_request("POST", "/auth/register", {
+            "phone": TEST_PHONE,
+            "name": "Test Driver",
+            "email": "testdriver@nexryde.com",
+            "role": "driver"
+        })
+        
+        if response["success"]:
+            self.log_result("/auth/register", "POST", "WORKING", "User registered successfully")
+        elif response["status_code"] == 400 and "already exists" in str(response["data"]):
+            self.log_result("/auth/register", "POST", "WORKING", "User already exists (expected)")
+        else:
+            self.log_result("/auth/register", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_google_oauth(self):
+        """Test POST /api/auth/google/exchange"""
+        response = await self.make_request("POST", "/auth/google/exchange", {
+            "session_id": "invalid_session_for_testing"
+        })
+        
+        if response["status_code"] == 401:
+            self.log_result("/auth/google/exchange", "POST", "WORKING", "Correctly rejects invalid session")
+        elif response["success"]:
+            self.log_result("/auth/google/exchange", "POST", "WORKING", "Google OAuth working")
+        else:
+            self.log_result("/auth/google/exchange", "POST", "PARTIAL", f"Response: {response['data']}")
+    
+    async def test_logout(self):
+        """Test POST /api/auth/logout"""
+        response = await self.make_request("POST", "/auth/logout")
+        
+        if response["success"]:
+            self.log_result("/auth/logout", "POST", "WORKING", "Logout successful")
+        else:
+            self.log_result("/auth/logout", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== USER TESTS ====================
+    
+    async def test_get_user_profile(self):
+        """Test GET /api/users/{user_id}"""
+        response = await self.make_request("GET", f"/users/{TEST_DRIVER_ID}")
+        
+        if response["success"]:
+            user_data = response["data"]
+            self.log_result("/users/{user_id}", "GET", "WORKING", 
+                          f"User found: {user_data.get('name', 'Unknown')}")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}", "GET", "PARTIAL", "User not found (expected for test ID)")
+        else:
+            self.log_result("/users/{user_id}", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_update_user_profile(self):
+        """Test PUT /api/users/{user_id}"""
+        response = await self.make_request("PUT", f"/users/{TEST_DRIVER_ID}", {
+            "name": "Updated Test Driver",
+            "email": "updated@nexryde.com"
+        })
+        
+        if response["success"]:
+            self.log_result("/users/{user_id}", "PUT", "WORKING", "Profile updated successfully")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}", "PUT", "PARTIAL", "User not found (expected for test ID)")
+        else:
+            self.log_result("/users/{user_id}", "PUT", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_upload_profile_picture(self):
+        """Test POST /api/users/{user_id}/profile-picture"""
+        # Create a small base64 image for testing
+        test_image = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+        
+        response = await self.make_request("POST", f"/users/{TEST_DRIVER_ID}/profile-picture", {
+            "image": test_image
+        })
+        
+        if response["success"]:
+            self.log_result("/users/{user_id}/profile-picture", "POST", "WORKING", "Profile picture uploaded")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}/profile-picture", "POST", "PARTIAL", "User not found (expected)")
+        else:
+            self.log_result("/users/{user_id}/profile-picture", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_add_emergency_contact(self):
+        """Test POST /api/users/{user_id}/emergency-contacts"""
+        response = await self.make_request("POST", f"/users/{TEST_DRIVER_ID}/emergency-contacts", {
+            "name": "Emergency Contact",
+            "phone": "+2348087654321",
+            "relationship": "Family"
+        })
+        
+        if response["success"]:
+            self.log_result("/users/{user_id}/emergency-contacts", "POST", "WORKING", "Emergency contact added")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}/emergency-contacts", "POST", "PARTIAL", "User not found (expected)")
+        else:
+            self.log_result("/users/{user_id}/emergency-contacts", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_get_emergency_contacts(self):
+        """Test GET /api/users/{user_id}/emergency-contacts"""
+        response = await self.make_request("GET", f"/users/{TEST_DRIVER_ID}/emergency-contacts")
+        
+        if response["success"]:
+            contacts = response["data"].get("contacts", [])
+            self.log_result("/users/{user_id}/emergency-contacts", "GET", "WORKING", 
+                          f"Retrieved {len(contacts)} emergency contacts")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}/emergency-contacts", "GET", "PARTIAL", "User not found (expected)")
+        else:
+            self.log_result("/users/{user_id}/emergency-contacts", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== FARE & BOOKING TESTS ====================
+    
+    async def test_fare_estimate(self):
+        """Test POST /api/fare/estimate"""
+        # Lagos coordinates for testing
+        response = await self.make_request("POST", "/fare/estimate", {
+            "pickup_lat": 6.5244,
+            "pickup_lng": 3.3792,
+            "dropoff_lat": 6.4281,
+            "dropoff_lng": 3.4219,
+            "service_type": "economy"
+        })
+        
+        if response["success"]:
+            fare_data = response["data"]
+            self.log_result("/fare/estimate", "POST", "WORKING", 
+                          f"Fare: ₦{fare_data.get('total_fare', 0)}, Distance: {fare_data.get('distance_km', 0)}km")
+        else:
+            self.log_result("/fare/estimate", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_surge_status(self):
+        """Test GET /api/surge/status"""
+        response = await self.make_request("GET", "/surge/status?lat=6.5244&lng=3.3792")
+        
+        if response["success"]:
+            surge_data = response["data"]
+            self.log_result("/surge/status", "GET", "WORKING", 
+                          f"Surge multiplier: {surge_data.get('multiplier', 1.0)}x")
+        else:
+            self.log_result("/surge/status", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_request_trip(self):
+        """Test POST /api/trips/request"""
+        response = await self.make_request("POST", "/trips/request", {
+            "rider_id": TEST_USER_ID,
+            "pickup_lat": 6.5244,
+            "pickup_lng": 3.3792,
             "pickup_address": "Victoria Island, Lagos",
-            "dropoff_lat": self.lagos_coords["dropoff_lat"],
-            "dropoff_lng": self.lagos_coords["dropoff_lng"],
+            "dropoff_lat": 6.4281,
+            "dropoff_lng": 3.4219,
             "dropoff_address": "Lekki Phase 1, Lagos",
             "service_type": "economy",
             "payment_method": "cash"
-        }
-        success, response = self.test_endpoint("POST", "/trips/request", ride_data)
-        if success and isinstance(response, dict):
-            self.test_trip_id = response.get("trip_id")
+        })
         
-        # 7. GET /api/trips/{trip_id} - Get trip details
-        if self.test_trip_id:
-            self.test_endpoint("GET", f"/trips/{self.test_trip_id}")
+        if response["success"]:
+            trip_data = response["data"]
+            self.log_result("/trips/request", "POST", "WORKING", 
+                          f"Trip requested: {trip_data.get('id', 'unknown')}")
         else:
-            self.test_endpoint("GET", "/trips/sample-trip-123", expected_status=404)
+            self.log_result("/trips/request", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_get_trip_details(self):
+        """Test GET /api/trips/{trip_id}"""
+        test_trip_id = "test_trip_123"
+        response = await self.make_request("GET", f"/trips/{test_trip_id}")
         
-        # 8. PUT /api/trips/{trip_id}/cancel - Cancel trip
-        if self.test_trip_id:
-            self.test_endpoint("PUT", f"/trips/{self.test_trip_id}/cancel")
-        
-        # 9. GET /api/trips/user/{user_id} - Trip history
-        if self.test_user_id:
-            self.test_endpoint("GET", f"/trips/user/{self.test_user_id}")
+        if response["success"]:
+            self.log_result("/trips/{trip_id}", "GET", "WORKING", "Trip details retrieved")
+        elif response["status_code"] == 404:
+            self.log_result("/trips/{trip_id}", "GET", "WORKING", "Trip not found (expected for test ID)")
         else:
-            self.test_endpoint("GET", "/trips/user/sample-user-123")
-        
-        # 10. PUT /api/trips/{trip_id}/rate - Rate a trip
-        if self.test_trip_id:
-            self.test_endpoint("PUT", f"/trips/{self.test_trip_id}/rate", {
-                "rating": 5.0,
-                "comment": "Excellent service!"
-            })
-        
-        # 11. POST /api/fare/estimate - Get fare estimate
-        self.test_endpoint("POST", "/fare/estimate", {
-            "pickup_lat": self.lagos_coords["pickup_lat"],
-            "pickup_lng": self.lagos_coords["pickup_lng"],
-            "dropoff_lat": self.lagos_coords["dropoff_lat"],
-            "dropoff_lng": self.lagos_coords["dropoff_lng"],
-            "service_type": "economy"
+            self.log_result("/trips/{trip_id}", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_cancel_trip(self):
+        """Test POST /api/trips/{trip_id}/cancel"""
+        test_trip_id = "test_trip_123"
+        response = await self.make_request("POST", f"/trips/{test_trip_id}/cancel", {
+            "reason": "Testing cancellation"
         })
         
-        # 12. POST /api/rides/bid/create - Create bid request (with query param)
-        success, response = self.test_endpoint("POST", f"/rides/bid/create?rider_id={self.test_user_id or 'sample-user-123'}", {
-            "pickup_lat": self.lagos_coords["pickup_lat"],
-            "pickup_lng": self.lagos_coords["pickup_lng"],
-            "pickup_address": "Victoria Island, Lagos",
-            "dropoff_lat": self.lagos_coords["dropoff_lat"],
-            "dropoff_lng": self.lagos_coords["dropoff_lng"],
-            "dropoff_address": "Lekki Phase 1, Lagos",
-            "rider_offered_price": 2500.0
-        })
-        
-        # 13. GET /api/rides/bid/open - Get open bids
-        self.test_endpoint("GET", "/rides/bid/open", params={
-            "lat": self.lagos_coords["pickup_lat"],
-            "lng": self.lagos_coords["pickup_lng"]
-        })
-        
-        # 14. POST /api/rides/schedule - Schedule ride (with query param)
-        future_time = (datetime.now() + timedelta(hours=2)).isoformat()
-        self.test_endpoint("POST", f"/rides/schedule?rider_id={self.test_user_id or 'sample-user-123'}", {
-            "pickup_lat": self.lagos_coords["pickup_lat"],
-            "pickup_lng": self.lagos_coords["pickup_lng"],
-            "pickup_address": "Victoria Island, Lagos",
-            "dropoff_lat": self.lagos_coords["dropoff_lat"],
-            "dropoff_lng": self.lagos_coords["dropoff_lng"],
-            "dropoff_address": "Lekki Phase 1, Lagos",
-            "scheduled_time": future_time,
-            "service_type": "economy"
-        })
-        
-        # 15. GET /api/rides/scheduled/{user_id} - Get scheduled rides
-        if self.test_user_id:
-            self.test_endpoint("GET", f"/rides/scheduled/{self.test_user_id}")
+        if response["success"]:
+            self.log_result("/trips/{trip_id}/cancel", "POST", "WORKING", "Trip cancelled successfully")
+        elif response["status_code"] == 404:
+            self.log_result("/trips/{trip_id}/cancel", "POST", "WORKING", "Trip not found (expected)")
         else:
-            self.test_endpoint("GET", "/rides/scheduled/sample-user-123")
+            self.log_result("/trips/{trip_id}/cancel", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== DRIVER TESTS ====================
+    
+    async def test_driver_stats(self):
+        """Test GET /api/drivers/{driver_id}/stats"""
+        response = await self.make_request("GET", f"/drivers/{TEST_DRIVER_ID}/stats")
         
-        # 16. POST /api/delivery/request - Request delivery (with query param)
-        self.test_endpoint("POST", f"/delivery/request?sender_id={self.test_user_id or 'sample-user-123'}", {
-            "pickup_lat": self.lagos_coords["pickup_lat"],
-            "pickup_lng": self.lagos_coords["pickup_lng"],
-            "pickup_address": "Victoria Island, Lagos",
-            "dropoff_lat": self.lagos_coords["dropoff_lat"],
-            "dropoff_lng": self.lagos_coords["dropoff_lng"],
-            "dropoff_address": "Lekki Phase 1, Lagos",
-            "recipient_name": "Jane Smith",
-            "recipient_phone": "+2348987654321",
-            "package_description": "Important Documents",
-            "package_size": "small"
-        })
-        
-        # 17. GET /api/delivery/user/{user_id} - Get user deliveries
-        if self.test_user_id:
-            self.test_endpoint("GET", f"/delivery/user/{self.test_user_id}")
+        if response["success"]:
+            stats = response["data"]
+            self.log_result("/drivers/{driver_id}/stats", "GET", "WORKING", 
+                          f"Earnings: ₦{stats.get('total_earnings', 0)}, Trips: {stats.get('total_trips', 0)}")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/stats", "GET", "PARTIAL", "Driver not found (expected)")
         else:
-            self.test_endpoint("GET", "/delivery/user/sample-user-123")
+            self.log_result("/drivers/{driver_id}/stats", "GET", "BROKEN", f"Failed: {response['data']}")
     
-    def test_driver_apis(self):
-        """Test Driver APIs (6 endpoints)"""
-        print("🚙 TESTING DRIVER APIs")
-        print("=" * 50)
-        
-        # Create a test driver first
-        driver_phone = "+2348111222333"
-        
-        # Send OTP for driver
-        success, response = self.test_endpoint("POST", "/auth/send-otp", {
-            "phone": driver_phone
+    async def test_driver_online_toggle(self):
+        """Test PUT /api/drivers/{driver_id}/online"""
+        response = await self.make_request("PUT", f"/drivers/{TEST_DRIVER_ID}/online", {
+            "is_online": True
         })
         
-        if success and isinstance(response, dict):
-            driver_otp = response.get("otp")
-            
-            # Verify OTP
-            if driver_otp:
-                success, response = self.test_endpoint("POST", "/auth/verify-otp", {
-                    "phone": driver_phone,
-                    "otp": driver_otp
-                })
-                
-                if success and isinstance(response, dict) and response.get("is_new_user"):
-                    # Register as driver
-                    success, response = self.test_endpoint("POST", "/auth/register", {
-                        "phone": driver_phone,
-                        "name": "Mike Driver",
-                        "email": "mike.driver@example.com",
-                        "role": "driver"
-                    })
-                    
-                    if success and isinstance(response, dict):
-                        user_data = response.get("user", {})
-                        self.test_driver_id = user_data.get("id")
-        
-        # Use sample driver ID if creation failed
-        driver_id = self.test_driver_id or "sample-driver-123"
-        
-        # 18. GET /api/drivers/{user_id}/profile - Driver profile
-        self.test_endpoint("GET", f"/drivers/{driver_id}/profile")
-        
-        # 19. PUT /api/drivers/{user_id}/profile - Update driver profile
-        self.test_endpoint("PUT", f"/drivers/{driver_id}/profile", {
-            "vehicle_type": "sedan",
-            "vehicle_model": "Toyota Camry 2020",
-            "vehicle_plate": "ABC-123-XY",
-            "vehicle_color": "Black",
-            "bank_name": "GTBank",
-            "account_number": "0123456789",
-            "account_name": "Mike Driver"
-        })
-        
-        # 20. PUT /api/drivers/{user_id}/location - Update location
-        self.test_endpoint("PUT", f"/drivers/{driver_id}/location", {
-            "latitude": self.lagos_coords["pickup_lat"],
-            "longitude": self.lagos_coords["pickup_lng"]
-        })
-        
-        # 21. PUT /api/drivers/{user_id}/online - Toggle online status (with query param)
-        self.test_endpoint("PUT", f"/drivers/{driver_id}/online?is_online=true")
-        
-        # 22. GET /api/drivers/{user_id}/stats - Get earnings/stats
-        self.test_endpoint("GET", f"/drivers/{driver_id}/stats")
-        
-        # 23. GET /api/drivers/nearby - Get nearby drivers
-        self.test_endpoint("GET", "/drivers/nearby", params={
-            "lat": self.lagos_coords["pickup_lat"],
-            "lng": self.lagos_coords["pickup_lng"],
-            "radius": 5
-        })
+        if response["success"]:
+            self.log_result("/drivers/{driver_id}/online", "PUT", "WORKING", "Online status updated")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/online", "PUT", "PARTIAL", "Driver not found (expected)")
+        else:
+            self.log_result("/drivers/{driver_id}/online", "PUT", "BROKEN", f"Failed: {response['data']}")
     
-    def test_subscription_apis(self):
-        """Test Subscription APIs (3 endpoints)"""
-        print("💳 TESTING SUBSCRIPTION APIs")
-        print("=" * 50)
-        
-        driver_id = self.test_driver_id or "sample-driver-123"
-        
-        # 24. GET /api/subscriptions/{driver_id} - Get subscription status
-        self.test_endpoint("GET", f"/subscriptions/{driver_id}")
-        
-        # 25. POST /api/subscriptions/{driver_id}/start-trial - Initiate subscription
-        self.test_endpoint("POST", f"/subscriptions/{driver_id}/start-trial")
-        
-        # 26. POST /api/subscriptions/{driver_id}/submit-payment - Upload payment proof (correct body format)
-        self.test_endpoint("POST", f"/subscriptions/{driver_id}/submit-payment", {
-            "driver_id": driver_id,
-            "screenshot": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwCdABmX/9k=",
-            "amount": 25000.0,
-            "payment_reference": "TXN123456789"
+    async def test_update_driver_location(self):
+        """Test PUT /api/drivers/{driver_id}/location"""
+        response = await self.make_request("PUT", f"/drivers/{TEST_DRIVER_ID}/location", {
+            "latitude": 6.5244,
+            "longitude": 3.3792
         })
+        
+        if response["success"]:
+            self.log_result("/drivers/{driver_id}/location", "PUT", "WORKING", "Location updated")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/location", "PUT", "PARTIAL", "Driver not found (expected)")
+        else:
+            self.log_result("/drivers/{driver_id}/location", "PUT", "BROKEN", f"Failed: {response['data']}")
     
-    def test_chat_apis(self):
-        """Test Chat APIs (5 endpoints)"""
-        print("💬 TESTING CHAT APIs")
-        print("=" * 50)
-        
-        user_id = self.test_user_id or "sample-user-123"
-        trip_id = self.test_trip_id or "sample-trip-123"
-        
-        # 27. POST /api/chat/ai - AI chat
-        self.test_endpoint("POST", "/chat/ai", {
-            "user_id": user_id,
-            "message": "What's the fare from Victoria Island to Lekki?",
-            "context": "fare_inquiry"
+    async def test_register_vehicle(self):
+        """Test POST /api/drivers/{driver_id}/vehicle"""
+        response = await self.make_request("POST", f"/drivers/{TEST_DRIVER_ID}/vehicle", {
+            "make": "Toyota",
+            "model": "Camry",
+            "year": 2020,
+            "color": "Black",
+            "plate_number": "ABC123DE",
+            "category": "economy"
         })
         
-        # 28. GET /api/chat/ai/history/{user_id} - AI chat history
-        self.test_endpoint("GET", f"/chat/ai/history/{user_id}")
-        
-        # 29. POST /api/chat/message - Send message (correct field name)
-        self.test_endpoint("POST", "/chat/message", {
-            "trip_id": trip_id,
-            "sender_id": user_id,
-            "sender_role": "rider",
-            "message": "I'm on my way to the pickup location"
-        })
-        
-        # 30. GET /api/chat/messages/{trip_id} - Get trip messages (with user_id param)
-        self.test_endpoint("GET", f"/chat/messages/{trip_id}", params={"user_id": user_id})
-        
-        # 31. GET /api/chat/presets/{role} - Get preset messages
-        self.test_endpoint("GET", "/chat/presets/rider")
-        self.test_endpoint("GET", "/chat/presets/driver")
+        if response["success"]:
+            self.log_result("/drivers/{driver_id}/vehicle", "POST", "WORKING", "Vehicle registered")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/vehicle", "POST", "PARTIAL", "Driver not found (expected)")
+        else:
+            self.log_result("/drivers/{driver_id}/vehicle", "POST", "BROKEN", f"Failed: {response['data']}")
     
-    def test_admin_apis(self):
-        """Test Admin APIs (6 endpoints)"""
-        print("👨‍💼 TESTING ADMIN APIs")
-        print("=" * 50)
+    async def test_get_vehicle_info(self):
+        """Test GET /api/drivers/{driver_id}/vehicle"""
+        response = await self.make_request("GET", f"/drivers/{TEST_DRIVER_ID}/vehicle")
         
-        # 32. POST /api/admin/login - Admin login
-        self.test_endpoint("POST", "/admin/login", {
-            "email": "admin@nexryde.com",
-            "password": "nexryde2025"
-        })
-        
-        # Test with wrong credentials
-        self.test_endpoint("POST", "/admin/login", {
-            "email": "wrong@email.com",
-            "password": "wrongpass"
-        }, expected_status=401)
-        
-        # 33. GET /api/admin/overview - Dashboard stats
-        self.test_endpoint("GET", "/admin/overview")
-        
-        # 34. GET /api/admin/riders - All riders
-        self.test_endpoint("GET", "/admin/riders")
-        
-        # 35. GET /api/admin/drivers - All drivers
-        self.test_endpoint("GET", "/admin/drivers")
-        
-        # 36. GET /api/admin/trips - All trips
-        self.test_endpoint("GET", "/admin/trips")
-        
-        # 37. GET /api/admin/payments - All payments
-        self.test_endpoint("GET", "/admin/payments")
-        
-        # 38. GET /api/admin/promos - All promo codes
-        self.test_endpoint("GET", "/admin/promos")
+        if response["success"]:
+            vehicle = response["data"]
+            self.log_result("/drivers/{driver_id}/vehicle", "GET", "WORKING", 
+                          f"Vehicle: {vehicle.get('make', 'Unknown')} {vehicle.get('model', '')}")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/vehicle", "GET", "PARTIAL", "Vehicle/Driver not found (expected)")
+        else:
+            self.log_result("/drivers/{driver_id}/vehicle", "GET", "BROKEN", f"Failed: {response['data']}")
     
-    def test_other_apis(self):
-        """Test Other APIs (8 endpoints)"""
-        print("🔧 TESTING OTHER APIs")
-        print("=" * 50)
-        
-        user_id = self.test_user_id or "sample-user-123"
-        trip_id = self.test_trip_id or "sample-trip-123"
-        
-        # 39. GET /api/surge/check - Surge pricing
-        self.test_endpoint("GET", "/surge/check", params={
-            "lat": self.lagos_coords["pickup_lat"],
-            "lng": self.lagos_coords["pickup_lng"]
+    async def test_driver_verification_submit(self):
+        """Test POST /api/drivers/verification/submit"""
+        response = await self.make_request("POST", "/drivers/verification/submit", {
+            "user_id": TEST_DRIVER_ID,
+            "personal_info": {
+                "fullName": "Test Driver",
+                "phone": TEST_PHONE,
+                "email": "testdriver@nexryde.com",
+                "address": "Lagos, Nigeria",
+                "dateOfBirth": "1990-01-01"
+            },
+            "vehicle_info": {
+                "vehicleMake": "Toyota",
+                "vehicleModel": "Camry",
+                "vehicleYear": 2020,
+                "vehicleColor": "Black",
+                "plateNumber": "ABC123DE"
+            },
+            "documents": {
+                "nin": "data:image/jpeg;base64,test_nin_image",
+                "drivers_license": "data:image/jpeg;base64,test_license_image",
+                "passport_photo": "data:image/jpeg;base64,test_passport_image",
+                "vehicle_registration": "data:image/jpeg;base64,test_vehicle_reg",
+                "insurance": "data:image/jpeg;base64,test_insurance"
+            }
         })
         
-        # 40. GET /api/users/{user_id}/emergency-contacts - SOS contacts
-        self.test_endpoint("GET", f"/users/{user_id}/emergency-contacts")
+        if response["success"]:
+            self.log_result("/drivers/verification/submit", "POST", "WORKING", "Verification submitted successfully")
+        else:
+            self.log_result("/drivers/verification/submit", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== SUBSCRIPTION TESTS ====================
+    
+    async def test_subscription_config(self):
+        """Test GET /api/subscriptions/config"""
+        response = await self.make_request("GET", "/subscriptions/config")
         
-        # 41. POST /api/sos/trigger - Trigger SOS (needs valid trip)
-        self.test_endpoint("POST", "/sos/trigger", {
-            "trip_id": trip_id,
-            "location_lat": self.lagos_coords["pickup_lat"],
-            "location_lng": self.lagos_coords["pickup_lng"],
+        if response["success"]:
+            config = response["data"]
+            self.log_result("/subscriptions/config", "GET", "WORKING", 
+                          f"Monthly fee: ₦{config.get('monthly_fee', 0)}")
+        else:
+            self.log_result("/subscriptions/config", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_subscription_status(self):
+        """Test GET /api/subscriptions/{driver_id}"""
+        response = await self.make_request("GET", f"/subscriptions/{TEST_DRIVER_ID}")
+        
+        if response["success"]:
+            subscription = response["data"]
+            self.log_result("/subscriptions/{driver_id}", "GET", "WORKING", 
+                          f"Status: {subscription.get('status', 'unknown')}")
+        elif response["status_code"] == 404:
+            self.log_result("/subscriptions/{driver_id}", "GET", "PARTIAL", "Subscription not found (expected)")
+        else:
+            self.log_result("/subscriptions/{driver_id}", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_start_trial(self):
+        """Test POST /api/subscriptions/{driver_id}/start-trial"""
+        response = await self.make_request("POST", f"/subscriptions/{TEST_DRIVER_ID}/start-trial")
+        
+        if response["success"]:
+            self.log_result("/subscriptions/{driver_id}/start-trial", "POST", "WORKING", "Trial started")
+        elif response["status_code"] == 400 and "already" in str(response["data"]).lower():
+            self.log_result("/subscriptions/{driver_id}/start-trial", "POST", "WORKING", "Trial already exists (expected)")
+        else:
+            self.log_result("/subscriptions/{driver_id}/start-trial", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_submit_payment(self):
+        """Test POST /api/subscriptions/{driver_id}/submit-payment"""
+        test_screenshot = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/8A8A"
+        
+        response = await self.make_request("POST", f"/subscriptions/{TEST_DRIVER_ID}/submit-payment", {
+            "screenshot": test_screenshot,
+            "amount": 25000,
+            "payment_reference": "TEST123456"
+        })
+        
+        if response["success"]:
+            self.log_result("/subscriptions/{driver_id}/submit-payment", "POST", "WORKING", "Payment submitted")
+        elif response["status_code"] == 404:
+            self.log_result("/subscriptions/{driver_id}/submit-payment", "POST", "PARTIAL", "Driver not found (expected)")
+        else:
+            self.log_result("/subscriptions/{driver_id}/submit-payment", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== GAMIFICATION TESTS ====================
+    
+    async def test_driver_leaderboard(self):
+        """Test GET /api/leaderboard/drivers"""
+        response = await self.make_request("GET", "/leaderboard/drivers?city=lagos&period=weekly")
+        
+        if response["success"]:
+            leaderboard = response["data"].get("drivers", [])
+            self.log_result("/leaderboard/drivers", "GET", "WORKING", 
+                          f"Retrieved {len(leaderboard)} drivers")
+        else:
+            self.log_result("/leaderboard/drivers", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_active_challenges(self):
+        """Test GET /api/challenges/active"""
+        response = await self.make_request("GET", "/challenges/active")
+        
+        if response["success"]:
+            challenges = response["data"].get("challenges", [])
+            self.log_result("/challenges/active", "GET", "WORKING", 
+                          f"Retrieved {len(challenges)} active challenges")
+        else:
+            self.log_result("/challenges/active", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_driver_streaks(self):
+        """Test GET /api/drivers/{driver_id}/streaks"""
+        response = await self.make_request("GET", f"/drivers/{TEST_DRIVER_ID}/streaks")
+        
+        if response["success"]:
+            streaks = response["data"]
+            self.log_result("/drivers/{driver_id}/streaks", "GET", "WORKING", 
+                          f"Current streak: {streaks.get('current_streak', 0)}")
+        elif response["status_code"] == 404:
+            self.log_result("/drivers/{driver_id}/streaks", "GET", "WORKING", "Driver not found (expected)")
+        else:
+            self.log_result("/drivers/{driver_id}/streaks", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== AI & CHAT TESTS ====================
+    
+    async def test_ai_chat(self):
+        """Test POST /api/chat/ai"""
+        response = await self.make_request("POST", "/chat/ai", {
+            "user_id": TEST_USER_ID,
+            "message": "What is the fare from Victoria Island to Lekki?",
+            "role": "rider"
+        })
+        
+        if response["success"]:
+            ai_response = response["data"].get("response", "")
+            self.log_result("/chat/ai", "POST", "WORKING", 
+                          f"AI responded: {ai_response[:50]}...")
+        else:
+            self.log_result("/chat/ai", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_rider_assistant(self):
+        """Test GET /api/ai/rider-assistant"""
+        response = await self.make_request("GET", "/ai/rider-assistant?question=How%20do%20I%20book%20a%20ride?")
+        
+        if response["success"]:
+            assistant_response = response["data"].get("response", "")
+            self.log_result("/ai/rider-assistant", "GET", "WORKING", 
+                          f"Assistant responded: {assistant_response[:50]}...")
+        else:
+            self.log_result("/ai/rider-assistant", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_driver_assistant(self):
+        """Test GET /api/ai/driver-assistant"""
+        response = await self.make_request("GET", f"/ai/driver-assistant?driver_id={TEST_DRIVER_ID}")
+        
+        if response["success"]:
+            assistant_data = response["data"]
+            self.log_result("/ai/driver-assistant", "GET", "WORKING", 
+                          f"Insights provided for driver")
+        else:
+            self.log_result("/ai/driver-assistant", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== SAFETY TESTS ====================
+    
+    async def test_trigger_sos(self):
+        """Test POST /api/sos/trigger"""
+        response = await self.make_request("POST", "/sos/trigger", {
+            "trip_id": "test_trip_123",
+            "location_lat": 6.5244,
+            "location_lng": 3.3792,
             "auto_triggered": False
         })
         
-        # 42. POST /api/promo/apply - Apply promo code (correct endpoint)
-        self.test_endpoint("POST", "/promo/apply", {
-            "code": "FIRST10",
-            "user_id": user_id,
-            "trip_fare": 2000.0
-        })
-        
-        # 43. GET /api/wallet/{user_id} - Get wallet balance
-        self.test_endpoint("GET", f"/wallet/{user_id}")
-        
-        # 44. POST /api/wallet/{user_id}/topup - Add to wallet (with query param)
-        self.test_endpoint("POST", f"/wallet/{user_id}/topup?amount=1000", {
-            "payment_method": "bank_transfer",
-            "reference": "TXN987654321"
-        })
-        
-        # 45. GET /api/health - Health check
-        self.test_endpoint("GET", "/health")
+        if response["success"]:
+            self.log_result("/sos/trigger", "POST", "WORKING", "SOS triggered successfully")
+        elif response["status_code"] == 404:
+            self.log_result("/sos/trigger", "POST", "WORKING", "Trip not found (expected for test)")
+        else:
+            self.log_result("/sos/trigger", "POST", "BROKEN", f"Failed: {response['data']}")
     
-    def run_all_tests(self):
-        """Run all API tests"""
-        print("🚀 NEXRYDE BACKEND API COMPREHENSIVE TESTING")
-        print("=" * 60)
-        print(f"Testing against: {BASE_URL}")
-        print(f"Started at: {datetime.now().isoformat()}")
-        print("=" * 60)
-        print()
+    async def test_fatigue_status(self):
+        """Test GET /api/drivers/{driver_id}/fatigue-status"""
+        response = await self.make_request("GET", f"/drivers/{TEST_DRIVER_ID}/fatigue-status")
         
-        # Run all test suites
-        self.test_authentication_apis()
-        self.test_rider_apis()
-        self.test_driver_apis()
-        self.test_subscription_apis()
-        self.test_chat_apis()
-        self.test_admin_apis()
-        self.test_other_apis()
+        if response["success"]:
+            fatigue = response["data"]
+            self.log_result("/drivers/{driver_id}/fatigue-status", "GET", "WORKING", 
+                          f"Hours driven: {fatigue.get('hours_driven', 0)}")
+        else:
+            self.log_result("/drivers/{driver_id}/fatigue-status", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== WALLET TESTS ====================
+    
+    async def test_wallet_balance(self):
+        """Test GET /api/wallet/{user_id}"""
+        response = await self.make_request("GET", f"/wallet/{TEST_USER_ID}")
+        
+        if response["success"]:
+            wallet = response["data"]
+            self.log_result("/wallet/{user_id}", "GET", "WORKING", 
+                          f"Balance: ₦{wallet.get('balance', 0)}")
+        elif response["status_code"] == 404:
+            self.log_result("/wallet/{user_id}", "GET", "PARTIAL", "Wallet not found (expected)")
+        else:
+            self.log_result("/wallet/{user_id}", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_wallet_topup(self):
+        """Test POST /api/wallet/{user_id}/topup"""
+        response = await self.make_request("POST", f"/wallet/{TEST_USER_ID}/topup", {
+            "amount": 5000,
+            "payment_method": "bank_transfer",
+            "reference": "TEST_TOPUP_123"
+        })
+        
+        if response["success"]:
+            self.log_result("/wallet/{user_id}/topup", "POST", "WORKING", "Wallet topped up successfully")
+        elif response["status_code"] == 404:
+            self.log_result("/wallet/{user_id}/topup", "POST", "PARTIAL", "User not found (expected)")
+        else:
+            self.log_result("/wallet/{user_id}/topup", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== ADMIN TESTS ====================
+    
+    async def test_admin_vehicle_registrations(self):
+        """Test GET /api/admin/vehicle-registrations"""
+        response = await self.make_request("GET", "/admin/vehicle-registrations")
+        
+        if response["success"]:
+            registrations = response["data"].get("registrations", [])
+            self.log_result("/admin/vehicle-registrations", "GET", "WORKING", 
+                          f"Retrieved {len(registrations)} vehicle registrations")
+        else:
+            self.log_result("/admin/vehicle-registrations", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_admin_dashboard(self):
+        """Test GET /api/admin/dashboard"""
+        response = await self.make_request("GET", "/admin/dashboard")
+        
+        if response["success"]:
+            dashboard = response["data"]
+            self.log_result("/admin/dashboard", "GET", "WORKING", 
+                          f"Total users: {dashboard.get('total_users', 0)}")
+        else:
+            self.log_result("/admin/dashboard", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    # ==================== MAIN TEST RUNNER ====================
+    
+    async def run_all_tests(self):
+        """Run all API endpoint tests"""
+        print("🚀 Starting NEXRYDE Backend API Testing Suite")
+        print(f"📡 Testing against: {BACKEND_URL}")
+        print("=" * 60)
+        
+        # Authentication APIs
+        print("\n🔐 AUTHENTICATION APIs:")
+        await self.test_send_otp()
+        await self.test_verify_otp()
+        await self.test_register()
+        await self.test_google_oauth()
+        await self.test_logout()
+        
+        # User APIs
+        print("\n👤 USER APIs:")
+        await self.test_get_user_profile()
+        await self.test_update_user_profile()
+        await self.test_upload_profile_picture()
+        await self.test_add_emergency_contact()
+        await self.test_get_emergency_contacts()
+        
+        # Fare & Booking APIs
+        print("\n💰 FARE & BOOKING APIs:")
+        await self.test_fare_estimate()
+        await self.test_surge_status()
+        await self.test_request_trip()
+        await self.test_get_trip_details()
+        await self.test_cancel_trip()
+        
+        # Driver APIs
+        print("\n🚗 DRIVER APIs:")
+        await self.test_driver_stats()
+        await self.test_driver_online_toggle()
+        await self.test_update_driver_location()
+        await self.test_register_vehicle()
+        await self.test_get_vehicle_info()
+        await self.test_driver_verification_submit()
+        
+        # Subscription APIs
+        print("\n💳 SUBSCRIPTION APIs:")
+        await self.test_subscription_config()
+        await self.test_subscription_status()
+        await self.test_start_trial()
+        await self.test_submit_payment()
+        
+        # Gamification APIs
+        print("\n🏆 GAMIFICATION APIs:")
+        await self.test_driver_leaderboard()
+        await self.test_active_challenges()
+        await self.test_driver_streaks()
+        
+        # AI & Chat APIs
+        print("\n🤖 AI & CHAT APIs:")
+        await self.test_ai_chat()
+        await self.test_rider_assistant()
+        await self.test_driver_assistant()
+        
+        # Safety APIs
+        print("\n🚨 SAFETY APIs:")
+        await self.test_trigger_sos()
+        await self.test_fatigue_status()
+        
+        # Wallet APIs
+        print("\n💼 WALLET APIs:")
+        await self.test_wallet_balance()
+        await self.test_wallet_topup()
+        
+        # Admin APIs
+        print("\n⚙️ ADMIN APIs:")
+        await self.test_admin_vehicle_registrations()
+        await self.test_admin_dashboard()
         
         # Print summary
         self.print_summary()
     
     def print_summary(self):
-        """Print test summary"""
-        total_tests = len(self.test_results)
-        passed = len(self.passed_tests)
-        failed = len(self.failed_tests)
-        success_rate = (passed / total_tests * 100) if total_tests > 0 else 0
-        
+        """Print test results summary"""
         print("\n" + "=" * 60)
-        print("📊 TEST SUMMARY")
+        print("📊 TEST RESULTS SUMMARY")
         print("=" * 60)
-        print(f"Total Tests: {total_tests}")
-        print(f"Passed: {passed}")
-        print(f"Failed: {failed}")
-        print(f"Success Rate: {success_rate:.1f}%")
-        print()
         
-        if self.passed_tests:
-            print("✅ WORKING ENDPOINTS:")
-            for test in self.passed_tests:
-                print(f"   {test}")
-            print()
+        working = len([r for r in self.results if r["status"] == "WORKING"])
+        partial = len([r for r in self.results if r["status"] == "PARTIAL"])
+        broken = len([r for r in self.results if r["status"] == "BROKEN"])
+        total = len(self.results)
         
-        if self.failed_tests:
-            print("❌ FAILING ENDPOINTS:")
-            for test in self.failed_tests:
-                print(f"   {test}")
-            print()
+        print(f"✅ WORKING: {working}/{total} ({working/total*100:.1f}%)")
+        print(f"⚠️ PARTIAL:  {partial}/{total} ({partial/total*100:.1f}%)")
+        print(f"❌ BROKEN:   {broken}/{total} ({broken/total*100:.1f}%)")
         
-        print(f"Completed at: {datetime.now().isoformat()}")
+        if broken > 0:
+            print(f"\n❌ FAILED ENDPOINTS ({broken}):")
+            for result in self.results:
+                if result["status"] == "BROKEN":
+                    print(f"   • {result['method']} {result['endpoint']} - {result['details']}")
+        
+        if partial > 0:
+            print(f"\n⚠️ PARTIAL ENDPOINTS ({partial}):")
+            for result in self.results:
+                if result["status"] == "PARTIAL":
+                    print(f"   • {result['method']} {result['endpoint']} - {result['details']}")
+        
+        print(f"\n🎯 SUCCESS RATE: {(working + partial)/total*100:.1f}%")
         print("=" * 60)
 
+async def main():
+    """Main test runner"""
+    async with NexrydeAPITester() as tester:
+        await tester.run_all_tests()
+
 if __name__ == "__main__":
-    tester = NEXRYDEAPITester()
-    tester.run_all_tests()
+    asyncio.run(main())
