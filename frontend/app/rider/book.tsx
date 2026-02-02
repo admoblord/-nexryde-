@@ -601,11 +601,11 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     paddingBottom: 140,
   },
-  // LOCATION CARD
+  // LOCATION CARD - BIGGER FOR MOBILE
   locationCard: {
     backgroundColor: '#fff',
     borderRadius: 28,
-    padding: SPACING.xl,
+    padding: SPACING.xl + 8, // Increased padding
     marginBottom: SPACING.lg,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
@@ -617,10 +617,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.lg + 4, // More space
   },
   locationTitle: {
-    fontSize: 20,
+    fontSize: 22, // Bigger title
     fontWeight: '900',
     color: '#1a1a2e',
     letterSpacing: 1,
@@ -629,18 +629,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
+    minHeight: 60, // Much bigger minimum height
   },
   dot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 20, // Bigger dots
+    height: 20,
+    borderRadius: 10,
   },
   locationInput: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 18, // MUCH BIGGER font size
     fontWeight: '700',
     color: '#1a1a2e',
-    paddingVertical: SPACING.md,
+    paddingVertical: SPACING.lg, // More padding for bigger touch area
+    paddingHorizontal: SPACING.sm,
+    minHeight: 56, // Ensure minimum touch target
   },
   inputIcon: {
     padding: SPACING.sm,
