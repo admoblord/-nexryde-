@@ -504,10 +504,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f2f5',
   },
   headerGradient: {
-    paddingBottom: SPACING.xl,
+    paddingBottom: SPACING.md,
     borderBottomLeftRadius: 35,
     borderBottomRightRadius: 35,
     overflow: 'hidden',
+    minHeight: 220, // Reduced from taller to prevent blocking
   },
   closeBtn: {
     position: 'absolute',
