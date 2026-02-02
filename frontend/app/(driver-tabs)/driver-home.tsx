@@ -360,6 +360,31 @@ export default function DriverHomeScreen() {
                 color="#795548"
                 onPress={() => router.push('/driver/documents')}
               />
+            </View>
+          </View>
+
+          {/* Safety & AI Features */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Safety & AI</Text>
+            <View style={styles.featureGrid}>
+              <FeatureCard
+                icon="warning"
+                label="Safety Alerts"
+                color="#F44336"
+                onPress={() => router.push('/driver/safety-alerts')}
+              />
+              <FeatureCard
+                icon="heart"
+                label="Wellness"
+                color="#E91E63"
+                onPress={() => router.push('/driver/wellness')}
+              />
+              <FeatureCard
+                icon="flash"
+                label="Smart Mode"
+                color="#9C27B0"
+                onPress={() => router.push('/driver/smart-mode')}
+              />
               <FeatureCard
                 icon="car"
                 label="Vehicle"
