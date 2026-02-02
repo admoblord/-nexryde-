@@ -246,27 +246,28 @@ export default function RiderHomeScreen() {
                 badge="NEW"
               />
               <ServiceCard
+                icon="mic"
+                title="Voice Booking"
+                desc="Pidgin, Yoruba, Igbo"
+                color="#667eea"
+                onPress={() => router.push('/rider/voice-booking')}
+                badge="NEW"
+              />
+            </View>
+            <View style={[styles.servicesGrid, { marginTop: SPACING.md }]}>
+              <ServiceCard
                 icon="happy"
                 title="Mood Match"
                 desc="Driver preferences"
                 color="#EC4899"
                 onPress={() => router.push('/rider/mood-preferences')}
               />
-            </View>
-            <View style={[styles.servicesGrid, { marginTop: SPACING.md }]}>
               <ServiceCard
                 icon="heart"
                 title="Favorite Drivers"
                 desc="Your top picks"
                 color="#EF4444"
                 onPress={() => router.push('/rider/favorite-drivers')}
-              />
-              <ServiceCard
-                icon="car"
-                title="Traffic Status"
-                desc="Live updates"
-                color="#14B8A6"
-                onPress={() => router.push('/rider/traffic-status')}
               />
             </View>
           </View>
