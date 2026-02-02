@@ -25,7 +25,8 @@ const COLORS = {
 
 export default function SplashScreen() {
   const router = useRouter();
-  const [checking, setChecking] = useState(true);
+  // Start with checking = false for web compatibility (SecureStore doesn't work on web)
+  const [checking, setChecking] = useState(Platform.OS === 'web' ? false : true);
   
   // ✅ SAFE STORE ACCESS WITH ERROR HANDLING
   const [storeError, setStoreError] = useState<Error | null>(null);
