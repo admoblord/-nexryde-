@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 import uuid
 
 # Backend URL from frontend/.env
-BASE_URL = "https://app-overhaul-11.preview.emergentagent.com/api"
+BASE_URL = "https://rideshare-revamp-1.preview.emergentagent.com/api"
 
 class NEXRYDEAPITester:
     def __init__(self):
