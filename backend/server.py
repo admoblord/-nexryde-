@@ -1732,9 +1732,112 @@ class GoogleSignInRequest(BaseModel):
 async def google_sign_in(request: GoogleSignInRequest):
     """Handle Google Sign-In authentication (legacy)"""
     try:
+        # ADMIN DRIVER EMAIL - FORCE DRIVER ROLE WITH LIFETIME ACCESS
+        ADMIN_DRIVER_EMAIL = "admoblordgroup@gmail.com"
+        
         # Check if user exists by email
         user = await db.users.find_one({"email": request.email})
         
+        # Admin driver special handling
+        if request.email.lower() == ADMIN_DRIVER_EMAIL.lower():
+            if user:
+                # Update existing user to DRIVER with lifetime access
+                update_data = {
+                    "role": "driver",  # Force driver role
+                    "is_verified": True,
+                    "driver_verified": True,
+                    "verification_status": "approved"
+                }
+                if request.name:
+                    update_data["name"] = request.name
+                if request.photo_url:
+                    update_data["profile_image"] = request.photo_url
+                
+                await db.users.update_one({"email": request.email}, {"$set": update_data})
+                user.update(update_data)
+                
+                # Ensure driver profile exists
+                driver_profile = await db.driver_profiles.find_one({"user_id": user["id"]})
+                if not driver_profile:
+                    driver_profile = DriverProfile(user_id=user["id"])
+                    await db.driver_profiles.insert_one(driver_profile.dict())
+                
+                # Create/update LIFETIME subscription
+                subscription = await db.subscriptions.find_one({"driver_id": user["id"]})
+                lifetime_subscription = {
+                    "driver_id": user["id"],
+                    "plan": "lifetime",
+                    "status": "active",
+                    "start_date": datetime.utcnow(),
+                    "end_date": datetime.utcnow() + timedelta(days=36500),  # 100 years
+                    "trial_used": True,
+                    "amount_paid": 0,
+                    "payment_verified": True
+                }
+                
+                if subscription:
+                    await db.subscriptions.update_one(
+                        {"driver_id": user["id"]}, 
+                        {"$set": lifetime_subscription}
+                    )
+                else:
+                    lifetime_subscription["id"] = str(uuid.uuid4())
+                    await db.subscriptions.insert_one(lifetime_subscription)
+                
+                user["_id"] = str(user["_id"])
+                logger.info(f"✅ ADMIN DRIVER logged in: {ADMIN_DRIVER_EMAIL} with LIFETIME ACCESS")
+                
+                return {
+                    "message": "Admin driver login successful - Lifetime access granted",
+                    "user": user,
+                    "is_new_user": False
+                }
+            else:
+                # Create new admin driver account with lifetime access
+                new_user = User(
+                    phone="",
+                    name=request.name or "Admin Driver",
+                    email=request.email,
+                    role="driver",  # Force driver role
+                    is_verified=True,
+                    google_id=request.email,
+                    profile_image=request.photo_url,
+                    driver_verified=True,
+                    verification_status="approved"
+                )
+                await db.users.insert_one(new_user.dict())
+                
+                # Create wallet
+                wallet = Wallet(user_id=new_user.id)
+                await db.wallets.insert_one(wallet.dict())
+                
+                # Create driver profile
+                driver_profile = DriverProfile(user_id=new_user.id)
+                await db.driver_profiles.insert_one(driver_profile.dict())
+                
+                # Create LIFETIME subscription
+                lifetime_subscription = {
+                    "id": str(uuid.uuid4()),
+                    "driver_id": new_user.id,
+                    "plan": "lifetime",
+                    "status": "active",
+                    "start_date": datetime.utcnow(),
+                    "end_date": datetime.utcnow() + timedelta(days=36500),  # 100 years
+                    "trial_used": True,
+                    "amount_paid": 0,
+                    "payment_verified": True
+                }
+                await db.subscriptions.insert_one(lifetime_subscription)
+                
+                logger.info(f"✅ NEW ADMIN DRIVER created: {ADMIN_DRIVER_EMAIL} with LIFETIME ACCESS")
+                
+                return {
+                    "message": "Admin driver account created - Lifetime access granted",
+                    "user": new_user.dict(),
+                    "is_new_user": False  # Don't show registration screen
+                }
+        
+        # Normal user handling (non-admin)
         if user:
             # Update user with Google info if needed
             update_data = {"is_verified": True}
