@@ -522,11 +522,14 @@ backend:
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
         - working: true
         - agent: "main"
         - comment: "Total = max(min_fare, base + km_fee + time_fee + traffic_fee) * multiplier. Peak multiplier capped at 1.2x. Configurable per city/service."
+        - working: true
+        - agent: "main"
+        - comment: "⚠️ USER REQUEST: Removed min_fare logic from backend calculation (lines 1028-1029) and removed hardcoded 'ESTIMATED ₦1,500' from rider booking screen. Backend still has booking_fee=0 in config but logic at line 1026 still adds it. Fare now purely formula-based: Total = (base + km_fee + time_fee + traffic_fee + booking_fee) * multiplier. NEEDS BACKEND TESTING to verify min_fare no longer applied."
 
 frontend:
   - task: "Splash Screen"
