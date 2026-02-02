@@ -1,1025 +1,544 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   StyleSheet,
+  TextInput,
   TouchableOpacity,
   ScrollView,
-  TextInput,
-  Animated,
-  Easing,
-  Dimensions,
   Alert,
+  ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// ========== ANIMATED VEHICLE ROW - 3 CARS ==========
-const AnimatedVehicleRow = () => {
-  const car1Bounce = useRef(new Animated.Value(0)).current;
-  const car2Bounce = useRef(new Animated.Value(0)).current;
-  const car3Bounce = useRef(new Animated.Value(0)).current;
-  const car1Move = useRef(new Animated.Value(-20)).current;
-  const car3Move = useRef(new Animated.Value(20)).current;
-  
-  useEffect(() => {
-    // Car 1 animation (left car)
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(car1Bounce, { toValue: -10, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(car1Bounce, { toValue: 0, duration: 800, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-    
-    // Car 2 animation (center car - bigger bounce)
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(car2Bounce, { toValue: -15, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(car2Bounce, { toValue: 0, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-    
-    // Car 3 animation (right car)
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(car3Bounce, { toValue: -8, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(car3Bounce, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-
-    // Side cars moving animation
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(car1Move, { toValue: 0, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(car1Move, { toValue: -20, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-    
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(car3Move, { toValue: 0, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(car3Move, { toValue: 20, duration: 1500, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-
-  return (
-    <View style={styles.vehicleRow}>
-      <Animated.Text style={[styles.sideVehicle, { transform: [{ translateY: car1Bounce }, { translateX: car1Move }] }]}>
-        🚕
-      </Animated.Text>
-      <Animated.Text style={[styles.centerVehicle, { transform: [{ translateY: car2Bounce }] }]}>
-        🚖
-      </Animated.Text>
-      <Animated.Text style={[styles.sideVehicle, { transform: [{ translateY: car3Bounce }, { translateX: car3Move }] }]}>
-        🚗
-      </Animated.Text>
-    </View>
-  );
-};
-
-// ========== INTER-CITY ANIMATED VEHICLES ==========
-const InterCityVehicles = () => {
-  const plane = useRef(new Animated.Value(0)).current;
-  const bus = useRef(new Animated.Value(0)).current;
-  const suv = useRef(new Animated.Value(0)).current;
-  
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(plane, { toValue: -12, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(plane, { toValue: 0, duration: 1200, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-    
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(bus, { toValue: -8, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(bus, { toValue: 0, duration: 1000, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-    
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(suv, { toValue: -10, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-        Animated.timing(suv, { toValue: 0, duration: 900, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
-      ])
-    ).start();
-  }, []);
-
-  return (
-    <View style={styles.vehicleRow}>
-      <Animated.Text style={[styles.sideVehicle, { transform: [{ translateY: bus }] }]}>
-        🚐
-      </Animated.Text>
-      <Animated.Text style={[styles.centerVehicleLarge, { transform: [{ translateY: plane }] }]}>
-        ✈️
-      </Animated.Text>
-      <Animated.Text style={[styles.sideVehicle, { transform: [{ translateY: suv }] }]}>
-        🚙
-      </Animated.Text>
-    </View>
-  );
-};
-
-// ========== SPARKLE EFFECTS ==========
-const Sparkle = ({ delay, x, y }: { delay: number; x: number; y: number }) => {
-  const scale = useRef(new Animated.Value(0)).current;
-  const opacity = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const animate = () => {
-      scale.setValue(0);
-      opacity.setValue(1);
-      Animated.parallel([
-        Animated.timing(scale, { toValue: 1.5, duration: 800, easing: Easing.out(Easing.ease), useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0, duration: 800, useNativeDriver: true }),
-      ]).start(() => setTimeout(animate, 1500 + Math.random() * 1500));
-    };
-    setTimeout(animate, delay);
-  }, []);
-
-  return (
-    <Animated.Text style={{ position: 'absolute', left: x, top: y, fontSize: 20, transform: [{ scale }], opacity }}>
-      ✨
-    </Animated.Text>
-  );
-};
-
-// ========== INTER-CITY ROUTES ==========
-const INTER_CITY_ROUTES = [
-  { id: 'lagos-ibadan', from: 'Lagos', to: 'Ibadan', distance: '127 km', duration: '2h', price: 15000, emoji: '🚗', color: ['#667eea', '#764ba2'] },
-  { id: 'lagos-abuja', from: 'Lagos', to: 'Abuja', distance: '536 km', duration: '7h', price: 45000, emoji: '✈️', color: ['#f093fb', '#f5576c'] },
-  { id: 'lagos-benin', from: 'Lagos', to: 'Benin', distance: '305 km', duration: '4h', price: 25000, emoji: '🚙', color: ['#4facfe', '#00f2fe'] },
-  { id: 'lagos-portharcourt', from: 'Lagos', to: 'Port Harcourt', distance: '460 km', duration: '6h', price: 38000, emoji: '🚐', color: ['#43e97b', '#38f9d7'] },
-  { id: 'abuja-kano', from: 'Abuja', to: 'Kano', distance: '480 km', duration: '5h', price: 35000, emoji: '🛺', color: ['#fa709a', '#fee140'] },
-];
-
-// ========== CAR TYPES ==========
+// SIMPLE CAR TYPES (Like Uber/Bolt)
 const CAR_TYPES = [
-  { id: 'economy', name: 'ECONOMY', emoji: '🚗', price: 150, desc: 'AFFORDABLE', color: '#4CAF50' },
-  { id: 'comfort', name: 'COMFORT', emoji: '🚙', price: 200, desc: 'SPACIOUS', color: '#2196F3' },
-  { id: 'premium', name: 'PREMIUM', emoji: '🚘', price: 350, desc: 'LUXURY', color: '#9C27B0' },
-  { id: 'xl', name: 'SUV/XL', emoji: '🚐', price: 250, desc: '6+ SEATS', color: '#FF9800' },
+  { 
+    id: 'economy', 
+    name: 'Economy', 
+    emoji: '🚗', 
+    multiplier: 1.0,
+    desc: 'Affordable rides',
+    capacity: '1-4 seats',
+    color: '#000'
+  },
+  { 
+    id: 'comfort', 
+    name: 'Comfort', 
+    emoji: '🚙', 
+    multiplier: 1.3,
+    desc: 'More space',
+    capacity: '1-4 seats',
+    color: '#1a8917'
+  },
+  { 
+    id: 'premium', 
+    name: 'Premium', 
+    emoji: '🚘', 
+    multiplier: 2.0,
+    desc: 'High-end cars',
+    capacity: '1-4 seats',
+    color: '#4a148c'
+  },
+  { 
+    id: 'xl', 
+    name: 'XL', 
+    emoji: '🚐', 
+    multiplier: 1.5,
+    desc: 'Extra seats',
+    capacity: '1-6 seats',
+    color: '#01579b'
+  },
 ];
 
-export default function BookScreen() {
+export default function BookingScreen() {
   const router = useRouter();
-  const [tripType, setTripType] = useState<'city' | 'intercity'>('city');
-  const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
-  const [selectedCar, setSelectedCar] = useState('economy');
   const [pickup, setPickup] = useState('');
-  const [dropoff, setDropoff] = useState('');
-  
-  const fadeAnim = useRef(new Animated.Value(1)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
+  const [destination, setDestination] = useState('');
+  const [selectedCar, setSelectedCar] = useState('economy');
+  const [fareEstimate, setFareEstimate] = useState<any>(null);
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [tripType, setTripType] = useState<'intra' | 'inter'>('intra');
 
+  // Auto-calculate fare when both locations are entered
   useEffect(() => {
-    Animated.sequence([
-      Animated.timing(fadeAnim, { toValue: 0.5, duration: 150, useNativeDriver: true }),
-      Animated.timing(fadeAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
-    ]).start();
-  }, [tripType]);
+    if (pickup.trim() && destination.trim()) {
+      calculateFare();
+    } else {
+      setFareEstimate(null);
+    }
+  }, [pickup, destination, selectedCar, tripType]);
+
+  const calculateFare = async () => {
+    setIsCalculating(true);
+    try {
+      // Call Google Maps API via backend to get REAL distance and time
+      const response = await fetch(`${BACKEND_URL}/api/fares/estimate-google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pickup: pickup,
+          destination: destination,
+          vehicle_type: selectedCar,
+          trip_type: tripType
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setFareEstimate(data);
+      } else {
+        console.error('Fare calculation failed');
+      }
+    } catch (error) {
+      console.error('Error calculating fare:', error);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
 
   const handleBookRide = () => {
-    if (tripType === 'city' && (!pickup || !dropoff)) {
-      Alert.alert('MISSING LOCATION', 'Please enter pickup and dropoff locations');
+    if (!pickup.trim()) {
+      Alert.alert('Missing Pickup', 'Please enter your pickup location');
       return;
     }
-    if (tripType === 'intercity' && !selectedRoute) {
-      Alert.alert('SELECT ROUTE', 'Please select an inter-city route');
+    if (!destination.trim()) {
+      Alert.alert('Missing Destination', 'Please enter your destination');
       return;
     }
-    router.push('/rider/tracking');
+    if (!fareEstimate) {
+      Alert.alert('Calculating...', 'Please wait for fare calculation');
+      return;
+    }
+
+    // Navigate to ride confirmation/tracking
+    router.push({
+      pathname: '/rider/tracking',
+      params: {
+        pickup,
+        destination,
+        carType: selectedCar,
+        estimatedFare: fareEstimate.total_fare,
+        distance: fareEstimate.distance,
+        duration: fareEstimate.duration
+      }
+    });
   };
 
   return (
-    <View style={styles.container}>
-      {/* ========== STUNNING GRADIENT HEADER ========== */}
-      <LinearGradient
-        colors={tripType === 'city' 
-          ? ['#0f0c29', '#302b63', '#24243e'] 
-          : ['#8E2DE2', '#4A00E0', '#7B1FA2']}
-        style={styles.headerGradient}
-      >
-        {/* Sparkle Effects for Inter-City */}
-        {tripType === 'intercity' && (
-          <>
-            <Sparkle delay={0} x={30} y={60} />
-            <Sparkle delay={400} x={120} y={40} />
-            <Sparkle delay={800} x={200} y={70} />
-            <Sparkle delay={1200} x={280} y={50} />
-            <Sparkle delay={1600} x={350} y={80} />
-            <Sparkle delay={300} x={80} y={100} />
-            <Sparkle delay={700} x={320} y={90} />
-          </>
-        )}
+    <SafeAreaView style={styles.container}>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#000" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Book a Ride</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
-        <SafeAreaView>
-          {/* Close Button */}
-          <TouchableOpacity style={styles.closeBtn} onPress={() => router.back()}>
-            <Ionicons name="close" size={30} color="#fff" />
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Trip Type Toggle */}
+        <View style={styles.tripTypeContainer}>
+          <TouchableOpacity
+            style={[styles.tripTypeButton, tripType === 'intra' && styles.tripTypeActive]}
+            onPress={() => setTripType('intra')}
+          >
+            <Text style={[styles.tripTypeText, tripType === 'intra' && styles.tripTypeTextActive]}>
+              Within City
+            </Text>
           </TouchableOpacity>
-
-          {/* 3 ANIMATED VEHICLES */}
-          {tripType === 'city' ? <AnimatedVehicleRow /> : <InterCityVehicles />}
-
-          {/* Header Text - BOLD */}
-          <View style={styles.headerContent}>
-            <Text style={styles.headerTitle}>
-              {tripType === 'city' ? '🚖 CITY RIDE' : '✈️ INTER-CITY TRAVEL'}
+          <TouchableOpacity
+            style={[styles.tripTypeButton, tripType === 'inter' && styles.tripTypeActive]}
+            onPress={() => setTripType('inter')}
+          >
+            <Text style={[styles.tripTypeText, tripType === 'inter' && styles.tripTypeTextActive]}>
+              Between Cities
             </Text>
-            <Text style={styles.headerSubtitle}>
-              {tripType === 'city' 
-                ? '⚡ FAST & AFFORDABLE RIDES WITHIN NIGERIA' 
-                : '🌟 EXPLORE NIGERIA IN COMFORT & STYLE'}
-            </Text>
-          </View>
+          </TouchableOpacity>
+        </View>
 
-          {/* ========== BEAUTIFUL TRIP TYPE TOGGLE ========== */}
-          <View style={styles.toggleContainer}>
-            <TouchableOpacity
-              style={[styles.toggleBtn, tripType === 'city' && styles.toggleBtnActive]}
-              onPress={() => setTripType('city')}
-            >
-              <Text style={styles.toggleEmoji}>🏙️</Text>
-              <Text style={[styles.toggleText, tripType === 'city' && styles.toggleTextActive]}>
-                CITY RIDE
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.toggleBtn, tripType === 'intercity' && styles.toggleBtnActive]}
-              onPress={() => setTripType('intercity')}
-            >
-              <Text style={styles.toggleEmoji}>🛣️</Text>
-              <Text style={[styles.toggleText, tripType === 'intercity' && styles.toggleTextActive]}>
-                INTER-CITY
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </LinearGradient>
-
-      {/* ========== MAIN CONTENT ========== */}
-      <ScrollView 
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
-          
-          {/* ========== CITY RIDE INTERFACE ========== */}
-          {tripType === 'city' && (
-            <>
-              {/* Location Card */}
-              <View style={styles.locationCard}>
-                <View style={styles.locationHeader}>
-                  <Ionicons name="location" size={24} color={COLORS.accentGreen} />
-                  <Text style={styles.locationTitle}>WHERE TO?</Text>
-                </View>
-
-                {/* Pickup */}
-                <View style={styles.inputRow}>
-                  <View style={[styles.dot, { backgroundColor: '#00E676' }]} />
-                  <TextInput
-                    style={styles.locationInput}
-                    placeholder="ENTER PICKUP LOCATION"
-                    placeholderTextColor="#888"
-                    value={pickup}
-                    onChangeText={setPickup}
-                  />
-                  <TouchableOpacity style={styles.inputIcon}>
-                    <Ionicons name="locate" size={22} color="#00E676" />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.inputDivider} />
-
-                {/* Dropoff */}
-                <View style={styles.inputRow}>
-                  <View style={[styles.dot, { backgroundColor: '#FF5252' }]} />
-                  <TextInput
-                    style={styles.locationInput}
-                    placeholder="ENTER DESTINATION"
-                    placeholderTextColor="#888"
-                    value={dropoff}
-                    onChangeText={setDropoff}
-                  />
-                  <TouchableOpacity style={styles.inputIcon}>
-                    <Ionicons name="star" size={22} color="#FFD700" />
-                  </TouchableOpacity>
-                </View>
-
-                {/* Quick Locations */}
-                <View style={styles.quickLocations}>
-                  <TouchableOpacity style={styles.quickBtn} onPress={() => setPickup('📍 CURRENT LOCATION')}>
-                    <Ionicons name="navigate" size={18} color="#00E676" />
-                    <Text style={styles.quickBtnText}>CURRENT</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.quickBtn} onPress={() => setDropoff('🏠 HOME')}>
-                    <Ionicons name="home" size={18} color="#2196F3" />
-                    <Text style={styles.quickBtnText}>HOME</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.quickBtn} onPress={() => setDropoff('💼 WORK')}>
-                    <Ionicons name="briefcase" size={18} color="#FF9800" />
-                    <Text style={styles.quickBtnText}>WORK</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-
-              {/* ========== CAR TYPE SELECTION - LARGER EMOJIS ========== */}
-              <Text style={styles.sectionTitle}>🚗 CHOOSE YOUR RIDE</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.carScroll}>
-                {CAR_TYPES.map((car) => (
-                  <TouchableOpacity
-                    key={car.id}
-                    style={[
-                      styles.carCard,
-                      selectedCar === car.id && { borderColor: car.color, borderWidth: 4 }
-                    ]}
-                    onPress={() => setSelectedCar(car.id)}
-                  >
-                    <View style={[styles.carIconWrap, { backgroundColor: car.color + '30' }]}>
-                      <Text style={styles.carEmoji}>{car.emoji}</Text>
-                    </View>
-                    <Text style={styles.carName}>{car.name}</Text>
-                    <Text style={styles.carDesc}>{car.desc}</Text>
-                    <Text style={[styles.carPrice, { color: car.color }]}>
-                      {CURRENCY}{car.price}/KM
-                    </Text>
-                    {selectedCar === car.id && (
-                      <View style={[styles.selectedBadge, { backgroundColor: car.color }]}>
-                        <Ionicons name="checkmark" size={16} color="#fff" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-
-              {/* Voice Booking Promo */}
-              <TouchableOpacity 
-                style={styles.voicePromo}
-                onPress={() => router.push('/rider/voice-booking')}
-              >
-                <LinearGradient
-                  colors={['#667eea', '#764ba2']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.voicePromoGradient}
-                >
-                  <View style={styles.voiceIcon}>
-                    <Text style={{ fontSize: 36 }}>🎤</Text>
-                  </View>
-                  <View style={styles.voiceContent}>
-                    <Text style={styles.voiceTitle}>VOICE BOOKING</Text>
-                    <Text style={styles.voiceSubtitle}>
-                      "BOOK ME GO LEKKI" - PIDGIN, YORUBA, IGBO, HAUSA!
-                    </Text>
-                  </View>
-                  <View style={styles.voiceNewBadge}>
-                    <Text style={styles.voiceNewText}>NEW</Text>
-                  </View>
-                </LinearGradient>
+        {/* Location Inputs */}
+        <View style={styles.locationCard}>
+          {/* Pickup */}
+          <View style={styles.inputRow}>
+            <View style={[styles.dot, { backgroundColor: '#10b981' }]} />
+            <TextInput
+              style={styles.input}
+              placeholder="Pickup location"
+              placeholderTextColor="#9ca3af"
+              value={pickup}
+              onChangeText={setPickup}
+              autoCapitalize="words"
+            />
+            {pickup.length > 0 && (
+              <TouchableOpacity onPress={() => setPickup('')}>
+                <Ionicons name="close-circle" size={20} color="#9ca3af" />
               </TouchableOpacity>
-            </>
-          )}
+            )}
+          </View>
 
-          {/* ========== INTER-CITY INTERFACE ========== */}
-          {tripType === 'intercity' && (
-            <>
-              {/* Beautiful Hero Section */}
-              <View style={styles.interCityHero}>
-                <Text style={styles.interCityTitle}>🌍 EXPLORE NIGERIA</Text>
-                <Text style={styles.interCitySubtitle}>
-                  PREMIUM INTER-CITY RIDES • FIXED PRICES • VERIFIED DRIVERS
+          <View style={styles.divider} />
+
+          {/* Destination */}
+          <View style={styles.inputRow}>
+            <View style={[styles.dot, { backgroundColor: '#ef4444' }]} />
+            <TextInput
+              style={styles.input}
+              placeholder="Where to?"
+              placeholderTextColor="#9ca3af"
+              value={destination}
+              onChangeText={setDestination}
+              autoCapitalize="words"
+            />
+            {destination.length > 0 && (
+              <TouchableOpacity onPress={() => setDestination('')}>
+                <Ionicons name="close-circle" size={20} color="#9ca3af" />
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+
+        {/* Quick Suggestions */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
+          <TouchableOpacity style={styles.suggestionChip} onPress={() => setPickup('Current Location')}>
+            <Ionicons name="locate" size={16} color="#10b981" />
+            <Text style={styles.suggestionText}>Current</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.suggestionChip}>
+            <Ionicons name="home" size={16} color="#3b82f6" />
+            <Text style={styles.suggestionText}>Home</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.suggestionChip}>
+            <Ionicons name="briefcase" size={16} color="#f59e0b" />
+            <Text style={styles.suggestionText}>Work</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        {/* Car Type Selection */}
+        <Text style={styles.sectionTitle}>Choose a ride</Text>
+        {CAR_TYPES.map((car) => (
+          <TouchableOpacity
+            key={car.id}
+            style={[styles.carCard, selectedCar === car.id && styles.carCardSelected]}
+            onPress={() => setSelectedCar(car.id)}
+          >
+            <View style={styles.carLeft}>
+              <Text style={styles.carEmoji}>{car.emoji}</Text>
+              <View>
+                <Text style={styles.carName}>{car.name}</Text>
+                <Text style={styles.carDesc}>{car.desc} • {car.capacity}</Text>
+                {fareEstimate && (
+                  <Text style={styles.carTime}>
+                    {fareEstimate.duration} • {fareEstimate.distance}
+                  </Text>
+                )}
+              </View>
+            </View>
+            <View style={styles.carRight}>
+              {isCalculating ? (
+                <ActivityIndicator size="small" color="#000" />
+              ) : fareEstimate ? (
+                <Text style={styles.carPrice}>
+                  ₦{Math.round(fareEstimate.total_fare * car.multiplier).toLocaleString()}
                 </Text>
-                <View style={styles.saveBadge}>
-                  <Text style={styles.saveText}>💰 SAVE UP TO 40%</Text>
-                </View>
+              ) : (
+                <Text style={styles.carPricePlaceholder}>--</Text>
+              )}
+              {selectedCar === car.id && (
+                <Ionicons name="checkmark-circle" size={24} color="#10b981" />
+              )}
+            </View>
+          </TouchableOpacity>
+        ))}
+
+        {/* Fare Breakdown */}
+        {fareEstimate && (
+          <View style={styles.fareCard}>
+            <Text style={styles.fareTitle}>Price Breakdown</Text>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>Distance</Text>
+              <Text style={styles.fareValue}>{fareEstimate.distance}</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>Estimated Time</Text>
+              <Text style={styles.fareValue}>{fareEstimate.duration}</Text>
+            </View>
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>Base Fare</Text>
+              <Text style={styles.fareValue}>₦{fareEstimate.base_fare?.toLocaleString()}</Text>
+            </View>
+            {tripType === 'inter' && (
+              <View style={styles.fareNote}>
+                <Ionicons name="information-circle" size={16} color="#3b82f6" />
+                <Text style={styles.fareNoteText}>
+                  Inter-city price calculated from Google Maps distance + traffic
+                </Text>
               </View>
-
-              {/* Route Cards */}
-              <Text style={styles.sectionTitle}>🛣️ POPULAR ROUTES</Text>
-              
-              {INTER_CITY_ROUTES.map((route) => (
-                <TouchableOpacity
-                  key={route.id}
-                  style={[
-                    styles.routeCard,
-                    selectedRoute === route.id && styles.routeCardSelected
-                  ]}
-                  onPress={() => setSelectedRoute(route.id)}
-                  activeOpacity={0.85}
-                >
-                  <LinearGradient
-                    colors={route.color as any}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.routeGradient}
-                  >
-                    {/* Decorative Elements */}
-                    <View style={styles.routeDecor1} />
-                    <View style={styles.routeDecor2} />
-
-                    {/* Route Content */}
-                    <View style={styles.routeTop}>
-                      <View style={styles.routeCities}>
-                        <Text style={styles.routeFrom}>{route.from.toUpperCase()}</Text>
-                        <View style={styles.routeArrow}>
-                          <Text style={styles.routeArrowEmoji}>{route.emoji}</Text>
-                        </View>
-                        <Text style={styles.routeTo}>{route.to.toUpperCase()}</Text>
-                      </View>
-                      {selectedRoute === route.id && (
-                        <View style={styles.routeCheckmark}>
-                          <Ionicons name="checkmark-circle" size={32} color="#fff" />
-                        </View>
-                      )}
-                    </View>
-
-                    <View style={styles.routeBottom}>
-                      <View style={styles.routeStat}>
-                        <Ionicons name="speedometer" size={18} color="rgba(255,255,255,0.95)" />
-                        <Text style={styles.routeStatText}>{route.distance}</Text>
-                      </View>
-                      <View style={styles.routeStat}>
-                        <Ionicons name="time" size={18} color="rgba(255,255,255,0.95)" />
-                        <Text style={styles.routeStatText}>{route.duration}</Text>
-                      </View>
-                      <View style={styles.routePriceTag}>
-                        <Text style={styles.routePrice}>{CURRENCY}{route.price.toLocaleString()}</Text>
-                      </View>
-                    </View>
-                  </LinearGradient>
-                </TouchableOpacity>
-              ))}
-
-              {/* Inter-City Features */}
-              <View style={styles.featuresRow}>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureEmoji}>🛡️</Text>
-                  <Text style={styles.featureText}>VERIFIED{"\n"}DRIVERS</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureEmoji}>💳</Text>
-                  <Text style={styles.featureText}>FIXED{"\n"}PRICE</Text>
-                </View>
-                <View style={styles.featureItem}>
-                  <Text style={styles.featureEmoji}>📍</Text>
-                  <Text style={styles.featureText}>LIVE{"\n"}TRACKING</Text>
-                </View>
-              </View>
-            </>
-          )}
-
-        </Animated.View>
+            )}
+          </View>
+        )}
       </ScrollView>
 
-      {/* ========== BOOK NOW BUTTON ========== */}
-      <View style={styles.bottomBar}>
-        <View style={styles.pricePreview}>
-          <Text style={styles.priceLabel}>ESTIMATED</Text>
-          <Text style={styles.priceValue}>
-            {tripType === 'city' 
-              ? `${CURRENCY}${((CAR_TYPES.find(c => c.id === selectedCar)?.price || 150) * 10).toLocaleString()}`
-              : selectedRoute 
-                ? `${CURRENCY}${(INTER_CITY_ROUTES.find(r => r.id === selectedRoute)?.price || 0).toLocaleString()}`
-                : '---'
-            }
+      {/* Book Button */}
+      <View style={styles.footer}>
+        <TouchableOpacity
+          style={[styles.bookButton, !fareEstimate && styles.bookButtonDisabled]}
+          onPress={handleBookRide}
+          disabled={!fareEstimate || isCalculating}
+        >
+          <Text style={styles.bookButtonText}>
+            {isCalculating ? 'Calculating...' : 'Confirm Ride'}
           </Text>
-        </View>
-        <TouchableOpacity style={styles.bookButton} onPress={handleBookRide}>
-          <LinearGradient
-            colors={['#00C853', '#00E676', '#69F0AE']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.bookButtonGradient}
-          >
-            <Text style={styles.bookButtonText}>BOOK NOW</Text>
-            <Ionicons name="arrow-forward" size={24} color="#fff" />
-          </LinearGradient>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f0f2f5',
+    backgroundColor: '#fff',
   },
-  headerGradient: {
-    paddingBottom: SPACING.xl,
-    borderBottomLeftRadius: 35,
-    borderBottomRightRadius: 35,
-    overflow: 'hidden',
-  },
-  closeBtn: {
-    position: 'absolute',
-    top: SPACING.lg,
-    left: SPACING.lg,
-    zIndex: 10,
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // 3 VEHICLES ROW
-  vehicleRow: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'flex-end',
-    marginTop: SPACING.xxl + 30,
-    marginBottom: SPACING.sm,
-    gap: SPACING.lg,
-  },
-  sideVehicle: {
-    fontSize: 50,
-  },
-  centerVehicle: {
-    fontSize: 70,
-  },
-  centerVehicleLarge: {
-    fontSize: 80,
-  },
-  headerContent: {
     alignItems: 'center',
-    paddingVertical: SPACING.md,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f3f4f6',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: '#fff',
-    letterSpacing: 2,
-    textShadowColor: 'rgba(0,0,0,0.3)',
-    textShadowOffset: { width: 1, height: 2 },
-    textShadowRadius: 4,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
   },
-  headerSubtitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.95)',
-    marginTop: SPACING.sm,
-    textAlign: 'center',
-    letterSpacing: 1,
-  },
-  // TOGGLE
-  toggleContainer: {
-    flexDirection: 'row',
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 25,
-    padding: 6,
-  },
-  toggleBtn: {
+  content: {
     flex: 1,
+    paddingHorizontal: 16,
+  },
+  tripTypeContainer: {
     flexDirection: 'row',
+    backgroundColor: '#f3f4f6',
+    borderRadius: 12,
+    padding: 4,
+    marginTop: 16,
+    marginBottom: 20,
+  },
+  tripTypeButton: {
+    flex: 1,
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.md + 2,
-    borderRadius: 20,
-    gap: 10,
+    borderRadius: 10,
   },
-  toggleBtnActive: {
+  tripTypeActive: {
     backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  toggleEmoji: {
-    fontSize: 24,
-  },
-  toggleText: {
+  tripTypeText: {
     fontSize: 15,
-    fontWeight: '900',
-    color: 'rgba(255,255,255,0.95)',
-    letterSpacing: 1,
+    fontWeight: '600',
+    color: '#6b7280',
   },
-  toggleTextActive: {
-    color: '#1a1a2e',
+  tripTypeTextActive: {
+    color: '#000',
   },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: SPACING.lg,
-    paddingBottom: 140,
-  },
-  // LOCATION CARD
   locationCard: {
     backgroundColor: '#fff',
-    borderRadius: 28,
-    padding: SPACING.xl,
-    marginBottom: SPACING.lg,
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 8,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
-  locationTitle: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#1a1a2e',
-    letterSpacing: 1,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: 12,
   },
   dot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
-  locationInput: {
+  input: {
     flex: 1,
     fontSize: 16,
-    fontWeight: '700',
-    color: '#1a1a2e',
-    paddingVertical: SPACING.md,
+    fontWeight: '500',
+    color: '#000',
+    paddingVertical: 12,
   },
-  inputIcon: {
-    padding: SPACING.sm,
+  divider: {
+    height: 1,
+    backgroundColor: '#e5e7eb',
+    marginVertical: 8,
+    marginLeft: 24,
   },
-  inputDivider: {
-    height: 2,
-    backgroundColor: '#f0f0f0',
-    marginLeft: 32,
-    marginVertical: SPACING.md,
+  suggestionsRow: {
+    marginTop: 12,
+    marginBottom: 24,
   },
-  quickLocations: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-    marginTop: SPACING.lg,
-    paddingTop: SPACING.lg,
-    borderTopWidth: 2,
-    borderTopColor: '#f5f5f5',
-  },
-  quickBtn: {
+  suggestionChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#f5f7fa',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    borderRadius: BORDER_RADIUS.full,
+    gap: 6,
+    backgroundColor: '#f9fafb',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
   },
-  quickBtnText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#444',
-    letterSpacing: 0.5,
+  suggestionText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#374151',
   },
-  // SECTION TITLE
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#1a1a2e',
-    marginBottom: SPACING.md,
-    letterSpacing: 1,
-  },
-  // CAR SELECTION - LARGER
-  carScroll: {
-    marginBottom: SPACING.lg,
-    marginHorizontal: -SPACING.lg,
-    paddingHorizontal: SPACING.lg,
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 16,
   },
   carCard: {
-    width: 145,
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: SPACING.lg,
-    marginRight: SPACING.md,
-    alignItems: 'center',
-    borderWidth: 3,
-    borderColor: 'transparent',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  carIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.md,
-  },
-  carEmoji: {
-    fontSize: 50,
-  },
-  carName: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#1a1a2e',
-    letterSpacing: 1,
-  },
-  carDesc: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#888',
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  carPrice: {
-    fontSize: 15,
-    fontWeight: '900',
-    marginTop: SPACING.sm,
-    letterSpacing: 0.5,
-  },
-  selectedBadge: {
-    position: 'absolute',
-    top: 10,
-    right: 10,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // VOICE PROMO
-  voicePromo: {
-    marginBottom: SPACING.lg,
-  },
-  voicePromoGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: SPACING.lg,
-    borderRadius: 24,
-    gap: SPACING.md,
-  },
-  voiceIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  voiceContent: {
-    flex: 1,
-  },
-  voiceTitle: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#fff',
-    letterSpacing: 1,
-  },
-  voiceSubtitle: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: 'rgba(255,255,255,0.95)',
-    marginTop: 4,
-    letterSpacing: 0.5,
-  },
-  voiceNewBadge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  voiceNewText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#000',
-    letterSpacing: 1,
-  },
-  // INTER-CITY
-  interCityHero: {
-    alignItems: 'center',
-    marginBottom: SPACING.xl,
-  },
-  interCityTitle: {
-    fontSize: 30,
-    fontWeight: '900',
-    color: '#1a1a2e',
-    letterSpacing: 2,
-  },
-  interCitySubtitle: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#555',
-    marginTop: SPACING.sm,
-    textAlign: 'center',
-    letterSpacing: 0.5,
-  },
-  saveBadge: {
-    backgroundColor: '#FFD700',
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.full,
-    marginTop: SPACING.md,
-  },
-  saveText: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#000',
-    letterSpacing: 1,
-  },
-  // ROUTE CARDS
-  routeCard: {
-    marginBottom: SPACING.md,
-    borderRadius: 28,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 16,
-    elevation: 10,
-  },
-  routeCardSelected: {
-    transform: [{ scale: 1.02 }],
-  },
-  routeGradient: {
-    padding: SPACING.xl,
-    position: 'relative',
-    overflow: 'hidden',
-  },
-  routeDecor1: {
-    position: 'absolute',
-    top: -40,
-    right: -40,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  routeDecor2: {
-    position: 'absolute',
-    bottom: -25,
-    left: -25,
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  routeTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
+    backgroundColor: '#fff',
+    padding: 16,
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: '#e5e7eb',
   },
-  routeCities: {
+  carCardSelected: {
+    borderColor: '#10b981',
+    backgroundColor: '#f0fdf4',
+  },
+  carLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: 12,
+    flex: 1,
   },
-  routeFrom: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#fff',
-    letterSpacing: 1,
+  carEmoji: {
+    fontSize: 32,
   },
-  routeArrow: {
-    width: 55,
-    height: 55,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  carName: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 2,
   },
-  routeArrowEmoji: {
-    fontSize: 30,
+  carDesc: {
+    fontSize: 13,
+    color: '#6b7280',
   },
-  routeTo: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#fff',
-    letterSpacing: 1,
+  carTime: {
+    fontSize: 12,
+    color: '#9ca3af',
+    marginTop: 2,
   },
-  routeCheckmark: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
+  carRight: {
+    alignItems: 'flex-end',
+    gap: 4,
   },
-  routeBottom: {
+  carPrice: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#000',
+  },
+  carPricePlaceholder: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#d1d5db',
+  },
+  fareCard: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginBottom: 100,
+  },
+  fareTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginBottom: 12,
+  },
+  fareRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xl,
+    justifyContent: 'space-between',
+    paddingVertical: 8,
   },
-  routeStat: {
+  fareLabel: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  fareValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#000',
+  },
+  fareNote: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
   },
-  routeStatText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: 'rgba(255,255,255,0.95)',
-    letterSpacing: 0.5,
-  },
-  routePriceTag: {
-    marginLeft: 'auto',
-    backgroundColor: 'rgba(255,255,255,0.35)',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  routePrice: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#fff',
-    letterSpacing: 0.5,
-  },
-  // FEATURES
-  featuresRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: '#fff',
-    borderRadius: 24,
-    padding: SPACING.xl,
-    marginTop: SPACING.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
-    elevation: 4,
-  },
-  featureItem: {
-    alignItems: 'center',
-  },
-  featureEmoji: {
-    fontSize: 36,
-    marginBottom: SPACING.sm,
-  },
-  featureText: {
+  fareNoteText: {
+    flex: 1,
     fontSize: 12,
-    fontWeight: '900',
-    color: '#444',
-    textAlign: 'center',
-    letterSpacing: 0.5,
+    color: '#3b82f6',
     lineHeight: 16,
   },
-  // BOTTOM BAR
-  bottomBar: {
+  footer: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
+    padding: 16,
     backgroundColor: '#fff',
-    paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.lg,
-    paddingBottom: SPACING.xxl,
     borderTopWidth: 1,
-    borderTopColor: '#eee',
-    gap: SPACING.lg,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 10,
-  },
-  pricePreview: {
-    flex: 1,
-  },
-  priceLabel: {
-    fontSize: 12,
-    fontWeight: '800',
-    color: '#888',
-    letterSpacing: 1,
-  },
-  priceValue: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: '#1a1a2e',
-    letterSpacing: 0.5,
+    borderTopColor: '#f3f4f6',
   },
   bookButton: {
-    flex: 1.5,
-  },
-  bookButtonGradient: {
-    flexDirection: 'row',
+    backgroundColor: '#000',
+    paddingVertical: 16,
+    borderRadius: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    paddingVertical: SPACING.lg + 2,
-    borderRadius: BORDER_RADIUS.xl,
+  },
+  bookButtonDisabled: {
+    backgroundColor: '#d1d5db',
   },
   bookButtonText: {
-    fontSize: 18,
-    fontWeight: '900',
+    fontSize: 16,
+    fontWeight: '700',
     color: '#fff',
-    letterSpacing: 2,
   },
 });
