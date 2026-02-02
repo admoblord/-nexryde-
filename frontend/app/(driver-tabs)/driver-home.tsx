@@ -181,7 +181,7 @@ export default function DriverHomeScreen() {
                   </Animated.View>
                 </View>
               </LinearGradient>
-            </ImageBackground>
+            </View>
           </Animated.View>
 
           {/* 💰 EARNINGS DASHBOARD */}
