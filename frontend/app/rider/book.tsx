@@ -1010,11 +1010,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.sm,
-    paddingVertical: SPACING.lg + 2,
+    paddingVertical: SPACING.xl, // BIGGER button height
     borderRadius: BORDER_RADIUS.xl,
+    minHeight: 64, // Ensure big touch target
   },
   bookButtonText: {
-    fontSize: 18,
+    fontSize: 20, // BIGGER font
     fontWeight: '900',
     color: '#fff',
     letterSpacing: 2,
