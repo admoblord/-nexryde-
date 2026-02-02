@@ -19,7 +19,8 @@ import { Image } from 'expo-image';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-const RIDER_HERO = 'https://randomuser.me/api/portraits/women/44.jpg'; // African woman - will replace with proper group image
+// Using placeholder.com which definitely works on web
+const RIDER_HERO = 'https://via.placeholder.com/400x200/10B981/FFFFFF?text=Nigerian+Riders';
 
 export default function RiderHomeScreen() {
   const router = useRouter();
