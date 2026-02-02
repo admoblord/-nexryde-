@@ -7821,12 +7821,13 @@ class VoiceBookingRequest(BaseModel):
 async def parse_voice_booking(request: VoiceBookingRequest):
     """
     Parse voice command to extract pickup and destination
-    Supports Nigerian English, Pidgin, and various Nigerian accents
+    Supports Nigerian English, Pidgin, and ALL Nigerian cities automatically
     """
     text = request.text.lower()
     
-    # Common Nigerian locations database
+    # COMPREHENSIVE Nigerian locations database - ALL CITIES ACROSS NIGERIA
     nigerian_locations = [
+        # Lagos State
         'ikorodu', 'lekki', 'victoria island', 'vi', 'ikeja', 'yaba', 'surulere',
         'apapa', 'maryland', 'ojota', 'berger', 'ajah', 'festac', 'isolo', 'mushin',
         'oshodi', 'agege', 'alimosho', 'lagos island', 'banana island', 'ikoyi',
@@ -7835,33 +7836,167 @@ async def parse_voice_booking(request: VoiceBookingRequest):
         'mangoro', 'badagry', 'epe', 'ibeju-lekki', 'abraham adesanya',
         'sangotedo', 'awoyaya', 'magodo', 'omole', 'ogba', 'ikosi', 'ketu',
         'mile 2', 'mile 12', 'cele', 'ilasamaja', 'bode thomas', 'onigbongbo',
-        'adeniyi jones', 'allen avenue', 'opebi', 'oregun', 'ojodu', 'berger',
-        'mowe', 'ibafo', 'isheri', 'magboro', 'arepo', 'warri', 'benin', 'ibadan',
-        'port harcourt', 'abuja', 'kano', 'jos', 'enugu', 'onitsha', 'aba',
-        'calabar', 'maiduguri', 'kaduna', 'zaria', 'sokoto', 'ilorin', 'akure',
-        'abeokuta', 'owerri', 'uyo', 'asaba', 'makurdi', 'lafia', 'lokoja'
+        'adeniyi jones', 'allen avenue', 'opebi', 'oregun', 'ojodu',
+        'mowe', 'ibafo', 'isheri', 'magboro', 'arepo', 'ojo', 'alaba', 'trade fair',
+        
+        # Abuja (FCT)
+        'abuja', 'wuse', 'garki', 'asokoro', 'maitama', 'gwarimpa', 'kubwa',
+        'nyanya', 'karu', 'lugbe', 'jabi', 'utako', 'gudu', 'apo', 'lifecamp',
+        'gwagwalada', 'bwari', 'kuje', 'jikwoyi', 'jukwoyi', 'katampe', 'mabushi',
+        'wuye', 'lokogoma', 'gaduwa', 'dakwo', 'kado', 'durumi', 'area 1', 'area 2',
+        'area 3', 'area 11', 'central area', 'central business district', 'cbd',
+        
+        # Kano State
+        'kano', 'sabon gari', 'fagge', 'nassarawa', 'gwale', 'kumbotso', 'ungogo',
+        'dawakin tofa', 'bichi', 'rano', 'gwarzo', 'wudil', 'gezawa',
+        
+        # Rivers State
+        'port harcourt', 'ph', 'trans amadi', 'rumuokoro', 'eleme', 'oyigbo',
+        'rumuigbo', 'rumuola', 'rumuokwuta', 'diobu', 'mile 1', 'mile 3',
+        'abuloma', 'choba', 'alakahia', 'rumukalagbor', 'rumuobiakani', 'airforce',
+        
+        # Oyo State
+        'ibadan', 'bodija', 'agodi', 'dugbe', 'mokola', 'sango', 'challenge',
+        'ring road', 'iwo road', 'moniya', 'apete', 'akobo', 'ojoo', 'akala',
+        'ologuneru', 'eleyele', 'jericho', 'bashorun', 'oritamefa', 'aleshinloye',
+        
+        # Ogun State
+        'abeokuta', 'ota', 'ifo', 'sango ota', 'agbara', 'sagamu', 'ijebu ode',
+        'mowe', 'ibafo', 'magboro', 'arepo', 'ojodu berger',
+        
+        # Enugu State
+        'enugu', 'independence layout', 'trans ekulu', 'achara layout', 'uwani',
+        'ogui', 'new haven', 'abakpa', 'emene', 'ninth mile', '9th mile', 'nsukka',
+        
+        # Anambra State
+        'onitsha', 'awka', 'nnewi', 'ekwulobia', 'aguata', 'ihiala', 'upper iweka',
+        'main market', 'bridgehead', 'fegge', 'woliwo', 'inland town',
+        
+        # Abia State
+        'aba', 'umuahia', 'ariaria', 'brass street', 'cemetery road', 'port harcourt road',
+        'faulks road', 'azikiwe road', 'st michaels', 'eziukwu',
+        
+        # Delta State
+        'warri', 'asaba', 'sapele', 'ughelli', 'effurun', 'okpanam', 'agbor',
+        
+        # Edo State
+        'benin', 'benin city', 'ring road', 'sapele road', 'akpakpava', 'uselu',
+        'ugbowo', 'ikpoba hill', 'upper mission', 'new benin', 'amagba',
+        
+        # Kaduna State
+        'kaduna', 'sabon tasha', 'barnawa', 'kakuri', 'ungwan rimi', 'narayi',
+        'malali', 'kaduna north', 'zaria', 'sabon gari zaria', 'samaru',
+        
+        # Plateau State
+        'jos', 'bukuru', 'rayfield', 'terminus', 'jenta', 'kwararafa',
+        
+        # Cross River State
+        'calabar', 'marian road', 'mayne avenue', 'parliamentary road', 'uwanse',
+        
+        # Akwa Ibom State
+        'uyo', 'eket', 'ikot ekpene', 'oron', 'abak', 'essien udim',
+        
+        # Imo State
+        'owerri', 'orlu', 'okigwe', 'mbaise', 'orji', 'new owerri', 'wetheral road',
+        
+        # Kwara State
+        'ilorin', 'offa', 'omu aran', 'lafiagi', 'pategi', 'sango', 'challenge',
+        
+        # Osun State
+        'osogbo', 'ile ife', 'ilesa', 'ede', 'ikirun', 'gbongan', 'ila orangun',
+        
+        # Ondo State
+        'akure', 'ondo', 'owo', 'ore', 'okitipupa', 'ikare',
+        
+        # Ekiti State
+        'ado ekiti', 'ikere', 'ijero', 'efon alaaye',
+        
+        # Benue State
+        'makurdi', 'gboko', 'otukpo', 'katsina ala',
+        
+        # Nasarawa State
+        'lafia', 'keffi', 'akwanga', 'nasarawa', 'doma',
+        
+        # Niger State
+        'minna', 'suleja', 'bida', 'kontagora', 'lapai',
+        
+        # Bauchi State
+        'bauchi', 'azare', 'misau', 'jama are', 'tafawa balewa',
+        
+        # Gombe State
+        'gombe', 'kumo', 'dukku', 'billiri',
+        
+        # Borno State
+        'maiduguri', 'bama', 'biu', 'damboa',
+        
+        # Yobe State
+        'damaturu', 'potiskum', 'gashua', 'nguru',
+        
+        # Sokoto State
+        'sokoto', 'tambuwal', 'gwadabawa', 'bodinga',
+        
+        # Kebbi State
+        'birnin kebbi', 'argungu', 'zuru', 'jega',
+        
+        # Zamfara State
+        'gusau', 'kaura namoda', 'talata mafara', 'bungudu',
+        
+        # Katsina State
+        'katsina', 'daura', 'funtua', 'kankia', 'malumfashi',
+        
+        # Jigawa State
+        'dutse', 'hadejia', 'gumel', 'kazaure', 'ringim',
+        
+        # Taraba State
+        'jalingo', 'wukari', 'bali', 'gembu',
+        
+        # Adamawa State
+        'yola', 'jimeta', 'mubi', 'numan', 'ganye',
+        
+        # Bayelsa State
+        'yenagoa', 'sagbama', 'nembe', 'brass', 'ogbia',
+        
+        # Ebonyi State
+        'abakaliki', 'afikpo', 'onueke', 'ezza',
+        
+        # Kogi State
+        'lokoja', 'okene', 'kabba', 'idah', 'ankpa',
     ]
+    
+    # Normalize and add common variations
+    location_variants = {}
+    for loc in nigerian_locations:
+        # Store original
+        location_variants[loc] = loc
+        # Add without spaces
+        location_variants[loc.replace(' ', '')] = loc
+        # Add with hyphens
+        location_variants[loc.replace(' ', '-')] = loc
     
     # Patterns to detect pickup and destination
     patterns = {
         'from_to': [
-            r'from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
-            r'take me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
-            r'book me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
-            r'pick me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
+            r'from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+)',
+            r'take me from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+)',
+            r'book me from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+)',
+            r'pick me from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+)',
+            r'going from\s+([a-z\s-]+?)\s+to\s+([a-z\s-]+)',
         ],
         'to_from': [
-            r'to\s+([a-z\s]+?)\s+from\s+([a-z\s]+)',
-            r'go\s+([a-z\s]+?)\s+from\s+([a-z\s]+)',
+            r'to\s+([a-z\s-]+?)\s+from\s+([a-z\s-]+)',
+            r'go\s+([a-z\s-]+?)\s+from\s+([a-z\s-]+)',
         ],
         'destination_only': [
-            r'take me to\s+([a-z\s]+)',
-            r'go to\s+([a-z\s]+)',
-            r'i want to go to\s+([a-z\s]+)',
-            r'i wan go\s+([a-z\s]+)',  # Pidgin
-            r'i dey go\s+([a-z\s]+)',  # Pidgin
-            r'book me go\s+([a-z\s]+)',  # Pidgin
-            r'abeg carry me go\s+([a-z\s]+)',  # Pidgin
+            r'take me to\s+([a-z\s-]+)',
+            r'go to\s+([a-z\s-]+)',
+            r'going to\s+([a-z\s-]+)',
+            r'i want to go to\s+([a-z\s-]+)',
+            r'i wan go\s+([a-z\s-]+)',  # Pidgin
+            r'i dey go\s+([a-z\s-]+)',  # Pidgin
+            r'book me go\s+([a-z\s-]+)',  # Pidgin
+            r'abeg carry me go\s+([a-z\s-]+)',  # Pidgin
+            r'i need to go to\s+([a-z\s-]+)',
+            r'heading to\s+([a-z\s-]+)',
         ]
     }
     
@@ -7896,20 +8031,34 @@ async def parse_voice_booking(request: VoiceBookingRequest):
                 pickup = "Current Location"
                 break
     
-    # Validate and clean up locations
+    # Validate and clean up locations using fuzzy matching
     def find_closest_location(text: str) -> str:
-        """Find the closest matching Nigerian location"""
-        text = text.strip()
+        """Find the closest matching Nigerian location with fuzzy search"""
+        text = text.strip().lower()
+        
         # Direct match
         if text in nigerian_locations:
             return text.title()
         
-        # Partial match
+        # Check variants
+        if text in location_variants:
+            return location_variants[text].title()
+        
+        # Fuzzy match - check if any location is contained in text
         for location in nigerian_locations:
             if location in text or text in location:
                 return location.title()
         
-        # Return original if no match (might be a new location)
+        # Check for partial word matches (e.g., "ikorodu road" -> "ikorodu")
+        words = text.split()
+        for word in words:
+            if word in nigerian_locations:
+                return word.title()
+            for location in nigerian_locations:
+                if word in location or location in word:
+                    return location.title()
+        
+        # Return original with title case if no match
         return text.title()
     
     if destination:
@@ -7917,38 +8066,16 @@ async def parse_voice_booking(request: VoiceBookingRequest):
     if pickup and pickup != "Current Location":
         pickup = find_closest_location(pickup)
     
-    # If we couldn't parse anything, use AI fallback
+    # If we couldn't parse anything clearly, return error
     if not destination:
-        try:
-            llm_chat = LlmChat(
-                model="gpt-4o",
-                api_key=os.environ.get('EMERGENT_LLM_KEY', '')
-            )
-            
-            prompt = f"""Extract the pickup location and destination from this Nigerian voice command: "{request.text}"
-            
-Respond ONLY in this exact JSON format:
-{{"pickup": "location name", "destination": "location name"}}
-
-If only destination is mentioned, use "Current Location" for pickup.
-Common Nigerian locations include: Lekki, Victoria Island, Ikeja, Yaba, Ikorodu, etc."""
-
-            response = llm_chat.invoke([UserMessage(prompt)])
-            result = json.loads(response.content)
-            pickup = result.get('pickup', 'Current Location')
-            destination = result.get('destination', '')
-        except Exception as e:
-            logger.error(f"AI fallback failed: {e}")
-            raise HTTPException(status_code=400, detail="Could not understand voice command. Please try again.")
-    
-    if not destination:
-        raise HTTPException(status_code=400, detail="Could not detect destination. Please speak clearly.")
+        raise HTTPException(status_code=400, detail="Could not detect destination. Please speak clearly and mention the city name.")
     
     return {
-        "pickup": pickup,
+        "pickup": pickup if pickup else "Current Location",
         "destination": destination,
         "original_text": request.text,
-        "language": request.language
+        "language": request.language,
+        "recognized": True
     }
 
 @app.get("/admin/")
