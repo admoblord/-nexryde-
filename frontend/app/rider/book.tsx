@@ -522,13 +522,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // 3 VEHICLES ROW
+  // 3 VEHICLES ROW - POSITIONED HIGHER TO NOT BLOCK INPUTS
   vehicleRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'flex-end',
-    marginTop: SPACING.xxl + 30,
-    marginBottom: SPACING.sm,
+    marginTop: SPACING.md + 10, // Reduced from xxl+30 to move vehicles up
+    marginBottom: SPACING.xs,
     gap: SPACING.lg,
   },
   sideVehicle: {
