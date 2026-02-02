@@ -7,6 +7,7 @@ import {
   ScrollView,
   Dimensions,
   Alert,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -118,12 +119,43 @@ export default function DriverHomeScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* 🚗 DRIVER HERO IMAGE - Professional Nigerian Driver */}
+          <View style={styles.heroContainer}>
+            <LinearGradient
+              colors={['#00C853', '#16A34A']}
+              style={styles.heroGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.heroContent}>
+                <View style={styles.heroTextSection}>
+                  <Text style={styles.heroTitle}>Welcome to Your</Text>
+                  <Text style={styles.heroSubtitle}>Driver Dashboard 🚗</Text>
+                  <Text style={styles.heroDesc}>
+                    Start earning today! Keep 100% of your earnings with NEXRYDE
+                  </Text>
+                </View>
+                <View style={styles.heroImageContainer}>
+                  <Image 
+                    source={require('@/assets/images/driver-hero.png')}
+                    style={styles.heroImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.heroBadge}>
+                    <Ionicons name="shield-checkmark" size={16} color="#FFFFFF" />
+                    <Text style={styles.heroBadgeText}>VERIFIED</Text>
+                  </View>
+                </View>
+              </View>
+            </LinearGradient>
+          </View>
+
           {/* Driver Mode Badge */}
           <View style={styles.modeBadge}>
             <View style={styles.modeDotOuter}>
               <View style={styles.modeDot} />
             </View>
-            <Text style={styles.modeText}>DRIVER MODE</Text>
+            <Text style={styles.modeText}>DRIVER MODE • FOR DRIVERS</Text>
           </View>
 
           {/* Online/Offline Toggle Card - Premium Design */}
@@ -488,6 +520,83 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: COLORS.green,
     letterSpacing: 1.5,
+  },
+  // Hero Section
+  heroContainer: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  heroGradient: {
+    padding: 20,
+  },
+  heroContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroTextSection: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  heroTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
+    marginBottom: 4,
+  },
+  heroSubtitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginBottom: 8,
+    letterSpacing: -0.5,
+  },
+  heroDesc: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 18,
+  },
+  heroImageContainer: {
+    position: 'relative',
+    width: 120,
+    height: 120,
+  },
+  heroImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 16,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.3)',
+  },
+  heroBadge: {
+    position: 'absolute',
+    bottom: -8,
+    right: -8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    gap: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  heroBadgeText: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
   },
   statusCard: {
     borderRadius: 24,
