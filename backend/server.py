@@ -7700,6 +7700,117 @@ async def startup_event():
 
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
+# ========== GOOGLE MAPS FARE ESTIMATION (REAL DISTANCE + TIME) ==========
+
+class GoogleFareRequest(BaseModel):
+    pickup: str
+    destination: str
+    vehicle_type: str = "economy"
+    trip_type: str = "intra"  # intra or inter
+
+@app.post("/api/fares/estimate-google")
+async def estimate_fare_google(request: GoogleFareRequest):
+    """
+    Calculate fare using REAL Google Maps distance and duration
+    NO hardcoded prices for inter-city - everything from Google Maps API
+    """
+    try:
+        import googlemaps
+        
+        # Initialize Google Maps client
+        gmaps_key = os.environ.get('GOOGLE_MAPS_API_KEY', '')
+        if not gmaps_key:
+            raise HTTPException(status_code=500, detail="Google Maps API key not configured")
+        
+        gmaps = googlemaps.Client(key=gmaps_key)
+        
+        # Get real distance and duration from Google Maps
+        directions_result = gmaps.distance_matrix(
+            origins=[request.pickup],
+            destinations=[request.destination],
+            mode="driving",
+            departure_time="now",  # Get real-time traffic data
+            traffic_model="best_guess"
+        )
+        
+        if directions_result['rows'][0]['elements'][0]['status'] != 'OK':
+            raise HTTPException(status_code=400, detail="Could not calculate route. Please check locations.")
+        
+        # Extract distance and duration from Google Maps
+        element = directions_result['rows'][0]['elements'][0]
+        distance_meters = element['distance']['value']
+        duration_seconds = element['duration_in_traffic']['value'] if 'duration_in_traffic' in element else element['duration']['value']
+        
+        distance_km = distance_meters / 1000
+        duration_minutes = duration_seconds / 60
+        
+        # Format for display
+        distance_text = element['distance']['text']
+        if 'duration_in_traffic' in element:
+            duration_text = element['duration_in_traffic']['text']
+        else:
+            duration_text = element['duration']['text']
+        
+        # Calculate fare based on trip type
+        if request.trip_type == "inter":
+            # INTER-CITY: Use Google distance + time ONLY
+            # Formula: ₦1,000 base + (distance × ₦120/km) + (hours × ₦800/hr)
+            base_fare = 1000
+            distance_rate = 120  # per km
+            time_rate = 800  # per hour
+            
+            distance_fee = distance_km * distance_rate
+            time_fee = (duration_minutes / 60) * time_rate
+            
+            subtotal = base_fare + distance_fee + time_fee
+        else:
+            # INTRA-CITY: Use standard formula
+            # Formula: ₦200 base + (distance × ₦100/km) + (minutes × ₦5/min)
+            base_fare = 200
+            distance_rate = 100  # per km
+            time_rate = 5  # per minute
+            
+            distance_fee = distance_km * distance_rate
+            time_fee = duration_minutes * time_rate
+            
+            subtotal = base_fare + distance_fee + time_fee
+        
+        # Apply vehicle multiplier
+        vehicle_multipliers = {
+            "economy": 1.0,
+            "comfort": 1.3,
+            "premium": 2.0,
+            "xl": 1.5
+        }
+        multiplier = vehicle_multipliers.get(request.vehicle_type, 1.0)
+        
+        total_fare = subtotal * multiplier
+        
+        return {
+            "pickup": request.pickup,
+            "destination": request.destination,
+            "distance": distance_text,
+            "distance_km": round(distance_km, 2),
+            "duration": duration_text,
+            "duration_minutes": round(duration_minutes, 1),
+            "base_fare": base_fare,
+            "distance_fee": round(distance_fee, 2),
+            "time_fee": round(time_fee, 2),
+            "subtotal": round(subtotal, 2),
+            "vehicle_type": request.vehicle_type,
+            "multiplier": multiplier,
+            "total_fare": round(total_fare, 2),
+            "trip_type": request.trip_type,
+            "traffic_considered": 'duration_in_traffic' in element,
+            "source": "Google Maps API"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Google Maps fare estimation error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to calculate fare: {str(e)}")
+
 # ========== VOICE BOOKING API (NIGERIAN ACCENT SUPPORT) ==========
 
 class VoiceBookingRequest(BaseModel):
