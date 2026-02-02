@@ -123,21 +123,20 @@ export default function DriverHomeScreen() {
             </TouchableOpacity>
           </Animated.View>
 
-          {/* 🌟 HERO - SMILING DRIVER IMAGE */}
+          {/* 🌟 HERO - SMILING NIGERIAN DRIVER */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
-            <View style={styles.heroImageContainer}>
-              {/* Background Image of Nigerian Driver */}
+            <View style={styles.heroCard}>
+              {/* Nigerian Driver Image - VISIBLE AT TOP */}
               <Image
                 source={{ uri: DRIVER_HERO }}
-                style={styles.heroBackgroundImage}
+                style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
                 resizeMode="cover"
               />
-              {/* Overlay Gradient */}
+              
+              {/* Content Section Below Image */}
               <LinearGradient
-                colors={isOnline 
-                  ? ['rgba(16,185,129,0.4)', 'rgba(16,185,129,0.7)', 'rgba(6,182,212,0.9)']
-                  : ['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)']}
-                style={styles.heroOverlay}
+                colors={isOnline ? ['#10B981', '#059669'] : ['#374151', '#1F2937']}
+                style={styles.heroContentSection}
               >
                 {/* Status Badge */}
                 <View style={[styles.statusBadge, isOnline && styles.statusBadgeOnline]}>
@@ -147,39 +146,37 @@ export default function DriverHomeScreen() {
                   </Text>
                 </View>
 
-                <View style={styles.heroContent}>
-                  <Text style={styles.heroTagline}>
-                    {isOnline ? '🟢 YOU\'RE LIVE!' : '🚗 START EARNING TODAY'}
-                  </Text>
-                  <Text style={styles.heroTitle}>
-                    {isOnline ? 'Waiting for\nriders...' : 'Ready to\nhit the road?'}
-                  </Text>
-                  
-                  {/* BIG GO ONLINE BUTTON */}
-                  <Animated.View style={{ transform: [{ scale: isOnline ? 1 : pulseAnim }] }}>
-                    <TouchableOpacity 
-                      style={styles.goOnlineBtn}
-                      onPress={toggleOnline}
-                      activeOpacity={0.9}
+                <Text style={styles.heroTagline}>
+                  {isOnline ? '🟢 YOU\'RE LIVE!' : '🚗 START EARNING TODAY'}
+                </Text>
+                <Text style={styles.heroTitle}>
+                  {isOnline ? 'Waiting for\nriders...' : 'Ready to hit\nthe road?'}
+                </Text>
+                
+                {/* BIG GO ONLINE BUTTON */}
+                <Animated.View style={{ transform: [{ scale: isOnline ? 1 : pulseAnim }] }}>
+                  <TouchableOpacity 
+                    style={styles.goOnlineBtn}
+                    onPress={toggleOnline}
+                    activeOpacity={0.9}
+                  >
+                    <LinearGradient
+                      colors={isOnline ? ['#EF4444', '#DC2626'] : ['#22C55E', '#16A34A']}
+                      style={styles.goOnlineGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
                     >
-                      <LinearGradient
-                        colors={isOnline ? ['#EF4444', '#DC2626'] : ['#10B981', '#059669']}
-                        style={styles.goOnlineGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <Ionicons 
-                          name={isOnline ? 'pause-circle' : 'power'} 
-                          size={32} 
-                          color="#FFF" 
-                        />
-                        <Text style={styles.goOnlineText}>
-                          {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
-                        </Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </Animated.View>
-                </View>
+                      <Ionicons 
+                        name={isOnline ? 'pause-circle' : 'power'} 
+                        size={32} 
+                        color="#FFF" 
+                      />
+                      <Text style={styles.goOnlineText}>
+                        {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
+                      </Text>
+                    </LinearGradient>
+                  </TouchableOpacity>
+                </Animated.View>
               </LinearGradient>
             </View>
           </Animated.View>
