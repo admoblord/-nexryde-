@@ -228,6 +228,49 @@ export default function RiderHomeScreen() {
             </View>
           </View>
 
+          {/* 🌟 NEW AI & PREMIUM FEATURES */}
+          <View style={styles.servicesSection}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>AI Features</Text>
+              <View style={[styles.sectionBadge, { backgroundColor: '#8B5CF620' }]}>
+                <Text style={[styles.sectionBadgeText, { color: '#8B5CF6' }]}>AI</Text>
+              </View>
+            </View>
+            <View style={styles.servicesGrid}>
+              <ServiceCard
+                icon="chatbubbles"
+                title="AI Trip Buddy"
+                desc="Chat companion"
+                color="#8B5CF6"
+                onPress={() => router.push('/ai-buddy')}
+                badge="NEW"
+              />
+              <ServiceCard
+                icon="happy"
+                title="Mood Match"
+                desc="Driver preferences"
+                color="#EC4899"
+                onPress={() => router.push('/rider/mood-preferences')}
+              />
+            </View>
+            <View style={[styles.servicesGrid, { marginTop: SPACING.md }]}>
+              <ServiceCard
+                icon="heart"
+                title="Favorite Drivers"
+                desc="Your top picks"
+                color="#EF4444"
+                onPress={() => router.push('/rider/favorite-drivers')}
+              />
+              <ServiceCard
+                icon="car"
+                title="Traffic Status"
+                desc="Live updates"
+                color="#14B8A6"
+                onPress={() => router.push('/rider/traffic-status')}
+              />
+            </View>
+          </View>
+
           {/* Quick Actions */}
           <View style={styles.quickActions}>
             <QuickAction icon="time" label="History" onPress={() => router.push('/ride-history')} />
