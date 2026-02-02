@@ -20,8 +20,8 @@ import { useAppStore } from '@/src/store/appStore';
 const { width, height } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// PREMIUM IMAGE - Happy driver in car smiling
-const DRIVER_HERO = 'https://images.unsplash.com/photo-1758521961632-24056f441db8?w=800&q=80'; // Attractive businessman laughing in car
+// PREMIUM IMAGE - Nigerian Yoruba man smiling in his car!
+const DRIVER_HERO = 'https://images.unsplash.com/photo-1536139414673-1b479272ea38?w=800&q=80'; // Smiling Nigerian man sitting inside vehicle - Yoruba driver!
 
 export default function DriverHomeScreen() {
   const router = useRouter();
