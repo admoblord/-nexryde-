@@ -349,7 +349,95 @@ export default function BookScreen() {
           <View style={styles.headerRight} />
         </View>
 
-        {/* Route Card */}
+        {/* 🚗 TRIP TYPE TOGGLE - City vs Inter-City */}
+        <View style={styles.tripTypeContainer}>
+          <TouchableOpacity
+            style={[
+              styles.tripTypeButton,
+              tripType === 'city' && styles.tripTypeButtonActive
+            ]}
+            onPress={() => setTripType('city')}
+          >
+            <Ionicons 
+              name="car" 
+              size={18} 
+              color={tripType === 'city' ? COLORS.white : COLORS.lightTextSecondary} 
+            />
+            <Text style={[
+              styles.tripTypeText,
+              tripType === 'city' && styles.tripTypeTextActive
+            ]}>City Ride</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.tripTypeButton,
+              tripType === 'intercity' && styles.tripTypeButtonActive
+            ]}
+            onPress={() => setTripType('intercity')}
+          >
+            <Ionicons 
+              name="map" 
+              size={18} 
+              color={tripType === 'intercity' ? COLORS.white : COLORS.lightTextSecondary} 
+            />
+            <Text style={[
+              styles.tripTypeText,
+              tripType === 'intercity' && styles.tripTypeTextActive
+            ]}>Inter-City</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Inter-City Popular Routes */}
+        {tripType === 'intercity' && (
+          <View style={styles.interCitySection}>
+            <Text style={styles.interCityTitle}>🚀 Popular Routes</Text>
+            <Text style={styles.interCitySubtitle}>Pre-cached routes for instant booking</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.routesScrollContent}
+            >
+              {INTER_CITY_ROUTES.map((route) => (
+                <TouchableOpacity
+                  key={route.id}
+                  style={[
+                    styles.interCityRouteCard,
+                    selectedInterCityRoute === route.id && styles.interCityRouteCardSelected
+                  ]}
+                  onPress={() => {
+                    setSelectedInterCityRoute(route.id);
+                    // Auto-fill the stops
+                    setStops([
+                      { id: '1', type: 'pickup', address: `${route.from} (City Center)`, isEditing: false, coordinates: { latitude: 6.5244, longitude: 3.3792 } },
+                      { id: '2', type: 'dropoff', address: `${route.to} (City Center)`, isEditing: false, coordinates: { latitude: 7.3775, longitude: 3.9470 } },
+                    ]);
+                  }}
+                >
+                  <View style={styles.routeHeader}>
+                    <Text style={styles.routeFromTo}>{route.from} → {route.to}</Text>
+                    {selectedInterCityRoute === route.id && (
+                      <Ionicons name="checkmark-circle" size={18} color={COLORS.accentGreen} />
+                    )}
+                  </View>
+                  <View style={styles.routeDetails}>
+                    <View style={styles.routeDetail}>
+                      <Ionicons name="navigate-outline" size={14} color={COLORS.lightTextSecondary} />
+                      <Text style={styles.routeDetailText}>{route.distance}</Text>
+                    </View>
+                    <View style={styles.routeDetail}>
+                      <Ionicons name="time-outline" size={14} color={COLORS.lightTextSecondary} />
+                      <Text style={styles.routeDetailText}>{route.duration}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.routePrice}>{route.price}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {/* Route Card - Only show for city rides or if intercity route selected */}
+        {(tripType === 'city' || selectedInterCityRoute) && (
         <View style={styles.routeCard}>
           {stops.map((stop, index) => (
             <View key={stop.id}>
