@@ -116,21 +116,21 @@ export default function VehicleRegistrationScreen() {
 
     const year = parseInt(vehicleInfo.year);
     
-    // Check year requirements
-    if (selectedCategory === 'economy' && year < 2015) {
-      Alert.alert('VEHICLE TOO OLD', 'Economy cars must be 2015 or newer. Your car does not qualify.');
+    // Check year requirements - Updated to be more inclusive
+    if (selectedCategory === 'economy' && year < 2005) {
+      Alert.alert('VEHICLE TOO OLD', 'Economy cars must be 2005 or newer. Unfortunately, your car does not qualify.');
       return false;
     }
-    if (selectedCategory === 'comfort' && year < 2018) {
-      Alert.alert('VEHICLE TOO OLD', 'Comfort cars must be 2018 or newer. Please select Economy instead.');
+    if (selectedCategory === 'comfort' && year < 2015) {
+      Alert.alert('VEHICLE TOO OLD', 'Comfort cars must be 2015 or newer. Please select Economy instead.');
       return false;
     }
     if (selectedCategory === 'premium' && year < 2020) {
       Alert.alert('VEHICLE TOO OLD', 'Premium cars must be 2020 or newer. Please select Comfort instead.');
       return false;
     }
-    if (selectedCategory === 'xl' && year < 2017) {
-      Alert.alert('VEHICLE TOO OLD', 'XL vehicles must be 2017 or newer.');
+    if (selectedCategory === 'xl' && year < 2015) {
+      Alert.alert('VEHICLE TOO OLD', 'XL vehicles must be 2015 or newer.');
       return false;
     }
 
