@@ -1492,4 +1492,18 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextSecondary,
     lineHeight: 18,
   },
+  // Animation Styles
+  fallingFlower: {
+    position: 'absolute',
+    fontSize: 20,
+    zIndex: 1000,
+  },
+  floatingParticle: {
+    position: 'absolute',
+    width: 4,
+    height: 4,
+    backgroundColor: COLORS.accentGreen,
+    borderRadius: 2,
+    zIndex: 1000,
+  },
 });
