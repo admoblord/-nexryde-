@@ -8,12 +8,17 @@ import {
   TextInput,
   Alert,
   Image,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAuth } from '@/src/context/AuthContext';
+import Constants from 'expo-constants';
+
+const API_URL = Constants.expoConfig?.extra?.apiUrl || process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // CAR CATEGORIES WITH REQUIREMENTS
 const CAR_CATEGORIES = [
