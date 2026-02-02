@@ -93,7 +93,7 @@ export default function RiderHomeScreen() {
               <Image
                 source={RIDER_HERO}
                 style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
-                contentFit="cover"
+                resizeMode="cover"
               />
               
               {/* Content Section Below Image */}
