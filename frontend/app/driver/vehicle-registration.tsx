@@ -451,16 +451,22 @@ export default function VehicleRegistrationScreen() {
             </View>
 
             <TouchableOpacity
-              style={[styles.submitButton, !agreedToRequirements && styles.submitButtonDisabled]}
+              style={[styles.submitButton, (!agreedToRequirements || isLoading) && styles.submitButtonDisabled]}
               onPress={handleSubmit}
-              disabled={!agreedToRequirements}
+              disabled={!agreedToRequirements || isLoading}
             >
               <LinearGradient
-                colors={agreedToRequirements ? ['#00C853', '#00E676'] : ['#888', '#888']}
+                colors={agreedToRequirements && !isLoading ? ['#00C853', '#00E676'] : ['#888', '#888']}
                 style={styles.submitButtonGradient}
               >
-                <Ionicons name="checkmark-circle" size={24} color="#fff" />
-                <Text style={styles.submitButtonText}>SUBMIT FOR VERIFICATION</Text>
+                {isLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="checkmark-circle" size={24} color="#fff" />
+                )}
+                <Text style={styles.submitButtonText}>
+                  {isLoading ? 'SUBMITTING...' : 'SUBMIT FOR VERIFICATION'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </>
