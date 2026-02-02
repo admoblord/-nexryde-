@@ -21,7 +21,7 @@ const { width, height } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // PREMIUM IMAGE - Nigerian Yoruba man smiling in his car!
-const DRIVER_HERO = 'https://images.unsplash.com/photo-1536139414673-1b479272ea38?w=800&q=80'; // Smiling Nigerian man sitting inside vehicle - Yoruba driver!
+const DRIVER_HERO = 'https://images.unsplash.com/photo-1604447199408-9798f9f64f88?w=800&q=80'; // Happy black man sitting in car seat - Nigerian driver!
 
 export default function DriverHomeScreen() {
   const router = useRouter();
