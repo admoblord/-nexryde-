@@ -766,6 +766,103 @@ const styles = StyleSheet.create({
   headerRight: {
     width: 40,
   },
+  // Trip Type Toggle Styles
+  tripTypeContainer: {
+    flexDirection: 'row',
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
+    backgroundColor: COLORS.lightCardBackground,
+    borderRadius: BORDER_RADIUS.full,
+    padding: 4,
+  },
+  tripTypeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: SPACING.sm,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.full,
+    gap: 6,
+  },
+  tripTypeButtonActive: {
+    backgroundColor: COLORS.primary,
+  },
+  tripTypeText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.lightTextSecondary,
+  },
+  tripTypeTextActive: {
+    color: COLORS.white,
+  },
+  // Inter-City Section Styles
+  interCitySection: {
+    marginHorizontal: SPACING.lg,
+    marginTop: SPACING.md,
+  },
+  interCityTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  interCitySubtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    marginTop: 2,
+    marginBottom: SPACING.sm,
+  },
+  routesScrollContent: {
+    paddingRight: SPACING.lg,
+    gap: SPACING.sm,
+  },
+  interCityRouteCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    minWidth: 160,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  interCityRouteCardSelected: {
+    borderColor: COLORS.accentGreen,
+    backgroundColor: '#F0FDF4',
+  },
+  routeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: SPACING.xs,
+  },
+  routeFromTo: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  routeDetails: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.xs,
+  },
+  routeDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  routeDetailText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextSecondary,
+  },
+  routePrice: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: COLORS.accentGreen,
+  },
   routeCard: {
     backgroundColor: COLORS.white,
     marginHorizontal: SPACING.lg,
