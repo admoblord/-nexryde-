@@ -47,8 +47,21 @@ const DEFAULT_REGION = {
   longitudeDelta: 0.05,
 };
 
+// Inter-City Popular Routes (Pre-cached for cost savings)
+const INTER_CITY_ROUTES = [
+  { id: 'lagos-ibadan', from: 'Lagos', to: 'Ibadan', distance: '127 km', duration: '~2h', price: '₦15,000' },
+  { id: 'lagos-abuja', from: 'Lagos', to: 'Abuja', distance: '536 km', duration: '~7h', price: '₦45,000' },
+  { id: 'lagos-benin', from: 'Lagos', to: 'Benin City', distance: '305 km', duration: '~4h', price: '₦25,000' },
+  { id: 'lagos-ore', from: 'Lagos', to: 'Ore', distance: '192 km', duration: '~2.5h', price: '₦18,000' },
+  { id: 'lagos-abeokuta', from: 'Lagos', to: 'Abeokuta', distance: '77 km', duration: '~1.5h', price: '₦10,000' },
+];
+
 export default function BookScreen() {
   const router = useRouter();
+  
+  // Trip Type: 'city' or 'intercity'
+  const [tripType, setTripType] = useState<'city' | 'intercity'>('city');
+  const [selectedInterCityRoute, setSelectedInterCityRoute] = useState<string | null>(null);
   
   const [stops, setStops] = useState<RouteStop[]>([
     { id: '1', type: 'pickup', address: '', isEditing: false },
