@@ -29,12 +29,12 @@ const CAR_CATEGORIES = [
     color: '#4CAF50',
     description: 'Affordable rides for everyday trips',
     requirements: [
-      'Car must be 2015 or newer',
+      'Car must be 2005 or newer',
       'Must have working AC',
       'Clean interior & exterior',
       '4 doors minimum',
     ],
-    examples: 'Toyota Corolla, Honda Civic, Hyundai Elantra',
+    examples: 'Toyota Corolla, Honda Civic, Hyundai Elantra, Camry',
     earnings: '₦150/km',
   },
   {
@@ -44,7 +44,7 @@ const CAR_CATEGORIES = [
     color: '#2196F3',
     description: 'Spacious & comfortable rides',
     requirements: [
-      'Car must be 2018 or newer',
+      'Car must be 2015 or newer',
       'Leather or premium fabric seats',
       'Strong AC (front & rear)',
       'Spacious legroom',
@@ -77,7 +77,7 @@ const CAR_CATEGORIES = [
     color: '#FF9800',
     description: '6+ seats for groups & families',
     requirements: [
-      'Car must be 2017 or newer',
+      'Car must be 2015 or newer',
       'Minimum 6 passenger seats',
       'SUV or Minivan only',
       'Working AC for all rows',
