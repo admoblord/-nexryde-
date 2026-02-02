@@ -482,7 +482,18 @@ export default function BookScreen() {
 
       {/* ========== BOOK NOW BUTTON ========== */}
       <View style={styles.bottomBar}>
-        <TouchableOpacity style={styles.bookButtonFull} onPress={handleBookRide}>
+        <View style={styles.pricePreview}>
+          <Text style={styles.priceLabel}>ESTIMATED</Text>
+          <Text style={styles.priceValue}>
+            {tripType === 'city' 
+              ? `${CURRENCY}${((CAR_TYPES.find(c => c.id === selectedCar)?.price || 150) * 10).toLocaleString()}`
+              : selectedRoute 
+                ? `${CURRENCY}${(INTER_CITY_ROUTES.find(r => r.id === selectedRoute)?.price || 0).toLocaleString()}`
+                : '---'
+            }
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.bookButton} onPress={handleBookRide}>
           <LinearGradient
             colors={['#00C853', '#00E676', '#69F0AE']}
             start={{ x: 0, y: 0 }}
@@ -504,11 +515,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f2f5',
   },
   headerGradient: {
-    paddingBottom: SPACING.md,
+    paddingBottom: SPACING.xl,
     borderBottomLeftRadius: 35,
     borderBottomRightRadius: 35,
     overflow: 'hidden',
-    minHeight: 220, // Reduced from taller to prevent blocking
   },
   closeBtn: {
     position: 'absolute',
@@ -522,13 +532,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // 3 VEHICLES ROW - POSITIONED HIGHER TO NOT BLOCK INPUTS
+  // 3 VEHICLES ROW
   vehicleRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'flex-end',
-    marginTop: SPACING.md + 10, // Reduced from xxl+30 to move vehicles up
-    marginBottom: SPACING.xs,
+    marginTop: SPACING.xxl + 30,
+    marginBottom: SPACING.sm,
     gap: SPACING.lg,
   },
   sideVehicle: {
@@ -601,11 +611,11 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
     paddingBottom: 140,
   },
-  // LOCATION CARD - BIGGER FOR MOBILE
+  // LOCATION CARD
   locationCard: {
     backgroundColor: '#fff',
     borderRadius: 28,
-    padding: SPACING.xl + 8, // Increased padding
+    padding: SPACING.xl,
     marginBottom: SPACING.lg,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
@@ -617,10 +627,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    marginBottom: SPACING.lg + 4, // More space
+    marginBottom: SPACING.lg,
   },
   locationTitle: {
-    fontSize: 22, // Bigger title
+    fontSize: 20,
     fontWeight: '900',
     color: '#1a1a2e',
     letterSpacing: 1,
@@ -629,21 +639,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.md,
-    minHeight: 60, // Much bigger minimum height
   },
   dot: {
-    width: 20, // Bigger dots
-    height: 20,
-    borderRadius: 10,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
   },
   locationInput: {
     flex: 1,
-    fontSize: 18, // MUCH BIGGER font size
+    fontSize: 16,
     fontWeight: '700',
     color: '#1a1a2e',
-    paddingVertical: SPACING.lg, // More padding for bigger touch area
-    paddingHorizontal: SPACING.sm,
-    minHeight: 56, // Ensure minimum touch target
+    paddingVertical: SPACING.md,
   },
   inputIcon: {
     padding: SPACING.sm,
@@ -1001,21 +1008,16 @@ const styles = StyleSheet.create({
   bookButton: {
     flex: 1.5,
   },
-  bookButtonFull: {
-    flex: 1,
-    width: '100%',
-  },
   bookButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.sm,
-    paddingVertical: SPACING.xl, // BIGGER button height
+    paddingVertical: SPACING.lg + 2,
     borderRadius: BORDER_RADIUS.xl,
-    minHeight: 64, // Ensure big touch target
   },
   bookButtonText: {
-    fontSize: 20, // BIGGER font
+    fontSize: 18,
     fontWeight: '900',
     color: '#fff',
     letterSpacing: 2,
