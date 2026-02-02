@@ -822,6 +822,8 @@ test_plan:
 
 agent_communication:
     - agent: "main"
+    - message: "NEW SESSION - FARE CALCULATION UPDATE: User requested removal of hardcoded 'ESTIMATED ₦1,500' from rider booking screen and min_fare logic from backend. ✅ FRONTEND: Confirmed via screenshot that estimated price text removed from /rider/book screen - 'BOOK NOW' button displays correctly. ⚠️ BACKEND: Lines 1028-1029 in server.py still apply min_fare with max(min_fare, subtotal). Need to test backend to verify min_fare is truly removed and fare calculation is purely formula-based. TESTING PRIORITY: Backend fare estimation endpoint with various scenarios (short trips, long trips, different service types) to confirm no minimum fare is applied."
+    - agent: "main"
     - message: "Major feature update complete. Added all Core Safety Features, AI Assistants, Gamification (Streaks, Badges, Challenges, Leaderboard), Driver Welfare (Fatigue Monitoring, Grace Period), Rider Welfare (Family Mode, Trip Sharing, Insurance). Frontend screens created for Safety Center, AI Assistant, and Leaderboard. Backend APIs tested with curl - all returning expected data."
     - agent: "testing"
     - message: "✅ BACKEND TESTING COMPLETE: All 12 priority APIs tested successfully. Core Safety APIs (AI assistants, emergency contacts, SOS) working correctly. Gamification APIs (leaderboards, challenges, fatigue monitoring) returning proper data structures. Driver welfare and trip insurance APIs functioning as expected. Minor fix applied to AI driver assistant for non-existent users. All APIs return appropriate responses and handle edge cases properly."
