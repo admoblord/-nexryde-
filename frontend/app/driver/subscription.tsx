@@ -76,6 +76,11 @@ export default function SubscriptionScreen() {
   useEffect(() => {
     initializeData();
     
+    // Safety timeout for web - stop loading after 5 seconds
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
+    
     // Entry animations
     Animated.parallel([
       Animated.timing(fadeAnim, {
@@ -89,6 +94,8 @@ export default function SubscriptionScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+    
+    return () => clearTimeout(timeout);
   }, []);
 
   const initializeData = async () => {
