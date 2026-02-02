@@ -82,51 +82,48 @@ export default function RiderHomeScreen() {
             </TouchableOpacity>
           </Animated.View>
 
-          {/* 🌟 HERO SECTION - Smiling Rider Image */}
+          {/* 🌟 HERO SECTION - Nigerian Riders (Igbo, Yoruba, Hausa) */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
             <TouchableOpacity 
               activeOpacity={0.95}
               onPress={() => router.push('/rider/book')}
               style={styles.heroCard}
             >
-              <View style={styles.heroImageContainer}>
-                {/* Background Image */}
-                <Image
-                  source={{ uri: RIDER_HERO }}
-                  style={styles.heroBackgroundImage}
-                  resizeMode="cover"
-                />
-                {/* Overlay Gradient */}
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.8)']}
-                  style={styles.heroOverlay}
-                >
-                  {/* LIVE Badge */}
-                  <View style={styles.liveBadge}>
-                    <View style={styles.liveIndicator} />
-                    <Text style={styles.liveText}>LIVE NOW</Text>
-                  </View>
+              {/* Nigerian People Image - VISIBLE AT TOP */}
+              <Image
+                source={{ uri: RIDER_HERO }}
+                style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
+                resizeMode="cover"
+              />
+              
+              {/* Content Section Below Image */}
+              <LinearGradient
+                colors={['#10B981', '#059669']}
+                style={styles.heroContentSection}
+              >
+                {/* LIVE Badge */}
+                <View style={styles.liveBadge}>
+                  <View style={styles.liveIndicator} />
+                  <Text style={styles.liveText}>LIVE NOW</Text>
+                </View>
 
-                  <View style={styles.heroContent}>
-                    <Text style={styles.heroTagline}>🇳🇬 FOR ALL NIGERIANS</Text>
-                    <Text style={styles.heroTitle}>Where would{'\n'}you like to go?</Text>
-                    
-                    {/* Search Box */}
-                    <Animated.View style={[styles.searchBox, { transform: [{ translateY: bounceAnim }] }]}>
-                      <View style={styles.searchIconWrap}>
-                        <Ionicons name="search" size={24} color="#10B981" />
-                      </View>
-                      <Text style={styles.searchPlaceholder}>Enter your destination</Text>
-                      <LinearGradient
-                        colors={['#10B981', '#06B6D4']}
-                        style={styles.searchArrow}
-                      >
-                        <Ionicons name="arrow-forward" size={20} color="#FFF" />
-                      </LinearGradient>
-                    </Animated.View>
+                <Text style={styles.heroTagline}>🇳🇬 FOR ALL NIGERIANS</Text>
+                <Text style={styles.heroTitle}>Where would you{'\n'}like to go?</Text>
+                
+                {/* Search Box */}
+                <Animated.View style={[styles.searchBox, { transform: [{ translateY: bounceAnim }] }]}>
+                  <View style={styles.searchIconWrap}>
+                    <Ionicons name="search" size={24} color="#10B981" />
                   </View>
-                </LinearGradient>
-              </View>
+                  <Text style={styles.searchPlaceholder}>Enter your destination</Text>
+                  <LinearGradient
+                    colors={['#10B981', '#06B6D4']}
+                    style={styles.searchArrow}
+                  >
+                    <Ionicons name="arrow-forward" size={20} color="#FFF" />
+                  </LinearGradient>
+                </Animated.View>
+              </LinearGradient>
             </TouchableOpacity>
           </Animated.View>
 
