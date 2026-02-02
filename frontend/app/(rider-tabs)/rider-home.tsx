@@ -126,7 +126,7 @@ export default function RiderHomeScreen() {
                     </Animated.View>
                   </View>
                 </LinearGradient>
-              </ImageBackground>
+              </View>
             </TouchableOpacity>
           </Animated.View>
 
