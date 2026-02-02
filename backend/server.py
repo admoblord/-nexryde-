@@ -1653,6 +1653,77 @@ async def switch_role(user_id: str):
     user["_id"] = str(user["_id"])
     return user
 
+# ==================== PROFILE PICTURE UPLOAD ====================
+
+class ProfilePictureUpload(BaseModel):
+    image: str  # Base64 encoded image
+
+@api_router.post("/users/{user_id}/profile-picture")
+async def upload_profile_picture(user_id: str, request: ProfilePictureUpload):
+    """Upload or update user profile picture"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Validate base64 image
+    if not request.image:
+        raise HTTPException(status_code=400, detail="Image data is required")
+    
+    # Check if it's a valid base64 string or a data URL
+    image_data = request.image
+    if image_data.startswith('data:image'):
+        # It's a data URL, extract the base64 part
+        if ';base64,' in image_data:
+            image_data = image_data.split(';base64,')[1]
+    
+    # Update user profile with the image
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "profile_image": request.image,
+            "profile_image_updated_at": datetime.utcnow()
+        }}
+    )
+    
+    logger.info(f"✅ Profile picture updated for user {user_id}")
+    
+    return {
+        "success": True,
+        "message": "Profile picture updated successfully",
+        "profile_image": request.image
+    }
+
+@api_router.get("/users/{user_id}/profile-picture")
+async def get_profile_picture(user_id: str):
+    """Get user profile picture"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    return {
+        "profile_image": user.get("profile_image"),
+        "updated_at": user.get("profile_image_updated_at")
+    }
+
+@api_router.delete("/users/{user_id}/profile-picture")
+async def delete_profile_picture(user_id: str):
+    """Delete user profile picture"""
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    await db.users.update_one(
+        {"id": user_id},
+        {"$unset": {"profile_image": "", "profile_image_updated_at": ""}}
+    )
+    
+    logger.info(f"✅ Profile picture deleted for user {user_id}")
+    
+    return {
+        "success": True,
+        "message": "Profile picture deleted successfully"
+    }
+
 # ==================== EMERGENCY CONTACTS ====================
 
 @api_router.post("/users/{user_id}/emergency-contacts")
