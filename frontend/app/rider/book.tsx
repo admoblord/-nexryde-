@@ -544,11 +544,28 @@ export default function BookScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Inter-City Popular Routes */}
+        {/* Inter-City Popular Routes - Beautiful Premium Design */}
         {tripType === 'intercity' && (
-          <View style={styles.interCitySection}>
-            <Text style={styles.interCityTitle}>🚀 Popular Routes</Text>
-            <Text style={styles.interCitySubtitle}>Pre-cached routes for instant booking</Text>
+          <LinearGradient
+            colors={['#FF6B9D', '#C44569', '#8B2FC9']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.interCityGradient}
+          >
+            {/* Decorative Elements */}
+            <View style={styles.decorCircleTopRight} />
+            <View style={styles.decorCircleBottomLeft} />
+            
+            <View style={styles.interCityHeader}>
+              <View>
+                <Text style={styles.interCityTitle}>🌸 Inter-City Travel</Text>
+                <Text style={styles.interCitySubtitle}>Beautiful journeys across Nigeria</Text>
+              </View>
+              <View style={styles.interCityBadge}>
+                <Text style={styles.interCityBadgeText}>SAVE 40%</Text>
+              </View>
+            </View>
+            
             <ScrollView 
               horizontal 
               showsHorizontalScrollIndicator={false}
@@ -569,16 +586,20 @@ export default function BookScreen() {
                       { id: '2', type: 'dropoff', address: `${route.to} (City Center)`, isEditing: false, coordinates: { latitude: 7.3775, longitude: 3.9470 } },
                     ]);
                   }}
+                  activeOpacity={0.9}
                 >
+                  <View style={styles.routeCardGlow} />
                   <View style={styles.routeHeader}>
-                    <Text style={styles.routeFromTo}>{route.from} → {route.to}</Text>
-                    {selectedInterCityRoute === route.id && (
-                      <Ionicons name="checkmark-circle" size={18} color={COLORS.accentGreen} />
-                    )}
+                    <Text style={styles.routeFromTo}>{route.from}</Text>
+                    <View style={styles.routeArrowContainer}>
+                      <Ionicons name="airplane" size={16} color="#FF6B9D" />
+                    </View>
+                    <Text style={styles.routeFromTo}>{route.to}</Text>
                   </View>
+                  <View style={styles.routeDivider} />
                   <View style={styles.routeDetails}>
                     <View style={styles.routeDetail}>
-                      <Ionicons name="navigate-outline" size={14} color={COLORS.lightTextSecondary} />
+                      <Ionicons name="speedometer-outline" size={14} color={COLORS.lightTextSecondary} />
                       <Text style={styles.routeDetailText}>{route.distance}</Text>
                     </View>
                     <View style={styles.routeDetail}>
@@ -586,11 +607,33 @@ export default function BookScreen() {
                       <Text style={styles.routeDetailText}>{route.duration}</Text>
                     </View>
                   </View>
-                  <Text style={styles.routePrice}>{route.price}</Text>
+                  <View style={styles.routePriceContainer}>
+                    <Text style={styles.routePriceLabel}>From</Text>
+                    <Text style={styles.routePrice}>{route.price}</Text>
+                  </View>
+                  {selectedInterCityRoute === route.id && (
+                    <View style={styles.selectedBadge}>
+                      <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />
+                    </View>
+                  )}
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
+            
+            {/* Voice Booking Promo in Inter-City */}
+            <TouchableOpacity style={styles.voicePromoCard}>
+              <View style={styles.voicePromoIcon}>
+                <Ionicons name="mic" size={20} color="#FFFFFF" />
+              </View>
+              <View style={styles.voicePromoContent}>
+                <Text style={styles.voicePromoTitle}>🎤 Voice Booking</Text>
+                <Text style={styles.voicePromoText}>Say "Book me to Abuja" in Yoruba, Igbo, or Pidgin!</Text>
+              </View>
+              <View style={styles.comingSoonTag}>
+                <Text style={styles.comingSoonText}>SOON</Text>
+              </View>
+            </TouchableOpacity>
+          </LinearGradient>
         )}
 
         {/* Route Card - Only show for city rides or if intercity route selected */}
