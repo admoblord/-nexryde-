@@ -283,11 +283,44 @@ export default function RiderHomeScreen() {
             <View style={styles.servicesGrid}>
               <ServiceCard
                 icon="shield-checkmark"
+                title="Security Code"
+                desc="Verify your ride"
+                color="#EF4444"
+                onPress={() => router.push('/rider/security-code')}
+                badge="NEW"
+              />
+              <ServiceCard
+                icon="videocam"
+                title="Ride Recording"
+                desc="Audio & Video"
+                color="#9C27B0"
+                onPress={() => router.push('/rider/ride-recording')}
+                badge="NEW"
+              />
+            </View>
+            <View style={[styles.servicesGrid, { marginTop: SPACING.md }]}>
+              <ServiceCard
+                icon="people"
+                title="Split Fare"
+                desc="Share with friends"
+                color="#00BCD4"
+                onPress={() => router.push('/rider/split-fare')}
+              />
+              <ServiceCard
+                icon="receipt"
+                title="Trip Receipt"
+                desc="Download PDF"
+                color="#607D8B"
+                onPress={() => router.push('/rider/trip-receipt')}
+              />
+            </View>
+            <View style={[styles.servicesGrid, { marginTop: SPACING.md }]}>
+              <ServiceCard
+                icon="location"
                 title="Safety Check"
                 desc="Check area danger"
-                color="#EF4444"
+                color="#F44336"
                 onPress={() => router.push('/rider/safety-check')}
-                badge="NEW"
               />
               <ServiceCard
                 icon="share-social"
