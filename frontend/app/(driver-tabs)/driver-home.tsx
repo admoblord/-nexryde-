@@ -7,9 +7,9 @@ import {
   ScrollView,
   Dimensions,
   Alert,
+  ImageBackground,
   Animated,
   Platform,
-  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,8 +21,7 @@ const { width, height } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // PREMIUM IMAGE - Nigerian Yoruba man smiling in his car!
-// Using relative path for guaranteed compatibility
-const DRIVER_HERO = require('../../assets/images/nigerian-driver.jpg');
+const DRIVER_HERO = 'https://images.unsplash.com/photo-1536139414673-1b479272ea38?w=800&q=80'; // Smiling Nigerian man sitting inside vehicle - Yoruba driver!
 
 export default function DriverHomeScreen() {
   const router = useRouter();
@@ -124,27 +123,18 @@ export default function DriverHomeScreen() {
             </TouchableOpacity>
           </Animated.View>
 
-          {/* 🌟 HERO - SMILING NIGERIAN DRIVER */}
+          {/* 🌟 HERO - SMILING DRIVER IMAGE */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
-            <View style={styles.heroCard}>
-              {/* Nigerian Driver Image - MOBILE OPTIMIZED */}
-              <View style={styles.imageContainer}>
-                <Image
-                  source={DRIVER_HERO}
-                  style={styles.heroImage}
-                  resizeMode="cover"
-                />
-                {/* Gradient overlay for better text readability */}
-                <LinearGradient
-                  colors={['transparent', 'rgba(0,0,0,0.3)']}
-                  style={styles.imageOverlay}
-                />
-              </View>
-              
-              {/* Content Section Below Image */}
+            <ImageBackground
+              source={{ uri: DRIVER_HERO }}
+              style={styles.heroImage}
+              imageStyle={styles.heroImageStyle}
+            >
               <LinearGradient
-                colors={isOnline ? ['#10B981', '#059669'] : ['#374151', '#1F2937']}
-                style={styles.heroContentSection}
+                colors={isOnline 
+                  ? ['rgba(16,185,129,0.4)', 'rgba(16,185,129,0.7)', 'rgba(6,182,212,0.9)']
+                  : ['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)']}
+                style={styles.heroOverlay}
               >
                 {/* Status Badge */}
                 <View style={[styles.statusBadge, isOnline && styles.statusBadgeOnline]}>
@@ -154,39 +144,41 @@ export default function DriverHomeScreen() {
                   </Text>
                 </View>
 
-                <Text style={styles.heroTagline}>
-                  {isOnline ? '🟢 YOU\'RE LIVE!' : '🚗 START EARNING TODAY'}
-                </Text>
-                <Text style={styles.heroTitle}>
-                  {isOnline ? 'Waiting for\nriders...' : 'Ready to hit\nthe road?'}
-                </Text>
-                
-                {/* BIG GO ONLINE BUTTON */}
-                <Animated.View style={{ transform: [{ scale: isOnline ? 1 : pulseAnim }] }}>
-                  <TouchableOpacity 
-                    style={styles.goOnlineBtn}
-                    onPress={toggleOnline}
-                    activeOpacity={0.9}
-                  >
-                    <LinearGradient
-                      colors={isOnline ? ['#EF4444', '#DC2626'] : ['#22C55E', '#16A34A']}
-                      style={styles.goOnlineGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
+                <View style={styles.heroContent}>
+                  <Text style={styles.heroTagline}>
+                    {isOnline ? '🟢 YOU\'RE LIVE!' : '🚗 START EARNING TODAY'}
+                  </Text>
+                  <Text style={styles.heroTitle}>
+                    {isOnline ? 'Waiting for\nriders...' : 'Ready to\nhit the road?'}
+                  </Text>
+                  
+                  {/* BIG GO ONLINE BUTTON */}
+                  <Animated.View style={{ transform: [{ scale: isOnline ? 1 : pulseAnim }] }}>
+                    <TouchableOpacity 
+                      style={styles.goOnlineBtn}
+                      onPress={toggleOnline}
+                      activeOpacity={0.9}
                     >
-                      <Ionicons 
-                        name={isOnline ? 'pause-circle' : 'power'} 
-                        size={32} 
-                        color="#FFF" 
-                      />
-                      <Text style={styles.goOnlineText}>
-                        {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
-                      </Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                </Animated.View>
+                      <LinearGradient
+                        colors={isOnline ? ['#EF4444', '#DC2626'] : ['#10B981', '#059669']}
+                        style={styles.goOnlineGradient}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 0 }}
+                      >
+                        <Ionicons 
+                          name={isOnline ? 'pause-circle' : 'power'} 
+                          size={32} 
+                          color="#FFF" 
+                        />
+                        <Text style={styles.goOnlineText}>
+                          {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
+                        </Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  </Animated.View>
+                </View>
               </LinearGradient>
-            </View>
+            </ImageBackground>
           </Animated.View>
 
           {/* 💰 EARNINGS DASHBOARD */}
@@ -372,26 +364,19 @@ const styles = StyleSheet.create({
   profileGradient: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
   profileInitial: { fontSize: 24, fontWeight: '800', color: '#FFF' },
 
-  // Hero - MOBILE OPTIMIZED
+  // Hero
   heroSection: { paddingHorizontal: 20, marginBottom: 24 },
-  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, backgroundColor: '#fff' },
-  imageContainer: { width: '100%', height: 220, overflow: 'hidden', position: 'relative' },
-  heroImage: { width: '100%', height: '100%', borderTopLeftRadius: 28, borderTopRightRadius: 28 },
-  imageOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
-  heroContentSection: { padding: 24, position: 'relative' },
-  heroImageContainer: { width: '100%', height: 320, position: 'relative', borderRadius: 28, overflow: 'hidden' },
-  heroBackgroundImage: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 28 },
   heroImage: { width: '100%', height: 320, borderRadius: 28, overflow: 'hidden' },
   heroImageStyle: { borderRadius: 28 },
-  heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 24, justifyContent: 'flex-end' },
-  statusBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.2)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, alignSelf: 'flex-start', marginBottom: 12 },
+  heroOverlay: { flex: 1, padding: 24, justifyContent: 'flex-end' },
+  statusBadge: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.9)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   statusBadgeOnline: { backgroundColor: 'rgba(16,185,129,0.95)' },
   statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF', marginRight: 8 },
   statusDotOnline: {},
   statusText: { fontSize: 12, fontWeight: '800', color: '#FFF', letterSpacing: 1 },
   statusTextOnline: {},
   heroContent: {},
-  heroTagline: { fontSize: 14, fontWeight: '700', color: '#FFF', letterSpacing: 1.5, marginBottom: 8, marginTop: 40 },
+  heroTagline: { fontSize: 14, fontWeight: '700', color: '#FFF', letterSpacing: 1.5, marginBottom: 8 },
   heroTitle: { fontSize: 38, fontWeight: '900', color: '#FFF', lineHeight: 46, marginBottom: 24 },
   goOnlineBtn: { borderRadius: 20, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12 },
   goOnlineGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 20, paddingHorizontal: 40, gap: 14 },
