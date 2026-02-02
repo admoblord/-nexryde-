@@ -7751,40 +7751,59 @@ async def estimate_fare_google(request: GoogleFareRequest):
         else:
             duration_text = element['duration']['text']
         
-        # Calculate fare based on trip type
+        # Calculate fare based on trip type and vehicle category
+        # MARKET-COMPETITIVE RATES (Based on Bolt, inDrive, Lag Ride Analysis)
+        
         if request.trip_type == "inter":
-            # INTER-CITY: Use Google distance + time ONLY
-            # Formula: ₦1,000 base + (distance × ₦120/km) + (hours × ₦800/hr)
-            base_fare = 1000
-            distance_rate = 120  # per km
-            time_rate = 800  # per hour
+            # INTER-CITY: Between cities (e.g., Lagos to Ibadan)
+            # Formula: Base + (distance × per_km) + (hours × per_hour)
+            if request.vehicle_type == "economy":
+                base_fare = 1000
+                distance_rate = 400  # per km
+                time_rate = 5000  # per hour (₦83.33/min)
+            elif request.vehicle_type == "comfort":
+                base_fare = 1200
+                distance_rate = 500  # per km
+                time_rate = 6000  # per hour (₦100/min)
+            elif request.vehicle_type == "xl":
+                base_fare = 1100
+                distance_rate = 450  # per km
+                time_rate = 5500  # per hour (₦91.67/min)
+            else:  # premium
+                base_fare = 1500
+                distance_rate = 600  # per km
+                time_rate = 7000  # per hour
             
             distance_fee = distance_km * distance_rate
             time_fee = (duration_minutes / 60) * time_rate
             
-            subtotal = base_fare + distance_fee + time_fee
+            total_fare = base_fare + distance_fee + time_fee
         else:
-            # INTRA-CITY: Use standard formula
-            # Formula: ₦200 base + (distance × ₦100/km) + (minutes × ₦5/min)
-            base_fare = 200
-            distance_rate = 100  # per km
-            time_rate = 5  # per minute
+            # INTRA-CITY: Within city (e.g., Lagos only)
+            # Formula: Base + (distance × per_km) + (minutes × per_min)
+            # BASED ON MARKET ANALYSIS: Competitive with Bolt/inDrive/Lag Ride
+            
+            if request.vehicle_type == "economy":
+                base_fare = 400
+                distance_rate = 400  # per km
+                time_rate = 80  # per minute
+            elif request.vehicle_type == "comfort":
+                base_fare = 600
+                distance_rate = 500  # per km
+                time_rate = 100  # per minute
+            elif request.vehicle_type == "xl":
+                base_fare = 500
+                distance_rate = 450  # per km
+                time_rate = 90  # per minute
+            else:  # premium
+                base_fare = 800
+                distance_rate = 600  # per km
+                time_rate = 120  # per minute
             
             distance_fee = distance_km * distance_rate
             time_fee = duration_minutes * time_rate
             
-            subtotal = base_fare + distance_fee + time_fee
-        
-        # Apply vehicle multiplier
-        vehicle_multipliers = {
-            "economy": 1.0,
-            "comfort": 1.3,
-            "premium": 2.0,
-            "xl": 1.5
-        }
-        multiplier = vehicle_multipliers.get(request.vehicle_type, 1.0)
-        
-        total_fare = subtotal * multiplier
+            total_fare = base_fare + distance_fee + time_fee
         
         return {
             "pickup": request.pickup,
