@@ -372,9 +372,12 @@ const styles = StyleSheet.create({
   profileGradient: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
   profileInitial: { fontSize: 24, fontWeight: '800', color: '#FFF' },
 
-  // Hero
+  // Hero - MOBILE OPTIMIZED
   heroSection: { paddingHorizontal: 20, marginBottom: 24 },
-  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16 },
+  heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 16, backgroundColor: '#fff' },
+  imageContainer: { width: '100%', height: 220, overflow: 'hidden', position: 'relative' },
+  heroImage: { width: '100%', height: '100%', borderTopLeftRadius: 28, borderTopRightRadius: 28 },
+  imageOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 80 },
   heroContentSection: { padding: 24, position: 'relative' },
   heroImageContainer: { width: '100%', height: 320, position: 'relative', borderRadius: 28, overflow: 'hidden' },
   heroBackgroundImage: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 28 },
