@@ -105,7 +105,7 @@ export default function RiderHomeScreen() {
                   </View>
 
                   <View style={styles.heroContent}>
-                    <Text style={styles.heroTagline}>YOUR JOURNEY STARTS HERE</Text>
+                    <Text style={styles.heroTagline}>🇳🇬 FOR ALL NIGERIANS</Text>
                     <Text style={styles.heroTitle}>Where would{'\n'}you like to go?</Text>
                     
                     {/* Search Box */}
