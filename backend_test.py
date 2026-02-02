@@ -265,8 +265,7 @@ class NexrydeAPITester:
     
     async def test_request_trip(self):
         """Test POST /api/trips/request"""
-        response = await self.make_request("POST", "/trips/request", {
-            "rider_id": TEST_USER_ID,
+        response = await self.make_request("POST", f"/trips/request?rider_id={TEST_USER_ID}", {
             "pickup_lat": 6.5244,
             "pickup_lng": 3.3792,
             "pickup_address": "Victoria Island, Lagos",
