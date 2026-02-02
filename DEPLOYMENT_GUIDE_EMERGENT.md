@@ -201,7 +201,7 @@ Premium:          ₦25,000/month
 
 ### **Road Warrior Pricing:**
 ```
-First 200 drivers: ₦25,000/month (LOCKED FOREVER) 🔒
+First 200 drivers: ₦25,000/month
 Next 300 drivers:  ₦30,000/month
 After 500:         ₦35,000/month
 Long-term:         ₦40,000/month
