@@ -289,8 +289,8 @@ export default function DriverHomeScreen() {
             <Text style={styles.sectionTitle}>Quick Access</Text>
             <View style={styles.featureGrid}>
               <FeatureCard
-                icon="heart"
-                label="Wellness Suite"
+                icon="radio"
+                label="Driver Radio"
                 color="#00B4D8"
                 onPress={() => router.push('/driver/radio')}
               />
@@ -347,6 +347,18 @@ export default function DriverHomeScreen() {
                 label="Insights"
                 color="#673AB7"
                 onPress={() => router.push('/driver/data-insights')}
+              />
+              <FeatureCard
+                icon="time"
+                label="Prayer Times"
+                color="#2E7D32"
+                onPress={() => router.push('/driver/prayer-times')}
+              />
+              <FeatureCard
+                icon="document-text"
+                label="Documents"
+                color="#795548"
+                onPress={() => router.push('/driver/documents')}
               />
               <FeatureCard
                 icon="car"
