@@ -16,11 +16,15 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+
+type RideType = 'intra_city' | 'inter_city';
 
 interface RouteStop {
   id: string;
@@ -39,16 +43,19 @@ interface PlacePrediction {
   };
 }
 
-// Lagos, Nigeria default location
-const DEFAULT_REGION = {
-  latitude: 6.5244,
-  longitude: 3.3792,
-  latitudeDelta: 0.05,
-  longitudeDelta: 0.05,
-};
+interface SubscriptionStatus {
+  tier: 'city_rider' | 'road_warrior' | 'none';
+  status: 'trial' | 'active' | 'expired';
+  can_access_intercity: boolean;
+}
 
 export default function BookScreen() {
   const router = useRouter();
+  const { user } = useAppStore();
+  
+  const [rideType, setRideType] = useState<RideType>('intra_city');
+  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const [loadingSubscription, setLoadingSubscription] = useState(true);
   
   const [stops, setStops] = useState<RouteStop[]>([
     { id: '1', type: 'pickup', address: '', isEditing: false },
@@ -65,32 +72,87 @@ export default function BookScreen() {
     latitude: number;
     longitude: number;
   } | null>(null);
+  const [estimatedDistance, setEstimatedDistance] = useState<number | null>(null);
 
-  // Get current location on mount
+  // Fetch driver subscription status
   useEffect(() => {
+    if (user?.id) {
+      fetchSubscriptionStatus();
+    }
     getCurrentLocation();
-  }, []);
+  }, [user?.id]);
+
+  const fetchSubscriptionStatus = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/subscription/status/${user?.id}`);
+      const data = await response.json();
+      setSubscription({
+        tier: data.tier || 'none',
+        status: data.status || 'expired',
+        can_access_intercity: data.tier === 'road_warrior' && (data.status === 'trial' || data.status === 'active'),
+      });
+    } catch (error) {
+      console.error('Error fetching subscription:', error);
+      setSubscription({
+        tier: 'none',
+        status: 'expired',
+        can_access_intercity: false,
+      });
+    }
+    setLoadingSubscription(false);
+  };
 
   const getCurrentLocation = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission denied');
-        return;
-      }
+      if (status !== 'granted') return;
 
       const location = await Location.getCurrentPositionAsync({});
-      const coords = {
+      setCurrentLocation({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-      };
-      setCurrentLocation(coords);
+      });
     } catch (error) {
       console.error('Error getting location:', error);
     }
   };
 
-  // Search places using Google Places API
+  // Calculate distance between two points
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371; // Earth's radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Update estimated distance when both pickup and dropoff are set
+  useEffect(() => {
+    const pickup = stops.find(s => s.type === 'pickup');
+    const dropoff = stops.find(s => s.type === 'dropoff');
+    
+    if (pickup?.coordinates && dropoff?.coordinates) {
+      const distance = calculateDistance(
+        pickup.coordinates.latitude,
+        pickup.coordinates.longitude,
+        dropoff.coordinates.latitude,
+        dropoff.coordinates.longitude
+      );
+      setEstimatedDistance(distance);
+      
+      // Auto-switch to inter-city if distance > 50km
+      if (distance > 50 && subscription?.can_access_intercity) {
+        setRideType('inter_city');
+      } else if (distance <= 50) {
+        setRideType('intra_city');
+      }
+    }
+  }, [stops, subscription]);
+
   const searchPlaces = async (query: string) => {
     if (query.length < 2) {
       setPredictions([]);
@@ -99,10 +161,15 @@ export default function BookScreen() {
 
     setIsSearching(true);
     try {
+      // Add bias for intra-city or inter-city search
+      const locationBias = rideType === 'intra_city' 
+        ? `&radius=50000&location=${currentLocation?.latitude || 6.5244},${currentLocation?.longitude || 3.3792}`
+        : '&components=country:ng';
+        
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
           query
-        )}&components=country:ng&key=${GOOGLE_MAPS_API_KEY}`
+        )}${locationBias}&key=${GOOGLE_MAPS_API_KEY}`
       );
       const data = await response.json();
       
@@ -115,7 +182,6 @@ export default function BookScreen() {
     setIsSearching(false);
   };
 
-  // Get place details (coordinates) from place_id
   const getPlaceDetails = async (placeId: string): Promise<{
     latitude: number;
     longitude: number;
@@ -140,7 +206,6 @@ export default function BookScreen() {
     return null;
   };
 
-  // Reverse geocode coordinates to address
   const reverseGeocode = async (latitude: number, longitude: number): Promise<string> => {
     try {
       const response = await fetch(
@@ -157,7 +222,6 @@ export default function BookScreen() {
     return `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`;
   };
 
-  // Handle place selection from search
   const handleSelectPrediction = async (prediction: PlacePrediction) => {
     Keyboard.dismiss();
     setIsLoadingLocation(true);
@@ -185,11 +249,8 @@ export default function BookScreen() {
     setIsLoadingLocation(false);
   };
 
-  // Use current location
   const useCurrentLocation = async () => {
-    if (!currentLocation) {
-      await getCurrentLocation();
-    }
+    if (!currentLocation) await getCurrentLocation();
     
     if (currentLocation) {
       setIsLoadingLocation(true);
@@ -198,11 +259,7 @@ export default function BookScreen() {
       if (activeStopId) {
         setStops(stops.map(stop =>
           stop.id === activeStopId
-            ? {
-                ...stop,
-                address: address,
-                coordinates: currentLocation,
-              }
+            ? { ...stop, address, coordinates: currentLocation }
             : stop
         ));
         setActiveStopId(null);
@@ -211,118 +268,58 @@ export default function BookScreen() {
     }
   };
 
-  // Open location picker for a specific stop
   const openLocationPicker = (stopId: string) => {
-    console.log('Opening location picker for stop:', stopId);
     setActiveStopId(stopId);
     setShowMapPicker(true);
   };
 
-  // Add a new stop
-  const addStop = () => {
-    const newStop: RouteStop = {
-      id: Date.now().toString(),
-      type: 'stop',
-      address: '',
-      isEditing: true,
-    };
-    const newStops = [...stops];
-    newStops.splice(stops.length - 1, 0, newStop);
-    setStops(newStops);
-  };
-
-  // Remove a stop
-  const removeStop = (id: string) => {
-    const stop = stops.find(s => s.id === id);
-    if (stop?.type === 'pickup' || stop?.type === 'dropoff') return;
-    setStops(stops.filter(stop => stop.id !== id));
-  };
-
-  // Select from saved/recent locations
-  const selectSavedLocation = async (address: string, name: string) => {
-    if (!activeStopId) {
-      const emptyStop = stops.find(s => !s.address);
-      if (emptyStop) {
-        setActiveStopId(emptyStop.id);
-      } else {
-        return;
-      }
+  const handleRideTypeChange = (type: RideType) => {
+    if (type === 'inter_city' && !subscription?.can_access_intercity) {
+      Alert.alert(
+        '🏆 Upgrade to Road Warrior',
+        'Inter-city trips are exclusively for Road Warrior subscribers. Upgrade now to unlock unlimited city-to-city rides!',
+        [
+          { text: 'Maybe Later', style: 'cancel' },
+          { 
+            text: 'Upgrade Now', 
+            onPress: () => router.push('/driver/subscription')
+          }
+        ]
+      );
+      return;
     }
-    
-    const mockCoords: { [key: string]: { latitude: number; longitude: number } } = {
-      'Home': { latitude: 6.4281, longitude: 3.4219 },
-      'Work': { latitude: 6.4355, longitude: 3.4567 },
-      'Shoprite Mall': { latitude: 6.4298, longitude: 3.4736 },
-      'Murtala Mohammed Airport': { latitude: 6.5774, longitude: 3.3212 },
-      'Palms Shopping Mall': { latitude: 6.4315, longitude: 3.4234 },
-    };
-    
-    const coords = mockCoords[name] || { latitude: 6.5244, longitude: 3.3792 };
-    
-    const targetStopId = activeStopId || stops.find(s => !s.address)?.id;
-    if (targetStopId) {
-      setStops(stops.map(stop =>
-        stop.id === targetStopId
-          ? { ...stop, address, coordinates: coords }
-          : stop
-      ));
-    }
-    setActiveStopId(null);
+    setRideType(type);
   };
-
-  const savedLocations = [
-    { id: 'home', name: 'Home', address: '123 Victoria Island, Lagos', icon: 'home' },
-    { id: 'work', name: 'Work', address: '456 Lekki Phase 1, Lagos', icon: 'briefcase' },
-  ];
-
-  const recentLocations = [
-    { id: 'recent1', name: 'Shoprite Mall', address: 'Lekki, Lagos' },
-    { id: 'recent2', name: 'Murtala Mohammed Airport', address: 'Ikeja, Lagos' },
-    { id: 'recent3', name: 'Palms Shopping Mall', address: 'Victoria Island, Lagos' },
-  ];
 
   const canContinue = 
     stops.find(s => s.type === 'pickup')?.address && 
-    stops.find(s => s.type === 'dropoff')?.address;
+    stops.find(s => s.type === 'dropoff')?.address &&
+    (rideType === 'intra_city' || subscription?.can_access_intercity);
 
   const handleContinue = () => {
     if (canContinue) {
+      // Check if distance matches ride type
+      if (estimatedDistance) {
+        if (rideType === 'intra_city' && estimatedDistance > 50) {
+          Alert.alert(
+            'Distance Too Far',
+            'This trip is over 50km. Please switch to Inter-City mode or choose a closer destination.',
+            [{ text: 'OK' }]
+          );
+          return;
+        }
+      }
       router.push('/rider/tracking');
-    }
-  };
-
-  const getStopIcon = (type: string) => {
-    if (type === 'pickup') {
-      return (
-        <View style={[styles.stopIndicator, styles.pickupIndicator]}>
-          <View style={styles.pickupDot} />
-        </View>
-      );
-    }
-    if (type === 'dropoff') {
-      return (
-        <View style={[styles.stopIndicator, styles.dropoffIndicator]}>
-          <View style={styles.dropoffDot} />
-        </View>
-      );
-    }
-    return (
-      <View style={[styles.stopIndicator, styles.middleIndicator]}>
-        <Ionicons name="search" size={16} color={COLORS.accentGreen} />
-      </View>
-    );
-  };
-
-  const getPlaceholder = (type: string) => {
-    switch (type) {
-      case 'pickup': return 'Pickup location';
-      case 'dropoff': return 'Dropoff location';
-      default: return 'Add stop';
     }
   };
 
   return (
     <View style={styles.container}>
+      <LinearGradient
+        colors={['#F8FAFC', '#EFF6FF', '#F8FAFC']}
+        style={StyleSheet.absoluteFill}
+      />
+
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
@@ -330,158 +327,263 @@ export default function BookScreen() {
             style={styles.closeButton}
             onPress={() => router.back()}
           >
-            <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
+            <Ionicons name="close" size={24} color="#0F172A" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Your route</Text>
+          <Text style={styles.headerTitle}>Book a Ride</Text>
           <View style={styles.headerRight} />
+        </View>
+
+        {/* Ride Type Tabs */}
+        <View style={styles.tabsContainer}>
+          <TouchableOpacity
+            style={[styles.tab, rideType === 'intra_city' && styles.tabActive]}
+            onPress={() => handleRideTypeChange('intra_city')}
+          >
+            <LinearGradient
+              colors={rideType === 'intra_city' ? ['#22C55E', '#16A34A'] : ['transparent', 'transparent']}
+              style={styles.tabGradient}
+            >
+              <View style={styles.tabContent}>
+                <Ionicons 
+                  name="business" 
+                  size={22} 
+                  color={rideType === 'intra_city' ? '#FFFFFF' : '#64748B'} 
+                />
+                <Text style={[styles.tabText, rideType === 'intra_city' && styles.tabTextActive]}>
+                  Intra-City
+                </Text>
+                <Text style={[styles.tabSubtext, rideType === 'intra_city' && styles.tabSubtextActive]}>
+                  Within City
+                </Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.tab, 
+              rideType === 'inter_city' && styles.tabActive,
+              !subscription?.can_access_intercity && styles.tabLocked
+            ]}
+            onPress={() => handleRideTypeChange('inter_city')}
+          >
+            <LinearGradient
+              colors={rideType === 'inter_city' ? ['#FFD700', '#FFA500'] : ['transparent', 'transparent']}
+              style={styles.tabGradient}
+            >
+              {!subscription?.can_access_intercity && (
+                <View style={styles.lockBadge}>
+                  <Ionicons name="lock-closed" size={12} color="#FFFFFF" />
+                </View>
+              )}
+              <View style={styles.tabContent}>
+                <Ionicons 
+                  name="navigate" 
+                  size={22} 
+                  color={rideType === 'inter_city' ? '#FFFFFF' : !subscription?.can_access_intercity ? '#94A3B8' : '#64748B'} 
+                />
+                <Text style={[
+                  styles.tabText, 
+                  rideType === 'inter_city' && styles.tabTextActive,
+                  !subscription?.can_access_intercity && styles.tabTextLocked
+                ]}>
+                  Inter-City
+                </Text>
+                <Text style={[
+                  styles.tabSubtext, 
+                  rideType === 'inter_city' && styles.tabSubtextActive,
+                  !subscription?.can_access_intercity && styles.tabSubtextLocked
+                ]}>
+                  City to City
+                </Text>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
+
+        {/* Info Banner */}
+        <View style={styles.infoBanner}>
+          <LinearGradient
+            colors={rideType === 'intra_city' ? ['#DCFCE7', '#BBF7D0'] : ['#FEF3C7', '#FDE68A']}
+            style={styles.infoBannerGradient}
+          >
+            <Ionicons 
+              name={rideType === 'intra_city' ? 'information-circle' : 'star'} 
+              size={20} 
+              color={rideType === 'intra_city' ? '#16A34A' : '#F59E0B'} 
+            />
+            <Text style={[
+              styles.infoBannerText,
+              { color: rideType === 'intra_city' ? '#166534' : '#92400E' }
+            ]}>
+              {rideType === 'intra_city' 
+                ? 'Perfect for trips within your city (up to 50km)'
+                : subscription?.can_access_intercity
+                  ? 'Road Warrior: Unlimited city-to-city trips across Nigeria!'
+                  : 'Upgrade to Road Warrior to unlock inter-city rides'}
+            </Text>
+          </LinearGradient>
         </View>
 
         {/* Route Card */}
         <View style={styles.routeCard}>
-          {stops.map((stop, index) => (
-            <View key={stop.id}>
-              {index > 0 && (
-                <View style={styles.connectionLine}>
-                  <View style={styles.dashedLine} />
+          <LinearGradient
+            colors={['#FFFFFF', '#FAFAFA']}
+            style={styles.routeCardGradient}
+          >
+            {stops.map((stop, index) => (
+              <View key={stop.id}>
+                {index > 0 && (
+                  <View style={styles.connectionLine}>
+                    <View style={styles.dashedLine} />
+                  </View>
+                )}
+                
+                <View style={styles.stopRow}>
+                  <View style={[
+                    styles.stopIndicator,
+                    stop.type === 'pickup' && styles.pickupIndicator,
+                    stop.type === 'dropoff' && styles.dropoffIndicator,
+                  ]}>
+                    <Ionicons 
+                      name={stop.type === 'pickup' ? 'location' : 'flag'} 
+                      size={18} 
+                      color="#FFFFFF" 
+                    />
+                  </View>
+
+                  <TouchableOpacity 
+                    style={[
+                      styles.stopInputContainer,
+                      activeStopId === stop.id && styles.stopInputActive
+                    ]}
+                    onPress={() => openLocationPicker(stop.id)}
+                  >
+                    <View style={styles.stopInputContent}>
+                      <Text style={styles.stopLabel}>
+                        {stop.type === 'pickup' ? 'PICKUP LOCATION' : 'DROP-OFF LOCATION'}
+                      </Text>
+                      <Text 
+                        style={[
+                          styles.stopInputText,
+                          !stop.address && styles.stopInputPlaceholder
+                        ]}
+                        numberOfLines={2}
+                      >
+                        {stop.address || (stop.type === 'pickup' ? 'Where from?' : 'Where to?')}
+                      </Text>
+                    </View>
+                    <View style={styles.stopInputIcon}>
+                      <Ionicons name="search" size={18} color="#94A3B8" />
+                    </View>
+                  </TouchableOpacity>
                 </View>
-              )}
-              
-              <View style={styles.stopRow}>
-                {getStopIcon(stop.type)}
-
-                <TouchableOpacity 
-                  style={[
-                    styles.stopInputContainer,
-                    activeStopId === stop.id && styles.stopInputActive
-                  ]}
-                  onPress={() => openLocationPicker(stop.id)}
-                  activeOpacity={0.7}
-                >
-                  <View style={styles.stopInputContent}>
-                    <Text style={styles.stopLabel}>
-                      {stop.type === 'pickup' ? 'PICKUP' : stop.type === 'dropoff' ? 'DROP-OFF' : 'STOP'}
-                    </Text>
-                    <Text 
-                      style={[
-                        styles.stopInputText,
-                        !stop.address && styles.stopInputPlaceholder
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {stop.address || getPlaceholder(stop.type)}
-                    </Text>
-                  </View>
-                  <View style={styles.stopInputIcon}>
-                    <Ionicons name="search" size={18} color={COLORS.lightTextMuted} />
-                  </View>
-                </TouchableOpacity>
-
-                {stop.type === 'pickup' ? (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={addStop}
-                  >
-                    <View style={styles.addButtonInner}>
-                      <Ionicons name="add" size={20} color={COLORS.white} />
-                    </View>
-                  </TouchableOpacity>
-                ) : stop.type === 'stop' ? (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => removeStop(stop.id)}
-                  >
-                    <View style={styles.removeButtonInner}>
-                      <Ionicons name="close" size={18} color={COLORS.error} />
-                    </View>
-                  </TouchableOpacity>
-                ) : null}
               </View>
-            </View>
-          ))}
+            ))}
+
+            {/* Distance Display */}
+            {estimatedDistance && (
+              <View style={styles.distanceCard}>
+                <Ionicons name="speedometer" size={18} color="#3B82F6" />
+                <Text style={styles.distanceText}>
+                  Estimated Distance: <Text style={styles.distanceBold}>{estimatedDistance.toFixed(1)} km</Text>
+                </Text>
+                {estimatedDistance > 50 && rideType === 'intra_city' && (
+                  <View style={styles.warningBadge}>
+                    <Ionicons name="alert-circle" size={14} color="#F59E0B" />
+                    <Text style={styles.warningText}>Switch to Inter-City</Text>
+                  </View>
+                )}
+              </View>
+            )}
+          </LinearGradient>
         </View>
 
-        {/* 🔥 VOICE BOOKING - COMING SOON */}
-        <View style={styles.voiceBookingCard}>
-          <View style={styles.voiceBookingBadge}>
-            <Text style={styles.voiceBookingBadgeText}>COMING SOON</Text>
-          </View>
-          <View style={styles.voiceBookingContent}>
-            <View style={styles.voiceIcon}>
-              <Ionicons name="mic" size={28} color="#8B5CF6" />
-            </View>
-            <View style={styles.voiceText}>
-              <Text style={styles.voiceTitle}>🎤 Voice Booking</Text>
-              <Text style={styles.voiceDesc}>Book rides by voice in Yoruba, Igbo, Hausa & Pidgin!</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Location Suggestions */}
         <ScrollView 
-          style={styles.suggestionsContainer}
+          style={styles.content}
           showsVerticalScrollIndicator={false}
         >
-          {/* Saved Places */}
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Saved Places</Text>
-            {savedLocations.map((location) => (
-              <TouchableOpacity 
-                key={location.id}
-                style={styles.savedLocationItem}
-                onPress={() => selectSavedLocation(location.address, location.name)}
-              >
-                <View style={styles.savedLocationIcon}>
-                  <Ionicons name={location.icon as any} size={20} color={COLORS.white} />
-                </View>
-                <View style={styles.locationContent}>
-                  <Text style={styles.locationName}>{location.name}</Text>
-                  <Text style={styles.locationAddress}>{location.address}</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={18} color={COLORS.lightTextMuted} />
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Recent Locations */}
-          <View style={styles.sectionContainer}>
-            <Text style={styles.sectionTitle}>Recent</Text>
-            {recentLocations.map((location) => (
-              <TouchableOpacity 
-                key={location.id}
-                style={styles.recentLocationItem}
-                onPress={() => selectSavedLocation(location.address, location.name)}
-              >
-                <View style={styles.recentLocationIcon}>
-                  <Ionicons name="time" size={18} color={COLORS.lightTextSecondary} />
-                </View>
-                <View style={styles.locationContent}>
-                  <Text style={styles.locationName}>{location.name}</Text>
-                  <Text style={styles.locationAddress}>{location.address}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-
           {/* Use Current Location */}
           <TouchableOpacity 
-            style={styles.currentLocationButton}
+            style={styles.currentLocationCard}
             onPress={useCurrentLocation}
             disabled={isLoadingLocation}
           >
-            <View style={[styles.locationIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+            <LinearGradient
+              colors={['#3B82F6', '#2563EB']}
+              style={styles.currentLocationGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
               {isLoadingLocation ? (
-                <ActivityIndicator size="small" color={COLORS.accentBlue} />
+                <ActivityIndicator size="small" color="#FFFFFF" />
               ) : (
-                <Ionicons name="navigate" size={18} color={COLORS.accentBlue} />
+                <Ionicons name="navigate-circle" size={24} color="#FFFFFF" />
               )}
-            </View>
-            <Text style={styles.currentLocationText}>Use current location</Text>
+              <Text style={styles.currentLocationText}>Use My Current Location</Text>
+              <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.8)" />
+            </LinearGradient>
           </TouchableOpacity>
+
+          {/* Subscription Prompt for City Riders */}
+          {subscription?.tier === 'city_rider' && rideType === 'inter_city' && (
+            <View style={styles.upgradeCard}>
+              <LinearGradient
+                colors={['#FFD700', '#FFA500']}
+                style={styles.upgradeGradient}
+              >
+                <View style={styles.upgradeIcon}>
+                  <Ionicons name="rocket" size={32} color="#FFFFFF" />
+                </View>
+                <View style={styles.upgradeContent}>
+                  <Text style={styles.upgradeTitle}>🏆 Upgrade to Road Warrior</Text>
+                  <Text style={styles.upgradeDesc}>
+                    Unlock unlimited inter-city trips across Nigeria! Lagos-Abuja, Lagos-Ibadan, and more.
+                  </Text>
+                  <TouchableOpacity 
+                    style={styles.upgradeButton}
+                    onPress={() => router.push('/driver/subscription')}
+                  >
+                    <Text style={styles.upgradeButtonText}>Upgrade Now →</Text>
+                  </TouchableOpacity>
+                </View>
+              </LinearGradient>
+            </View>
+          )}
+
+          {/* Popular Routes */}
+          {rideType === 'inter_city' && subscription?.can_access_intercity && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>🔥 Popular Inter-City Routes</Text>
+              {[
+                { from: 'Lagos', to: 'Ibadan', distance: '128 km', duration: '1.5 hrs' },
+                { from: 'Lagos', to: 'Abuja', distance: '750 km', duration: '8 hrs' },
+                { from: 'Lagos', to: 'Port Harcourt', distance: '450 km', duration: '5 hrs' },
+                { from: 'Abuja', to: 'Kaduna', distance: '170 km', duration: '2 hrs' },
+              ].map((route, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={styles.popularRouteCard}
+                  onPress={() => Alert.alert('Coming Soon', 'Quick route selection will be available soon!')}
+                >
+                  <View style={styles.routeInfo}>
+                    <View style={styles.routeFromTo}>
+                      <Text style={styles.routeCity}>{route.from}</Text>
+                      <Ionicons name="arrow-forward" size={16} color="#64748B" />
+                      <Text style={styles.routeCity}>{route.to}</Text>
+                    </View>
+                    <Text style={styles.routeDetails}>{route.distance} • {route.duration}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={20} color="#CBD5E1" />
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
 
           <View style={styles.bottomSpacer} />
         </ScrollView>
 
-        {/* Bottom Button */}
+        {/* Continue Button */}
         <View style={styles.bottomContainer}>
           <TouchableOpacity 
             style={[
@@ -491,17 +593,27 @@ export default function BookScreen() {
             onPress={handleContinue}
             disabled={!canContinue}
           >
-            <Text style={[
-              styles.continueText,
-              !canContinue && styles.continueTextDisabled
-            ]}>
-              Continue
-            </Text>
-            <Ionicons 
-              name="arrow-forward" 
-              size={20} 
-              color={canContinue ? COLORS.white : COLORS.lightTextMuted} 
-            />
+            <LinearGradient
+              colors={canContinue 
+                ? (rideType === 'intra_city' ? ['#22C55E', '#16A34A'] : ['#FFD700', '#FFA500'])
+                : ['#E2E8F0', '#E2E8F0']
+              }
+              style={styles.continueGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={[
+                styles.continueText,
+                !canContinue && styles.continueTextDisabled
+              ]}>
+                {rideType === 'intra_city' ? 'Find Nearby Drivers' : 'Find Road Warriors'}
+              </Text>
+              <Ionicons 
+                name="arrow-forward-circle" 
+                size={24} 
+                color={canContinue ? '#FFFFFF' : '#94A3B8'} 
+              />
+            </LinearGradient>
           </TouchableOpacity>
         </View>
 
@@ -510,10 +622,8 @@ export default function BookScreen() {
           visible={showMapPicker}
           animationType="slide"
           presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
-          transparent={false}
         >
           <SafeAreaView style={styles.modalContainer}>
-            {/* Modal Header */}
             <View style={styles.modalHeader}>
               <TouchableOpacity 
                 style={styles.modalCloseButton}
@@ -523,20 +633,21 @@ export default function BookScreen() {
                   setPredictions([]);
                 }}
               >
-                <Ionicons name="close" size={24} color={COLORS.lightTextPrimary} />
+                <Ionicons name="close" size={24} color="#0F172A" />
               </TouchableOpacity>
-              <Text style={styles.modalTitle}>Search Location</Text>
+              <Text style={styles.modalTitle}>
+                {rideType === 'intra_city' ? 'Search Location' : 'Search City'}
+              </Text>
               <View style={{ width: 40 }} />
             </View>
 
-            {/* Search Bar */}
             <View style={styles.searchContainer}>
               <View style={styles.searchInputContainer}>
-                <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
+                <Ionicons name="search" size={20} color="#94A3B8" />
                 <TextInput
                   style={styles.searchInput}
-                  placeholder="Search for a place"
-                  placeholderTextColor={COLORS.lightTextMuted}
+                  placeholder={rideType === 'intra_city' ? 'Search for a place...' : 'Search for a city...'}
+                  placeholderTextColor="#94A3B8"
                   value={searchQuery}
                   onChangeText={(text) => {
                     setSearchQuery(text);
@@ -545,30 +656,23 @@ export default function BookScreen() {
                   autoFocus
                 />
                 {searchQuery.length > 0 && (
-                  <TouchableOpacity 
-                    onPress={() => {
-                      setSearchQuery('');
-                      setPredictions([]);
-                    }}
-                  >
-                    <Ionicons name="close-circle" size={20} color={COLORS.lightTextMuted} />
+                  <TouchableOpacity onPress={() => {
+                    setSearchQuery('');
+                    setPredictions([]);
+                  }}>
+                    <Ionicons name="close-circle" size={20} color="#94A3B8" />
                   </TouchableOpacity>
                 )}
               </View>
             </View>
 
-            {/* Loading */}
             {isSearching && (
               <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={COLORS.accentGreen} />
+                <ActivityIndicator size="small" color="#22C55E" />
               </View>
             )}
 
-            {/* Search Results */}
-            <ScrollView 
-              style={styles.resultsList}
-              keyboardShouldPersistTaps="handled"
-            >
+            <ScrollView style={styles.resultsList} keyboardShouldPersistTaps="handled">
               {predictions.map((prediction) => (
                 <TouchableOpacity
                   key={prediction.place_id}
@@ -576,7 +680,11 @@ export default function BookScreen() {
                   onPress={() => handleSelectPrediction(prediction)}
                 >
                   <View style={styles.resultIcon}>
-                    <Ionicons name="location-outline" size={20} color={COLORS.lightTextSecondary} />
+                    <Ionicons 
+                      name={rideType === 'inter_city' ? 'navigate' : 'location-outline'} 
+                      size={20} 
+                      color="#64748B" 
+                    />
                   </View>
                   <View style={styles.resultContent}>
                     <Text style={styles.resultMain}>
@@ -589,7 +697,6 @@ export default function BookScreen() {
                 </TouchableOpacity>
               ))}
 
-              {/* Quick Actions */}
               {predictions.length === 0 && !isSearching && (
                 <View style={styles.quickActions}>
                   <TouchableOpacity 
@@ -599,30 +706,11 @@ export default function BookScreen() {
                       setShowMapPicker(false);
                     }}
                   >
-                    <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
-                      <Ionicons name="navigate" size={20} color={COLORS.accentBlue} />
+                    <View style={styles.quickActionIcon}>
+                      <Ionicons name="navigate" size={20} color="#3B82F6" />
                     </View>
                     <Text style={styles.quickActionText}>Use current location</Text>
                   </TouchableOpacity>
-
-                  {savedLocations.map((location) => (
-                    <TouchableOpacity 
-                      key={location.id}
-                      style={styles.quickActionItem}
-                      onPress={() => {
-                        selectSavedLocation(location.address, location.name);
-                        setShowMapPicker(false);
-                      }}
-                    >
-                      <View style={[styles.quickActionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
-                        <Ionicons name={location.icon as any} size={20} color={COLORS.accentGreen} />
-                      </View>
-                      <View>
-                        <Text style={styles.quickActionText}>{location.name}</Text>
-                        <Text style={styles.quickActionSubtext}>{location.address}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
                 </View>
               )}
             </ScrollView>
@@ -636,7 +724,7 @@ export default function BookScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#F8FAFC',
   },
   safeArea: {
     flex: 1,
@@ -645,277 +733,351 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   closeButton: {
     width: 40,
     height: 40,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 2,
   },
   headerTitle: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: -0.5,
   },
   headerRight: {
     width: 40,
   },
+  
+  // Tabs
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    gap: 12,
+    marginBottom: 16,
+  },
+  tab: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#E2E8F0',
+  },
+  tabActive: {
+    borderColor: 'transparent',
+  },
+  tabLocked: {
+    opacity: 0.6,
+  },
+  tabGradient: {
+    padding: 16,
+    position: 'relative',
+  },
+  lockBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#64748B',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  tabContent: {
+    alignItems: 'center',
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#475569',
+    marginTop: 8,
+  },
+  tabTextActive: {
+    color: '#FFFFFF',
+  },
+  tabTextLocked: {
+    color: '#94A3B8',
+  },
+  tabSubtext: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  tabSubtextActive: {
+    color: 'rgba(255,255,255,0.9)',
+  },
+  tabSubtextLocked: {
+    color: '#CBD5E1',
+  },
+  
+  // Info Banner
+  infoBanner: {
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  infoBannerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 10,
+  },
+  infoBannerText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  
+  // Route Card
   routeCard: {
-    backgroundColor: COLORS.white,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
+    marginHorizontal: 20,
+    marginBottom: 16,
+    borderRadius: 20,
+    overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.1,
     shadowRadius: 12,
     elevation: 4,
+  },
+  routeCardGradient: {
+    padding: 20,
   },
   stopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: 14,
   },
   stopIndicator: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
   },
   pickupIndicator: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: COLORS.accentGreenSoft,
-  },
-  pickupDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: '#22C55E',
   },
   dropoffIndicator: {
-    borderColor: COLORS.error,
-    backgroundColor: '#FEE2E2',
-  },
-  dropoffDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: COLORS.error,
-  },
-  middleIndicator: {
-    borderColor: COLORS.accentBlue,
-    backgroundColor: COLORS.accentBlueSoft,
+    backgroundColor: '#EF4444',
   },
   connectionLine: {
-    marginLeft: 15,
-    height: 28,
+    marginLeft: 22,
+    height: 24,
     justifyContent: 'center',
   },
   dashedLine: {
     width: 3,
     height: '100%',
-    backgroundColor: COLORS.lightBorder,
+    backgroundColor: '#E2E8F0',
     borderRadius: 2,
   },
   stopInputContainer: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     borderWidth: 2,
-    borderColor: COLORS.lightBorder,
-    minHeight: 60,
+    borderColor: '#E2E8F0',
+    minHeight: 70,
   },
   stopInputActive: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: COLORS.white,
+    borderColor: '#22C55E',
+    backgroundColor: '#FFFFFF',
   },
   stopInputContent: {
     flex: 1,
   },
   stopLabel: {
     fontSize: 10,
-    fontWeight: '700',
-    color: COLORS.accentGreen,
+    fontWeight: '900',
+    color: '#64748B',
     letterSpacing: 1,
-    marginBottom: 2,
+    marginBottom: 4,
   },
   stopInputText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
   },
   stopInputPlaceholder: {
-    color: COLORS.lightTextMuted,
-    fontWeight: '400',
+    color: '#94A3B8',
+    fontWeight: '600',
   },
   stopInputIcon: {
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: COLORS.white,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: SPACING.sm,
+    marginLeft: 12,
   },
-  mapButton: {
+  distanceCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.accentBlueSoft,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 12,
+    padding: 12,
+    marginTop: 16,
+    gap: 8,
+  },
+  distanceText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#1E40AF',
+  },
+  distanceBold: {
+    fontWeight: '900',
+    fontSize: 14,
+  },
+  warningBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
     gap: 4,
   },
-  mapButtonText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.accentBlue,
+  warningText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#92400E',
   },
-  mapIconContainer: {
-    width: 24,
-    height: 24,
-    borderRadius: 6,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dragHandle: {
-    paddingLeft: SPACING.sm,
-  },
-  actionButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: SPACING.xs,
-  },
-  addButtonInner: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.accentGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  removeButtonInner: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#FEE2E2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  suggestionsContainer: {
+  
+  // Content
+  content: {
     flex: 1,
-    paddingHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
+    paddingHorizontal: 20,
   },
-  sectionContainer: {
-    marginBottom: SPACING.lg,
+  currentLocationCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 16,
   },
-  sectionTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    marginBottom: SPACING.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  locationItem: {
+  currentLocationGradient: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  savedLocationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  savedLocationIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-    backgroundColor: COLORS.accentGreen,
-  },
-  recentLocationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  recentLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-    backgroundColor: COLORS.lightSurface,
-  },
-  locationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  locationContent: {
-    flex: 1,
-  },
-  locationName: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-    marginBottom: 2,
-  },
-  locationAddress: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-  },
-  currentLocationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    marginBottom: SPACING.lg,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    gap: 12,
   },
   currentLocationText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.accentBlue,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#FFFFFF',
   },
+  
+  // Upgrade Card
+  upgradeCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: 16,
+  },
+  upgradeGradient: {
+    padding: 20,
+    flexDirection: 'row',
+    gap: 16,
+  },
+  upgradeIcon: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: 'rgba(255,255,255,0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  upgradeContent: {
+    flex: 1,
+  },
+  upgradeTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginBottom: 6,
+  },
+  upgradeDesc: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    lineHeight: 18,
+    marginBottom: 12,
+  },
+  upgradeButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  upgradeButtonText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#F59E0B',
+  },
+  
+  // Popular Routes
+  section: {
+    marginBottom: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 12,
+  },
+  popularRouteCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  routeInfo: {
+    flex: 1,
+  },
+  routeFromTo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  routeCity: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  routeDetails: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  
+  // Bottom
   bottomSpacer: {
     height: 100,
   },
@@ -924,53 +1086,48 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.lightBackground,
+    padding: 20,
+    backgroundColor: '#F8FAFC',
     borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
+    borderTopColor: '#E2E8F0',
   },
   continueButton: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  continueButtonDisabled: {
+    opacity: 0.5,
+  },
+  continueGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.accentGreen,
-    borderRadius: BORDER_RADIUS.xl,
-    paddingVertical: SPACING.lg,
-    gap: SPACING.sm,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
-  },
-  continueButtonDisabled: {
-    backgroundColor: COLORS.lightBorder,
-    shadowOpacity: 0,
-    elevation: 0,
+    paddingVertical: 18,
+    gap: 12,
   },
   continueText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#FFFFFF',
   },
   continueTextDisabled: {
-    color: COLORS.lightTextMuted,
+    color: '#94A3B8',
   },
-  // Modal Styles
+  
+  // Modal
   modalContainer: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#F8FAFC',
   },
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-    backgroundColor: COLORS.white,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
   },
   modalCloseButton: {
     width: 40,
@@ -979,32 +1136,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0F172A',
   },
   searchContainer: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: '#FFFFFF',
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    gap: SPACING.sm,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 12,
+    borderWidth: 2,
+    borderColor: '#E2E8F0',
   },
   searchInput: {
     flex: 1,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
-    paddingVertical: SPACING.xs,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
   },
   loadingContainer: {
-    padding: SPACING.lg,
+    padding: 20,
     alignItems: 'center',
   },
   resultsList: {
@@ -1013,153 +1172,60 @@ const styles = StyleSheet.create({
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.lightBorder,
-    backgroundColor: COLORS.white,
+    borderBottomColor: '#E2E8F0',
+    backgroundColor: '#FFFFFF',
   },
   resultIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.lightSurface,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
+    marginRight: 14,
   },
   resultContent: {
     flex: 1,
   },
   resultMain: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 2,
   },
   resultSecondary: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    marginTop: 2,
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
   },
   quickActions: {
-    padding: SPACING.lg,
+    padding: 20,
   },
   quickActionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: '#E2E8F0',
   },
   quickActionIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  quickActionText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-  },
-  quickActionSubtext: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
-    marginTop: 2,
-  },
-  savedLocationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  savedLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.accentGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  recentLocationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  recentLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: COLORS.lightSurface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-  },
-  // Voice Booking Card
-  voiceBookingCard: {
-    backgroundColor: 'rgba(139,92,246,0.1)',
-    borderRadius: 20,
-    padding: 16,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.md,
-    borderWidth: 2,
-    borderColor: 'rgba(139,92,246,0.3)',
-  },
-  voiceBookingBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  voiceBookingBadgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 0.5,
-  },
-  voiceBookingContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  voiceIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(139,92,246,0.2)',
+    backgroundColor: '#EFF6FF',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
   },
-  voiceText: {
-    flex: 1,
-  },
-  voiceTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-    marginBottom: 4,
-  },
-  voiceDesc: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-    lineHeight: 18,
+  quickActionText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
   },
 });
