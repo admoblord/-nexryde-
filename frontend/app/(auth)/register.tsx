@@ -170,12 +170,12 @@ export default function RegisterScreen() {
                 </View>
                 <View style={styles.roleInfo}>
                   <Text style={[styles.roleTitle, selectedRole === 'driver' && styles.roleTitleDriver]}>Driver</Text>
-                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceDriver]}>{CURRENCY}25K/month</Text>
+                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceDriver]}>From {CURRENCY}18K/month</Text>
                 </View>
                 <View style={styles.roleFeatures}>
                   <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Keep 100% earnings</Text>
                   <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Zero commission</Text>
-                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Daily challenges & rewards</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Two subscription tiers</Text>
                 </View>
               </TouchableOpacity>
             </View>

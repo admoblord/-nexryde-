@@ -329,7 +329,7 @@ export default function HomeScreen() {
                     <Text style={styles.subscriptionDays}>
                       {driverStats?.subscription_days_left 
                         ? `${driverStats.subscription_days_left} days remaining`
-                        : '₦25,000/month • Unlimited earnings'}
+                        : 'From ₦18,000/month • Two tiers'}
                     </Text>
                   </View>
                 </View>

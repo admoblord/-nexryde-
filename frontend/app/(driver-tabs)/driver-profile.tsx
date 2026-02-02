@@ -211,7 +211,7 @@ export default function DriverProfileScreen() {
           </View>
           <View style={styles.subscriptionBanner}>
             <Text style={styles.subscriptionBannerText}>
-              {CURRENCY}25,000/month • Zero commission • 100% earnings
+              From {CURRENCY}18,000/month • Two tiers • 100% earnings
             </Text>
           </View>
         </TouchableOpacity>

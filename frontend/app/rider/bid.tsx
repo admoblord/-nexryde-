@@ -224,7 +224,7 @@ export default function RideBidScreen() {
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>Name Your Price</Text>
-            <Text style={styles.headerSubtitle}>inDrive Style</Text>
+            <Text style={styles.headerSubtitle}>Bid for Your Ride</Text>
           </View>
           <View style={{ width: 44 }} />
         </View>
