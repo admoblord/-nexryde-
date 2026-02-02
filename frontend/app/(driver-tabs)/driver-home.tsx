@@ -127,12 +127,19 @@ export default function DriverHomeScreen() {
           {/* 🌟 HERO - SMILING NIGERIAN DRIVER */}
           <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
             <View style={styles.heroCard}>
-              {/* Nigerian Driver Image - VISIBLE AT TOP */}
-              <Image
-                source={DRIVER_HERO}
-                style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
-                resizeMode="cover"
-              />
+              {/* Nigerian Driver Image - MOBILE OPTIMIZED */}
+              <View style={styles.imageContainer}>
+                <Image
+                  source={DRIVER_HERO}
+                  style={styles.heroImage}
+                  resizeMode="cover"
+                />
+                {/* Gradient overlay for better text readability */}
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)']}
+                  style={styles.imageOverlay}
+                />
+              </View>
               
               {/* Content Section Below Image */}
               <LinearGradient
