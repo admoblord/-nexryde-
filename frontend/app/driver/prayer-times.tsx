@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { usePrayerTimes, PrayerTime, Mosque } from '../services/prayerTimes';
+import { usePrayerTimes, PrayerTime, Mosque } from '../../src/services/prayerTimes';
 import { router } from 'expo-router';
 
 const { width } = Dimensions.get('window');
