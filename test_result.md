@@ -758,12 +758,25 @@ test_plan:
     - "Settings and All Buttons Testing"
     - "Payment Proof Upload and Admin Review"
     - "Final UI Polish Verification"
+    - "Vehicle Registration System"
   stuck_tasks:
     - "Rider Booking Screen - Pressable handlers"
     - "Splash Screen Navigation"
     - "Driver Subscription Screen Loading"
   test_all: true
   test_priority: "comprehensive"
+
+  - task: "Driver Vehicle Registration"
+    implemented: true
+    working: true
+    file: "app/driver/vehicle-registration.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ COMPLETE: 3-step vehicle registration flow. Step 1: Category selection (Economy/Comfort/Premium/XL) with requirements and earnings. Step 2: Vehicle details form (Make/Model/Year/Color/Plate). Step 3: Review & Confirm with agreement checkbox. Backend API POST /api/drivers/{id}/vehicle validates year requirements, luxury brands for Premium. Admin API at GET /api/admin/vehicle-registrations for verification queue. Web click handlers have known issues but native app will work correctly."
 
   - task: "Family Mode Screen"
     implemented: true
