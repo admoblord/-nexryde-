@@ -61,8 +61,8 @@ TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
 TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://api.ng.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 
-# Emergent Auth URL
-EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', 'https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data')
+# Emergent Auth URL - FIXED: Using correct production URL
+EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', 'https://auth.emergentagent.com/session-data')
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
@@ -1419,7 +1419,8 @@ class SessionDataResponse(BaseModel):
 async def exchange_google_session(request: SessionExchangeRequest, response: Response):
     """Exchange session_id from Emergent Auth for user data and session"""
     try:
-        logger.info(f"Received session_id for exchange: {request.session_id[:20]}..." if len(request.session_id) > 20 else f"Received session_id: {request.session_id}")
+        logger.info(f"🔐 Google Auth: Received session_id for exchange: {request.session_id[:20]}..." if len(request.session_id) > 20 else f"Received session_id: {request.session_id}")
+        logger.info(f"🌐 Calling Emergent Auth URL: {EMERGENT_AUTH_URL}")
         
         # Call Emergent Auth to get user data
         async with httpx.AsyncClient() as client:
@@ -1429,14 +1430,37 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
                 timeout=30.0
             )
             
-            logger.info(f"Emergent Auth response status: {auth_response.status_code}")
+            logger.info(f"📡 Emergent Auth response status: {auth_response.status_code}")
+            logger.info(f"📝 Response headers: {dict(auth_response.headers)}")
             
             if auth_response.status_code != 200:
-                logger.error(f"Emergent Auth error: {auth_response.status_code} - {auth_response.text}")
-                raise HTTPException(status_code=401, detail="Invalid session. Please try signing in again.")
+                error_text = auth_response.text[:500]  # Limit error text length
+                logger.error(f"❌ Emergent Auth error: {auth_response.status_code} - {error_text}")
+                
+                # Provide more specific error messages
+                if auth_response.status_code == 401:
+                    raise HTTPException(status_code=401, detail="Session expired or invalid. Please sign in again.")
+                elif auth_response.status_code == 404:
+                    raise HTTPException(status_code=401, detail="Authentication service not found. Please contact support.")
+                elif auth_response.status_code >= 500:
+                    raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable. Please try again.")
+                else:
+                    raise HTTPException(status_code=401, detail=f"Authentication failed (code: {auth_response.status_code}). Please try again.")
             
-            user_data = auth_response.json()
-            logger.info(f"Emergent Auth returned user: {user_data.get('email', 'unknown')}")
+            # Parse response
+            try:
+                user_data = auth_response.json()
+                logger.info(f"✅ Emergent Auth returned user: {user_data.get('email', 'unknown')}")
+            except Exception as parse_error:
+                logger.error(f"❌ Failed to parse Emergent Auth response: {parse_error}")
+                logger.error(f"Response text: {auth_response.text[:200]}")
+                raise HTTPException(status_code=500, detail="Invalid response from authentication service")
+            
+            # Validate response data
+            if not user_data.get('email'):
+                logger.error(f"❌ Missing email in Emergent Auth response: {user_data}")
+                raise HTTPException(status_code=500, detail="Invalid user data from authentication service")
+            
             session_data = SessionDataResponse(**user_data)
         
         # Check if user exists by email
@@ -1502,9 +1526,18 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
             
     except HTTPException:
         raise
+    except httpx.TimeoutException:
+        logger.error("⏱️ Timeout connecting to Emergent Auth")
+        raise HTTPException(status_code=504, detail="Authentication service timeout. Please try again.")
+    except httpx.NetworkError as e:
+        logger.error(f"🌐 Network error connecting to Emergent Auth: {str(e)}")
+        raise HTTPException(status_code=503, detail="Cannot reach authentication service. Please check your connection.")
     except Exception as e:
-        logger.error(f"Google session exchange error: {str(e)}")
-        raise HTTPException(status_code=400, detail="Failed to process Google sign-in")
+        logger.error(f"❌ Google session exchange error: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Failed to process Google sign-in: {str(e)}")
 
 # Legacy Google Sign-In endpoint (for backwards compatibility)
 class GoogleSignInRequest(BaseModel):
