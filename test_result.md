@@ -522,7 +522,7 @@ backend:
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: true
         - agent: "main"
@@ -530,6 +530,9 @@ backend:
         - working: true
         - agent: "main"
         - comment: "⚠️ USER REQUEST: Removed min_fare logic from backend calculation (lines 1028-1029) and removed hardcoded 'ESTIMATED ₦1,500' from rider booking screen. Backend still has booking_fee=0 in config but logic at line 1026 still adds it. Fare now purely formula-based: Total = (base + km_fee + time_fee + traffic_fee + booking_fee) * multiplier. NEEDS BACKEND TESTING to verify min_fare no longer applied."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ MIN_FARE REMOVAL VERIFIED: Comprehensive testing of POST /api/fare/estimate endpoint confirms min_fare logic has been successfully removed. Test Case 1 (Short Economy Trip): 0.5km, 5min = ₦700 total fare, BELOW old ₦800 minimum. Test Case 2 (Normal Economy Trip): 13.68km, 25min = ₦3200 with min_fare config showing ₦0. Test Case 3 (Premium Short Trip): 0.61km, 5min = ₦1450 with min_fare config ₦0. All fare configurations show min_fare: 0 across all service types (economy, comfort, premium, xl). Fare calculation now purely formula-based: Total = (base + distance_fee + time_fee + traffic_fee + booking_fee) × surge_multiplier. NO minimum fare enforcement detected. Short trips successfully return fares below old minimum thresholds, proving min_fare logic completely removed."
 
 frontend:
   - task: "Splash Screen"
