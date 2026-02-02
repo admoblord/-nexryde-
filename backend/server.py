@@ -7088,6 +7088,233 @@ async def get_report_categories():
     
     return {"categories": categories}
 
+# ==================== VEHICLE REGISTRATION ENDPOINT ====================
+
+class VehicleRegistrationRequest(BaseModel):
+    """Request model for driver vehicle registration"""
+    make: str
+    model: str
+    year: int
+    color: str
+    plate_number: str
+    category: str  # economy, comfort, premium, xl
+
+# Vehicle category requirements
+VEHICLE_CATEGORY_REQUIREMENTS = {
+    "economy": {
+        "name": "Economy",
+        "min_year": 2015,
+        "luxury_only": False,
+        "earnings_per_km": 150,
+    },
+    "comfort": {
+        "name": "Comfort",
+        "min_year": 2018,
+        "luxury_only": False,
+        "earnings_per_km": 200,
+    },
+    "premium": {
+        "name": "Premium",
+        "min_year": 2020,
+        "luxury_only": True,
+        "luxury_brands": ["mercedes", "bmw", "lexus", "audi", "porsche", "range rover", "jaguar", "bentley", "rolls royce"],
+        "earnings_per_km": 350,
+    },
+    "xl": {
+        "name": "SUV / XL",
+        "min_year": 2017,
+        "luxury_only": False,
+        "earnings_per_km": 250,
+    },
+}
+
+@api_router.post("/drivers/{driver_id}/vehicle")
+async def register_driver_vehicle(driver_id: str, request: VehicleRegistrationRequest):
+    """Register or update driver's vehicle with category validation"""
+    
+    # Verify driver exists
+    user = await db.users.find_one({"id": driver_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    if user.get("role") != "driver":
+        raise HTTPException(status_code=400, detail="User is not a driver")
+    
+    # Validate category
+    category_lower = request.category.lower()
+    if category_lower not in VEHICLE_CATEGORY_REQUIREMENTS:
+        raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {', '.join(VEHICLE_CATEGORY_REQUIREMENTS.keys())}")
+    
+    category_reqs = VEHICLE_CATEGORY_REQUIREMENTS[category_lower]
+    current_year = datetime.utcnow().year
+    
+    # Validate year
+    if request.year < category_reqs["min_year"]:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Vehicle too old for {category_reqs['name']} category. Must be {category_reqs['min_year']} or newer."
+        )
+    
+    if request.year > current_year + 1:
+        raise HTTPException(status_code=400, detail="Invalid vehicle year")
+    
+    # Validate luxury brand for premium category
+    if category_reqs.get("luxury_only"):
+        make_lower = request.make.lower()
+        is_luxury = any(brand in make_lower for brand in category_reqs.get("luxury_brands", []))
+        if not is_luxury:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Premium category requires a luxury brand (Mercedes, BMW, Lexus, Audi, etc.). Your {request.make} does not qualify."
+            )
+    
+    # Create vehicle registration record
+    vehicle_data = {
+        "make": request.make.strip(),
+        "model": request.model.strip(),
+        "year": request.year,
+        "color": request.color.strip(),
+        "plate_number": request.plate_number.strip().upper(),
+        "category": category_lower,
+        "category_name": category_reqs["name"],
+        "earnings_per_km": category_reqs["earnings_per_km"],
+        "status": "pending_verification",  # pending_verification, verified, rejected
+        "registered_at": datetime.utcnow(),
+        "verified_at": None,
+        "rejection_reason": None,
+    }
+    
+    # Update driver profile
+    await db.driver_profiles.update_one(
+        {"user_id": driver_id},
+        {
+            "$set": {
+                "vehicle_type": category_lower,
+                "vehicle_model": f"{request.make} {request.model}",
+                "vehicle_plate": request.plate_number.strip().upper(),
+                "vehicle_color": request.color.strip(),
+                "vehicle_year": request.year,
+                "vehicle": vehicle_data,
+            }
+        },
+        upsert=True
+    )
+    
+    # Also store in vehicle_registrations collection for admin tracking
+    registration_record = {
+        "id": str(uuid.uuid4()),
+        "driver_id": driver_id,
+        "driver_name": user.get("name", "Unknown"),
+        "driver_phone": user.get("phone", ""),
+        **vehicle_data,
+        "created_at": datetime.utcnow(),
+    }
+    await db.vehicle_registrations.insert_one(registration_record)
+    
+    logger.info(f"✅ Vehicle registered for driver {driver_id}: {request.make} {request.model} ({category_lower})")
+    
+    return {
+        "success": True,
+        "message": f"Vehicle registered successfully in {category_reqs['name']} category",
+        "vehicle": vehicle_data,
+        "status": "pending_verification",
+        "note": "Our team will verify your vehicle within 24-48 hours."
+    }
+
+@api_router.get("/drivers/{driver_id}/vehicle")
+async def get_driver_vehicle(driver_id: str):
+    """Get driver's registered vehicle"""
+    profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    
+    if not profile or not profile.get("vehicle"):
+        return {
+            "has_vehicle": False,
+            "message": "No vehicle registered"
+        }
+    
+    return {
+        "has_vehicle": True,
+        "vehicle": profile.get("vehicle")
+    }
+
+@api_router.get("/admin/vehicle-registrations")
+async def get_pending_vehicle_registrations(status: str = None):
+    """Admin: Get vehicle registrations (optionally filtered by status)"""
+    query = {}
+    if status:
+        query["status"] = status
+    
+    registrations = await db.vehicle_registrations.find(query).sort("created_at", -1).to_list(100)
+    
+    for reg in registrations:
+        reg.pop("_id", None)
+    
+    return {
+        "registrations": registrations,
+        "total": len(registrations)
+    }
+
+@api_router.put("/admin/vehicle-registrations/{registration_id}/verify")
+async def verify_vehicle_registration(registration_id: str, approved: bool = True, rejection_reason: str = None):
+    """Admin: Verify or reject a vehicle registration"""
+    registration = await db.vehicle_registrations.find_one({"id": registration_id})
+    
+    if not registration:
+        raise HTTPException(status_code=404, detail="Registration not found")
+    
+    new_status = "verified" if approved else "rejected"
+    
+    update_data = {
+        "status": new_status,
+        "verified_at": datetime.utcnow() if approved else None,
+        "rejection_reason": rejection_reason if not approved else None,
+    }
+    
+    # Update registration record
+    await db.vehicle_registrations.update_one(
+        {"id": registration_id},
+        {"$set": update_data}
+    )
+    
+    # Update driver profile
+    driver_id = registration.get("driver_id")
+    if driver_id:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {
+                "vehicle.status": new_status,
+                "vehicle.verified_at": update_data["verified_at"],
+                "vehicle.rejection_reason": update_data["rejection_reason"],
+            }}
+        )
+        
+        # Send notification to driver
+        user = await db.users.find_one({"id": driver_id})
+        if user:
+            if approved:
+                message = f"🎉 Great news! Your {registration.get('make')} {registration.get('model')} has been verified for {registration.get('category_name')} rides. You can now start accepting trips!"
+            else:
+                message = f"Your vehicle registration was not approved. Reason: {rejection_reason or 'Did not meet category requirements'}. Please update your vehicle details."
+            
+            # Store notification
+            await db.notifications.insert_one({
+                "id": str(uuid.uuid4()),
+                "user_id": driver_id,
+                "type": "vehicle_verification",
+                "title": "Vehicle Verification " + ("Approved ✅" if approved else "Rejected ❌"),
+                "message": message,
+                "read": False,
+                "created_at": datetime.utcnow()
+            })
+    
+    logger.info(f"Vehicle registration {registration_id} {'approved' if approved else 'rejected'}")
+    
+    return {
+        "success": True,
+        "status": new_status,
+        "message": f"Vehicle registration {'approved' if approved else 'rejected'}"
+    }
+
 @api_router.get("/drivers/{driver_id}/suspension-status")
 async def get_driver_suspension_status(driver_id: str):
     """Check if driver is suspended"""
