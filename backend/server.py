@@ -7597,6 +7597,146 @@ async def startup_event():
 
 # Serve admin panel at /admin (local access)
 @app.get("/admin")
+# ========== VOICE BOOKING API (NIGERIAN ACCENT SUPPORT) ==========
+
+class VoiceBookingRequest(BaseModel):
+    text: str
+    language: str = "en-NG"
+
+@app.post("/api/voice/parse-booking")
+async def parse_voice_booking(request: VoiceBookingRequest):
+    """
+    Parse voice command to extract pickup and destination
+    Supports Nigerian English, Pidgin, and various Nigerian accents
+    """
+    text = request.text.lower()
+    
+    # Common Nigerian locations database
+    nigerian_locations = [
+        'ikorodu', 'lekki', 'victoria island', 'vi', 'ikeja', 'yaba', 'surulere',
+        'apapa', 'maryland', 'ojota', 'berger', 'ajah', 'festac', 'isolo', 'mushin',
+        'oshodi', 'agege', 'alimosho', 'lagos island', 'banana island', 'ikoyi',
+        'gbagada', 'anthony', 'obalende', 'costain', 'iponri', 'ajegunle', 'idimu',
+        'egbeda', 'ikotun', 'igando', 'sango', 'iyana ipaja', 'abule egba',
+        'mangoro', 'badagry', 'epe', 'ibeju-lekki', 'abraham adesanya',
+        'sangotedo', 'awoyaya', 'magodo', 'omole', 'ogba', 'ikosi', 'ketu',
+        'mile 2', 'mile 12', 'cele', 'ilasamaja', 'bode thomas', 'onigbongbo',
+        'adeniyi jones', 'allen avenue', 'opebi', 'oregun', 'ojodu', 'berger',
+        'mowe', 'ibafo', 'isheri', 'magboro', 'arepo', 'warri', 'benin', 'ibadan',
+        'port harcourt', 'abuja', 'kano', 'jos', 'enugu', 'onitsha', 'aba',
+        'calabar', 'maiduguri', 'kaduna', 'zaria', 'sokoto', 'ilorin', 'akure',
+        'abeokuta', 'owerri', 'uyo', 'asaba', 'makurdi', 'lafia', 'lokoja'
+    ]
+    
+    # Patterns to detect pickup and destination
+    patterns = {
+        'from_to': [
+            r'from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
+            r'take me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
+            r'book me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
+            r'pick me from\s+([a-z\s]+?)\s+to\s+([a-z\s]+)',
+        ],
+        'to_from': [
+            r'to\s+([a-z\s]+?)\s+from\s+([a-z\s]+)',
+            r'go\s+([a-z\s]+?)\s+from\s+([a-z\s]+)',
+        ],
+        'destination_only': [
+            r'take me to\s+([a-z\s]+)',
+            r'go to\s+([a-z\s]+)',
+            r'i want to go to\s+([a-z\s]+)',
+            r'i wan go\s+([a-z\s]+)',  # Pidgin
+            r'i dey go\s+([a-z\s]+)',  # Pidgin
+            r'book me go\s+([a-z\s]+)',  # Pidgin
+            r'abeg carry me go\s+([a-z\s]+)',  # Pidgin
+        ]
+    }
+    
+    import re
+    
+    pickup = ""
+    destination = ""
+    
+    # Try from-to patterns
+    for pattern in patterns['from_to']:
+        match = re.search(pattern, text)
+        if match:
+            pickup = match.group(1).strip()
+            destination = match.group(2).strip()
+            break
+    
+    # Try to-from patterns (swap order)
+    if not pickup or not destination:
+        for pattern in patterns['to_from']:
+            match = re.search(pattern, text)
+            if match:
+                destination = match.group(1).strip()
+                pickup = match.group(2).strip()
+                break
+    
+    # Try destination-only patterns (use current location for pickup)
+    if not destination:
+        for pattern in patterns['destination_only']:
+            match = re.search(pattern, text)
+            if match:
+                destination = match.group(1).strip()
+                pickup = "Current Location"
+                break
+    
+    # Validate and clean up locations
+    def find_closest_location(text: str) -> str:
+        """Find the closest matching Nigerian location"""
+        text = text.strip()
+        # Direct match
+        if text in nigerian_locations:
+            return text.title()
+        
+        # Partial match
+        for location in nigerian_locations:
+            if location in text or text in location:
+                return location.title()
+        
+        # Return original if no match (might be a new location)
+        return text.title()
+    
+    if destination:
+        destination = find_closest_location(destination)
+    if pickup and pickup != "Current Location":
+        pickup = find_closest_location(pickup)
+    
+    # If we couldn't parse anything, use AI fallback
+    if not destination:
+        try:
+            llm_chat = LlmChat(
+                model="gpt-4o",
+                api_key=os.environ.get('EMERGENT_LLM_KEY', '')
+            )
+            
+            prompt = f"""Extract the pickup location and destination from this Nigerian voice command: "{request.text}"
+            
+Respond ONLY in this exact JSON format:
+{{"pickup": "location name", "destination": "location name"}}
+
+If only destination is mentioned, use "Current Location" for pickup.
+Common Nigerian locations include: Lekki, Victoria Island, Ikeja, Yaba, Ikorodu, etc."""
+
+            response = llm_chat.invoke([UserMessage(prompt)])
+            result = json.loads(response.content)
+            pickup = result.get('pickup', 'Current Location')
+            destination = result.get('destination', '')
+        except Exception as e:
+            logger.error(f"AI fallback failed: {e}")
+            raise HTTPException(status_code=400, detail="Could not understand voice command. Please try again.")
+    
+    if not destination:
+        raise HTTPException(status_code=400, detail="Could not detect destination. Please speak clearly.")
+    
+    return {
+        "pickup": pickup,
+        "destination": destination,
+        "original_text": request.text,
+        "language": request.language
+    }
+
 @app.get("/admin/")
 async def serve_admin():
     """Serve admin panel"""
