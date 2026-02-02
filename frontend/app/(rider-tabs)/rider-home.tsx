@@ -20,7 +20,7 @@ import { useAppStore } from '@/src/store/appStore';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-const RIDER_HERO = 'https://images.unsplash.com/photo-1694286080685-279d3b3c8dfb?w=800&q=80'; // Three Nigerian women smiling together - representing Igbo, Yoruba, Hausa unity!
+const RIDER_HERO = 'https://images.unsplash.com/photo-1739301674016-45dddb02e2dd?w=800&q=80'; // Three Nigerian women friends sitting together smiling - Igbo, Yoruba, Hausa!
 
 export default function RiderHomeScreen() {
   const router = useRouter();
