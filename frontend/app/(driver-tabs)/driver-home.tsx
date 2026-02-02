@@ -21,8 +21,8 @@ const { width, height } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // PREMIUM IMAGE - Nigerian Yoruba man smiling in his car!
-// LOCAL IMAGE - Will definitely show!
-const DRIVER_HERO = require('@/assets/images/nigerian-driver.jpg');
+// Using relative path for guaranteed compatibility
+const DRIVER_HERO = require('../../assets/images/nigerian-driver.jpg');
 
 export default function DriverHomeScreen() {
   const router = useRouter();
