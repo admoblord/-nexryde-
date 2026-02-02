@@ -26,6 +26,15 @@ from emergentintegrations.llm.chat import LlmChat, UserMessage
 from subscription_manager import subscription_router
 from payment_reminder_system import payment_reminder_job
 
+# Import Two-Tier Subscription System (ENHANCED)
+from two_tier_subscription import two_tier_router
+
+# Import Route Caching Service (API Cost Protection)
+from route_cache_service import route_cache_router
+
+# Import Smart Route Planner (Eliminate Empty Returns)
+from smart_route_planner import route_planner_router
+
 # Import Map Service (Cost Controlled)
 from map_service import map_router
 
@@ -7051,7 +7060,10 @@ async def seed_promo_codes():
 
 # Include routers
 app.include_router(api_router)
-app.include_router(subscription_router)
+app.include_router(subscription_router)  # Old single-tier system (keep for backward compatibility)
+app.include_router(two_tier_router)  # NEW: Two-tier subscription system
+app.include_router(route_cache_router)  # NEW: Route caching for API cost protection
+app.include_router(route_planner_router)  # NEW: Smart Route Planner for return passengers
 app.include_router(map_router)
 app.include_router(call_router)
 
