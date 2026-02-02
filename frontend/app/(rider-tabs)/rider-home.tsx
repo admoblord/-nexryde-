@@ -365,9 +365,11 @@ const styles = StyleSheet.create({
   // Hero
   heroSection: { paddingHorizontal: 20, marginBottom: 20 },
   heroCard: { borderRadius: 28, overflow: 'hidden', elevation: 12, shadowColor: '#10B981', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20 },
+  heroImageContainer: { width: '100%', height: 340, position: 'relative', borderRadius: 28, overflow: 'hidden' },
+  heroBackgroundImage: { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', borderRadius: 28 },
   heroImage: { width: '100%', height: 340 },
   heroImageStyle: { borderRadius: 28 },
-  heroOverlay: { flex: 1, padding: 24, justifyContent: 'flex-end' },
+  heroOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, padding: 24, justifyContent: 'flex-end' },
   liveBadge: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16,185,129,0.9)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   liveIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF', marginRight: 8 },
   liveText: { fontSize: 12, fontWeight: '800', color: '#FFF', letterSpacing: 1 },
