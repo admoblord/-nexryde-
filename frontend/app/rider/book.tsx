@@ -997,6 +997,10 @@ const styles = StyleSheet.create({
   bookButton: {
     flex: 1.5,
   },
+  bookButtonFull: {
+    flex: 1,
+    width: '100%',
+  },
   bookButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
