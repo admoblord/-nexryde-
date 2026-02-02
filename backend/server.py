@@ -88,7 +88,7 @@ FARE_CONFIG = {
             "per_km": 150,              # ₦150 per kilometer
             "per_min": 25,              # ₦25 per minute (for traffic/waiting)
             "booking_fee": 0,         # ₦100 platform service fee
-            "min_fare": 800,            # ₦800 minimum fare
+            "min_fare": 0,            # ₦800 minimum fare
             "max_multiplier": 2.5,      # Max 2.5x surge pricing
             "cancellation_fee": 300,    # ₦300 if rider cancels after driver accepts
         },
@@ -97,7 +97,7 @@ FARE_CONFIG = {
             "per_km": 200,              # ₦200 per kilometer
             "per_min": 35,              # ₦35 per minute
             "booking_fee": 0,         # ₦150 platform service fee
-            "min_fare": 1200,           # ₦1,200 minimum fare
+            "min_fare": 0,           # ₦1,200 minimum fare
             "max_multiplier": 2.5,
             "cancellation_fee": 400,
         },
@@ -106,7 +106,7 @@ FARE_CONFIG = {
             "per_km": 350,              # ₦350 per kilometer
             "per_min": 50,              # ₦50 per minute
             "booking_fee": 0,         # ₦200 platform service fee
-            "min_fare": 2000,           # ₦2,000 minimum fare
+            "min_fare": 0,           # ₦2,000 minimum fare
             "max_multiplier": 3.0,      # Premium can surge up to 3x
             "cancellation_fee": 500,
         },
@@ -115,7 +115,7 @@ FARE_CONFIG = {
             "per_km": 250,              # ₦250 per kilometer
             "per_min": 40,              # ₦40 per minute
             "booking_fee": 0,         # ₦150 platform service fee
-            "min_fare": 1500,           # ₦1,500 minimum fare
+            "min_fare": 0,           # ₦1,500 minimum fare
             "max_multiplier": 2.5,
             "cancellation_fee": 450,
         },
@@ -126,7 +126,7 @@ FARE_CONFIG = {
             "per_km": 130,
             "per_min": 20,
             "booking_fee": 0,
-            "min_fare": 700,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 250,
         },
@@ -135,7 +135,7 @@ FARE_CONFIG = {
             "per_km": 180,
             "per_min": 30,
             "booking_fee": 0,
-            "min_fare": 1000,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 350,
         },
@@ -144,7 +144,7 @@ FARE_CONFIG = {
             "per_km": 300,
             "per_min": 45,
             "booking_fee": 0,
-            "min_fare": 1800,
+            "min_fare": 0,
             "max_multiplier": 3.0,
             "cancellation_fee": 450,
         },
@@ -153,7 +153,7 @@ FARE_CONFIG = {
             "per_km": 220,
             "per_min": 35,
             "booking_fee": 0,
-            "min_fare": 1300,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 400,
         },
@@ -164,7 +164,7 @@ FARE_CONFIG = {
             "per_km": 140,
             "per_min": 22,
             "booking_fee": 0,
-            "min_fare": 750,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 280,
         },
@@ -173,7 +173,7 @@ FARE_CONFIG = {
             "per_km": 190,
             "per_min": 32,
             "booking_fee": 0,
-            "min_fare": 1100,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 380,
         },
@@ -182,7 +182,7 @@ FARE_CONFIG = {
             "per_km": 320,
             "per_min": 48,
             "booking_fee": 0,
-            "min_fare": 1900,
+            "min_fare": 0,
             "max_multiplier": 3.0,
             "cancellation_fee": 480,
         },
@@ -191,7 +191,7 @@ FARE_CONFIG = {
             "per_km": 230,
             "per_min": 38,
             "booking_fee": 0,
-            "min_fare": 1400,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 420,
         },
@@ -202,7 +202,7 @@ FARE_CONFIG = {
             "per_km": 150,
             "per_min": 25,
             "booking_fee": 0,
-            "min_fare": 800,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 300,
         },
@@ -211,7 +211,7 @@ FARE_CONFIG = {
             "per_km": 200,
             "per_min": 35,
             "booking_fee": 0,
-            "min_fare": 1200,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 400,
         },
@@ -220,7 +220,7 @@ FARE_CONFIG = {
             "per_km": 350,
             "per_min": 50,
             "booking_fee": 0,
-            "min_fare": 2000,
+            "min_fare": 0,
             "max_multiplier": 3.0,
             "cancellation_fee": 500,
         },
@@ -229,7 +229,7 @@ FARE_CONFIG = {
             "per_km": 250,
             "per_min": 40,
             "booking_fee": 0,
-            "min_fare": 1500,
+            "min_fare": 0,
             "max_multiplier": 2.5,
             "cancellation_fee": 450,
         },
