@@ -132,7 +132,19 @@ export default function SubscriptionScreen() {
     try {
       const response = await fetch(`${BACKEND_URL}/api/subscription/status/${user.id}`);
       const data = await response.json();
-      setSubscription(data);
+      
+      // Map API response to expected format
+      setSubscription({
+        tier: data.tier || (data.status === 'active' ? 'city_rider' : 'none'),
+        status: data.status || 'expired',
+        monthly_price: data.monthly_price || pricing?.city_rider?.current_price || 18000,
+        trial_active: data.trial_active || data.status === 'trial',
+        trial_hours_remaining: data.trial_hours_remaining,
+        trial_trips_remaining: data.trial_trips_remaining,
+        days_remaining: data.days_remaining,
+        can_upgrade: data.can_upgrade ?? (data.status === 'active'),
+        upgrade_requirements: data.upgrade_requirements,
+      });
     } catch (error) {
       console.error('Error fetching subscription:', error);
       setSubscription({
