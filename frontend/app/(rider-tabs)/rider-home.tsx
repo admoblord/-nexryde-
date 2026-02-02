@@ -89,12 +89,19 @@ export default function RiderHomeScreen() {
               onPress={() => router.push('/rider/book')}
               style={styles.heroCard}
             >
-              {/* Nigerian People Image - VISIBLE AT TOP */}
-              <Image
-                source={RIDER_HERO}
-                style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
-                resizeMode="cover"
-              />
+              {/* Nigerian People Image - MOBILE OPTIMIZED */}
+              <View style={styles.imageContainer}>
+                <Image
+                  source={RIDER_HERO}
+                  style={styles.heroImage}
+                  resizeMode="cover"
+                />
+                {/* Gradient overlay for better text readability */}
+                <LinearGradient
+                  colors={['transparent', 'rgba(0,0,0,0.3)']}
+                  style={styles.imageOverlay}
+                />
+              </View>
               
               {/* Content Section Below Image */}
               <LinearGradient
