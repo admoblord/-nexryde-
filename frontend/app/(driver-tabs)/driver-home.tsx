@@ -374,6 +374,12 @@ export default function DriverHomeScreen() {
                 onPress={() => router.push('/driver/safety-alerts')}
               />
               <FeatureCard
+                icon="alert-circle"
+                label="Accident AI"
+                color="#D32F2F"
+                onPress={() => router.push('/driver/accident-prediction')}
+              />
+              <FeatureCard
                 icon="heart"
                 label="Wellness"
                 color="#E91E63"
@@ -384,6 +390,12 @@ export default function DriverHomeScreen() {
                 label="Smart Mode"
                 color="#9C27B0"
                 onPress={() => router.push('/driver/smart-mode')}
+              />
+              <FeatureCard
+                icon="megaphone"
+                label="Story Mode"
+                color="#FF6B35"
+                onPress={() => router.push('/driver/story-mode')}
               />
               <FeatureCard
                 icon="car"
