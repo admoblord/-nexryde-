@@ -4,20 +4,151 @@ import {
   Text,
   StyleSheet,
   TouchableOpacity,
-  TextInput,
   ScrollView,
+  TextInput,
+  ActivityIndicator,
+  Platform,
+  Animated,
+  Easing,
   Dimensions,
   Modal,
-  Platform,
-  ActivityIndicator,
   Keyboard,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Falling Flower Component
+const FallingFlower = ({ delay, startX }: { delay: number; startX: number }) => {
+  const translateY = useRef(new Animated.Value(-50)).current;
+  const translateX = useRef(new Animated.Value(startX)).current;
+  const rotate = useRef(new Animated.Value(0)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const startAnimation = () => {
+      translateY.setValue(-50);
+      translateX.setValue(startX);
+      rotate.setValue(0);
+      opacity.setValue(1);
+
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: SCREEN_HEIGHT + 50,
+          duration: 4000 + Math.random() * 2000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(translateX, {
+          toValue: startX + (Math.random() - 0.5) * 100,
+          duration: 4000 + Math.random() * 2000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(rotate, {
+          toValue: 360 * (Math.random() > 0.5 ? 1 : -1),
+          duration: 4000 + Math.random() * 2000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.timing(opacity, {
+          toValue: 0,
+          duration: 4000 + Math.random() * 2000,
+          easing: Easing.in(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]).start(() => startAnimation());
+    };
+
+    const timer = setTimeout(startAnimation, delay);
+    return () => clearTimeout(timer);
+  }, [delay, startX]);
+
+  const spin = rotate.interpolate({
+    inputRange: [0, 360],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  const flowers = ['🌸', '🌺', '🌷', '💮', '🏵️', '✿', '❀'];
+  const flower = flowers[Math.floor(Math.random() * flowers.length)];
+
+  return (
+    <Animated.Text
+      style={[
+        styles.fallingFlower,
+        {
+          transform: [
+            { translateY },
+            { translateX },
+            { rotate: spin },
+          ],
+          opacity,
+        },
+      ]}
+    >
+      {flower}
+    </Animated.Text>
+  );
+};
+
+// Floating Particles for City Ride
+const FloatingParticle = ({ delay, startX }: { delay: number; startX: number }) => {
+  const translateY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const opacity = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.5)).current;
+
+  useEffect(() => {
+    const startAnimation = () => {
+      translateY.setValue(SCREEN_HEIGHT);
+      opacity.setValue(0.7);
+      scale.setValue(0.5 + Math.random() * 0.5);
+
+      Animated.parallel([
+        Animated.timing(translateY, {
+          toValue: -50,
+          duration: 6000 + Math.random() * 3000,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        Animated.sequence([
+          Animated.timing(opacity, {
+            toValue: 1,
+            duration: 1000,
+            useNativeDriver: true,
+          }),
+          Animated.timing(opacity, {
+            toValue: 0,
+            duration: 5000,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]).start(() => startAnimation());
+    };
+
+    const timer = setTimeout(startAnimation, delay);
+    return () => clearTimeout(timer);
+  }, [delay]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.floatingParticle,
+        {
+          left: startX,
+          transform: [{ translateY }, { scale }],
+          opacity,
+        },
+      ]}
+    />
+  );
+};
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
