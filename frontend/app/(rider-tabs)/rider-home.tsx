@@ -91,7 +91,7 @@ export default function RiderHomeScreen() {
             >
               {/* Nigerian People Image - VISIBLE AT TOP */}
               <Image
-                source={{ uri: RIDER_HERO }}
+                source={RIDER_HERO}
                 style={{ width: '100%', height: 200, borderTopLeftRadius: 28, borderTopRightRadius: 28 }}
                 contentFit="cover"
               />
