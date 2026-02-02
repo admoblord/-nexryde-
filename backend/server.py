@@ -1025,10 +1025,7 @@ def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: 
     # Step 4: Calculate subtotal before surge
     subtotal = base_fare + distance_fee + time_fee + traffic_fee + booking_fee
     
-    # Step 5: Apply minimum fare rule
-    subtotal = max(min_fare, subtotal)
-    
-    # Step 6: Calculate surge/dynamic pricing
+    # Step 5: Calculate surge/dynamic pricing (min_fare removed per user request)
     current_hour = datetime.utcnow().hour + 1  # Nigerian time (WAT = UTC+1)
     is_weekend = datetime.utcnow().weekday() >= 5
     
