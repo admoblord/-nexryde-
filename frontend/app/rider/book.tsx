@@ -500,6 +500,7 @@ export default function BookScreen() {
             </View>
           ))}
         </View>
+        )}
 
         {/* 🔥 VOICE BOOKING - COMING SOON */}
         <View style={styles.voiceBookingCard}>
