@@ -19,8 +19,8 @@ import { useAppStore } from '@/src/store/appStore';
 const { width, height } = Dimensions.get('window');
 
 // PREMIUM IMAGES - Nigerian riders (Igbo, Yoruba, Hausa together!)
-// LOCAL IMAGE - Will definitely show!
-const RIDER_HERO = require('@/assets/images/nigerian-riders.jpg');
+// Using relative path for guaranteed compatibility
+const RIDER_HERO = require('../../assets/images/nigerian-riders.jpg');
 
 export default function RiderHomeScreen() {
   const router = useRouter();
