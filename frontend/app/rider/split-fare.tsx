@@ -18,23 +18,54 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/const
 
 export default function SplitFareScreen() {
   const router = useRouter();
-  const [totalFare] = useState(5000);
+  const params = useLocalSearchParams();
+  const [totalFare] = useState(params.fare ? Number(params.fare) : 5000);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFriends, setSelectedFriends] = useState<string[]>([]);
+  const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
+  const [deviceContacts, setDeviceContacts] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
 
-  const contacts = [
-    { id: '1', name: 'Chidi Okeke', phone: '+234 801 234 5678', avatar: '👨🏾' },
-    { id: '2', name: 'Amara Nwosu', phone: '+234 802 345 6789', avatar: '👩🏾' },
-    { id: '3', name: 'Emeka Eze', phone: '+234 803 456 7890', avatar: '👨🏾' },
-    { id: '4', name: 'Ngozi Obi', phone: '+234 804 567 8901', avatar: '👩🏾' },
-  ];
+  useEffect(() => {
+    loadContacts();
+  }, []);
 
-  const toggleFriend = (id: string) => {
-    if (selectedFriends.includes(id)) {
-      setSelectedFriends(selectedFriends.filter(f => f !== id));
+  const loadContacts = async () => {
+    try {
+      const { status } = await Contacts.requestPermissionsAsync();
+      if (status === 'granted') {
+        const { data } = await Contacts.getContactsAsync({
+          fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Name],
+        });
+
+        if (data.length > 0) {
+          // Format contacts for display
+          const formatted = data
+            .filter(c => c.phoneNumbers && c.phoneNumbers.length > 0)
+            .map(c => ({
+              id: c.id,
+              name: c.name || 'Unknown',
+              phone: c.phoneNumbers![0].number,
+              avatar: c.name ? c.name[0].toUpperCase() : '?',
+            }))
+            .slice(0, 50); // Limit to 50 contacts
+          
+          setDeviceContacts(formatted);
+        }
+      } else {
+        Alert.alert('Permission Denied', 'Cannot access contacts without permission');
+      }
+    } catch (error) {
+      console.error('Load contacts error:', error);
+    }
+  };
+
+  const toggleFriend = (contact: any) => {
+    const exists = selectedFriends.find(f => f.id === contact.id);
+    if (exists) {
+      setSelectedFriends(selectedFriends.filter(f => f.id !== contact.id));
     } else {
       if (selectedFriends.length < 4) {
-        setSelectedFriends([...selectedFriends, id]);
+        setSelectedFriends([...selectedFriends, contact]);
       } else {
         Alert.alert('Limit Reached', 'Maximum 4 people can split fare');
       }
@@ -43,17 +74,56 @@ export default function SplitFareScreen() {
 
   const splitAmount = Math.ceil(totalFare / (selectedFriends.length + 1));
 
-  const handleSendRequest = () => {
+  const handleSendRequest = async () => {
     if (selectedFriends.length === 0) {
       Alert.alert('Select Friends', 'Please select at least one person to split fare with');
       return;
     }
-    Alert.alert(
-      '✅ Split Request Sent!',
-      `Each person will pay ${CURRENCY}${splitAmount.toLocaleString()}. Waiting for their approval.`,
-      [{ text: 'OK', onPress: () => router.back() }]
-    );
+
+    setLoading(true);
+    try {
+      // Check if SMS is available
+      const isAvailable = await SMS.isAvailableAsync();
+      
+      if (isAvailable) {
+        const phoneNumbers = selectedFriends.map(f => f.phone);
+        const message = `🚗 NEXRYDE Split Fare Request!\n\nYou've been invited to split a ride fare of ${CURRENCY}${totalFare.toLocaleString()}.\n\nYour share: ${CURRENCY}${splitAmount.toLocaleString()}\nTotal people: ${selectedFriends.length + 1}\n\nAccept this request in the NEXRYDE app to confirm payment.`;
+
+        await SMS.sendSMSAsync(phoneNumbers, message);
+        
+        Alert.alert(
+          '✅ Request Sent!',
+          `SMS invitations sent to ${selectedFriends.length} ${selectedFriends.length === 1 ? 'person' : 'people'}. Each will pay ${CURRENCY}${splitAmount.toLocaleString()}.`,
+          [{ text: 'Done', onPress: () => router.back() }]
+        );
+      } else {
+        Alert.alert(
+          'SMS Not Available',
+          'SMS is not available on this device. Split fare requests will be sent via the app.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      }
+    } catch (error) {
+      console.error('Send SMS error:', error);
+      Alert.alert('Error', 'Failed to send split fare request. Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const contacts = deviceContacts.length > 0 ? deviceContacts : [
+    { id: '1', name: 'Chidi Okeke', phone: '+234 801 234 5678', avatar: 'C' },
+    { id: '2', name: 'Amara Nwosu', phone: '+234 802 345 6789', avatar: 'A' },
+    { id: '3', name: 'Emeka Eze', phone: '+234 803 456 7890', avatar: 'E' },
+    { id: '4', name: 'Ngozi Obi', phone: '+234 804 567 8901', avatar: 'N' },
+  ];
+
+  const filteredContacts = searchQuery
+    ? contacts.filter(c => 
+        c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        c.phone.includes(searchQuery)
+      )
+    : contacts;
 
   return (
     <SafeAreaView style={styles.container}>
