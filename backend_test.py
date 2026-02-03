@@ -235,14 +235,12 @@ class NexrydeAPITester:
     # ==================== FARE & BOOKING TESTS ====================
     
     async def test_fare_estimate(self):
-        """Test POST /api/fare/estimate (Google Maps integration)"""
-        # Lagos coordinates for testing
+        """Test POST /api/fares/estimate-google (Google Maps integration)"""
         response = await self.make_request("POST", "/fares/estimate-google", {
-            "pickup_lat": 6.5244,
-            "pickup_lng": 3.3792,
-            "dropoff_lat": 6.4281,
-            "dropoff_lng": 3.4219,
-            "service_type": "economy"
+            "pickup": "Victoria Island, Lagos, Nigeria",
+            "destination": "Lekki Phase 1, Lagos, Nigeria",
+            "vehicle_type": "economy",
+            "trip_type": "intra"
         })
         
         if response["success"]:
