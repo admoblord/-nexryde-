@@ -41,6 +41,7 @@
     "expo-secure-store": "^15.0.8",
     "expo-sharing": "~13.1.5",
     "expo-speech": "~14.0.8",
+    "expo-speech-recognition": "^3.1.0",
     "expo-splash-screen": "~0.30.10",
     "expo-status-bar": "~2.2.3",
     "expo-symbols": "~0.4.5",
