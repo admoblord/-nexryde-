@@ -259,20 +259,6 @@ export default function ModernRiderHome() {
     </SafeAreaView>
   );
 }
-                  <Ionicons name={feature.icon as any} size={22} color={COLORS.primary} />
-                </View>
-                <Text style={styles.moreLabel}>{feature.label}</Text>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
-    </SafeAreaView>
-  );
-}
 
 const styles = StyleSheet.create({
   container: {
