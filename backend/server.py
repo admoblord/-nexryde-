@@ -4423,12 +4423,14 @@ async def ai_chat(request: AIChatRequest):
             role = "User" if msg["role"] == "user" else "AI"
             conversation_context += f"\n{role}: {msg['message']}"
         
-        if EMERGENT_LLM_KEY:
+        if OPENAI_API_KEY or EMERGENT_LLM_KEY:
+            api_key_to_use = OPENAI_API_KEY if OPENAI_API_KEY else EMERGENT_LLM_KEY
+            
             chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
+                api_key=api_key_to_use,
                 session_id=session_id,
                 system_message=AI_CHAT_SYSTEM_PROMPT + user_context + f"\n\nRecent conversation:{conversation_context}"
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=request.message)
             response_text = await chat.send_message(user_message)
@@ -4447,7 +4449,7 @@ async def ai_chat(request: AIChatRequest):
                 "success": True,
                 "message": response_text,
                 "session_id": session_id,
-                "powered_by": "gpt-4o",
+                "powered_by": "gpt-4o-mini",
                 "timestamp": datetime.utcnow().isoformat()
             }
         else:
