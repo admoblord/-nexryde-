@@ -35,6 +35,12 @@ const VEHICLE_TYPES = [
   { id: 'economy', name: 'Standard', icon: 'car', color: COLORS.brandGreen, desc: 'Affordable rides' },
   { id: 'comfort', name: 'Comfort', icon: 'car-sport', color: COLORS.brandBlue, desc: 'Extra comfort' },
   { id: 'xl', name: 'XL', icon: 'bus', color: '#FFB800', desc: 'More space' },
+  { id: 'premium', name: 'Premium', icon: 'rocket', color: '#9333EA', desc: 'Luxury ride' },
+];
+
+const TRIP_TYPES = [
+  { id: 'intra', label: 'Intra-City', desc: 'Within Lagos', icon: 'business' },
+  { id: 'inter', label: 'Inter-City', desc: 'Lagos to other cities', icon: 'airplane' },
 ];
 
 export default function BookRideScreen() {
@@ -43,6 +49,7 @@ export default function BookRideScreen() {
   const [destination, setDestination] = useState('');
   const [stops, setStops] = useState<string[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
+  const [selectedTripType, setSelectedTripType] = useState('intra');
   const [isLoading, setIsLoading] = useState(false);
 
   const addStop = () => {
