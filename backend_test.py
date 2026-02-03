@@ -299,7 +299,7 @@ class NexrydeAPITester:
         """Test PUT /api/trips/{trip_id}/cancel"""
         test_trip_id = "test_trip_123"
         response = await self.make_request("PUT", f"/trips/{test_trip_id}/cancel", {
-            "reason": "Testing cancellation"
+            "cancelled_by": "user_123"
         })
         
         if response["success"]:
