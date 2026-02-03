@@ -332,6 +332,23 @@ export default function BookingScreen() {
               </LinearGradient>
             </TouchableOpacity>
 
+            {/* VOICE BOOKING BUTTON - PURPLE GRADIENT */}
+            <TouchableOpacity 
+              style={styles.voiceBookingBtn}
+              onPress={() => router.push('/rider/voice-booking' as any)}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={[COLORS.purple, '#A855F7']}
+                style={styles.voiceGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Ionicons name="mic" size={20} color="#FFFFFF" />
+                <Text style={styles.voiceText}>Voice Booking</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
             {/* Pickup */}
             <View style={styles.locationRow}>
               <View style={[styles.locationDot, { backgroundColor: COLORS.mint }]} />
