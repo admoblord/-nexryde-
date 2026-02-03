@@ -369,9 +369,9 @@ export default function DriverHomeScreen() {
             </View>
           </View>
 
-          {/* QUICK ACTIONS GRID */}
+          {/* ALL DRIVER FEATURES GRID */}
           <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <Text style={styles.sectionTitle}>All Features</Text>
             <View style={styles.actionsGrid}>
               {DRIVER_ACTIONS.map((action, index) => (
                 <Animated.View
