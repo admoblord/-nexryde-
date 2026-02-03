@@ -1,20 +1,22 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   ScrollView,
   Alert,
   ActivityIndicator,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { GooglePlacesAutocomplete } from 'react-native-google-places-autocomplete';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY';
 
 // PREMIUM CAR TYPES - Beautiful & Professional
 const CAR_TYPES = [
@@ -68,13 +70,16 @@ export default function BookingScreen() {
   const [fareEstimate, setFareEstimate] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [tripType, setTripType] = useState<'intra' | 'inter'>('intra');
+  
+  const pickupRef = useRef<any>();
+  const destRef = useRef<any>();
 
   // Auto-calculate fare when both locations are entered
   useEffect(() => {
     if (pickup.trim() && destination.trim() && pickup.trim().length > 2 && destination.trim().length > 2) {
       const timer = setTimeout(() => {
         calculateFare();
-      }, 800); // Debounce for smooth UX
+      }, 800);
       return () => clearTimeout(timer);
     } else {
       setFareEstimate(null);
@@ -153,8 +158,12 @@ export default function BookingScreen() {
           <View style={{ width: 40 }} />
         </View>
 
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Trip Type Toggle - Beautiful Design */}
+        <ScrollView 
+          style={styles.content} 
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Trip Type Toggle */}
           <View style={styles.tripTypeCard}>
             <TouchableOpacity
               style={[styles.tripTypeButton, tripType === 'intra' && styles.tripTypeActive]}
@@ -187,58 +196,98 @@ export default function BookingScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Location Inputs - Premium Card */}
+          {/* Location Inputs with GOOGLE AUTOCOMPLETE */}
           <View style={styles.locationCard}>
             <View style={styles.locationHeader}>
               <Ionicons name="navigate-circle" size={24} color="#667eea" />
               <Text style={styles.locationHeaderText}>Where are you going?</Text>
             </View>
 
-            {/* Pickup */}
-            <View style={styles.inputContainer}>
+            {/* Pickup with Google Autocomplete */}
+            <View style={styles.autocompleteContainer}>
               <View style={[styles.inputDot, { backgroundColor: '#10b981' }]}>
                 <View style={styles.inputDotInner} />
               </View>
-              <TextInput
-                style={styles.input}
-                placeholder="Pickup location"
-                placeholderTextColor="#9ca3af"
-                value={pickup}
-                onChangeText={setPickup}
-                autoCapitalize="words"
-              />
-              {pickup.length > 0 && (
-                <TouchableOpacity onPress={() => setPickup('')} style={styles.clearButton}>
-                  <Ionicons name="close-circle" size={20} color="#9ca3af" />
-                </TouchableOpacity>
-              )}
+              <View style={{ flex: 1 }}>
+                <GooglePlacesAutocomplete
+                  ref={pickupRef}
+                  placeholder='Pickup location'
+                  minLength={2}
+                  fetchDetails={true}
+                  onPress={(data, details = null) => {
+                    setPickup(data.description);
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_API_KEY,
+                    language: 'en',
+                    components: 'country:ng',
+                  }}
+                  styles={{
+                    textInput: styles.autocompleteInput,
+                    listView: styles.autocompleteList,
+                    row: styles.autocompleteRow,
+                    description: styles.autocompleteDescription,
+                  }}
+                  textInputProps={{
+                    placeholderTextColor: '#9ca3af',
+                    returnKeyType: 'next',
+                    onSubmitEditing: () => destRef.current?.focus(),
+                  }}
+                  enablePoweredByContainer={false}
+                  nearbyPlacesAPI="GooglePlacesSearch"
+                  debounce={300}
+                />
+              </View>
             </View>
 
             <View style={styles.routeLine} />
 
-            {/* Destination */}
-            <View style={styles.inputContainer}>
+            {/* Destination with Google Autocomplete */}
+            <View style={styles.autocompleteContainer}>
               <View style={[styles.inputDot, { backgroundColor: '#ef4444' }]}>
                 <Ionicons name="location" size={12} color="#fff" />
               </View>
-              <TextInput
-                style={styles.input}
-                placeholder="Where to?"
-                placeholderTextColor="#9ca3af"
-                value={destination}
-                onChangeText={setDestination}
-                autoCapitalize="words"
-              />
-              {destination.length > 0 && (
-                <TouchableOpacity onPress={() => setDestination('')} style={styles.clearButton}>
-                  <Ionicons name="close-circle" size={20} color="#9ca3af" />
-                </TouchableOpacity>
-              )}
+              <View style={{ flex: 1 }}>
+                <GooglePlacesAutocomplete
+                  ref={destRef}
+                  placeholder='Where to?'
+                  minLength={2}
+                  fetchDetails={true}
+                  onPress={(data, details = null) => {
+                    setDestination(data.description);
+                    Keyboard.dismiss();
+                  }}
+                  query={{
+                    key: GOOGLE_MAPS_API_KEY,
+                    language: 'en',
+                    components: 'country:ng',
+                  }}
+                  styles={{
+                    textInput: styles.autocompleteInput,
+                    listView: styles.autocompleteList,
+                    row: styles.autocompleteRow,
+                    description: styles.autocompleteDescription,
+                  }}
+                  textInputProps={{
+                    placeholderTextColor: '#9ca3af',
+                    returnKeyType: 'done',
+                  }}
+                  enablePoweredByContainer={false}
+                  nearbyPlacesAPI="GooglePlacesSearch"
+                  debounce={300}
+                />
+              </View>
             </View>
 
             {/* Quick Suggestions */}
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
-              <TouchableOpacity style={styles.suggestionChip} onPress={() => setPickup('Current Location')}>
+              <TouchableOpacity 
+                style={styles.suggestionChip} 
+                onPress={() => {
+                  setPickup('Current Location');
+                  pickupRef.current?.setAddressText('Current Location');
+                }}
+              >
                 <Ionicons name="navigate" size={16} color="#10b981" />
                 <Text style={styles.suggestionText}>Current</Text>
               </TouchableOpacity>
@@ -253,7 +302,7 @@ export default function BookingScreen() {
             </ScrollView>
           </View>
 
-          {/* Car Type Selection - Beautiful Cards */}
+          {/* Car Type Selection */}
           <Text style={styles.sectionTitle}>Choose your ride</Text>
           {CAR_TYPES.map((car) => {
             const isSelected = selectedCar === car.id;
@@ -318,7 +367,7 @@ export default function BookingScreen() {
             );
           })}
 
-          {/* Fare Breakdown - Premium Card */}
+          {/* Fare Breakdown */}
           {fareEstimate && (
             <View style={styles.fareCard}>
               <LinearGradient
@@ -359,7 +408,7 @@ export default function BookingScreen() {
           <View style={{ height: 120 }} />
         </ScrollView>
 
-        {/* Book Button - Premium Gradient */}
+        {/* Book Button */}
         <View style={styles.footer}>
           <TouchableOpacity
             style={[styles.bookButton, !fareEstimate && styles.bookButtonDisabled]}
@@ -473,9 +522,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#1a1a2e',
   },
-  inputContainer: {
+  autocompleteContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 14,
   },
   inputDot: {
@@ -484,6 +533,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 12,
   },
   inputDotInner: {
     width: 8,
@@ -498,15 +548,34 @@ const styles = StyleSheet.create({
     marginLeft: 11,
     marginVertical: 4,
   },
-  input: {
-    flex: 1,
+  autocompleteInput: {
     fontSize: 16,
     fontWeight: '600',
     color: '#1a1a2e',
-    paddingVertical: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
-  clearButton: {
-    padding: 4,
+  autocompleteList: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    marginTop: 4,
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+  },
+  autocompleteRow: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    backgroundColor: '#fff',
+  },
+  autocompleteDescription: {
+    fontSize: 14,
+    color: '#374151',
+    fontWeight: '500',
   },
   suggestionsRow: {
     marginTop: 20,
