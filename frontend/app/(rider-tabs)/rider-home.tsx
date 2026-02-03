@@ -72,13 +72,35 @@ const QUICK_FEATURES = [
   { id: 'favorites', label: 'Favorites', icon: 'star-outline', route: '/rider/favorite-drivers', color: COLORS.warning },
 ];
 
-// MORE FEATURES - IN NAVIGATION
-const MORE_FEATURES = [
-  { id: 'bid', label: 'Bid Ride', icon: 'pricetag-outline', route: '/rider/bid' },
-  { id: 'split-fare', label: 'Split Fare', icon: 'people-outline', route: '/rider/split-fare' },
-  { id: 'family', label: 'Family', icon: 'home-outline', route: '/rider/family' },
-  { id: 'tracking', label: 'Live Tracking', icon: 'navigate-outline', route: '/rider/tracking' },
-  { id: 'recording', label: 'Ride Recording', icon: 'videocam-outline', route: '/rider/ride-recording' },
+// ALL FEATURES GRID - COMPREHENSIVE ACCESS
+const ALL_FEATURES = [
+  // Booking & Rides
+  { id: 'bid', label: 'Bid Ride', icon: 'pricetag', route: '/rider/bid', color: COLORS.primary },
+  { id: 'tracking', label: 'Live Track', icon: 'navigate', route: '/rider/tracking', color: COLORS.secondary },
+  { id: 'driver-details', label: 'Driver Info', icon: 'person-circle', route: '/rider/driver-details', color: COLORS.primary },
+  { id: 'trip-receipt', label: 'Receipts', icon: 'receipt', route: '/rider/trip-receipt', color: COLORS.secondary },
+  
+  // Social & Sharing
+  { id: 'split-fare', label: 'Split Fare', icon: 'people', route: '/rider/split-fare', color: COLORS.warning },
+  { id: 'share-trip', label: 'Share Trip', icon: 'share-social', route: '/rider/share-trip', color: COLORS.primary },
+  { id: 'family', label: 'Family', icon: 'home', route: '/rider/family', color: COLORS.secondary },
+  
+  // Safety & Security
+  { id: 'recording', label: 'Recording', icon: 'videocam', route: '/rider/ride-recording', color: COLORS.danger },
+  { id: 'security-code', label: 'Security', icon: 'lock-closed', route: '/rider/security-code', color: COLORS.warning },
+  { id: 'safety-center', label: 'Safety', icon: 'shield-checkmark', route: '/(rider-tabs)/rider-safety', color: COLORS.danger },
+  
+  // Preferences & Settings
+  { id: 'car-type', label: 'Car Type', icon: 'car-sport', route: '/rider/car-type-preference', color: COLORS.primary },
+  { id: 'mood', label: 'Mood', icon: 'musical-notes', route: '/rider/mood-preferences', color: COLORS.secondary },
+  { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/rider/traffic-status', color: COLORS.warning },
+  
+  // Support & Tools
+  { id: 'assistant', label: 'AI Buddy', icon: 'chatbubbles', route: '/ai-buddy', color: COLORS.primary },
+  { id: 'chat', label: 'Messages', icon: 'chatbox', route: '/chat', color: COLORS.secondary },
+  { id: 'support', label: 'Support', icon: 'help-circle', route: '/support', color: COLORS.warning },
+  { id: 'lost-found', label: 'Lost Items', icon: 'search', route: '/lost-found', color: COLORS.danger },
+  { id: 'saved-places', label: 'Places', icon: 'location', route: '/saved-places', color: COLORS.primary },
 ];
 
 export default function ModernRiderHome() {
