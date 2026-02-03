@@ -1895,6 +1895,13 @@ async def register(request: RegisterRequest):
         if existing:
             raise HTTPException(status_code=400, detail="User with this Google account already exists")
     
+    # Validate role-specific requirements
+    if request.role == "driver" and not request.terms_accepted:
+        raise HTTPException(status_code=400, detail="Drivers must accept terms and conditions")
+    
+    if request.role == "rider" and not request.nin:
+        raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
+    
     user = User(
         phone=request.phone or "",
         name=request.name, 
@@ -1902,7 +1909,10 @@ async def register(request: RegisterRequest):
         role=request.role, 
         is_verified=True,
         google_id=request.google_id,
-        profile_image=request.profile_image
+        profile_image=request.profile_image,
+        nin=request.nin,  # NIN for riders
+        terms_accepted=request.terms_accepted,  # Terms acceptance for drivers
+        terms_accepted_at=request.terms_accepted_at,  # Timestamp for drivers
     )
     await db.users.insert_one(user.dict())
     
