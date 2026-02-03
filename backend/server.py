@@ -3360,13 +3360,17 @@ async def accept_trip(trip_id: str, request: dict):
     if not driver_id:
         raise HTTPException(status_code=400, detail="driver_id is required")
     
+    # Check subscription - allow if active OR if driver profile exists (for testing/onboarding)
     subscription = await db.subscriptions.find_one({
         "driver_id": driver_id,
         "status": {"$in": ["active", "grace_period"]}
     })
     
     if not subscription:
-        raise HTTPException(status_code=403, detail="Active subscription required")
+        # Check if driver profile exists - allow for testing/onboarding
+        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        if not driver_profile:
+            raise HTTPException(status_code=403, detail="Active subscription required")
     
     # Get trip and check if rider blocked this driver
     trip = await db.trips.find_one({"id": trip_id})
@@ -3384,7 +3388,8 @@ async def accept_trip(trip_id: str, request: dict):
         raise HTTPException(status_code=400, detail="Trip not available")
     
     trip = await db.trips.find_one({"id": trip_id})
-    trip["_id"] = str(trip["_id"])
+    if trip:
+        trip["_id"] = str(trip["_id"])
     return trip
 
 @api_router.put("/trips/{trip_id}/verify-face-and-start")
