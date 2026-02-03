@@ -326,9 +326,7 @@ class NexrydeAPITester:
     
     async def test_driver_online_toggle(self):
         """Test PUT /api/drivers/{driver_id}/online"""
-        response = await self.make_request("PUT", f"/drivers/{TEST_DRIVER_ID}/online", {
-            "is_online": True
-        })
+        response = await self.make_request("PUT", f"/drivers/{TEST_DRIVER_ID}/online?is_online=true")
         
         if response["success"]:
             self.log_result("/drivers/{driver_id}/online", "PUT", "WORKING", "Online status updated")
