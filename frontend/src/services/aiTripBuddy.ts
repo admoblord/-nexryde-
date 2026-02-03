@@ -145,15 +145,53 @@ export class AITripBuddy {
   /**
    * Generate AI response based on personality and context
    */
-  static generateResponse(
+  static async generateResponse(
     userMessage: string,
     personality: AIPersonality,
     context: ConversationContext,
     conversationHistory: AIMessage[] = []
+  ): Promise<string> {
+    try {
+      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      
+      // Build personality context
+      const personalityConfig = AI_PERSONALITIES.find(p => p.id === personality);
+      const personalityPrompt = personalityConfig 
+        ? `You are ${personalityConfig.name} (${personalityConfig.icon}), ${personalityConfig.description}. Speak in this style: ${personalityConfig.traits.join(', ')}.`
+        : '';
+      
+      // Call real OpenAI backend
+      const response = await fetch(`${BACKEND_URL}/api/chat/ai`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: `${personalityPrompt}\n\nUser: ${userMessage}`,
+          user_id: 'ai_buddy_user',
+          user_role: 'rider',
+          session_id: `buddy_${Date.now()}`,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        return data.message || 'I apologize, I could not generate a response.';
+      }
+      
+      throw new Error('API call failed');
+      
+    } catch (error) {
+      console.error('AI Buddy API Error:', error);
+      // Fallback to local mock
+      return this.generateLocalFallback(userMessage, personality, context);
+    }
+  }
+
+  private static generateLocalFallback(
+    userMessage: string,
+    personality: AIPersonality,
+    context: ConversationContext
   ): string {
     const lowerMessage = userMessage.toLowerCase();
-    
-    // Detect intent
     const intent = this.detectIntent(lowerMessage);
     
     // Generate response based on personality and intent
