@@ -324,6 +324,147 @@ export default function RiderProfileScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* ALL FEATURES SECTION - COMPREHENSIVE ACCESS */}
+        <View style={styles.menuSection}>
+          <Text style={styles.menuSectionTitle}>All Features</Text>
+          
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/bid')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.primarySoft }]}>
+              <Ionicons name="pricetag-outline" size={20} color={COLORS.primary} />
+            </View>
+            <Text style={styles.menuText}>Bid Ride (InDrive Style)</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/split-fare')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+              <Ionicons name="people-outline" size={20} color={COLORS.warning} />
+            </View>
+            <Text style={styles.menuText}>Split Fare</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/family')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
+              <Ionicons name="home-outline" size={20} color={COLORS.success} />
+            </View>
+            <Text style={styles.menuText}>KODA Family</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/tracking')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="navigate-outline" size={20} color={COLORS.info} />
+            </View>
+            <Text style={styles.menuText}>Live Tracking</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/ride-recording')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.errorSoft }]}>
+              <Ionicons name="videocam-outline" size={20} color={COLORS.error} />
+            </View>
+            <Text style={styles.menuText}>Ride Recording</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/security-code')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="lock-closed-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={styles.menuText}>Security Code</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/share-trip')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
+              <Ionicons name="share-social-outline" size={20} color={COLORS.accent} />
+            </View>
+            <Text style={styles.menuText}>Share Trip</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/car-type-preference')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.primarySoft }]}>
+              <Ionicons name="car-sport-outline" size={20} color={COLORS.primary} />
+            </View>
+            <Text style={styles.menuText}>Car Type Preference</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/mood-preferences')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+              <Ionicons name="musical-notes-outline" size={20} color={COLORS.warning} />
+            </View>
+            <Text style={styles.menuText}>Mood Preferences</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/traffic-status')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.errorSoft }]}>
+              <Ionicons name="speedometer-outline" size={20} color={COLORS.error} />
+            </View>
+            <Text style={styles.menuText}>Traffic Status</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/trip-receipt')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="receipt-outline" size={20} color={COLORS.info} />
+            </View>
+            <Text style={styles.menuText}>Trip Receipts</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/ai-buddy')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
+              <Ionicons name="chatbubbles-outline" size={20} color={COLORS.success} />
+            </View>
+            <Text style={styles.menuText}>AI Buddy</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/chat')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.primarySoft }]}>
+              <Ionicons name="chatbox-outline" size={20} color={COLORS.primary} />
+            </View>
+            <Text style={styles.menuText}>Messages</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/lost-found')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+              <Ionicons name="search-outline" size={20} color={COLORS.warning} />
+            </View>
+            <Text style={styles.menuText}>Lost & Found</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/fare-breakdown')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="calculator-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={styles.menuText}>Fare Breakdown</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/ride-history')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="time-outline" size={20} color={COLORS.info} />
+            </View>
+            <Text style={styles.menuText}>Ride History</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/assistant')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
+              <Ionicons name="mic-outline" size={20} color={COLORS.accent} />
+            </View>
+            <Text style={styles.menuText}>Voice Assistant</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+        </View>
+
         {/* Logout */}
         <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
           <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
