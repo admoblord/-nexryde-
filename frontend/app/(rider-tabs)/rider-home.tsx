@@ -236,18 +236,29 @@ export default function ModernRiderHome() {
           </View>
         </Animated.View>
 
-        {/* MORE FEATURES - COMPACT LIST */}
+        {/* ALL FEATURES GRID - COMPLETE ACCESS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>More Features</Text>
-          <View style={styles.moreList}>
-            {MORE_FEATURES.map((feature, index) => (
+          <Text style={styles.sectionTitle}>All Features</Text>
+          <View style={styles.allFeaturesGrid}>
+            {ALL_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
-                style={[styles.moreItem, index === MORE_FEATURES.length - 1 && { borderBottomWidth: 0 }]}
+                style={styles.featureCard}
                 onPress={() => router.push(feature.route as any)}
                 activeOpacity={0.7}
               >
-                <View style={styles.moreIcon}>
+                <View style={[styles.featureIcon, { backgroundColor: feature.color + '15' }]}>
+                  <Ionicons name={feature.icon as any} size={24} color={feature.color} />
+                </View>
+                <Text style={styles.featureLabel} numberOfLines={2}>{feature.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </Animated.View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
                   <Ionicons name={feature.icon as any} size={22} color={COLORS.primary} />
                 </View>
                 <Text style={styles.moreLabel}>{feature.label}</Text>
