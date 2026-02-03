@@ -133,8 +133,10 @@ export default function BookRideScreen() {
                 <LocationAutocomplete
                   placeholder="Enter pickup location..."
                   value={pickup}
-                  onSelectLocation={(location) => setPickup(location.description)}
-                  containerStyle={styles.autocompleteContainer}
+                  onChangeText={setPickup}
+                  onPlaceSelected={(location) => setPickup(location.description)}
+                  apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                  placeholderTextColor="#A8B3C5"
                 />
               </View>
             </View>
@@ -152,8 +154,10 @@ export default function BookRideScreen() {
                 <LocationAutocomplete
                   placeholder="Where are you going?"
                   value={destination}
-                  onSelectLocation={(location) => setDestination(location.description)}
-                  containerStyle={styles.autocompleteContainer}
+                  onChangeText={setDestination}
+                  onPlaceSelected={(location) => setDestination(location.description)}
+                  apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                  placeholderTextColor="#A8B3C5"
                 />
               </View>
             </View>
