@@ -95,8 +95,8 @@ export default function BookRideScreen() {
         body: JSON.stringify({
           pickup: pickup,
           destination: destination,
-          vehicle_type: selectedVehicle,  // economy, comfort, or xl
-          trip_type: 'intra',  // intra-city by default
+          vehicle_type: selectedVehicle,  // economy, comfort, xl, premium
+          trip_type: selectedTripType,  // intra or inter
         }),
       });
 
