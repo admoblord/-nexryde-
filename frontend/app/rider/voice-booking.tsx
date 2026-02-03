@@ -292,20 +292,62 @@ export default function VoiceBookingScreen() {
               ))}
             </View>
 
-            {/* Example Phrases */}
+            {/* Example Phrases - ENHANCED WITH QUICK TAP */}
             <View style={styles.examplesCard}>
-              <Text style={styles.examplesTitle}>📢 Say something like:</Text>
+              <Text style={styles.examplesTitle}>📢 Try These Examples:</Text>
+              
+              {/* Quick Example Buttons */}
+              <View style={styles.quickExamplesRow}>
+                <TouchableOpacity 
+                  style={styles.quickExampleBtn}
+                  onPress={() => {
+                    setRecognizedText('Take me from Lekki to Ikeja');
+                    processVoiceCommand('Take me from Lekki to Ikeja');
+                  }}
+                >
+                  <Text style={styles.quickExampleText}>Lekki → Ikeja</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.quickExampleBtn}
+                  onPress={() => {
+                    setRecognizedText('Go to Victoria Island');
+                    processVoiceCommand('Go to Victoria Island');
+                  }}
+                >
+                  <Text style={styles.quickExampleText}>Go to VI</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity 
+                  style={styles.quickExampleBtn}
+                  onPress={() => {
+                    setRecognizedText('Take me to Ajah from Yaba');
+                    processVoiceCommand('Take me to Ajah from Yaba');
+                  }}
+                >
+                  <Text style={styles.quickExampleText}>Yaba → Ajah</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.divider} />
+              
+              <Text style={styles.examplesSubheading}>Or say:</Text>
               <Text style={styles.exampleText}>
-                "Take me to Ajah from Sangotedo"
+                • "Take me to Ajah from Sangotedo"
               </Text>
               <Text style={styles.exampleText}>
-                "I want to go to Ikorodu"
+                • "I want to go to Ikorodu"
               </Text>
               <Text style={styles.exampleText}>
-                "Book me go Lekki from Yaba"
+                • "Book me go Lekki" (Pidgin)
               </Text>
-              <Text style={styles.examplesSubtext}>
-                Works with 600+ Nigerian locations!
+              <Text style={styles.exampleText}>
+                • "Abeg carry me go Yaba" (Pidgin)
+              </Text>
+              <Text style={styles.examplesFooter}>
+                ✅ Supports 200+ Nigerian locations across all 36 states!
+                {'\n'}✅ Pidgin English supported!
+                {'\n'}✅ Nigerian accent optimized!
               </Text>
             </View>
 
