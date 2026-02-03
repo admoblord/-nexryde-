@@ -681,6 +681,9 @@ frontend:
         - working: false
         - agent: "testing"
         - comment: "❌ FINAL COMPREHENSIVE TESTING CONFIRMS CRITICAL PRESSABLE FAILURES (390x844): Booking screen UI displays PERFECTLY - header 'Your route', pickup/dropoff location fields, saved places (Home: 123 Victoria Island, Work: 456 Lekki Phase 1), recent locations (Shoprite Mall, Murtala Mohammed Airport), 'Use current location' button, Continue button all render correctly with excellent mobile responsive design. CRITICAL ISSUES CONFIRMED: 1) Pickup/Dropoff location field clicks do NOT open location picker modal - Pressable onPress handlers COMPLETELY BROKEN, 2) Continue button navigation to /rider/tracking COMPLETELY BROKEN (URL remains same after click), 3) Saved location selection works correctly (Home/Work fill fields). ROOT CAUSE: Pressable components have broken onPress event handlers throughout the screen. URGENT: Fix Pressable implementation or revert to TouchableOpacity for all interactive elements."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CRITICAL UI RENDERING FAILURE: Comprehensive testing on mobile (390x844) reveals booking screen has deeper issues than previously reported. Core UI elements are NOT VISIBLE: 'Your route' header (False), Pickup location field (False), Drop-off location field (False), Home/Work saved places buttons (False), Continue button (False). This suggests the booking screen is not rendering properly at all, not just Pressable click handler issues. The app redirects to a different booking interface showing 'Available Rides', 'Searching for drivers...', pickup/dropoff input fields, 'Within City'/'Intercity' toggles, and 'Enter Locations' button. This indicates the booking flow has been completely redesigned or there are routing issues. URGENT: Investigate why /rider/book is not loading expected UI components."
 
   - task: "Safety Center Screen"
     implemented: true
