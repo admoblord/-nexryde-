@@ -55,6 +55,7 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 # Emergent LLM Key for AI Assistants
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # Termii SMS OTP Configuration
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
