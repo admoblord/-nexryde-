@@ -7728,6 +7728,67 @@ async def get_driver_suspension_status(driver_id: str):
 # Import for category severity map
 from driver_report_system import CATEGORY_SEVERITY_MAP
 
+@app.get("/api/admin/dashboard")
+async def get_admin_dashboard():
+    """Get admin dashboard statistics"""
+    try:
+        # Get counts
+        total_users = await db.users.count_documents({})
+        total_drivers = await db.driver_profiles.count_documents({})
+        online_drivers = await db.driver_profiles.count_documents({"is_online": True})
+        total_trips = await db.trips.count_documents({})
+        active_trips = await db.trips.count_documents({"status": {"$in": ["accepted", "picked_up", "in_progress"]}})
+        completed_trips = await db.trips.count_documents({"status": "completed"})
+        
+        # Get revenue (sum of all completed trip fares)
+        revenue_pipeline = [
+            {"$match": {"status": "completed"}},
+            {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
+        ]
+        revenue_result = await db.trips.aggregate(revenue_pipeline).to_list(1)
+        total_revenue = revenue_result[0]["total"] if revenue_result else 0
+        
+        # Get pending verifications
+        pending_verifications = await db.driver_profiles.count_documents({"verification_status": "pending"})
+        
+        # Get pending vehicle registrations
+        pending_registrations = await db.vehicle_registrations.count_documents({"status": "pending"})
+        
+        return {
+            "users": {
+                "total": total_users,
+                "drivers": total_drivers,
+                "riders": total_users - total_drivers,
+            },
+            "drivers": {
+                "total": total_drivers,
+                "online": online_drivers,
+                "offline": total_drivers - online_drivers,
+            },
+            "trips": {
+                "total": total_trips,
+                "active": active_trips,
+                "completed": completed_trips,
+            },
+            "revenue": {
+                "total": total_revenue,
+                "currency": "NGN",
+            },
+            "pending": {
+                "driver_verifications": pending_verifications,
+                "vehicle_registrations": pending_registrations,
+            }
+        }
+    except Exception as e:
+        logging.error(f"Admin dashboard error: {str(e)}")
+        return {
+            "users": {"total": 0, "drivers": 0, "riders": 0},
+            "drivers": {"total": 0, "online": 0, "offline": 0},
+            "trips": {"total": 0, "active": 0, "completed": 0},
+            "revenue": {"total": 0, "currency": "NGN"},
+            "pending": {"driver_verifications": 0, "vehicle_registrations": 0}
+        }
+
 # Seed default promo codes on startup
 @app.on_event("startup")
 async def seed_promo_codes():
