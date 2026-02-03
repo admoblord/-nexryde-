@@ -10,9 +10,8 @@ export default function SupportScreen() {
   const [message, setMessage] = useState('');
 
   const contactOptions = [
-    { icon: 'call', label: 'Call Support', value: '+234-900-000-0000', action: () => Linking.openURL('tel:+2349000000000') },
-    { icon: 'mail', label: 'Email Us', value: 'support@nexryde.com', action: () => Linking.openURL('mailto:support@nexryde.com') },
-    { icon: 'logo-whatsapp', label: 'WhatsApp', value: '+234-900-000-0000', action: () => Linking.openURL('https://wa.me/2349000000000') },
+    { icon: 'call', label: 'Call Support', value: '+234 810 889 9392', action: () => Linking.openURL('tel:+2348108899392') },
+    { icon: 'mail', label: 'Email Us', value: 'admoblordgroup@gmail.com', action: () => Linking.openURL('mailto:admoblordgroup@gmail.com') },
   ];
 
   const faqs = [
