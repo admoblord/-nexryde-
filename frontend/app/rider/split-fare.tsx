@@ -171,14 +171,15 @@ export default function SplitFareScreen() {
         {/* Contacts */}
         <Text style={styles.sectionTitle}>Select Friends ({selectedFriends.length}/4)</Text>
         
-        {contacts.map((contact) => (
+        {filteredContacts.map((contact) => (
           <TouchableOpacity
             key={contact.id}
             style={[
               styles.contactCard,
-              selectedFriends.includes(contact.id) && styles.contactCardSelected
+              selectedFriends.find(f => f.id === contact.id) && styles.contactCardSelected
             ]}
-            onPress={() => toggleFriend(contact.id)}
+            onPress={() => toggleFriend(contact)}
+          >
           >
             <View style={styles.contactAvatar}>
               <Text style={styles.avatarText}>{contact.avatar}</Text>
