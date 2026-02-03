@@ -41,8 +41,27 @@ export default function BookRideScreen() {
   const router = useRouter();
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
+  const [stops, setStops] = useState<string[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [isLoading, setIsLoading] = useState(false);
+
+  const addStop = () => {
+    if (stops.length < 3) {
+      setStops([...stops, '']);
+    } else {
+      Alert.alert('Maximum Stops', 'You can add up to 3 stops only');
+    }
+  };
+
+  const removeStop = (index: number) => {
+    setStops(stops.filter((_, i) => i !== index));
+  };
+
+  const updateStop = (index: number, value: string) => {
+    const newStops = [...stops];
+    newStops[index] = value;
+    setStops(newStops);
+  };
 
   const handleConfirmBooking = async () => {
     // Validate inputs
