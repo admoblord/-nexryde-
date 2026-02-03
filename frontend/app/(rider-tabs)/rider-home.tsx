@@ -606,4 +606,43 @@ const styles = StyleSheet.create({
   carIcon: {
     marginLeft: 12,
   },
+
+  // FEATURES GRID
+  section: {
+    marginBottom: 24,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.text,
+    marginBottom: 16,
+  },
+  featuresGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  featureCard: {
+    width: '31%',
+    aspectRatio: 1,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featureIconBg: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  featureTitle: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.text,
+    textAlign: 'center',
+  },
 });
