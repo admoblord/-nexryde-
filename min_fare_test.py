@@ -9,7 +9,7 @@ import json
 from typing import Dict, Any
 
 # Backend URL from frontend env
-BACKEND_URL = "https://nexryde-debug.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-auth-flow.preview.emergentagent.com/api"
 
 def test_min_fare_removal():
     """
