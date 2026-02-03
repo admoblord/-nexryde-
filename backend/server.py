@@ -3355,7 +3355,11 @@ async def get_pending_trips(driver_lat: float, driver_lng: float):
     return nearby_trips[:10]
 
 @api_router.put("/trips/{trip_id}/accept")
-async def accept_trip(trip_id: str, driver_id: str):
+async def accept_trip(trip_id: str, request: dict):
+    driver_id = request.get("driver_id", "")
+    if not driver_id:
+        raise HTTPException(status_code=400, detail="driver_id is required")
+    
     subscription = await db.subscriptions.find_one({
         "driver_id": driver_id,
         "status": {"$in": ["active", "grace_period"]}
