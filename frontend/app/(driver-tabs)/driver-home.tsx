@@ -195,27 +195,24 @@ export default function ModernDriverHome() {
           </View>
         </Animated.View>
 
-        {/* MORE FEATURES - COMPACT LIST */}
+        {/* ALL FEATURES GRID - COMPLETE ACCESS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>More Features</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>See All</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>All Features</Text>
+            <Text style={styles.featureCount}>{ALL_FEATURES.length} features</Text>
           </View>
-          <View style={styles.moreList}>
-            {MORE_FEATURES.slice(0, 6).map((feature) => (
+          <View style={styles.allFeaturesGrid}>
+            {ALL_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
-                style={styles.moreItem}
+                style={styles.featureCard}
                 onPress={() => router.push(feature.route as any)}
                 activeOpacity={0.7}
               >
-                <View style={styles.moreIcon}>
-                  <Ionicons name={feature.icon as any} size={22} color={COLORS.primary} />
+                <View style={[styles.featureIconBox, { backgroundColor: feature.color + '15' }]}>
+                  <Ionicons name={feature.icon as any} size={24} color={feature.color} />
                 </View>
-                <Text style={styles.moreLabel}>{feature.label}</Text>
-                <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
+                <Text style={styles.featureText} numberOfLines={2}>{feature.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
