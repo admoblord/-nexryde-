@@ -351,6 +351,31 @@ const styles = StyleSheet.create({
   autocompleteContainer: {
     // Autocomplete will render here
   },
+  stopHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  addStopButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0, 212, 106, 0.1)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    marginTop: 8,
+    marginBottom: 12,
+    borderWidth: 2,
+    borderColor: COLORS.brandGreen,
+    borderStyle: 'dashed',
+  },
+  addStopText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.brandGreen,
+    marginLeft: 8,
+  },
   vehicleSection: {
     marginTop: 32,
   },
