@@ -161,6 +161,48 @@ export default function BookRideScreen() {
               </View>
             </View>
 
+            {/* STOPS - Dynamic Stop Addition */}
+            {stops.map((stop, index) => (
+              <View key={index} style={[styles.locationCard, { marginTop: -10 }]}>
+                <View style={styles.locationIconContainer}>
+                  <View style={[styles.iconCircle, { backgroundColor: '#FFB800' }]}>
+                    <Text style={{ color: COLORS.white, fontWeight: '800', fontSize: 14 }}>
+                      {index + 1}
+                    </Text>
+                  </View>
+                  {index < stops.length - 1 && <View style={styles.verticalLine} />}
+                </View>
+                
+                <View style={styles.locationInput}>
+                  <View style={styles.stopHeader}>
+                    <Text style={styles.locationLabel}>STOP {index + 1}</Text>
+                    <TouchableOpacity onPress={() => removeStop(index)}>
+                      <Ionicons name="close-circle" size={20} color="#EF4444" />
+                    </TouchableOpacity>
+                  </View>
+                  <LocationAutocomplete
+                    placeholder={`Enter stop ${index + 1} location...`}
+                    value={stop}
+                    onChangeText={(text) => updateStop(index, text)}
+                    onPlaceSelected={(location) => updateStop(index, location.description)}
+                    apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                    placeholderTextColor="#A8B3C5"
+                  />
+                </View>
+              </View>
+            ))}
+
+            {/* Add Stop Button */}
+            {stops.length < 3 && (
+              <TouchableOpacity
+                style={styles.addStopButton}
+                onPress={addStop}
+              >
+                <Ionicons name="add-circle-outline" size={20} color={COLORS.brandGreen} />
+                <Text style={styles.addStopText}>Add Stop</Text>
+              </TouchableOpacity>
+            )}
+
             {/* Destination Card */}
             <View style={[styles.locationCard, { marginTop: -10 }]}>
               <View style={styles.locationIconContainer}>
