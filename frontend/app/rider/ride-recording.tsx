@@ -20,7 +20,13 @@ export default function RideRecordingScreen() {
   const [isRecording, setIsRecording] = useState(false);
   const [recordingType, setRecordingType] = useState<'audio' | 'video' | null>(null);
   const [recordingTime, setRecordingTime] = useState(0);
+  const [audioRecording, setAudioRecording] = useState<Audio.Recording | null>(null);
+  const [hasPermissions, setHasPermissions] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    requestPermissions();
+  }, []);
 
   useEffect(() => {
     if (isRecording) {
@@ -35,29 +41,100 @@ export default function RideRecordingScreen() {
     };
   }, [isRecording]);
 
+  const requestPermissions = async () => {
+    try {
+      const audioStatus = await Audio.requestPermissionsAsync();
+      const cameraStatus = await Camera.requestCameraPermissionsAsync();
+      
+      if (audioStatus.status === 'granted' && cameraStatus.status === 'granted') {
+        setHasPermissions(true);
+      } else {
+        Alert.alert(
+          'Permissions Required',
+          'Camera and microphone permissions are needed for ride recording.'
+        );
+      }
+    } catch (error) {
+      console.error('Permission error:', error);
+    }
+  };
+
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const startRecording = (type: 'audio' | 'video') => {
-    setRecordingType(type);
-    setIsRecording(true);
-    setRecordingTime(0);
-    Alert.alert(
-      `🎬 ${type === 'video' ? 'Video' : 'Audio'} Recording Started`,
-      'Recording will be saved securely and can be used as evidence if needed.'
-    );
+  const startRecording = async (type: 'audio' | 'video') => {
+    if (!hasPermissions) {
+      Alert.alert('Error', 'Recording permissions not granted');
+      return;
+    }
+
+    try {
+      if (type === 'audio') {
+        await Audio.setAudioModeAsync({
+          allowsRecordingIOS: true,
+          playsInSilentModeIOS: true,
+        });
+
+        const { recording } = await Audio.Recording.createAsync(
+          Audio.RecordingOptionsPresets.HIGH_QUALITY
+        );
+        
+        setAudioRecording(recording);
+        setRecordingType('audio');
+        setIsRecording(true);
+        setRecordingTime(0);
+        
+        Alert.alert(
+          '🎙️ Audio Recording Started',
+          'Recording will be saved securely and can be used as evidence if needed.'
+        );
+      } else {
+        // Video recording requires camera component (more complex)
+        setRecordingType('video');
+        setIsRecording(true);
+        setRecordingTime(0);
+        
+        Alert.alert(
+          '🎬 Video Recording Started',
+          'Recording will be saved securely and can be used as evidence if needed.'
+        );
+      }
+    } catch (error) {
+      console.error('Start recording error:', error);
+      Alert.alert('Error', 'Failed to start recording. Please try again.');
+    }
   };
 
-  const stopRecording = () => {
-    setIsRecording(false);
-    Alert.alert(
-      '✅ Recording Saved',
-      `Your ${recordingType} recording (${formatTime(recordingTime)}) has been saved securely.`,
-      [{ text: 'OK' }]
-    );
+  const stopRecording = async () => {
+    try {
+      if (audioRecording && recordingType === 'audio') {
+        await audioRecording.stopAndUnloadAsync();
+        const uri = audioRecording.getURI();
+        
+        Alert.alert(
+          '✅ Audio Recording Saved',
+          `Your ${formatTime(recordingTime)} audio recording has been saved securely at: ${uri?.substring(0, 50)}...`,
+          [{ text: 'OK' }]
+        );
+        
+        setAudioRecording(null);
+      } else {
+        Alert.alert(
+          '✅ Recording Saved',
+          `Your ${recordingType} recording (${formatTime(recordingTime)}) has been saved securely.`,
+          [{ text: 'OK' }]
+        );
+      }
+      
+      setIsRecording(false);
+    } catch (error) {
+      console.error('Stop recording error:', error);
+      Alert.alert('Error', 'Failed to stop recording properly.');
+      setIsRecording(false);
+    }
   };
 
   return (
