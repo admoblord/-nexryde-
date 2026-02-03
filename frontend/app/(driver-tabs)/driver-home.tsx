@@ -32,12 +32,13 @@ const COLORS = {
 
 // DRIVER ACTIONS WITH DESIGN COLORS
 const DRIVER_ACTIONS = [
+  // CORE
   {
     id: 'earnings',
     label: 'Earnings',
     icon: 'cash',
     color: COLORS.yellow,
-    route: '/(driver-tabs)/driver-earnings',
+    route: '/driver/earnings-dashboard',
   },
   {
     id: 'trips',
@@ -47,18 +48,179 @@ const DRIVER_ACTIONS = [
     route: '/(driver-tabs)/driver-trips',
   },
   {
-    id: 'profile',
-    label: 'Profile',
-    icon: 'person',
+    id: 'subscription',
+    label: 'Subscription',
+    icon: 'card',
     color: COLORS.purple,
-    route: '/(driver-tabs)/driver-profile',
+    route: '/driver/subscription',
   },
   {
-    id: 'safety',
-    label: 'Safety',
+    id: 'verification',
+    label: 'Verification',
     icon: 'shield-checkmark',
     color: COLORS.green,
-    route: '/(driver-tabs)/driver-safety',
+    route: '/driver/verification',
+  },
+  // VEHICLE
+  {
+    id: 'vehicle',
+    label: 'My Vehicle',
+    icon: 'car-sport',
+    color: COLORS.blue,
+    route: '/driver/vehicle',
+  },
+  {
+    id: 'vehicle-registration',
+    label: 'Registration',
+    icon: 'document-text',
+    color: COLORS.yellow,
+    route: '/driver/vehicle-registration',
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    icon: 'documents',
+    color: COLORS.purple,
+    route: '/driver/documents',
+  },
+  // PERFORMANCE
+  {
+    id: 'performance',
+    label: 'Performance',
+    icon: 'analytics',
+    color: COLORS.green,
+    route: '/driver/performance',
+  },
+  {
+    id: 'leaderboard',
+    label: 'Leaderboard',
+    icon: 'trophy',
+    color: COLORS.yellow,
+    route: '/driver/leaderboard',
+  },
+  {
+    id: 'badges',
+    label: 'Badges',
+    icon: 'star',
+    color: COLORS.purple,
+    route: '/driver/badges',
+  },
+  {
+    id: 'tiers',
+    label: 'Driver Tiers',
+    icon: 'ribbon',
+    color: COLORS.green,
+    route: '/driver/tiers',
+  },
+  {
+    id: 'challenges',
+    label: 'Challenges',
+    icon: 'flame',
+    color: COLORS.red,
+    route: '/driver/challenges',
+  },
+  // SMART FEATURES
+  {
+    id: 'smart-mode',
+    label: 'Smart Mode',
+    icon: 'bulb',
+    color: COLORS.yellow,
+    route: '/driver/smart-mode',
+  },
+  {
+    id: 'heatmap',
+    label: 'Heatmap',
+    icon: 'map',
+    color: COLORS.red,
+    route: '/driver/heatmap',
+  },
+  {
+    id: 'traffic',
+    label: 'Traffic',
+    icon: 'car',
+    color: COLORS.yellow,
+    route: '/driver/traffic',
+  },
+  {
+    id: 'traffic-prediction',
+    label: 'Traffic AI',
+    icon: 'speedometer',
+    color: COLORS.purple,
+    route: '/driver/traffic-prediction',
+  },
+  {
+    id: 'accident-prediction',
+    label: 'Accident AI',
+    icon: 'warning',
+    color: COLORS.red,
+    route: '/driver/accident-prediction',
+  },
+  // AI & INSIGHTS
+  {
+    id: 'ai-suggestions',
+    label: 'AI Coach',
+    icon: 'chatbubbles',
+    color: COLORS.purple,
+    route: '/driver/ai-suggestions',
+  },
+  {
+    id: 'data-insights',
+    label: 'Insights',
+    icon: 'stats-chart',
+    color: COLORS.blue,
+    route: '/driver/data-insights',
+  },
+  // SAFETY & WELLNESS
+  {
+    id: 'safety-alerts',
+    label: 'Safety',
+    icon: 'shield',
+    color: COLORS.green,
+    route: '/driver/safety-alerts',
+  },
+  {
+    id: 'wellness',
+    label: 'Wellness',
+    icon: 'fitness',
+    color: COLORS.green,
+    route: '/driver/wellness',
+  },
+  // LIFESTYLE
+  {
+    id: 'fuel-tracker',
+    label: 'Fuel Tracker',
+    icon: 'water',
+    color: COLORS.yellow,
+    route: '/driver/fuel-tracker',
+  },
+  {
+    id: 'prayer-times',
+    label: 'Prayer Times',
+    icon: 'moon',
+    color: COLORS.purple,
+    route: '/driver/prayer-times',
+  },
+  {
+    id: 'story-mode',
+    label: 'Stories',
+    icon: 'book',
+    color: COLORS.blue,
+    route: '/driver/story-mode',
+  },
+  {
+    id: 'radio',
+    label: 'Radio',
+    icon: 'radio',
+    color: COLORS.red,
+    route: '/driver/radio',
+  },
+  // FINANCE
+  {
+    id: 'bank',
+    label: 'Bank Account',
+    icon: 'business',
+    color: COLORS.green,
+    route: '/driver/bank',
   },
 ];
 
