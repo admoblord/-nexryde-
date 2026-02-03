@@ -15,6 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 
 // Conditional import for Google Places Autocomplete (only on native)
 let GooglePlacesAutocomplete: any;
@@ -25,54 +26,62 @@ if (Platform.OS !== 'web') {
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY';
 
-// PREMIUM CAR TYPES - Beautiful & Professional
+// PREMIUM USA STYLE - Navy Blue/Gold Luxury Color Scheme
+const COLORS = {
+  primary: '#1B2B4D',        // Deep Navy Blue
+  secondary: '#D4AF37',      // Luxury Gold
+  accent: '#3A5A8C',         // Medium Navy
+  background: '#F8F9FB',     // Light background
+  cardBg: '#FFFFFF',         // Pure white cards
+  text: '#1B2B4D',           // Navy text
+  textSecondary: '#64748B',  // Slate gray
+  border: '#E2E8F0',         // Light border
+  success: '#059669',        // Green
+  error: '#DC2626',          // Red
+};
+
+// PREMIUM CAR TYPES - Clean, Professional, No Emojis
 const CAR_TYPES = [
   { 
     id: 'economy', 
     name: 'Economy', 
-    emoji: '🚗', 
-    multiplier: 1.0,
-    desc: 'Affordable, everyday rides',
-    capacity: '1-4',
-    gradient: ['#667eea', '#764ba2'],
-    color: '#667eea'
+    desc: 'Affordable rides',
+    capacity: '4 seats',
+    eta: '3 min',
   },
   { 
     id: 'comfort', 
     name: 'Comfort', 
-    emoji: '🚙', 
-    multiplier: 1.3,
-    desc: 'Extra space & comfort',
-    capacity: '1-4',
-    gradient: ['#f093fb', '#f5576c'],
-    color: '#f093fb'
+    desc: 'Extra space',
+    capacity: '4 seats',
+    eta: '5 min',
   },
   { 
     id: 'premium', 
     name: 'Premium', 
-    emoji: '🚘', 
-    multiplier: 2.0,
-    desc: 'Luxury high-end vehicles',
-    capacity: '1-4',
-    gradient: ['#4facfe', '#00f2fe'],
-    color: '#4facfe'
+    desc: 'Luxury vehicles',
+    capacity: '4 seats',
+    eta: '8 min',
   },
   { 
     id: 'xl', 
     name: 'XL', 
-    emoji: '🚐', 
-    multiplier: 1.5,
-    desc: 'Extra seats for groups',
-    capacity: '1-6',
-    gradient: ['#43e97b', '#38f9d7'],
-    color: '#43e97b'
+    desc: 'Group rides',
+    capacity: '6 seats',
+    eta: '6 min',
   },
 ];
+
+interface Stop {
+  id: string;
+  location: string;
+}
 
 export default function BookingScreen() {
   const router = useRouter();
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
+  const [stops, setStops] = useState<Stop[]>([]);
   const [selectedCar, setSelectedCar] = useState('economy');
   const [fareEstimate, setFareEstimate] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
@@ -81,7 +90,28 @@ export default function BookingScreen() {
   const pickupRef = useRef<any>();
   const destRef = useRef<any>();
 
-  // Auto-calculate fare when both locations are entered
+  // Add Stop functionality
+  const addStop = () => {
+    const newStop: Stop = {
+      id: `stop-${Date.now()}`,
+      location: '',
+    };
+    setStops([...stops, newStop]);
+  };
+
+  // Remove Stop
+  const removeStop = (stopId: string) => {
+    setStops(stops.filter(stop => stop.id !== stopId));
+  };
+
+  // Update Stop location
+  const updateStop = (stopId: string, location: string) => {
+    setStops(stops.map(stop => 
+      stop.id === stopId ? { ...stop, location } : stop
+    ));
+  };
+
+  // Auto-calculate fare when locations are entered
   useEffect(() => {
     if (pickup.trim() && destination.trim() && pickup.trim().length > 2 && destination.trim().length > 2) {
       const timer = setTimeout(() => {
@@ -91,7 +121,7 @@ export default function BookingScreen() {
     } else {
       setFareEstimate(null);
     }
-  }, [pickup, destination, selectedCar, tripType]);
+  }, [pickup, destination, selectedCar, tripType, stops]);
 
   const calculateFare = async () => {
     setIsCalculating(true);
@@ -103,7 +133,8 @@ export default function BookingScreen() {
           pickup: pickup,
           destination: destination,
           vehicle_type: selectedCar,
-          trip_type: tripType
+          trip_type: tripType,
+          stops: stops.map(s => s.location).filter(l => l.trim()),
         }),
       });
 
@@ -120,15 +151,11 @@ export default function BookingScreen() {
 
   const handleBookRide = () => {
     if (!pickup.trim()) {
-      Alert.alert('Missing Pickup', 'Please enter your pickup location');
+      Alert.alert('Pickup Required', 'Please enter your pickup location');
       return;
     }
     if (!destination.trim()) {
-      Alert.alert('Missing Destination', 'Please enter your destination');
-      return;
-    }
-    if (!fareEstimate) {
-      Alert.alert('Calculating...', 'Please wait for fare calculation');
+      Alert.alert('Destination Required', 'Please enter your destination');
       return;
     }
 
@@ -137,10 +164,11 @@ export default function BookingScreen() {
       params: {
         pickup,
         destination,
+        stops: JSON.stringify(stops),
         carType: selectedCar,
-        estimatedFare: fareEstimate.total_fare,
-        distance: fareEstimate.distance,
-        duration: fareEstimate.duration
+        estimatedFare: fareEstimate?.total_fare || 0,
+        distance: fareEstimate?.distance || 0,
+        duration: fareEstimate?.duration || 0
       }
     });
   };
@@ -149,19 +177,19 @@ export default function BookingScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Premium Gradient Background */}
+      {/* Premium Navy Blue Gradient Background */}
       <LinearGradient
-        colors={['#f8f9fa', '#e9ecef', '#dee2e6']}
+        colors={['#F8F9FB', '#EFF3F8']}
         style={StyleSheet.absoluteFillObject}
       />
 
       <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
+        {/* Minimal Premium Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color="#1a1a2e" />
+            <Ionicons name="arrow-back" size={24} color={COLORS.primary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Book Your Ride</Text>
+          <Text style={styles.headerTitle}>Book a Ride</Text>
           <View style={{ width: 40 }} />
         </View>
 
@@ -170,61 +198,42 @@ export default function BookingScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Trip Type Toggle */}
-          <View style={styles.tripTypeCard}>
+          {/* Trip Type Selector - Minimalist */}
+          <View style={styles.tripTypeContainer}>
             <TouchableOpacity
-              style={[styles.tripTypeButton, tripType === 'intra' && styles.tripTypeActive]}
+              style={[styles.tripTypeBtn, tripType === 'intra' && styles.tripTypeBtnActive]}
               onPress={() => setTripType('intra')}
             >
-              <LinearGradient
-                colors={tripType === 'intra' ? ['#667eea', '#764ba2'] : ['transparent', 'transparent']}
-                style={styles.tripTypeGradient}
-              >
-                <Ionicons name="location" size={20} color={tripType === 'intra' ? '#fff' : '#6b7280'} />
-                <Text style={[styles.tripTypeText, tripType === 'intra' && styles.tripTypeTextActive]}>
-                  Within City
-                </Text>
-              </LinearGradient>
+              <Text style={[styles.tripTypeText, tripType === 'intra' && styles.tripTypeTextActive]}>
+                Within City
+              </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[styles.tripTypeButton, tripType === 'inter' && styles.tripTypeActive]}
+              style={[styles.tripTypeBtn, tripType === 'inter' && styles.tripTypeBtnActive]}
               onPress={() => setTripType('inter')}
             >
-              <LinearGradient
-                colors={tripType === 'inter' ? ['#f093fb', '#f5576c'] : ['transparent', 'transparent']}
-                style={styles.tripTypeGradient}
-              >
-                <Ionicons name="airplane" size={20} color={tripType === 'inter' ? '#fff' : '#6b7280'} />
-                <Text style={[styles.tripTypeText, tripType === 'inter' && styles.tripTypeTextActive]}>
-                  Between Cities
-                </Text>
-              </LinearGradient>
+              <Text style={[styles.tripTypeText, tripType === 'inter' && styles.tripTypeTextActive]}>
+                Intercity
+              </Text>
             </TouchableOpacity>
           </View>
 
-          {/* Location Inputs with GOOGLE AUTOCOMPLETE */}
+          {/* Location Inputs - Premium Card */}
           <View style={styles.locationCard}>
-            <View style={styles.locationHeader}>
-              <Ionicons name="navigate-circle" size={24} color="#667eea" />
-              <Text style={styles.locationHeaderText}>Where are you going?</Text>
-            </View>
-
-            {/* Pickup with Google Autocomplete */}
-            <View style={styles.autocompleteContainer}>
-              <View style={[styles.inputDot, { backgroundColor: '#10b981' }]}>
-                <View style={styles.inputDotInner} />
+            {/* Pickup Location */}
+            <View style={styles.locationRow}>
+              <View style={styles.iconContainer}>
+                <View style={[styles.locationDot, { backgroundColor: COLORS.success }]} />
               </View>
-              <View style={{ flex: 1 }}>
+              <View style={styles.inputContainer}>
                 {Platform.OS === 'web' ? (
                   <TextInput
-                    style={styles.autocompleteInput}
+                    style={styles.input}
                     placeholder="Pickup location"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={COLORS.textSecondary}
                     value={pickup}
                     onChangeText={setPickup}
                     returnKeyType="next"
-                    onSubmitEditing={() => destRef.current?.focus()}
                   />
                 ) : (
                   <GooglePlacesAutocomplete
@@ -241,15 +250,12 @@ export default function BookingScreen() {
                       components: 'country:ng',
                     }}
                     styles={{
-                      textInput: styles.autocompleteInput,
+                      textInput: styles.input,
                       listView: styles.autocompleteList,
-                      row: styles.autocompleteRow,
-                      description: styles.autocompleteDescription,
                     }}
                     textInputProps={{
-                      placeholderTextColor: '#9ca3af',
+                      placeholderTextColor: COLORS.textSecondary,
                       returnKeyType: 'next',
-                      onSubmitEditing: () => destRef.current?.focus(),
                     }}
                     enablePoweredByContainer={false}
                     nearbyPlacesAPI="GooglePlacesSearch"
@@ -259,19 +265,74 @@ export default function BookingScreen() {
               </View>
             </View>
 
-            <View style={styles.routeLine} />
+            <View style={styles.verticalLine} />
 
-            {/* Destination with Google Autocomplete */}
-            <View style={styles.autocompleteContainer}>
-              <View style={[styles.inputDot, { backgroundColor: '#ef4444' }]}>
-                <Ionicons name="location" size={12} color="#fff" />
+            {/* Stops */}
+            {stops.map((stop, index) => (
+              <View key={stop.id}>
+                <View style={styles.locationRow}>
+                  <View style={styles.iconContainer}>
+                    <View style={[styles.locationDot, { backgroundColor: COLORS.secondary }]} />
+                  </View>
+                  <View style={styles.inputContainer}>
+                    {Platform.OS === 'web' ? (
+                      <TextInput
+                        style={styles.input}
+                        placeholder={`Stop ${index + 1}`}
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={stop.location}
+                        onChangeText={(text) => updateStop(stop.id, text)}
+                        returnKeyType="next"
+                      />
+                    ) : (
+                      <GooglePlacesAutocomplete
+                        placeholder={`Stop ${index + 1}`}
+                        minLength={2}
+                        fetchDetails={true}
+                        onPress={(data, details = null) => {
+                          updateStop(stop.id, data.description);
+                        }}
+                        query={{
+                          key: GOOGLE_MAPS_API_KEY,
+                          language: 'en',
+                          components: 'country:ng',
+                        }}
+                        styles={{
+                          textInput: styles.input,
+                          listView: styles.autocompleteList,
+                        }}
+                        textInputProps={{
+                          placeholderTextColor: COLORS.textSecondary,
+                          returnKeyType: 'next',
+                        }}
+                        enablePoweredByContainer={false}
+                        nearbyPlacesAPI="GooglePlacesSearch"
+                        debounce={300}
+                      />
+                    )}
+                  </View>
+                  <TouchableOpacity 
+                    onPress={() => removeStop(stop.id)}
+                    style={styles.removeStopBtn}
+                  >
+                    <Ionicons name="close-circle" size={20} color={COLORS.error} />
+                  </TouchableOpacity>
+                </View>
+                <View style={styles.verticalLine} />
               </View>
-              <View style={{ flex: 1 }}>
+            ))}
+
+            {/* Destination Location */}
+            <View style={styles.locationRow}>
+              <View style={styles.iconContainer}>
+                <View style={[styles.locationDot, { backgroundColor: COLORS.error }]} />
+              </View>
+              <View style={styles.inputContainer}>
                 {Platform.OS === 'web' ? (
                   <TextInput
-                    style={styles.autocompleteInput}
+                    style={styles.input}
                     placeholder="Where to?"
-                    placeholderTextColor="#9ca3af"
+                    placeholderTextColor={COLORS.textSecondary}
                     value={destination}
                     onChangeText={setDestination}
                     returnKeyType="done"
@@ -292,13 +353,11 @@ export default function BookingScreen() {
                       components: 'country:ng',
                     }}
                     styles={{
-                      textInput: styles.autocompleteInput,
+                      textInput: styles.input,
                       listView: styles.autocompleteList,
-                      row: styles.autocompleteRow,
-                      description: styles.autocompleteDescription,
                     }}
                     textInputProps={{
-                      placeholderTextColor: '#9ca3af',
+                      placeholderTextColor: COLORS.textSecondary,
                       returnKeyType: 'done',
                     }}
                     enablePoweredByContainer={false}
@@ -309,154 +368,94 @@ export default function BookingScreen() {
               </View>
             </View>
 
-            {/* Quick Suggestions */}
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.suggestionsRow}>
-              <TouchableOpacity 
-                style={styles.suggestionChip} 
-                onPress={() => {
-                  setPickup('Current Location');
-                  pickupRef.current?.setAddressText('Current Location');
-                }}
-              >
-                <Ionicons name="navigate" size={16} color="#10b981" />
-                <Text style={styles.suggestionText}>Current</Text>
+            {/* Add Stop Button */}
+            {stops.length < 3 && (
+              <TouchableOpacity style={styles.addStopBtn} onPress={addStop}>
+                <Ionicons name="add-circle-outline" size={20} color={COLORS.secondary} />
+                <Text style={styles.addStopText}>Add stop</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.suggestionChip}>
-                <Ionicons name="home" size={16} color="#667eea" />
-                <Text style={styles.suggestionText}>Home</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.suggestionChip}>
-                <Ionicons name="briefcase" size={16} color="#f093fb" />
-                <Text style={styles.suggestionText}>Work</Text>
-              </TouchableOpacity>
-            </ScrollView>
+            )}
           </View>
 
-          {/* Car Type Selection */}
-          <Text style={styles.sectionTitle}>Choose your ride</Text>
-          {CAR_TYPES.map((car) => {
-            const isSelected = selectedCar === car.id;
-            const estimatedPrice = fareEstimate ? Math.round(fareEstimate.total_fare * car.multiplier) : null;
-            
-            return (
+          {/* Premium Car Selection */}
+          <View style={styles.carSection}>
+            <Text style={styles.sectionTitle}>Select Vehicle</Text>
+            {CAR_TYPES.map((car) => (
               <TouchableOpacity
                 key={car.id}
-                style={[styles.carCard, isSelected && styles.carCardSelected]}
+                style={[
+                  styles.carCard,
+                  selectedCar === car.id && styles.carCardActive
+                ]}
                 onPress={() => setSelectedCar(car.id)}
               >
-                {isSelected && (
-                  <LinearGradient
-                    colors={car.gradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                    style={styles.carCardGradient}
-                  />
-                )}
-                <View style={styles.carLeft}>
-                  <View style={[styles.carEmojiContainer, { backgroundColor: car.color + '20' }]}>
-                    <Text style={styles.carEmoji}>{car.emoji}</Text>
-                  </View>
-                  <View style={styles.carInfo}>
-                    <Text style={[styles.carName, isSelected && styles.carNameSelected]}>{car.name}</Text>
-                    <Text style={[styles.carDesc, isSelected && styles.carDescSelected]}>{car.desc}</Text>
-                    <View style={styles.carMeta}>
-                      <Ionicons name="people" size={14} color={isSelected ? '#fff' : '#9ca3af'} />
-                      <Text style={[styles.carCapacity, isSelected && styles.carCapacitySelected]}>
-                        {car.capacity} seats
-                      </Text>
-                      {fareEstimate && (
-                        <>
-                          <Text style={[styles.carMetaDot, isSelected && styles.carMetaDotSelected]}>•</Text>
-                          <Text style={[styles.carTime, isSelected && styles.carTimeSelected]}>
-                            {fareEstimate.duration}
-                          </Text>
-                        </>
-                      )}
-                    </View>
+                <View style={styles.carInfo}>
+                  <Text style={styles.carName}>{car.name}</Text>
+                  <Text style={styles.carDesc}>{car.desc}</Text>
+                  <View style={styles.carMeta}>
+                    <Text style={styles.carMetaText}>
+                      <Ionicons name="people-outline" size={14} color={COLORS.textSecondary} /> {car.capacity}
+                    </Text>
+                    <Text style={styles.carMetaText}>
+                      <Ionicons name="time-outline" size={14} color={COLORS.textSecondary} /> {car.eta}
+                    </Text>
                   </View>
                 </View>
-                <View style={styles.carRight}>
+                <View style={styles.carPricing}>
                   {isCalculating ? (
-                    <ActivityIndicator size="small" color={isSelected ? '#fff' : car.color} />
-                  ) : estimatedPrice ? (
-                    <>
-                      <Text style={[styles.carPrice, isSelected && styles.carPriceSelected]}>
-                        ₦{estimatedPrice.toLocaleString()}
-                      </Text>
-                      {isSelected && (
-                        <View style={styles.selectedBadge}>
-                          <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                        </View>
-                      )}
-                    </>
+                    <ActivityIndicator size="small" color={COLORS.secondary} />
+                  ) : fareEstimate ? (
+                    <Text style={styles.carPrice}>₦{fareEstimate.total_fare?.toLocaleString()}</Text>
                   ) : (
-                    <Text style={styles.carPricePlaceholder}>--</Text>
+                    <Text style={styles.carPriceEstimate}>Enter route</Text>
                   )}
                 </View>
               </TouchableOpacity>
-            );
-          })}
+            ))}
+          </View>
 
-          {/* Fare Breakdown */}
+          {/* Fare Breakdown - If available */}
           {fareEstimate && (
             <View style={styles.fareCard}>
-              <LinearGradient
-                colors={['#f8f9fa', '#ffffff']}
-                style={styles.fareGradient}
-              >
-                <View style={styles.fareHeader}>
-                  <Ionicons name="receipt" size={20} color="#667eea" />
-                  <Text style={styles.fareTitle}>Trip Summary</Text>
-                </View>
-
-                <View style={styles.fareRow}>
-                  <Text style={styles.fareLabel}>Distance</Text>
-                  <Text style={styles.fareValue}>{fareEstimate.distance}</Text>
-                </View>
-                <View style={styles.fareRow}>
-                  <Text style={styles.fareLabel}>Estimated Time</Text>
-                  <Text style={styles.fareValue}>{fareEstimate.duration}</Text>
-                </View>
-                <View style={styles.fareDivider} />
-                <View style={styles.fareRow}>
-                  <Text style={styles.fareLabelBold}>Base Fare</Text>
-                  <Text style={styles.fareValueBold}>₦{fareEstimate.base_fare?.toLocaleString()}</Text>
-                </View>
-
-                {tripType === 'inter' && (
-                  <View style={styles.fareNote}>
-                    <Ionicons name="information-circle" size={16} color="#667eea" />
-                    <Text style={styles.fareNoteText}>
-                      Price calculated from Google Maps (real-time traffic included)
-                    </Text>
-                  </View>
-                )}
-              </LinearGradient>
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Distance</Text>
+                <Text style={styles.fareValue}>{fareEstimate.distance_km?.toFixed(1)} km</Text>
+              </View>
+              <View style={styles.fareRow}>
+                <Text style={styles.fareLabel}>Estimated time</Text>
+                <Text style={styles.fareValue}>{fareEstimate.duration_min?.toFixed(0)} min</Text>
+              </View>
+              <View style={styles.fareDivider} />
+              <View style={styles.fareRow}>
+                <Text style={styles.fareTotalLabel}>Total Fare</Text>
+                <Text style={styles.fareTotalValue}>₦{fareEstimate.total_fare?.toLocaleString()}</Text>
+              </View>
             </View>
           )}
 
           <View style={{ height: 120 }} />
         </ScrollView>
 
-        {/* Book Button */}
-        <View style={styles.footer}>
+        {/* Premium Book Button - Fixed Bottom */}
+        <View style={styles.bottomContainer}>
           <TouchableOpacity
-            style={[styles.bookButton, !fareEstimate && styles.bookButtonDisabled]}
+            style={[
+              styles.bookButton,
+              (!pickup || !destination) && styles.bookButtonDisabled
+            ]}
             onPress={handleBookRide}
-            disabled={!fareEstimate || isCalculating}
+            disabled={!pickup || !destination}
           >
             <LinearGradient
-              colors={fareEstimate ? (selectedCarData?.gradient || ['#667eea', '#764ba2']) : ['#d1d5db', '#d1d5db']}
+              colors={[COLORS.primary, COLORS.accent]}
+              style={styles.bookButtonGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
-              style={styles.bookButtonGradient}
             >
               <Text style={styles.bookButtonText}>
-                {isCalculating ? 'Calculating...' : fareEstimate ? 'Confirm & Book Ride' : 'Enter Locations'}
+                {fareEstimate ? `Book Ride - ₦${fareEstimate.total_fare?.toLocaleString()}` : 'Book Ride'}
               </Text>
-              {fareEstimate && !isCalculating && (
-                <Ionicons name="arrow-forward" size={20} color="#fff" style={{ marginLeft: 8 }} />
-              )}
+              <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
             </LinearGradient>
           </TouchableOpacity>
         </View>
@@ -478,379 +477,274 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
+    backgroundColor: 'transparent',
   },
   backButton: {
     width: 40,
     height: 40,
+    borderRadius: 20,
+    backgroundColor: COLORS.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.8)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   headerTitle: {
     fontSize: 20,
-    fontWeight: '800',
-    color: '#1a1a2e',
-    letterSpacing: 0.5,
+    fontWeight: '700',
+    color: COLORS.primary,
+    letterSpacing: -0.5,
   },
   content: {
     flex: 1,
     paddingHorizontal: 20,
   },
-  tripTypeCard: {
+  
+  // Trip Type Selector
+  tripTypeContainer: {
     flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 16,
-    padding: 6,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    padding: 4,
     marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  tripTypeBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    borderRadius: 8,
+  },
+  tripTypeBtnActive: {
+    backgroundColor: COLORS.primary,
+  },
+  tripTypeText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  tripTypeTextActive: {
+    color: '#FFFFFF',
+  },
+
+  // Location Card - Premium
+  locationCard: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.08,
     shadowRadius: 12,
     elevation: 4,
   },
-  tripTypeButton: {
-    flex: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  tripTypeActive: {},
-  tripTypeGradient: {
+  locationRow: {
     flexDirection: 'row',
+    alignItems: 'center',
+  },
+  iconContainer: {
+    width: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    gap: 8,
   },
-  tripTypeText: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#6b7280',
+  locationDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
-  tripTypeTextActive: {
-    color: '#fff',
-  },
-  locationCard: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.1,
-    shadowRadius: 16,
-    elevation: 6,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 20,
-  },
-  locationHeaderText: {
-    fontSize: 17,
-    fontWeight: '700',
-    color: '#1a1a2e',
-  },
-  autocompleteContainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 14,
-  },
-  inputDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  inputDotInner: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#fff',
-  },
-  routeLine: {
+  verticalLine: {
     width: 2,
-    height: 20,
-    backgroundColor: '#e5e7eb',
-    marginLeft: 11,
+    height: 24,
+    backgroundColor: COLORS.border,
+    marginLeft: 15,
     marginVertical: 4,
   },
-  autocompleteInput: {
+  inputContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  input: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a2e',
+    color: COLORS.text,
     paddingVertical: 12,
-    paddingHorizontal: 0,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-  },
-  autocompleteList: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    marginTop: 4,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-  },
-  autocompleteRow: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    backgroundColor: '#fff',
-  },
-  autocompleteDescription: {
-    fontSize: 14,
-    color: '#374151',
     fontWeight: '500',
   },
-  suggestionsRow: {
-    marginTop: 20,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#f3f4f6',
+  autocompleteList: {
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    marginTop: 8,
   },
-  suggestionChip: {
+  removeStopBtn: {
+    marginLeft: 8,
+    padding: 4,
+  },
+  addStopBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#f9fafb',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 20,
-    marginRight: 10,
-    borderWidth: 1,
-    borderColor: '#e5e7eb',
+    paddingTop: 16,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
-  suggestionText: {
-    fontSize: 14,
+  addStopText: {
+    fontSize: 15,
     fontWeight: '600',
-    color: '#374151',
+    color: COLORS.secondary,
+    marginLeft: 8,
+  },
+
+  // Car Selection - Premium
+  carSection: {
+    marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#1a1a2e',
+    fontWeight: '700',
+    color: COLORS.primary,
     marginBottom: 16,
-    letterSpacing: 0.3,
+    letterSpacing: -0.5,
   },
   carCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    padding: 18,
-    borderRadius: 18,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 12,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#e5e7eb',
+    borderColor: 'transparent',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.05,
     shadowRadius: 8,
     elevation: 2,
-    position: 'relative',
-    overflow: 'hidden',
   },
-  carCardSelected: {
-    borderColor: 'transparent',
-    shadowOpacity: 0.15,
-  },
-  carCardGradient: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  carLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    flex: 1,
-    zIndex: 1,
-  },
-  carEmojiContainer: {
-    width: 50,
-    height: 50,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  carEmoji: {
-    fontSize: 26,
+  carCardActive: {
+    borderColor: COLORS.secondary,
+    backgroundColor: '#FFFBF0',
   },
   carInfo: {
     flex: 1,
   },
   carName: {
     fontSize: 17,
-    fontWeight: '800',
-    color: '#1a1a2e',
+    fontWeight: '700',
+    color: COLORS.primary,
     marginBottom: 4,
   },
-  carNameSelected: {
-    color: '#fff',
-  },
   carDesc: {
-    fontSize: 13,
-    color: '#6b7280',
-    marginBottom: 6,
-  },
-  carDescSelected: {
-    color: 'rgba(255,255,255,0.9)',
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    marginBottom: 8,
   },
   carMeta: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
+    gap: 16,
   },
-  carCapacity: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontWeight: '600',
+  carMetaText: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
-  carCapacitySelected: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  carMetaDot: {
-    color: '#d1d5db',
-    marginHorizontal: 4,
-  },
-  carMetaDotSelected: {
-    color: 'rgba(255,255,255,0.6)',
-  },
-  carTime: {
-    fontSize: 12,
-    color: '#9ca3af',
-    fontWeight: '600',
-  },
-  carTimeSelected: {
-    color: 'rgba(255,255,255,0.85)',
-  },
-  carRight: {
+  carPricing: {
     alignItems: 'flex-end',
-    gap: 6,
-    zIndex: 1,
   },
   carPrice: {
-    fontSize: 19,
-    fontWeight: '900',
-    color: '#1a1a2e',
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.primary,
   },
-  carPriceSelected: {
-    color: '#fff',
+  carPriceEstimate: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
   },
-  carPricePlaceholder: {
-    fontSize: 19,
-    fontWeight: '900',
-    color: '#d1d5db',
-  },
-  selectedBadge: {
-    marginTop: 2,
-  },
+
+  // Fare Breakdown
   fareCard: {
-    marginTop: 8,
-    borderRadius: 20,
-    overflow: 'hidden',
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  fareGradient: {
-    padding: 20,
-  },
-  fareHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 16,
-  },
-  fareTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#1a1a2e',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    elevation: 2,
   },
   fareRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    marginBottom: 12,
   },
   fareLabel: {
     fontSize: 15,
-    color: '#6b7280',
+    color: COLORS.textSecondary,
     fontWeight: '500',
   },
   fareValue: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#374151',
-  },
-  fareLabelBold: {
-    fontSize: 16,
-    color: '#1a1a2e',
-    fontWeight: '700',
-  },
-  fareValueBold: {
-    fontSize: 16,
-    fontWeight: '900',
-    color: '#1a1a2e',
+    color: COLORS.text,
+    fontWeight: '600',
   },
   fareDivider: {
     height: 1,
-    backgroundColor: '#e5e7eb',
+    backgroundColor: COLORS.border,
     marginVertical: 8,
   },
-  fareNote: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#eff6ff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#dbeafe',
+  fareTotalLabel: {
+    fontSize: 17,
+    color: COLORS.primary,
+    fontWeight: '700',
   },
-  fareNoteText: {
-    flex: 1,
-    fontSize: 12,
-    color: '#667eea',
-    lineHeight: 16,
-    fontWeight: '600',
+  fareTotalValue: {
+    fontSize: 20,
+    color: COLORS.primary,
+    fontWeight: '700',
   },
-  footer: {
-    padding: 20,
-    paddingBottom: 24,
-    backgroundColor: 'transparent',
+
+  // Book Button - Premium
+  bottomContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    paddingBottom: 20,
+    backgroundColor: COLORS.background,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.border,
   },
   bookButton: {
-    borderRadius: 16,
+    borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
+    shadowColor: COLORS.primary,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
     shadowRadius: 12,
-    elevation: 8,
+    elevation: 6,
   },
   bookButtonDisabled: {
-    shadowOpacity: 0.05,
+    opacity: 0.5,
   },
   bookButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 18,
+    paddingHorizontal: 24,
+    gap: 8,
   },
   bookButtonText: {
     fontSize: 17,
-    fontWeight: '900',
-    color: '#fff',
+    fontWeight: '700',
+    color: '#FFFFFF',
     letterSpacing: 0.5,
   },
 });
