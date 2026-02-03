@@ -428,7 +428,7 @@ export default function SubscriptionScreen() {
 
                 <View style={styles.tierPricing}>
                   <Text style={styles.tierPriceLabel}>
-                    {pricing && getPhaseLabel(pricing.city_rider.current_phase)}
+                    {pricing && pricing.city_rider && getPhaseLabel(pricing.city_rider.current_phase)}
                   </Text>
                   <View style={styles.tierPriceRow}>
                     <Text style={styles.tierCurrency}>₦</Text>
