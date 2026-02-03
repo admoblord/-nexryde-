@@ -811,6 +811,39 @@ class NexrydeAPITester:
         # Print summary
         self.print_summary()
     
+    def print_priority_summary(self):
+        """Print priority test results summary"""
+        print("\n" + "=" * 60)
+        print("🎯 PRIORITY ENDPOINTS TEST RESULTS")
+        print("=" * 60)
+        
+        # Filter results for priority endpoints
+        priority_endpoints = [
+            "/trips/{trip_id}/cancel", "/trips/{trip_id}/accept", 
+            "/wallet/{user_id}/topup", "/admin/dashboard", 
+            "/fares/estimate-google", "/drivers/available", "/places/autocomplete"
+        ]
+        
+        priority_results = [r for r in self.results if any(ep in r["endpoint"] for ep in priority_endpoints)]
+        
+        working = len([r for r in priority_results if r["status"] == "WORKING"])
+        partial = len([r for r in priority_results if r["status"] == "PARTIAL"])
+        broken = len([r for r in priority_results if r["status"] == "BROKEN"])
+        total = len(priority_results)
+        
+        print(f"✅ WORKING: {working}/{total} ({working/total*100:.1f}%)")
+        print(f"⚠️ PARTIAL:  {partial}/{total} ({partial/total*100:.1f}%)")
+        print(f"❌ BROKEN:   {broken}/{total} ({broken/total*100:.1f}%)")
+        
+        if broken > 0:
+            print(f"\n❌ CRITICAL FAILURES ({broken}):")
+            for result in priority_results:
+                if result["status"] == "BROKEN":
+                    print(f"   • {result['method']} {result['endpoint']} - {result['details']}")
+        
+        print(f"\n🎯 PRIORITY SUCCESS RATE: {(working + partial)/total*100:.1f}%")
+        print("=" * 60)
+
     def print_summary(self):
         """Print test results summary"""
         print("\n" + "=" * 60)
