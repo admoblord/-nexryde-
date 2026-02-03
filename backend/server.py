@@ -478,6 +478,9 @@ class Trip(BaseModel):
     # Safety features
     is_monitored: bool = True
     sos_triggered: bool = False
+    security_code: Optional[str] = None  # 4-digit code for driver verification
+    security_code_verified: bool = False
+    security_code_attempts: int = 0
     sos_triggered_at: Optional[datetime] = None
     route_deviation_detected: bool = False
     abnormal_stop_detected: bool = False
