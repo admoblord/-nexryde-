@@ -777,6 +777,15 @@ class NexrydeAPITester:
         await self.test_admin_vehicle_registrations()
         await self.test_admin_dashboard()
         
+        # Additional endpoints from review request
+        print("\n📍 ADDITIONAL APIs:")
+        await self.test_get_available_drivers()
+        await self.test_accept_trip()
+        await self.test_update_trip_location()
+        await self.test_places_autocomplete()
+        await self.test_get_notifications()
+        await self.test_mark_notification_read()
+        
         # Print summary
         self.print_summary()
     
