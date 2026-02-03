@@ -235,9 +235,9 @@ class NexrydeAPITester:
     # ==================== FARE & BOOKING TESTS ====================
     
     async def test_fare_estimate(self):
-        """Test POST /api/fare/estimate"""
+        """Test POST /api/fare/estimate (Google Maps integration)"""
         # Lagos coordinates for testing
-        response = await self.make_request("POST", "/fare/estimate", {
+        response = await self.make_request("POST", "/fares/estimate-google", {
             "pickup_lat": 6.5244,
             "pickup_lng": 3.3792,
             "dropoff_lat": 6.4281,
@@ -247,10 +247,10 @@ class NexrydeAPITester:
         
         if response["success"]:
             fare_data = response["data"]
-            self.log_result("/fare/estimate", "POST", "WORKING", 
+            self.log_result("/fares/estimate-google", "POST", "WORKING", 
                           f"Fare: ₦{fare_data.get('total_fare', 0)}, Distance: {fare_data.get('distance_km', 0)}km")
         else:
-            self.log_result("/fare/estimate", "POST", "BROKEN", f"Failed: {response['data']}")
+            self.log_result("/fares/estimate-google", "POST", "BROKEN", f"Failed: {response['data']}")
     
     async def test_surge_status(self):
         """Test GET /api/surge/check"""
