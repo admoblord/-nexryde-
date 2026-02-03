@@ -78,9 +78,11 @@ export default function LocationAutocomplete({
 
     setIsLoading(true);
     try {
-      const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+      // Use backend proxy to avoid CORS issues
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const url = `${backendUrl}/api/places/autocomplete?input=${encodeURIComponent(
         input
-      )}&key=${apiKey}&components=country:${countryCode}&language=en`;
+      )}&country=${countryCode}&language=en`;
 
       const response = await fetch(url);
       const data = await response.json();
