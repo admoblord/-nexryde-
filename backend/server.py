@@ -389,6 +389,10 @@ class User(BaseModel):
     trust_score: float = 100.0  # Trust score (inheritable)
     # Women-only mode preference
     women_only_mode: bool = False
+    # New fields for registration
+    nin: Optional[str] = None  # National Identification Number for riders
+    terms_accepted: Optional[bool] = None  # Terms acceptance for drivers
+    terms_accepted_at: Optional[str] = None  # Timestamp when driver accepted terms
     
 class DriverProfile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
