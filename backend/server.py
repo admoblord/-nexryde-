@@ -3793,8 +3793,12 @@ async def get_wallet_balance(user_id: str):
     return {"balance": user.get("wallet_balance", 0), "currency": "NGN", "user_id": user_id}
 
 @api_router.post("/wallet/{user_id}/topup")
-async def topup_wallet_balance(user_id: str, amount: float):
+async def topup_wallet_balance(user_id: str, request: dict):
     """Top up wallet - ENHANCED with validation and logging"""
+    amount = request.get("amount", 0)
+    if not amount:
+        raise HTTPException(status_code=400, detail="amount is required")
+    
     # Validation
     if amount < 100:
         raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
@@ -3814,7 +3818,7 @@ async def topup_wallet_balance(user_id: str, amount: float):
         "amount": amount,
         "status": "completed",
         "timestamp": datetime.utcnow(),
-        "payment_method": "card",  # TODO: Get from request
+        "payment_method": request.get("payment_method", "card"),
         "reference": f"TOP{uuid.uuid4().hex[:10].upper()}"
     }
     
