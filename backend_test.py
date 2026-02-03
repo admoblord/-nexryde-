@@ -877,6 +877,14 @@ class NexrydeAPITester:
 async def main():
     """Main test runner"""
     async with NexrydeAPITester() as tester:
+        # First run priority endpoint tests
+        await tester.run_priority_tests()
+        
+        print("\n" + "=" * 80)
+        print("🔄 RUNNING COMPREHENSIVE BACKEND API HEALTH CHECK...")
+        print("=" * 80)
+        
+        # Then run full test suite for comprehensive health check
         await tester.run_all_tests()
 
 if __name__ == "__main__":
