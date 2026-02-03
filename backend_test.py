@@ -588,8 +588,7 @@ class NexrydeAPITester:
     
     async def test_wallet_topup(self):
         """Test POST /api/wallet/{user_id}/topup"""
-        response = await self.make_request("POST", f"/wallet/{TEST_USER_ID}/topup", {
-            "amount": 5000,
+        response = await self.make_request("POST", f"/wallet/{TEST_USER_ID}/topup?amount=5000", {
             "payment_method": "bank_transfer",
             "reference": "TEST_TOPUP_123"
         })
