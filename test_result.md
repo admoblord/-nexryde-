@@ -272,6 +272,18 @@ backend:
         - agent: "testing"
         - comment: "✅ GOOGLE MAPS INTEGRATION CONFIRMED: Comprehensive testing of POST /api/fare/estimate endpoint successful. Test Case 1 (Lagos coordinates): 5.5km distance, 18min duration, ₦1820.36 fare with Google polyline data. Test Case 2 (Lagos Island to Lekki): 25.11km distance, 49min duration, ₦4793.32 fare with complete pricing breakdown (base_fare, distance_fee, time_fee, total_fare). Google Maps API integration working perfectly - real road distances and travel times returned with encoded polylines. API returns comprehensive fare estimates with 3-minute price locks and insurance coverage. All required fields present: distance_km, duration_min, total_fare, polyline, pricing breakdown."
 
+  - task: "NEW: Intra-City vs Inter-City Trip Type Pricing"
+    implemented: true
+    working: "NA"
+    file: "server.py, book-new.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "✅ FULLY IMPLEMENTED: Complete Intra-city vs Inter-city trip pricing system integrated with existing Google Maps fare calculation. BACKEND (server.py lines 7954-8081): POST /api/fares/estimate-google endpoint accepts trip_type parameter ('intra' or 'inter'). INTRA-CITY pricing (within Lagos): Economy ₦400 base + ₦400/km + ₦80/min, Comfort ₦600 base + ₦500/km + ₦100/min, XL ₦500 base + ₦450/km + ₦90/min, Premium ₦800 base + ₦600/km + ₦120/min. INTER-CITY pricing (between cities): Economy ₦1000 base + ₦400/km + ₦5000/hr, Comfort ₦1200 base + ₦500/km + ₦6000/hr, XL ₦1100 base + ₦450/km + ₦5500/hr, Premium ₦1500 base + ₦600/km + ₦7000/hr. Pricing based on competitive analysis of inDrive, Bolt, and Lag Ride as per user request. FRONTEND (book-new.tsx lines 41-273): Trip type selector UI added with 2 options - 'Intra-City (Within Lagos)' and 'Inter-City (Lagos to other cities)' with business/airplane icons. State management via selectedTripType hook. trip_type parameter passed to backend API call (line 99). Fully integrated with existing Google Maps distance calculation. Ready for testing with real coordinates."
+
   - task: "Real-Time AI Chat API (GPT-4o)"
     implemented: true
     working: true
