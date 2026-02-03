@@ -267,38 +267,45 @@ export default function BookingScreen() {
                 <Ionicons name="location" size={12} color="#fff" />
               </View>
               <View style={{ flex: 1 }}>
-                <GooglePlacesAutocomplete
-                  ref={destRef}
-                  placeholder='Where to?'
-                  minLength={2}
-                  fetchDetails={true}
-                  onPress={(data, details = null) => {
-                    setDestination(data.description);
-                    Keyboard.dismiss();
-                  }}
-                  query={{
-                    key: GOOGLE_MAPS_API_KEY,
-                    language: 'en',
-                    components: 'country:ng',
-                  }}
-                  requestUrl={{
-                    url: 'https://maps.googleapis.com/maps/api',
-                    useOnPlatform: 'web',
-                  }}
-                  styles={{
-                    textInput: styles.autocompleteInput,
-                    listView: styles.autocompleteList,
-                    row: styles.autocompleteRow,
-                    description: styles.autocompleteDescription,
-                  }}
-                  textInputProps={{
-                    placeholderTextColor: '#9ca3af',
-                    returnKeyType: 'done',
-                  }}
-                  enablePoweredByContainer={false}
-                  nearbyPlacesAPI="GooglePlacesSearch"
-                  debounce={300}
-                />
+                {Platform.OS === 'web' ? (
+                  <TextInput
+                    style={styles.autocompleteInput}
+                    placeholder="Where to?"
+                    placeholderTextColor="#9ca3af"
+                    value={destination}
+                    onChangeText={setDestination}
+                    returnKeyType="done"
+                  />
+                ) : (
+                  <GooglePlacesAutocomplete
+                    ref={destRef}
+                    placeholder='Where to?'
+                    minLength={2}
+                    fetchDetails={true}
+                    onPress={(data, details = null) => {
+                      setDestination(data.description);
+                      Keyboard.dismiss();
+                    }}
+                    query={{
+                      key: GOOGLE_MAPS_API_KEY,
+                      language: 'en',
+                      components: 'country:ng',
+                    }}
+                    styles={{
+                      textInput: styles.autocompleteInput,
+                      listView: styles.autocompleteList,
+                      row: styles.autocompleteRow,
+                      description: styles.autocompleteDescription,
+                    }}
+                    textInputProps={{
+                      placeholderTextColor: '#9ca3af',
+                      returnKeyType: 'done',
+                    }}
+                    enablePoweredByContainer={false}
+                    nearbyPlacesAPI="GooglePlacesSearch"
+                    debounce={300}
+                  />
+                )}
               </View>
             </View>
 
