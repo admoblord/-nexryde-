@@ -83,7 +83,6 @@ const ALL_FEATURES = [
   // Social & Sharing
   { id: 'split-fare', label: 'Split Fare', icon: 'people', route: '/rider/split-fare', color: COLORS.warning },
   { id: 'share-trip', label: 'Share Trip', icon: 'share-social', route: '/rider/share-trip', color: COLORS.primary },
-  { id: 'family', label: 'Family', icon: 'home', route: '/rider/family', color: COLORS.secondary },
   
   // Safety & Security
   { id: 'recording', label: 'Recording', icon: 'videocam', route: '/rider/ride-recording', color: COLORS.danger },
