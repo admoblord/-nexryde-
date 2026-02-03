@@ -29,45 +29,146 @@ const COLORS = {
   red: '#F85D50',            // Bright red/orange
 };
 
-// SERVICE CARDS DATA
-const SERVICES = [
+// ALL RIDER FEATURES - COMPREHENSIVE
+const RIDER_FEATURES = [
+  // CORE BOOKING
   {
-    id: 'new-trip',
-    title: 'New Trip',
-    icon: 'location',
-    size: 'small',
-    route: '/rider/book',
-    gradient: null,
-    bgColor: COLORS.cardBg,
-  },
-  {
-    id: 'scooter',
-    title: 'Scooter',
-    subtitle: 'Get a fantasy ride',
-    icon: 'bicycle',
-    size: 'large',
-    route: '/rider/book',
-    gradient: [COLORS.yellow, '#FFD000'],
-    bgColor: null,
-  },
-  {
-    id: 'shipment',
-    title: 'Shipment',
-    subtitle: 'Hire trucks safely',
+    id: 'book',
+    title: 'Book Ride',
     icon: 'car',
-    size: 'small',
-    route: '/rider/delivery',
-    gradient: [COLORS.green, '#00E090'],
-    bgColor: null,
+    color: COLORS.green,
+    route: '/rider/book',
   },
   {
-    id: 'office',
-    title: 'Office',
-    icon: 'briefcase',
-    size: 'small',
-    route: '/rider/book',
-    gradient: [COLORS.purple, '#B870FF'],
-    bgColor: null,
+    id: 'schedule',
+    title: 'Schedule',
+    icon: 'time',
+    color: COLORS.purple,
+    route: '/rider/schedule',
+  },
+  {
+    id: 'delivery',
+    title: 'Delivery',
+    icon: 'cube',
+    color: COLORS.yellow,
+    route: '/rider/delivery',
+  },
+  {
+    id: 'bid',
+    title: 'Bid Ride',
+    icon: 'pricetag',
+    color: COLORS.red,
+    route: '/rider/bid',
+  },
+  // SOCIAL & SHARING
+  {
+    id: 'split-fare',
+    title: 'Split Fare',
+    icon: 'people',
+    color: COLORS.green,
+    route: '/rider/split-fare',
+  },
+  {
+    id: 'family',
+    title: 'Family',
+    icon: 'home',
+    color: COLORS.purple,
+    route: '/rider/family',
+  },
+  {
+    id: 'share-trip',
+    title: 'Share Trip',
+    icon: 'share-social',
+    color: COLORS.blue,
+    route: '/rider/share-trip',
+  },
+  // PREFERENCES
+  {
+    id: 'favorite-drivers',
+    title: 'Favorites',
+    icon: 'star',
+    color: COLORS.yellow,
+    route: '/rider/favorite-drivers',
+  },
+  {
+    id: 'car-type-preference',
+    title: 'Car Type',
+    icon: 'car-sport',
+    color: COLORS.purple,
+    route: '/rider/car-type-preference',
+  },
+  {
+    id: 'mood-preferences',
+    title: 'Mood',
+    icon: 'happy',
+    color: COLORS.green,
+    route: '/rider/mood-preferences',
+  },
+  // SAFETY & SECURITY
+  {
+    id: 'safety-check',
+    title: 'Safety',
+    icon: 'shield-checkmark',
+    color: COLORS.green,
+    route: '/rider/safety-check',
+  },
+  {
+    id: 'security-code',
+    title: 'Security',
+    icon: 'lock-closed',
+    color: COLORS.red,
+    route: '/rider/security-code',
+  },
+  {
+    id: 'ride-recording',
+    title: 'Recording',
+    icon: 'videocam',
+    color: COLORS.red,
+    route: '/rider/ride-recording',
+  },
+  // TRACKING & INFO
+  {
+    id: 'tracking',
+    title: 'Tracking',
+    icon: 'navigate',
+    color: COLORS.blue,
+    route: '/rider/tracking',
+  },
+  {
+    id: 'traffic-status',
+    title: 'Traffic',
+    icon: 'car',
+    color: COLORS.yellow,
+    route: '/rider/traffic-status',
+  },
+  {
+    id: 'driver-details',
+    title: 'Driver Info',
+    icon: 'person-circle',
+    color: COLORS.purple,
+    route: '/rider/driver-details',
+  },
+  // HISTORY & WALLET
+  {
+    id: 'trips',
+    title: 'My Trips',
+    icon: 'list',
+    color: COLORS.green,
+    route: '/(rider-tabs)/rider-trips',
+  },
+  {
+    id: 'trip-receipt',
+    title: 'Receipts',
+    icon: 'receipt',
+    color: COLORS.blue,
+    route: '/rider/trip-receipt',
+  },
+  {
+    id: 'wallet',
+    title: 'Wallet',
+    icon: 'wallet',
+    color: COLORS.green,
+    route: '/(rider-tabs)/rider-wallet',
   },
 ];
 
