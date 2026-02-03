@@ -113,7 +113,34 @@ export default function BookingScreen() {
         Animated.timing(carPulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
       ])
     ).start();
+
+    // Fetch available drivers on mount
+    fetchAvailableDrivers();
+
+    // Refresh available drivers every 10 seconds
+    const interval = setInterval(fetchAvailableDrivers, 10000);
+    return () => clearInterval(interval);
   }, []);
+
+  // Fetch available drivers from backend
+  const fetchAvailableDrivers = async () => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/available?vehicle_type=${selectedCar}`);
+      if (response.ok) {
+        const data = await response.json();
+        setAvailableDrivers(data.drivers || []);
+      }
+    } catch (error) {
+      console.log('Could not fetch available drivers:', error);
+      // Set empty array if fetch fails
+      setAvailableDrivers([]);
+    }
+  };
+
+  // Refresh drivers when vehicle type changes
+  useEffect(() => {
+    fetchAvailableDrivers();
+  }, [selectedCar]);
 
   // Get Current Location
   const getCurrentLocation = async () => {
