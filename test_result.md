@@ -605,6 +605,33 @@ frontend:
         - working: true
         - agent: "main"
         - comment: "Role selection (Rider/Driver) with info about subscription"
+        - working: true
+        - agent: "main"
+        - comment: "✅ UPDATED: Registration flow now routes to role-specific verification screens. Drivers navigate to driver-terms screen, riders navigate to rider-nin screen after entering basic info."
+
+  - task: "Driver Terms & Conditions Screen"
+    implemented: true
+    working: "NA"
+    file: "app/(auth)/driver-terms.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "✅ NEW FEATURE: Complete driver T&C screen with scrollable terms content (12 sections covering partnership agreement, subscription model, requirements, vehicle standards, service quality, earnings, safety, termination, data privacy, dispute resolution, changes to terms, and contact info). Features: checkbox for acceptance, disabled Continue button until accepted, back navigation, clean mobile-first design with proper spacing and readability. Last Updated: June 2025. Navigates to driver home after acceptance and registration."
+
+  - task: "Rider NIN Registration Screen"
+    implemented: true
+    working: "NA"
+    file: "app/(auth)/rider-nin.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: "NA"
+        - agent: "main"
+        - comment: "✅ NEW FEATURE: Dedicated NIN (National Identification Number) input screen for riders. Features: gradient icon with shield, clear explanation of why NIN is required, security reassurance cards, 11-digit NIN input with validation (numbers only), helper text, 'Why do we need your NIN?' section with 4 bullet points, disabled Continue button until valid 11-digit NIN is entered, secure footer message. Beautiful mobile-first design with green/blue brand colors. Navigates to rider home after successful registration."
 
   - task: "Home Screen with Role Switching"
     implemented: true
