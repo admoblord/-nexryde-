@@ -332,7 +332,7 @@ export default function RiderProfileScreen() {
             <View style={[styles.menuIcon, { backgroundColor: COLORS.primarySoft }]}>
               <Ionicons name="pricetag-outline" size={20} color={COLORS.primary} />
             </View>
-            <Text style={styles.menuText}>Bid Ride (InDrive Style)</Text>
+            <Text style={styles.menuText}>Bid Ride</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
