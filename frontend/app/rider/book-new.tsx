@@ -32,16 +32,16 @@ const COLORS = {
 };
 
 const VEHICLE_TYPES = [
-  { id: 'standard', name: 'Standard', icon: 'car', color: COLORS.brandGreen },
-  { id: 'premium', name: 'Premium', icon: 'car-sport', color: COLORS.brandBlue },
-  { id: 'suv', name: 'SUV', icon: 'bus', color: '#FFB800' },
+  { id: 'economy', name: 'Standard', icon: 'car', color: COLORS.brandGreen, desc: 'Affordable rides' },
+  { id: 'comfort', name: 'Comfort', icon: 'car-sport', color: COLORS.brandBlue, desc: 'Extra comfort' },
+  { id: 'xl', name: 'XL', icon: 'bus', color: '#FFB800', desc: 'More space' },
 ];
 
 export default function BookRideScreen() {
   const router = useRouter();
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
-  const [selectedVehicle, setSelectedVehicle] = useState('standard');
+  const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [isLoading, setIsLoading] = useState(false);
 
   const handleConfirmBooking = async () => {
