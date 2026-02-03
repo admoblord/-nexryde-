@@ -1058,6 +1058,11 @@ agent_communication:
     priority: "high"
     needs_retesting: false
     status_history:
+
+agent_communication:
+    - agent: "main"
+    - message: "✅ DRIVER TERMS & RIDER NIN REGISTRATION COMPLETE: Successfully implemented both new registration features. BACKEND: Updated User model with nin, terms_accepted, terms_accepted_at fields. Updated RegisterRequest model to accept new fields. Updated /api/auth/register endpoint with validation (drivers must accept T&C, riders must provide 11-digit NIN). FRONTEND: Created /app/(auth)/driver-terms.tsx - full screen with scrollable terms content (12 sections: partnership, subscription, requirements, vehicle standards, service quality, earnings, safety, termination, data privacy, disputes, changes, contact), acceptance checkbox, disabled Continue button until accepted. Created /app/(auth)/rider-nin.tsx - beautiful NIN input screen with gradient icon, security reassurance cards, 11-digit validation (numbers only), 'Why NIN?' section with 4 bullet points, disabled Continue button until valid NIN entered. Updated /app/(auth)/register.tsx to navigate to appropriate screen based on role selection (drivers → driver-terms, riders → rider-nin). Both screens verified working correctly via screenshots. Mobile-first design with brand colors. Ready for backend testing."
+
         - working: true
         - agent: "testing"
         - comment: "✅ TESTED: Package delivery system working perfectly. POST /api/delivery/request successfully creates delivery request with ID a8e319d9-bac5-42f3-8138-7a577f5a003c for 'Important Documents' package from Victoria Island to Lekki. Recipient details (John Doe, +2348012345678) and package size (small) properly handled."
