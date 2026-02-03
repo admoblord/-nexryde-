@@ -548,6 +548,20 @@ const styles = StyleSheet.create({
     color: COLORS.brandGreen,
     marginLeft: 8,
   },
+  gpsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 212, 106, 0.15)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 4,
+  },
+  gpsButtonText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.brandGreen,
+  },
   tripTypeSection: {
     marginTop: 24,
   },
