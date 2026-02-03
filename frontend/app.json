@@ -21,7 +21,9 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "NEXRYDE needs your location to find nearby drivers and calculate fares",
         "NSLocationAlwaysUsageDescription": "NEXRYDE needs your location to track trips in the background",
-        "NSCameraUsageDescription": "NEXRYDE needs camera access for document verification"
+        "NSCameraUsageDescription": "NEXRYDE needs camera access for document verification",
+        "NSSpeechRecognitionUsageDescription": "Book rides with your voice - Nigerian accent supported",
+        "NSMicrophoneUsageDescription": "Voice booking needs microphone access"
       }
     },
     "android": {
