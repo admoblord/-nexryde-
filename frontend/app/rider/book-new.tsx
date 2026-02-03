@@ -293,21 +293,34 @@ export default function BookRideScreen() {
             )}
           </View>
 
-          {/* TRIP TYPE SELECTOR - INTRA-CITY vs INTER-CITY */}
-          <View style={styles.tripTypeSection}>
-            <Text style={styles.sectionTitle}>Trip Type</Text>
-            <View style={styles.tripTypeContainer}>
-              {TRIP_TYPES.map((tripType) => (
-                <TouchableOpacity
-                  key={tripType.id}
-                  style={[
-                    styles.tripTypeCard,
-                    selectedTripType === tripType.id && styles.tripTypeCardSelected
-                  ]}
-                  onPress={() => setSelectedTripType(tripType.id)}
-                >
-                  <Ionicons 
-                    name={tripType.icon as any} 
+          {/* Vehicle Types - Only show when city is selected */}
+          {selectedCity && (
+            <View style={styles.vehicleSection}>
+              <Text style={styles.sectionTitle}>Select Vehicle</Text>
+              <View style={styles.vehicleGrid}>
+                {VEHICLE_TYPES.map((vehicle) => (
+                  <TouchableOpacity
+                    key={vehicle.id}
+                    style={[
+                      styles.vehicleCard,
+                      selectedVehicle === vehicle.id && styles.vehicleCardSelected
+                    ]}
+                    onPress={() => setSelectedVehicle(vehicle.id)}
+                  >
+                    <View style={[styles.vehicleIcon, { backgroundColor: vehicle.color + '20' }]}>
+                      <Ionicons name={vehicle.icon as any} size={28} color={vehicle.color} />
+                    </View>
+                    <Text style={styles.vehicleName}>{vehicle.name}</Text>
+                    {selectedVehicle === vehicle.id && (
+                      <View style={styles.checkmark}>
+                        <Ionicons name="checkmark-circle" size={20} color={COLORS.brandGreen} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+          )} 
                     size={24} 
                     color={selectedTripType === tripType.id ? COLORS.brandGreen : COLORS.textSecondary} 
                   />
