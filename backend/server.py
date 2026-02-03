@@ -556,6 +556,9 @@ class RegisterRequest(BaseModel):
     role: str = "rider"
     google_id: Optional[str] = None
     profile_image: Optional[str] = None
+    nin: Optional[str] = None  # National Identification Number for riders
+    terms_accepted: Optional[bool] = None  # Terms acceptance for drivers
+    terms_accepted_at: Optional[str] = None  # Timestamp when terms were accepted
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
