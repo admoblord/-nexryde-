@@ -6,10 +6,9 @@ import {
   TouchableOpacity,
   ScrollView,
   Dimensions,
-  Alert,
-  ImageBackground,
   Animated,
   Platform,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -17,11 +16,55 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-// PREMIUM IMAGE - Nigerian Yoruba man smiling in his car!
-const DRIVER_HERO = 'https://images.unsplash.com/photo-1536139414673-1b479272ea38?w=800&q=80'; // Smiling Nigerian man sitting inside vehicle - Yoruba driver!
+// FUTURISTIC ASIAN/EUROPEAN COLOR PALETTE
+const COLORS = {
+  dark: '#0A0E27',
+  darkAlt: '#151B3D',
+  cyan: '#00F5FF',
+  magenta: '#FF006E',
+  purple: '#8338EC',
+  gold: '#FFBE0B',
+  mint: '#06FFA5',
+  blue: '#0084FF',
+  text: '#FFFFFF',
+  textSecondary: '#A0AEC0',
+  cardBg: 'rgba(255, 255, 255, 0.05)',
+};
+
+// QUICK ACTIONS FOR DRIVERS
+const DRIVER_ACTIONS = [
+  {
+    id: 'earnings',
+    label: 'Earnings',
+    icon: 'cash',
+    gradient: ['#FFBE0B', '#FB8500'],
+    route: '/(driver-tabs)/driver-earnings',
+  },
+  {
+    id: 'trips',
+    label: 'My Trips',
+    icon: 'list',
+    gradient: ['#00F5FF', '#0084FF'],
+    route: '/(driver-tabs)/driver-trips',
+  },
+  {
+    id: 'profile',
+    label: 'Profile',
+    icon: 'person',
+    gradient: ['#8338EC', '#A855F7'],
+    route: '/(driver-tabs)/driver-profile',
+  },
+  {
+    id: 'safety',
+    label: 'Safety',
+    icon: 'shield-checkmark',
+    gradient: ['#06FFA5', '#00D98C'],
+    route: '/(driver-tabs)/driver-safety',
+  },
+];
 
 export default function DriverHomeScreen() {
   const router = useRouter();
@@ -30,24 +73,22 @@ export default function DriverHomeScreen() {
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
 
   // Animations
-  const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
-  const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 40)).current;
-  const scaleAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0.9)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const glowAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     loadDriverData();
     
     Animated.parallel([
-      Animated.timing(fadeAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
-      Animated.spring(scaleAnim, { toValue: 1, friction: 6, useNativeDriver: true }),
     ]).start();
 
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.08, duration: 1000, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 1, duration: 2000, useNativeDriver: true }),
+        Animated.timing(glowAnim, { toValue: 0, duration: 2000, useNativeDriver: true }),
       ])
     ).start();
   }, []);
@@ -55,13 +96,13 @@ export default function DriverHomeScreen() {
   const loadDriverData = async () => {
     if (!user?.id) return;
     try {
-      const statsRes = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/stats`);
-      if (statsRes.ok) {
-        const stats = await statsRes.json();
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/stats`);
+      if (response.ok) {
+        const data = await response.json();
         setEarnings({
-          today: stats.today_earnings || 0,
-          week: stats.week_earnings || 0,
-          trips: stats.total_trips || 0,
+          today: data.earnings_today || 0,
+          week: data.earnings_this_week || 0,
+          trips: data.total_trips || 0,
         });
       }
     } catch (error) {
@@ -69,373 +110,428 @@ export default function DriverHomeScreen() {
     }
   };
 
-  const toggleOnline = async () => {
+  const toggleOnlineStatus = async () => {
     const newStatus = !isOnline;
     setIsOnline(newStatus);
-    
-    if (user?.id) {
-      try {
-        await fetch(`${BACKEND_URL}/api/drivers/${user.id}/online?is_online=${newStatus}`, { method: 'PUT' });
-      } catch (error) {
-        console.error('Error updating online status:', error);
-      }
+    // API call to update online status
+    try {
+      await fetch(`${BACKEND_URL}/api/drivers/${user?.id}/online`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ online: newStatus }),
+      });
+    } catch (error) {
+      console.error('Error updating online status:', error);
     }
-    
-    Alert.alert(
-      newStatus ? '🟢 You\'re Now Online!' : '🔴 You\'re Offline',
-      newStatus ? 'Get ready to receive ride requests!' : 'You won\'t receive new requests.'
-    );
   };
 
-  const formatCurrency = (amount: number) => '₦' + amount.toLocaleString();
+  const glowOpacity = glowAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0.2, 0.6],
+  });
 
   return (
     <View style={styles.container}>
-      {/* BRIGHT Gradient Background */}
+      {/* FUTURISTIC DARK GRADIENT */}
       <LinearGradient
-        colors={['#FFFFFF', '#F0FDF4', '#ECFEFF', '#FFF7ED']}
+        colors={['#0A0E27', '#151B3D', '#1E2749']}
         style={StyleSheet.absoluteFillObject}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
       />
-      
+
+      {/* ANIMATED GLOW EFFECTS */}
+      <Animated.View style={[styles.glowCircle, styles.glow1, { opacity: glowOpacity }]} />
+      <Animated.View style={[styles.glowCircle, styles.glow2, { opacity: glowOpacity }]} />
+
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
-          
-          {/* ✨ PREMIUM HEADER */}
-          <Animated.View style={[styles.header, { opacity: fadeAnim }]}>
-            <View>
-              <Text style={styles.greeting}>Welcome back! 🚗</Text>
+        <ScrollView 
+          showsVerticalScrollIndicator={false} 
+          contentContainerStyle={styles.scrollContent}
+        >
+          {/* FUTURISTIC HEADER */}
+          <Animated.View 
+            style={[
+              styles.header, 
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
+            ]}
+          >
+            <View style={styles.headerLeft}>
+              <Text style={styles.greeting}>Drive Smart</Text>
               <Text style={styles.userName}>{user?.name || 'Driver'}</Text>
             </View>
             <TouchableOpacity 
               style={styles.profileBtn}
-              onPress={() => router.push('/driver/profile')}
+              onPress={() => router.push('/(driver-tabs)/driver-profile')}
             >
               <LinearGradient
-                colors={isOnline ? ['#10B981', '#06B6D4'] : ['#64748B', '#475569']}
+                colors={[COLORS.cyan, COLORS.blue]}
                 style={styles.profileGradient}
               >
-                <Text style={styles.profileInitial}>
-                  {user?.name ? user.name.charAt(0).toUpperCase() : 'D'}
-                </Text>
+                <Ionicons name="person" size={22} color="#FFFFFF" />
               </LinearGradient>
             </TouchableOpacity>
           </Animated.View>
 
-          {/* 🌟 HERO - SMILING DRIVER IMAGE */}
-          <Animated.View style={[styles.heroSection, { transform: [{ scale: scaleAnim }] }]}>
-            <ImageBackground
-              source={{ uri: DRIVER_HERO }}
-              style={styles.heroImage}
-              imageStyle={styles.heroImageStyle}
+          {/* ONLINE/OFFLINE TOGGLE - POWERFUL */}
+          <Animated.View style={{ opacity: fadeAnim }}>
+            <LinearGradient
+              colors={isOnline ? [COLORS.mint, '#00D98C'] : [COLORS.cardBg, COLORS.cardBg]}
+              style={styles.statusCard}
             >
-              <LinearGradient
-                colors={isOnline 
-                  ? ['rgba(16,185,129,0.4)', 'rgba(16,185,129,0.7)', 'rgba(6,182,212,0.9)']
-                  : ['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)']}
-                style={styles.heroOverlay}
-              >
-                {/* Status Badge */}
-                <View style={[styles.statusBadge, isOnline && styles.statusBadgeOnline]}>
-                  <View style={[styles.statusDot, isOnline && styles.statusDotOnline]} />
-                  <Text style={[styles.statusText, isOnline && styles.statusTextOnline]}>
-                    {isOnline ? 'ONLINE' : 'OFFLINE'}
-                  </Text>
+              <View style={styles.statusContent}>
+                <View style={styles.statusLeft}>
+                  <View style={[styles.statusIcon, isOnline && { backgroundColor: 'rgba(255,255,255,0.3)' }]}>
+                    <Ionicons 
+                      name={isOnline ? "flash" : "flash-off"} 
+                      size={28} 
+                      color={isOnline ? "#FFFFFF" : COLORS.textSecondary} 
+                    />
+                  </View>
+                  <View>
+                    <Text style={[styles.statusLabel, isOnline && { color: '#FFFFFF' }]}>
+                      {isOnline ? 'You\'re Online' : 'You\'re Offline'}
+                    </Text>
+                    <Text style={[styles.statusSubtitle, isOnline && { color: 'rgba(255,255,255,0.9)' }]}>
+                      {isOnline ? 'Ready to accept rides' : 'Go online to start earning'}
+                    </Text>
+                  </View>
                 </View>
-
-                <View style={styles.heroContent}>
-                  <Text style={styles.heroTagline}>
-                    {isOnline ? '🟢 YOU\'RE LIVE!' : '🚗 START EARNING TODAY'}
-                  </Text>
-                  <Text style={styles.heroTitle}>
-                    {isOnline ? 'Waiting for\nriders...' : 'Ready to\nhit the road?'}
-                  </Text>
-                  
-                  {/* BIG GO ONLINE BUTTON */}
-                  <Animated.View style={{ transform: [{ scale: isOnline ? 1 : pulseAnim }] }}>
-                    <TouchableOpacity 
-                      style={styles.goOnlineBtn}
-                      onPress={toggleOnline}
-                      activeOpacity={0.9}
-                    >
-                      <LinearGradient
-                        colors={isOnline ? ['#EF4444', '#DC2626'] : ['#10B981', '#059669']}
-                        style={styles.goOnlineGradient}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 0 }}
-                      >
-                        <Ionicons 
-                          name={isOnline ? 'pause-circle' : 'power'} 
-                          size={32} 
-                          color="#FFF" 
-                        />
-                        <Text style={styles.goOnlineText}>
-                          {isOnline ? 'GO OFFLINE' : 'GO ONLINE'}
-                        </Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </Animated.View>
-                </View>
-              </LinearGradient>
-            </ImageBackground>
+                <Switch
+                  value={isOnline}
+                  onValueChange={toggleOnlineStatus}
+                  trackColor={{ false: '#4A5568', true: 'rgba(255,255,255,0.4)' }}
+                  thumbColor={isOnline ? '#FFFFFF' : '#E2E8F0'}
+                  ios_backgroundColor="#4A5568"
+                />
+              </View>
+            </LinearGradient>
           </Animated.View>
 
-          {/* 💰 EARNINGS DASHBOARD */}
+          {/* EARNINGS STATS - GLASSMORPHISM */}
           <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Today's Earnings</Text>
-              <TouchableOpacity onPress={() => router.push('/driver/earnings')} style={styles.viewAllBtn}>
-                <Text style={styles.viewAllText}>View All</Text>
-                <Ionicons name="chevron-forward" size={18} color="#10B981" />
+            <Text style={styles.sectionTitle}>Earnings</Text>
+            <View style={styles.earningsRow}>
+              <TouchableOpacity 
+                style={styles.earningCard}
+                onPress={() => router.push('/(driver-tabs)/driver-earnings' as any)}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['rgba(255, 190, 11, 0.15)', 'rgba(251, 133, 0, 0.15)']}
+                  style={styles.earningGradient}
+                >
+                  <View style={styles.earningIcon}>
+                    <Ionicons name="today" size={24} color={COLORS.gold} />
+                  </View>
+                  <Text style={styles.earningLabel}>Today</Text>
+                  <Text style={styles.earningValue}>₦{earnings.today.toLocaleString()}</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+
+              <TouchableOpacity 
+                style={styles.earningCard}
+                onPress={() => router.push('/(driver-tabs)/driver-earnings' as any)}
+                activeOpacity={0.85}
+              >
+                <LinearGradient
+                  colors={['rgba(0, 245, 255, 0.15)', 'rgba(0, 132, 255, 0.15)']}
+                  style={styles.earningGradient}
+                >
+                  <View style={styles.earningIcon}>
+                    <Ionicons name="calendar" size={24} color={COLORS.cyan} />
+                  </View>
+                  <Text style={styles.earningLabel}>This Week</Text>
+                  <Text style={styles.earningValue}>₦{earnings.week.toLocaleString()}</Text>
+                </LinearGradient>
               </TouchableOpacity>
             </View>
+          </View>
 
-            <View style={styles.earningsCard}>
+          {/* STATS - COLORFUL */}
+          <View style={styles.statsRow}>
+            <View style={styles.statCard}>
               <LinearGradient
-                colors={['#10B981', '#059669']}
-                style={styles.earningsGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
+                colors={['rgba(255, 0, 110, 0.15)', 'rgba(255, 69, 137, 0.15)']}
+                style={styles.statGradient}
               >
-                <View style={styles.earningsMain}>
-                  <Text style={styles.earningsLabel}>TODAY</Text>
-                  <Text style={styles.earningsAmount}>{formatCurrency(earnings.today)}</Text>
-                </View>
-                <View style={styles.earningsStats}>
-                  <View style={styles.earningsStat}>
-                    <Text style={styles.earningsStatValue}>{earnings.trips}</Text>
-                    <Text style={styles.earningsStatLabel}>Trips</Text>
-                  </View>
-                  <View style={styles.earningsDivider} />
-                  <View style={styles.earningsStat}>
-                    <Text style={styles.earningsStatValue}>{formatCurrency(earnings.week)}</Text>
-                    <Text style={styles.earningsStatLabel}>This Week</Text>
-                  </View>
-                </View>
+                <Ionicons name="car" size={28} color={COLORS.magenta} />
+                <Text style={styles.statValue}>{earnings.trips}</Text>
+                <Text style={styles.statLabel}>Total Trips</Text>
+              </LinearGradient>
+            </View>
+
+            <View style={styles.statCard}>
+              <LinearGradient
+                colors={['rgba(6, 255, 165, 0.15)', 'rgba(0, 217, 140, 0.15)']}
+                style={styles.statGradient}
+              >
+                <Ionicons name="star" size={28} color={COLORS.mint} />
+                <Text style={styles.statValue}>4.8</Text>
+                <Text style={styles.statLabel}>Rating</Text>
               </LinearGradient>
             </View>
           </View>
 
-          {/* 📋 QUICK ACTIONS */}
+          {/* QUICK ACTIONS - VIBRANT GRID */}
           <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Quick Actions</Text>
-              <View style={styles.essentialBadge}>
-                <Text style={styles.essentialText}>⚡ ESSENTIAL</Text>
-              </View>
-            </View>
-
-            <View style={styles.quickGrid}>
-              <QuickCard icon="car" title="Vehicle" subtitle="Register car" color="#10B981" onPress={() => router.push('/driver/vehicle-registration')} />
-              <QuickCard icon="card" title="Subscription" subtitle="Manage plan" color="#3B82F6" onPress={() => router.push('/driver/subscription')} />
-              <QuickCard icon="document" title="Verification" subtitle="Documents" color="#8B5CF6" onPress={() => router.push('/driver/verification')} />
-              <QuickCard icon="wallet" title="Bank" subtitle="Withdrawals" color="#F59E0B" onPress={() => router.push('/driver/bank')} />
+            <Text style={styles.sectionTitle}>Quick Actions</Text>
+            <View style={styles.actionsGrid}>
+              {DRIVER_ACTIONS.map((action) => (
+                <TouchableOpacity
+                  key={action.id}
+                  style={styles.actionCard}
+                  onPress={() => router.push(action.route as any)}
+                  activeOpacity={0.85}
+                >
+                  <LinearGradient
+                    colors={action.gradient}
+                    style={styles.actionGradient}
+                  >
+                    <View style={styles.actionIconBg}>
+                      <Ionicons name={action.icon as any} size={26} color="#FFFFFF" />
+                    </View>
+                    <Text style={styles.actionLabel}>{action.label}</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              ))}
             </View>
           </View>
 
-          {/* 🗺️ SMART FEATURES */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Smart Features</Text>
-              <View style={[styles.essentialBadge, { backgroundColor: '#EDE9FE' }]}>
-                <Text style={[styles.essentialText, { color: '#8B5CF6' }]}>✨ AI</Text>
-              </View>
-            </View>
-
-            <View style={styles.smartRow}>
-              <SmartCard icon="flame" title="Heatmap" subtitle="Find hot zones" gradient={['#EF4444', '#DC2626']} onPress={() => router.push('/driver/heatmap')} />
-              <SmartCard icon="flash" title="Smart Mode" subtitle="AI optimize" gradient={['#8B5CF6', '#7C3AED']} onPress={() => router.push('/driver/smart-mode')} />
-            </View>
-            <View style={styles.smartRow}>
-              <SmartCard icon="warning" title="Safety Alerts" subtitle="Stay safe" gradient={['#F59E0B', '#D97706']} onPress={() => router.push('/driver/safety-alerts')} />
-              <SmartCard icon="car" title="Traffic" subtitle="Live updates" gradient={['#06B6D4', '#0891B2']} onPress={() => router.push('/driver/traffic')} />
-            </View>
-          </View>
-
-          {/* 🏆 ACHIEVEMENTS */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Achievements</Text>
-              <View style={[styles.essentialBadge, { backgroundColor: '#FEF3C7' }]}>
-                <Text style={[styles.essentialText, { color: '#D97706' }]}>🏆 EARN</Text>
-              </View>
-            </View>
-
-            <View style={styles.achieveRow}>
-              <AchieveCard icon="trophy" label="Leaderboard" color="#F59E0B" onPress={() => router.push('/driver/leaderboard')} />
-              <AchieveCard icon="ribbon" label="Challenges" color="#10B981" onPress={() => router.push('/driver/challenges')} />
-              <AchieveCard icon="medal" label="Badges" color="#3B82F6" onPress={() => router.push('/driver/badges')} />
-              <AchieveCard icon="trending-up" label="Tiers" color="#8B5CF6" onPress={() => router.push('/driver/tiers')} />
-            </View>
-          </View>
-
-          {/* 😊 WELLNESS */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Wellness & More</Text>
-            <View style={styles.wellnessGrid}>
-              <WellnessBtn icon="fitness" label="Wellness" color="#EC4899" onPress={() => router.push('/driver/wellness')} />
-              <WellnessBtn icon="radio" label="Radio" color="#8B5CF6" onPress={() => router.push('/driver/radio')} />
-              <WellnessBtn icon="time" label="Prayer" color="#10B981" onPress={() => router.push('/driver/prayer-times')} />
-              <WellnessBtn icon="speedometer" label="Fuel" color="#F59E0B" onPress={() => router.push('/driver/fuel-tracker')} />
-              <WellnessBtn icon="chatbubbles" label="Stories" color="#3B82F6" onPress={() => router.push('/driver/story-mode')} />
-              <WellnessBtn icon="stats-chart" label="Stats" color="#06B6D4" onPress={() => router.push('/driver/performance')} />
-            </View>
-          </View>
-
-          {/* 🆘 SUPPORT */}
-          <View style={styles.section}>
-            <TouchableOpacity style={styles.supportCard} onPress={() => router.push('/chat')} activeOpacity={0.9}>
-              <LinearGradient colors={['#6366F1', '#8B5CF6']} style={styles.supportGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-                <View style={styles.supportIcon}>
-                  <Text style={styles.supportEmoji}>🤖</Text>
-                </View>
-                <View style={styles.supportText}>
-                  <Text style={styles.supportTitle}>24/7 AI Support</Text>
-                  <Text style={styles.supportSubtitle}>Get help anytime</Text>
-                </View>
-                <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.7)" />
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-
-          <View style={{ height: 120 }} />
+          <View style={{ height: 40 }} />
         </ScrollView>
       </SafeAreaView>
     </View>
   );
 }
 
-// === COMPONENTS ===
-
-const QuickCard = ({ icon, title, subtitle, color, onPress }: any) => (
-  <TouchableOpacity style={styles.quickCard} onPress={onPress} activeOpacity={0.9}>
-    <View style={[styles.quickIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon} size={26} color={color} />
-    </View>
-    <Text style={styles.quickTitle}>{title}</Text>
-    <Text style={styles.quickSubtitle}>{subtitle}</Text>
-  </TouchableOpacity>
-);
-
-const SmartCard = ({ icon, title, subtitle, gradient, onPress }: any) => (
-  <TouchableOpacity style={styles.smartCard} onPress={onPress} activeOpacity={0.9}>
-    <LinearGradient colors={gradient} style={styles.smartGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-      <View style={styles.smartIcon}>
-        <Ionicons name={icon} size={24} color="#FFF" />
-      </View>
-      <View style={styles.smartText}>
-        <Text style={styles.smartTitle}>{title}</Text>
-        <Text style={styles.smartSubtitle}>{subtitle}</Text>
-      </View>
-      <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.6)" />
-    </LinearGradient>
-  </TouchableOpacity>
-);
-
-const AchieveCard = ({ icon, label, color, onPress }: any) => (
-  <TouchableOpacity style={styles.achieveCard} onPress={onPress} activeOpacity={0.9}>
-    <View style={[styles.achieveIcon, { backgroundColor: color + '15' }]}>
-      <Ionicons name={icon} size={24} color={color} />
-    </View>
-    <Text style={styles.achieveLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
-const WellnessBtn = ({ icon, label, color, onPress }: any) => (
-  <TouchableOpacity style={styles.wellnessBtn} onPress={onPress} activeOpacity={0.8}>
-    <Ionicons name={icon} size={20} color={color} />
-    <Text style={styles.wellnessLabel}>{label}</Text>
-  </TouchableOpacity>
-);
-
-// === STYLES ===
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#FFF' },
-  safeArea: { flex: 1 },
-  scrollContent: { paddingBottom: 20 },
+  container: {
+    flex: 1,
+  },
+  safeArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
 
-  // Header
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 24, paddingTop: 16, paddingBottom: 20 },
-  greeting: { fontSize: 16, color: '#64748B', fontWeight: '500' },
-  userName: { fontSize: 32, fontWeight: '900', color: '#0F172A', marginTop: 4 },
-  profileBtn: { borderRadius: 28 },
-  profileGradient: { width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center' },
-  profileInitial: { fontSize: 24, fontWeight: '800', color: '#FFF' },
+  // GLOW EFFECTS
+  glowCircle: {
+    position: 'absolute',
+    width: 400,
+    height: 400,
+    borderRadius: 200,
+  },
+  glow1: {
+    top: -200,
+    right: -100,
+    backgroundColor: '#00F5FF',
+    opacity: 0.1,
+  },
+  glow2: {
+    bottom: -150,
+    left: -150,
+    backgroundColor: '#FFBE0B',
+    opacity: 0.1,
+  },
 
-  // Hero
-  heroSection: { paddingHorizontal: 20, marginBottom: 24 },
-  heroImage: { width: '100%', height: 320, borderRadius: 28, overflow: 'hidden' },
-  heroImageStyle: { borderRadius: 28 },
-  heroOverlay: { flex: 1, padding: 24, justifyContent: 'flex-end' },
-  statusBadge: { position: 'absolute', top: 20, right: 20, flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.9)', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  statusBadgeOnline: { backgroundColor: 'rgba(16,185,129,0.95)' },
-  statusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#FFF', marginRight: 8 },
-  statusDotOnline: {},
-  statusText: { fontSize: 12, fontWeight: '800', color: '#FFF', letterSpacing: 1 },
-  statusTextOnline: {},
-  heroContent: {},
-  heroTagline: { fontSize: 14, fontWeight: '700', color: '#FFF', letterSpacing: 1.5, marginBottom: 8 },
-  heroTitle: { fontSize: 38, fontWeight: '900', color: '#FFF', lineHeight: 46, marginBottom: 24 },
-  goOnlineBtn: { borderRadius: 20, overflow: 'hidden', elevation: 10, shadowColor: '#10B981', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12 },
-  goOnlineGradient: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 20, paddingHorizontal: 40, gap: 14 },
-  goOnlineText: { fontSize: 22, fontWeight: '900', color: '#FFF', letterSpacing: 1 },
+  // HEADER
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  greeting: {
+    fontSize: 14,
+    color: COLORS.textSecondary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  userName: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginTop: 4,
+    letterSpacing: -0.5,
+  },
+  profileBtn: {
+    shadowColor: '#00F5FF',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  profileGradient: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 
-  // Section
-  section: { paddingHorizontal: 20, marginBottom: 24 },
-  sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  sectionTitle: { fontSize: 22, fontWeight: '900', color: '#0F172A', marginBottom: 16 },
-  viewAllBtn: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  viewAllText: { fontSize: 15, fontWeight: '700', color: '#10B981' },
-  essentialBadge: { backgroundColor: '#ECFDF5', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12 },
-  essentialText: { fontSize: 12, fontWeight: '800', color: '#10B981' },
+  // STATUS CARD
+  statusCard: {
+    borderRadius: 20,
+    padding: 24,
+    marginBottom: 28,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#06FFA5',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  statusContent: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  statusLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+    gap: 16,
+  },
+  statusIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.cardBg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusLabel: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginBottom: 4,
+  },
+  statusSubtitle: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '500',
+  },
 
-  // Earnings Card
-  earningsCard: { borderRadius: 24, overflow: 'hidden', elevation: 8, shadowColor: '#10B981', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.3, shadowRadius: 12 },
-  earningsGradient: { padding: 24 },
-  earningsMain: { alignItems: 'center', marginBottom: 24 },
-  earningsLabel: { fontSize: 14, color: 'rgba(255,255,255,0.8)', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
-  earningsAmount: { fontSize: 48, fontWeight: '900', color: '#FFF' },
-  earningsStats: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center' },
-  earningsStat: { alignItems: 'center' },
-  earningsStatValue: { fontSize: 22, fontWeight: '800', color: '#FFF', marginBottom: 4 },
-  earningsStatLabel: { fontSize: 13, color: 'rgba(255,255,255,0.8)' },
-  earningsDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.3)' },
+  // SECTION
+  section: {
+    marginBottom: 28,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: COLORS.text,
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
 
-  // Quick Grid
-  quickGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14 },
-  quickCard: { width: (width - 54) / 2, backgroundColor: '#FFF', borderRadius: 20, padding: 20, alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9' },
-  quickIcon: { width: 56, height: 56, borderRadius: 18, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
-  quickTitle: { fontSize: 17, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
-  quickSubtitle: { fontSize: 13, color: '#64748B' },
+  // EARNINGS
+  earningsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  earningCard: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  earningGradient: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  earningIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  earningLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+    marginBottom: 6,
+  },
+  earningValue: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: COLORS.text,
+  },
 
-  // Smart Row
-  smartRow: { flexDirection: 'row', gap: 14, marginBottom: 14 },
-  smartCard: { flex: 1, borderRadius: 18, overflow: 'hidden' },
-  smartGradient: { flexDirection: 'row', alignItems: 'center', padding: 18 },
-  smartIcon: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(255,255,255,0.25)', justifyContent: 'center', alignItems: 'center', marginRight: 14 },
-  smartText: { flex: 1 },
-  smartTitle: { fontSize: 16, fontWeight: '800', color: '#FFF' },
-  smartSubtitle: { fontSize: 12, color: 'rgba(255,255,255,0.8)', marginTop: 2 },
+  // STATS
+  statsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 28,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 16,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  statGradient: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  statValue: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: COLORS.text,
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  statLabel: {
+    fontSize: 13,
+    color: COLORS.textSecondary,
+    fontWeight: '600',
+  },
 
-  // Achieve Row
-  achieveRow: { flexDirection: 'row', gap: 12 },
-  achieveCard: { flex: 1, backgroundColor: '#FFF', borderRadius: 18, padding: 18, alignItems: 'center', borderWidth: 2, borderColor: '#F1F5F9' },
-  achieveIcon: { width: 50, height: 50, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 10 },
-  achieveLabel: { fontSize: 12, fontWeight: '700', color: '#374151' },
-
-  // Wellness Grid
-  wellnessGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  wellnessBtn: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', paddingHorizontal: 16, paddingVertical: 14, borderRadius: 14, gap: 10 },
-  wellnessLabel: { fontSize: 14, fontWeight: '700', color: '#374151' },
-
-  // Support Card
-  supportCard: { borderRadius: 22, overflow: 'hidden' },
-  supportGradient: { flexDirection: 'row', alignItems: 'center', padding: 22 },
-  supportIcon: { width: 56, height: 56, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
-  supportEmoji: { fontSize: 30 },
-  supportText: { flex: 1 },
-  supportTitle: { fontSize: 19, fontWeight: '900', color: '#FFF' },
-  supportSubtitle: { fontSize: 14, color: 'rgba(255,255,255,0.8)', marginTop: 4 },
+  // ACTIONS GRID
+  actionsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  actionCard: {
+    width: (width - 52) / 2,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  actionGradient: {
+    padding: 20,
+    minHeight: 120,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  actionIconBg: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  actionLabel: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    textAlign: 'center',
+  },
 });
