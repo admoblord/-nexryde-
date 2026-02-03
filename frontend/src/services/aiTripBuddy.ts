@@ -476,26 +476,40 @@ export const useAITripBuddy = () => {
     // Show typing indicator
     setIsTyping(true);
     
-    // Simulate thinking time (500ms - 1500ms)
-    await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
-    
-    // Generate AI response
-    const aiResponse = AITripBuddy.generateResponse(text, personality, context, updatedMessages);
-    
-    const aiMessage: AIMessage = {
-      id: (Date.now() + 1).toString(),
-      text: aiResponse,
-      sender: 'ai',
-      timestamp: Date.now(),
-      personality,
-    };
-    
-    const finalMessages = [...updatedMessages, aiMessage];
-    setMessages(finalMessages);
-    setIsTyping(false);
-    
-    // Save history
-    await saveHistory(finalMessages);
+    try {
+      // Simulate thinking time (500ms - 1500ms)
+      await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
+      
+      // Generate AI response - NOW ASYNC with real API
+      const aiResponse = await AITripBuddy.generateResponse(text, personality, context, updatedMessages);
+      
+      const aiMessage: AIMessage = {
+        id: (Date.now() + 1).toString(),
+        text: aiResponse,
+        sender: 'ai',
+        timestamp: Date.now(),
+        personality,
+      };
+      
+      const finalMessages = [...updatedMessages, aiMessage];
+      setMessages(finalMessages);
+      
+      // Save history
+      await saveHistory(finalMessages);
+    } catch (error) {
+      console.error('Send message error:', error);
+      // Add error message
+      const errorMessage: AIMessage = {
+        id: (Date.now() + 1).toString(),
+        text: "Sorry, I'm having trouble connecting. Please try again.",
+        sender: 'ai',
+        timestamp: Date.now(),
+        personality,
+      };
+      setMessages([...updatedMessages, errorMessage]);
+    } finally {
+      setIsTyping(false);
+    }
   }, [messages, personality, context, saveHistory]);
   
   /**
