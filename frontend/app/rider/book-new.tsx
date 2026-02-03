@@ -232,6 +232,46 @@ export default function BookRideScreen() {
             </View>
           </View>
 
+          {/* TRIP TYPE SELECTOR - INTRA-CITY vs INTER-CITY */}
+          <View style={styles.tripTypeSection}>
+            <Text style={styles.sectionTitle}>Trip Type</Text>
+            <View style={styles.tripTypeContainer}>
+              {TRIP_TYPES.map((tripType) => (
+                <TouchableOpacity
+                  key={tripType.id}
+                  style={[
+                    styles.tripTypeCard,
+                    selectedTripType === tripType.id && styles.tripTypeCardSelected
+                  ]}
+                  onPress={() => setSelectedTripType(tripType.id)}
+                >
+                  <Ionicons 
+                    name={tripType.icon as any} 
+                    size={24} 
+                    color={selectedTripType === tripType.id ? COLORS.brandGreen : COLORS.textSecondary} 
+                  />
+                  <Text style={[
+                    styles.tripTypeLabel,
+                    selectedTripType === tripType.id && styles.tripTypeLabelSelected
+                  ]}>
+                    {tripType.label}
+                  </Text>
+                  <Text style={[
+                    styles.tripTypeDesc,
+                    selectedTripType === tripType.id && { color: COLORS.brandGreen }
+                  ]}>
+                    {tripType.desc}
+                  </Text>
+                  {selectedTripType === tripType.id && (
+                    <View style={styles.tripTypeCheck}>
+                      <Ionicons name="checkmark-circle" size={20} color={COLORS.brandGreen} />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
           {/* Vehicle Types */}
           <View style={styles.vehicleSection}>
             <Text style={styles.sectionTitle}>Select Vehicle</Text>
