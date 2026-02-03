@@ -95,6 +95,12 @@ export default function BookRideScreen() {
   };
 
   const handleConfirmBooking = async () => {
+    // Validate city selection
+    if (!selectedCity || selectedCity.trim() === '') {
+      Alert.alert('Select City', 'Please select your city first');
+      return;
+    }
+    
     // Validate inputs
     if (!pickup || pickup.trim() === '' || pickup.toLowerCase().includes('null')) {
       Alert.alert('Invalid Pickup', 'Please select a valid pickup location from the suggestions');
@@ -113,6 +119,9 @@ export default function BookRideScreen() {
 
     setIsLoading(true);
     try {
+      // Auto-detect trip type based on locations
+      const tripType = detectTripType();
+      
       const response = await fetch(`${BACKEND_URL}/api/fares/estimate-google`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -120,16 +129,17 @@ export default function BookRideScreen() {
           pickup: pickup,
           destination: destination,
           vehicle_type: selectedVehicle,  // economy, comfort, xl, premium
-          trip_type: selectedTripType,  // intra or inter
+          trip_type: tripType,  // auto-detected: intra or inter
         }),
       });
 
       const fareData = await response.json();
       
       if (response.ok && fareData.total_fare) {
+        const tripTypeLabel = tripType === 'intra' ? '🏙️ Intra-City' : '🛣️ Inter-City';
         Alert.alert(
           '🚗 Confirm Booking',
-          `Vehicle: ${VEHICLE_TYPES.find(v => v.id === selectedVehicle)?.name}\n\nFrom: ${pickup}\n\nTo: ${destination}\n\nFare: ₦${fareData.total_fare.toFixed(2)}`,
+          `${tripTypeLabel}\nVehicle: ${VEHICLE_TYPES.find(v => v.id === selectedVehicle)?.name}\n\nFrom: ${pickup}\n\nTo: ${destination}\n\nFare: ₦${fareData.total_fare.toFixed(2)}`,
           [
             { text: 'Cancel', style: 'cancel' },
             { text: 'Book Now', onPress: () => {
