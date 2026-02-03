@@ -346,38 +346,6 @@ export default function BookRideScreen() {
               </LinearGradient>
             </TouchableOpacity>
           )}
-                  {selectedVehicle === vehicle.id && (
-                    <View style={styles.checkmark}>
-                      <Ionicons name="checkmark-circle" size={20} color={COLORS.brandGreen} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
-
-          {/* Book Button */}
-          <TouchableOpacity
-            style={styles.bookButton}
-            onPress={handleConfirmBooking}
-            disabled={isLoading || !pickup || !destination}
-          >
-            <LinearGradient
-              colors={[COLORS.brandGreen, COLORS.brandBlue]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.bookGradient}
-            >
-              {isLoading ? (
-                <ActivityIndicator color={COLORS.white} />
-              ) : (
-                <>
-                  <Text style={styles.bookButtonText}>Confirm Booking</Text>
-                  <Ionicons name="arrow-forward-circle" size={24} color={COLORS.white} />
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
         </KeyboardAvoidingView>
       </LinearGradient>
     </SafeAreaView>
