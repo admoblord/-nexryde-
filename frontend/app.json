@@ -65,9 +65,7 @@
           "resizeMode": "contain",
           "backgroundColor": "#0D1420"
         }
-      ],
-      "@react-native-voice/voice",
-      "expo-speech-recognition"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
