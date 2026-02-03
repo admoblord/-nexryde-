@@ -308,17 +308,20 @@ export default function ModernBookingScreen() {
 
       {/* BOTTOM BAR - CONFIRM BUTTON */}
       <Animated.View style={[styles.bottomBar, { opacity: fadeAnim }]}>
-        <View style={styles.priceSection}>
-          <Text style={styles.priceLabel}>Estimated Fare</Text>
-          <Text style={styles.priceValue}>{selectedVehicleData?.price || '₦800'}</Text>
-        </View>
         <TouchableOpacity 
           style={[styles.confirmButton, { backgroundColor: selectedVehicleData?.color || COLORS.primary }]}
           onPress={handleConfirmBooking}
           activeOpacity={0.8}
+          disabled={isLoading}
         >
-          <Text style={styles.confirmButtonText}>Confirm Booking</Text>
-          <Ionicons name="arrow-forward" size={20} color="#FFF" />
+          {isLoading ? (
+            <ActivityIndicator color="#FFF" />
+          ) : (
+            <>
+              <Text style={styles.confirmButtonText}>Confirm Booking</Text>
+              <Ionicons name="arrow-forward" size={20} color="#FFF" />
+            </>
+          )}
         </TouchableOpacity>
       </Animated.View>
     </SafeAreaView>
