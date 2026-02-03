@@ -254,14 +254,17 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   greeting: {
-    fontSize: 14,
+    fontSize: 16,
+    fontWeight: '600',
     color: COLORS.textSecondary,
     marginBottom: 4,
+    letterSpacing: 0.3,
   },
   userName: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 28,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: 0.5,
   },
   profileButton: {
     width: 48,
