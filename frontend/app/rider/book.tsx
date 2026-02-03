@@ -516,29 +516,13 @@ export default function BookingScreen() {
               <View style={styles.locationInputRow}>
                 <View style={[styles.locationDot, { backgroundColor: COLORS.green }]} />
                 <View style={styles.inputWrapper}>
-                  {Platform.OS === 'web' ? (
-                    <TextInput
-                      style={styles.input}
-                      placeholder="Pickup location"
-                      placeholderTextColor={COLORS.textSecondary}
-                      value={pickup}
-                      onChangeText={setPickup}
-                    />
-                  ) : (
-                    <GooglePlacesAutocomplete
-                      ref={pickupRef}
-                      placeholder='Pickup location'
-                      minLength={2}
-                      fetchDetails={true}
-                      onPress={(data) => setPickup(data.description)}
-                      query={{ key: GOOGLE_MAPS_API_KEY, language: 'en', components: 'country:ng' }}
-                      styles={{ textInput: styles.input }}
-                      textInputProps={{ placeholderTextColor: COLORS.textSecondary }}
-                      enablePoweredByContainer={false}
-                      nearbyPlacesAPI="GooglePlacesSearch"
-                      debounce={300}
-                    />
-                  )}
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Pickup location"
+                    placeholderTextColor={COLORS.textSecondary}
+                    value={pickup}
+                    onChangeText={setPickup}
+                  />
                 </View>
               </View>
 
