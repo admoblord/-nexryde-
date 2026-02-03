@@ -57,6 +57,50 @@ export default function RiderTrafficStatusScreen() {
     setRefreshing(false);
   };
 
+  const handleSearchLocation = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setSearchLoading(true);
+    try {
+      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
+      
+      // Geocode the search query to get coordinates
+      const geocodeResponse = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(searchQuery + ', Lagos, Nigeria')}&key=${GOOGLE_MAPS_KEY}`
+      );
+      
+      const geocodeData = await geocodeResponse.json();
+      
+      if (geocodeData.status === 'OK' && geocodeData.results.length > 0) {
+        const location = geocodeData.results[0];
+        const { lat, lng } = location.geometry.location;
+        
+        // Fetch traffic status for this location
+        await fetchTrafficStatus(lat, lng, 5000);
+        
+        // Get AI prediction for this location
+        const prediction = await TrafficAI.getTrafficPredictions([
+          { latitude: lat, longitude: lng, name: searchQuery }
+        ]);
+        
+        setSearchedLocation({
+          name: location.formatted_address,
+          lat,
+          lng,
+          prediction: prediction[0],
+        });
+      } else {
+        alert('Location not found. Please try a different search term.');
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      alert('Failed to search location. Please try again.');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
   const getBestTimeToTravel = () => {
     const currentHour = new Date().getHours();
     if (currentHour >= 6 && currentHour < 10) return '10:00 AM - 2:00 PM';
