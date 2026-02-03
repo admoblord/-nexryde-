@@ -39,7 +39,7 @@ export default function RegisterScreen() {
 
   const isGoogleAuth = authType === 'google';
 
-  const handleContinue = async () => {
+  const handleContinue = () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter your name');
       return;
@@ -50,51 +50,31 @@ export default function RegisterScreen() {
       return;
     }
 
-    try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          phone: phoneNumber ? `+234${phoneNumber}` : null,
+    // Navigate to appropriate verification screen based on role
+    if (selectedRole === 'driver') {
+      // Drivers must accept Terms & Conditions
+      router.push({
+        pathname: '/(auth)/driver-terms',
+        params: {
+          phone: phoneNumber ? `+234${phoneNumber}` : '',
           name: name,
-          email: email || null,
-          role: selectedRole,
-          google_id: googleId || null,
-          profile_image: googlePicture || null,
-        }),
+          email: email || '',
+          google_id: googleId || '',
+          picture: googlePicture || '',
+        },
       });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        setUser(data.user);
-        setIsAuthenticated(true);
-        
-        if (selectedRole === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
-        } else {
-          router.replace('/(rider-tabs)/rider-home');
-        }
-      } else {
-        Alert.alert('Error', data.detail || 'Registration failed');
-      }
-    } catch (error) {
-      console.error('Registration error:', error);
-      // Fallback to local registration for demo
-      setUser({
-        id: Date.now().toString(),
-        name: name || 'User',
-        phone: phoneNumber ? `+234${phoneNumber}` : undefined,
-        role: selectedRole,
-        email: email,
+    } else {
+      // Riders must provide NIN
+      router.push({
+        pathname: '/(auth)/rider-nin',
+        params: {
+          phone: phoneNumber ? `+234${phoneNumber}` : '',
+          name: name,
+          email: email || '',
+          google_id: googleId || '',
+          picture: googlePicture || '',
+        },
       });
-      setIsAuthenticated(true);
-      
-      if (selectedRole === 'driver') {
-        router.replace('/(driver-tabs)/driver-home');
-      } else {
-        router.replace('/(rider-tabs)/rider-home');
-      }
     }
   };
 
