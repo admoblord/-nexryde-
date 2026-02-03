@@ -52,6 +52,89 @@ export default function BookRideScreen() {
   const [stops, setStops] = useState<string[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
   const [isLoading, setIsLoading] = useState(false);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
+  
+  // PROACTIVE GPS: Auto-detect location when screen loads
+  useEffect(() => {
+    getCurrentLocationProactive();
+  }, []);
+  
+  // Get user's current GPS location - VERY PROACTIVE
+  const getCurrentLocationProactive = async () => {
+    try {
+      setIsGettingLocation(true);
+      
+      // Request location permissions with high accuracy
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Location Permission', 'Please enable location services for accurate pickup detection');
+        setIsGettingLocation(false);
+        return;
+      }
+      
+      // Get current position with HIGH ACCURACY
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High, // Very accurate GPS
+      });
+      
+      const { latitude, longitude } = location.coords;
+      
+      // Reverse geocode to get address
+      const address = await reverseGeocode(latitude, longitude);
+      
+      setCurrentLocation({
+        lat: latitude,
+        lng: longitude,
+        address: address
+      });
+      
+      // Auto-detect city from address
+      if (address.toLowerCase().includes('lagos')) {
+        setSelectedCity('Lagos, Nigeria');
+      } else if (address.toLowerCase().includes('abuja')) {
+        setSelectedCity('Abuja, Nigeria');
+      } else if (address.toLowerCase().includes('port harcourt')) {
+        setSelectedCity('Port Harcourt, Nigeria');
+      }
+      
+      setIsGettingLocation(false);
+    } catch (error) {
+      console.error('GPS Error:', error);
+      setIsGettingLocation(false);
+    }
+  };
+  
+  // Reverse geocode coordinates to address using Google Maps
+  const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
+    try {
+      const response = await fetch(
+        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${lat},${lng}&key=${process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}`
+      );
+      const data = await response.json();
+      
+      if (data.results && data.results.length > 0) {
+        return data.results[0].formatted_address;
+      }
+      
+      return `${lat}, ${lng}`;
+    } catch (error) {
+      console.error('Reverse geocode error:', error);
+      return `${lat}, ${lng}`;
+    }
+  };
+  
+  // Use GPS location for pickup
+  const useCurrentLocation = () => {
+    if (currentLocation) {
+      setPickup(currentLocation.address);
+      Alert.alert('📍 Location Set', 'Using your current location as pickup');
+    } else {
+      Alert.alert('Getting Location', 'Please wait while we detect your exact location...');
+      getCurrentLocationProactive();
+    }
+  };
   
   // Auto-detect trip type based on pickup and destination cities
   const detectTripType = () => {
