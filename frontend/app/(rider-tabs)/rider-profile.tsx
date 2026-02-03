@@ -344,14 +344,6 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/family')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="home-outline" size={20} color={COLORS.success} />
-            </View>
-            <Text style={styles.menuText}>KODA Family</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/tracking')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
               <Ionicons name="navigate-outline" size={20} color={COLORS.info} />
