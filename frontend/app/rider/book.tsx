@@ -266,6 +266,10 @@ export default function BookingScreen() {
                     language: 'en',
                     components: 'country:ng',
                   }}
+                  requestUrl={{
+                    url: 'https://maps.googleapis.com/maps/api',
+                    useOnPlatform: 'web',
+                  }}
                   styles={{
                     textInput: styles.autocompleteInput,
                     listView: styles.autocompleteList,
