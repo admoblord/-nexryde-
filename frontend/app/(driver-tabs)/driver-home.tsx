@@ -41,18 +41,41 @@ const PRIORITY_FEATURES = [
   { id: 'performance', label: 'Performance', icon: 'analytics-outline', route: '/driver/performance', color: COLORS.success },
 ];
 
-// ALL OTHER FEATURES - IN NAVIGATION
-const MORE_FEATURES = [
-  { id: 'vehicle', label: 'Vehicle', icon: 'car-sport-outline', route: '/driver/vehicle' },
-  { id: 'documents', label: 'Documents', icon: 'document-text-outline', route: '/driver/documents' },
-  { id: 'verification', label: 'Verification', icon: 'shield-checkmark-outline', route: '/driver/verification' },
-  { id: 'smart-mode', label: 'Smart Mode', icon: 'bulb-outline', route: '/driver/smart-mode' },
-  { id: 'heatmap', label: 'Heatmap', icon: 'map-outline', route: '/driver/heatmap' },
-  { id: 'ai-coach', label: 'AI Coach', icon: 'chatbubbles-outline', route: '/driver/ai-suggestions' },
-  { id: 'leaderboard', label: 'Leaderboard', icon: 'trophy-outline', route: '/driver/leaderboard' },
-  { id: 'wellness', label: 'Wellness', icon: 'fitness-outline', route: '/driver/wellness' },
-  { id: 'fuel', label: 'Fuel Tracker', icon: 'water-outline', route: '/driver/fuel-tracker' },
-  { id: 'prayer', label: 'Prayer Times', icon: 'moon-outline', route: '/driver/prayer-times' },
+// ALL FEATURES GRID - COMPREHENSIVE ACCESS  
+const ALL_FEATURES = [
+  // Verification & Setup
+  { id: 'verification', label: 'Verification', icon: 'shield-checkmark', route: '/driver/verification', color: COLORS.success },
+  { id: 'vehicle', label: 'Vehicle', icon: 'car-sport', route: '/driver/vehicle', color: COLORS.primary },
+  { id: 'vehicle-reg', label: 'Register Car', icon: 'create', route: '/driver/vehicle-registration', color: COLORS.secondary },
+  { id: 'documents', label: 'Documents', icon: 'document-text', route: '/driver/documents', color: COLORS.warning },
+  { id: 'bank', label: 'Bank Details', icon: 'wallet', route: '/driver/bank', color: COLORS.primary },
+  
+  // Business & Earnings
+  { id: 'challenges', label: 'Challenges', icon: 'trophy', route: '/driver/challenges', color: COLORS.warning },
+  { id: 'badges', label: 'Badges', icon: 'medal', route: '/driver/badges', color: COLORS.success },
+  { id: 'tiers', label: 'Tiers', icon: 'ribbon', route: '/driver/tiers', color: COLORS.primary },
+  { id: 'leaderboard', label: 'Leaderboard', icon: 'podium', route: '/driver/leaderboard', color: COLORS.secondary },
+  { id: 'data-insights', label: 'Insights', icon: 'bar-chart', route: '/driver/data-insights', color: COLORS.primary },
+  
+  // AI & Smart Features
+  { id: 'smart-mode', label: 'Smart Mode', icon: 'bulb', route: '/driver/smart-mode', color: COLORS.success },
+  { id: 'ai-coach', label: 'AI Coach', icon: 'chatbubbles', route: '/driver/ai-suggestions', color: COLORS.primary },
+  { id: 'heatmap', label: 'Heatmap', icon: 'map', route: '/driver/heatmap', color: COLORS.warning },
+  { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.danger },
+  { id: 'traffic-predict', label: 'Traffic AI', icon: 'analytics', route: '/driver/traffic-prediction', color: COLORS.secondary },
+  { id: 'accident-predict', label: 'Accident AI', icon: 'warning', route: '/driver/accident-prediction', color: COLORS.danger },
+  
+  // Wellness & Lifestyle
+  { id: 'wellness', label: 'Wellness', icon: 'fitness', route: '/driver/wellness', color: COLORS.success },
+  { id: 'prayer', label: 'Prayer Times', icon: 'moon', route: '/driver/prayer-times', color: COLORS.primary },
+  { id: 'story', label: 'Story Mode', icon: 'book', route: '/driver/story-mode', color: COLORS.secondary },
+  { id: 'radio', label: 'Radio', icon: 'radio', route: '/driver/radio', color: COLORS.warning },
+  
+  // Operations & Tools
+  { id: 'fuel', label: 'Fuel Tracker', icon: 'water', route: '/driver/fuel-tracker', color: COLORS.primary },
+  { id: 'safety-alerts', label: 'Safety Alerts', icon: 'notifications', route: '/driver/safety-alerts', color: COLORS.danger },
+  { id: 'support', label: 'Support', icon: 'help-circle', route: '/support', color: COLORS.secondary },
+  { id: 'settings', label: 'Settings', icon: 'settings', route: '/settings', color: COLORS.primary },
 ];
 
 export default function ModernDriverHome() {
