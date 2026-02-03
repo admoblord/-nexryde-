@@ -533,7 +533,7 @@ class NexrydeAPITester:
     
     async def test_driver_assistant(self):
         """Test GET /api/ai/driver-assistant"""
-        response = await self.make_request("GET", f"/ai/driver-assistant?driver_id={TEST_DRIVER_ID}")
+        response = await self.make_request("GET", f"/ai/driver-assistant?user_id={TEST_DRIVER_ID}&question=What%20are%20the%20best%20hours%20to%20drive?")
         
         if response["success"]:
             assistant_data = response["data"]
