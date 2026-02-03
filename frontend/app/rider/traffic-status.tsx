@@ -22,6 +22,8 @@ export default function RiderTrafficStatusScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [predictions, setPredictions] = useState<TrafficPrediction[]>([]);
+  const [searchedLocation, setSearchedLocation] = useState<any>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Popular Lagos locations for predictions
   const popularLocations = [
