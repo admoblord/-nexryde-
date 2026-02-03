@@ -535,12 +535,15 @@ export default function BookingScreen() {
                   <View style={styles.locationInputRow}>
                     <View style={[styles.locationDot, { backgroundColor: COLORS.yellow }]} />
                     <View style={styles.inputWrapper}>
-                      <TextInput
-                        style={styles.input}
-                        placeholder={`Stop ${index + 1}`}
-                        placeholderTextColor={COLORS.textSecondary}
+                      <LocationAutocomplete
                         value={stop.location}
                         onChangeText={(text) => updateStop(stop.id, text)}
+                        onPlaceSelected={(place) => updateStop(stop.id, place.description)}
+                        placeholder={`Stop ${index + 1}`}
+                        apiKey={GOOGLE_MAPS_API_KEY}
+                        countryCode="ng"
+                        inputStyle={styles.input}
+                        placeholderTextColor={COLORS.textSecondary}
                       />
                     </View>
                     <TouchableOpacity onPress={() => removeStop(stop.id)} style={styles.removeBtn}>
