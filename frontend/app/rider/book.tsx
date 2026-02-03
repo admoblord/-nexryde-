@@ -553,12 +553,15 @@ export default function BookingScreen() {
               <View style={styles.locationInputRow}>
                 <View style={[styles.locationDot, { backgroundColor: COLORS.red }]} />
                 <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Where to?"
-                    placeholderTextColor={COLORS.textSecondary}
+                  <LocationAutocomplete
                     value={destination}
                     onChangeText={setDestination}
+                    onPlaceSelected={(place) => setDestination(place.description)}
+                    placeholder="Where to?"
+                    apiKey={GOOGLE_MAPS_API_KEY}
+                    countryCode="ng"
+                    inputStyle={styles.input}
+                    placeholderTextColor={COLORS.textSecondary}
                   />
                 </View>
               </View>
