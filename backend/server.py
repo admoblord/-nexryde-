@@ -3510,7 +3510,11 @@ async def complete_trip(trip_id: str):
     return trip
 
 @api_router.put("/trips/{trip_id}/cancel")
-async def cancel_trip(trip_id: str, cancelled_by: str):
+async def cancel_trip(trip_id: str, request: dict):
+    cancelled_by = request.get("cancelled_by", "")
+    if not cancelled_by:
+        raise HTTPException(status_code=400, detail="cancelled_by is required")
+    
     trip = await db.trips.find_one({"id": trip_id})
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
