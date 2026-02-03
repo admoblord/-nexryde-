@@ -258,17 +258,6 @@ export default function DriverHomeScreen() {
                 <Text style={styles.statLabel}>Total Trips</Text>
               </LinearGradient>
             </View>
-
-            <View style={styles.statCard}>
-              <LinearGradient
-                colors={['rgba(6, 255, 165, 0.15)', 'rgba(0, 217, 140, 0.15)']}
-                style={styles.statGradient}
-              >
-                <Ionicons name="star" size={28} color={COLORS.mint} />
-                <Text style={styles.statValue}>4.8</Text>
-                <Text style={styles.statLabel}>Rating</Text>
-              </LinearGradient>
-            </View>
           </View>
 
           {/* QUICK ACTIONS - VIBRANT GRID */}
