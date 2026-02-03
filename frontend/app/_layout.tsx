@@ -1,3 +1,6 @@
+// Fix for react-native-google-places-autocomplete web compatibility
+import 'react-native-get-random-values';
+
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Text } from 'react-native';
