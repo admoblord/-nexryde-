@@ -7833,6 +7833,36 @@ async def estimate_fare_google(request: GoogleFareRequest):
 
 # ========== VOICE BOOKING API (NIGERIAN ACCENT SUPPORT) ==========
 
+# Google Places Autocomplete Proxy Endpoint (to avoid CORS issues)
+@app.get("/api/places/autocomplete")
+async def google_places_autocomplete(
+    input: str,
+    country: str = "ng",
+    language: str = "en"
+):
+    """
+    Proxy endpoint for Google Places Autocomplete API to avoid CORS issues
+    """
+    try:
+        google_maps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', 'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY')
+        
+        url = f"https://maps.googleapis.com/maps/api/place/autocomplete/json"
+        params = {
+            'input': input,
+            'key': google_maps_api_key,
+            'components': f'country:{country}',
+            'language': language
+        }
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=10.0)
+            data = response.json()
+            
+        return data
+    except Exception as e:
+        logging.error(f"Google Places Autocomplete Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch places: {str(e)}")
+
 class VoiceBookingRequest(BaseModel):
     text: str
     language: str = "en-NG"
