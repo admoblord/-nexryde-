@@ -3415,6 +3415,88 @@ async def accept_trip(trip_id: str, request: dict):
         trip["_id"] = str(trip["_id"])
     return trip
 
+
+@api_router.post("/trips/{trip_id}/verify-security-code")
+async def verify_security_code(trip_id: str, request: dict):
+    """Driver verifies the security code shown to rider"""
+    driver_id = request.get("driver_id", "")
+    security_code = request.get("security_code", "")
+    
+    if not driver_id or not security_code:
+        raise HTTPException(status_code=400, detail="driver_id and security_code are required")
+    
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if trip["status"] not in ["accepted", "arrived"]:
+        raise HTTPException(status_code=400, detail="Trip must be accepted first")
+    
+    if trip["driver_id"] != driver_id:
+        raise HTTPException(status_code=403, detail="You are not the driver for this trip")
+    
+    # Check if already verified
+    if trip.get("security_code_verified", False):
+        return {
+            "verified": True,
+            "message": "Security code already verified",
+            "trip": trip
+        }
+    
+    # Check attempts
+    attempts = trip.get("security_code_attempts", 0)
+    if attempts >= 3:
+        # Too many failed attempts - cancel trip for safety
+        await db.trips.update_one(
+            {"id": trip_id},
+            {"$set": {"status": "cancelled", "cancel_reason": "Too many wrong security code attempts"}}
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Too many wrong attempts. Trip cancelled for safety."
+        )
+    
+    # Verify code
+    if trip.get("security_code") == security_code:
+        # Code matches - mark as verified
+        await db.trips.update_one(
+            {"id": trip_id},
+            {"$set": {
+                "security_code_verified": True,
+                "security_code_verified_at": datetime.utcnow()
+            }}
+        )
+        
+        updated_trip = await db.trips.find_one({"id": trip_id})
+        return {
+            "verified": True,
+            "message": "Security code verified successfully! Rider identity confirmed.",
+            "trip": updated_trip
+        }
+    else:
+        # Code doesn't match - increment attempts
+        new_attempts = attempts + 1
+        await db.trips.update_one(
+            {"id": trip_id},
+            {"$set": {"security_code_attempts": new_attempts}}
+        )
+        
+        remaining = 3 - new_attempts
+        if remaining == 0:
+            await db.trips.update_one(
+                {"id": trip_id},
+                {"$set": {"status": "cancelled", "cancel_reason": "Too many wrong security code attempts"}}
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Wrong code. Trip cancelled for safety."
+            )
+        
+        raise HTTPException(
+            status_code=400,
+            detail=f"Wrong security code. {remaining} attempt{'s' if remaining > 1 else ''} remaining."
+        )
+
 @api_router.put("/trips/{trip_id}/verify-face-and-start")
 async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequest):
     """Verify driver face and start trip"""
