@@ -624,6 +624,84 @@ class NexrydeAPITester:
         else:
             self.log_result("/admin/dashboard", "GET", "BROKEN", f"Failed: {response['data']}")
     
+    # ==================== ADDITIONAL ENDPOINTS FROM REVIEW ====================
+    
+    async def test_get_available_drivers(self):
+        """Test GET /api/drivers/available"""
+        response = await self.make_request("GET", "/drivers/available?lat=6.5244&lng=3.3792")
+        
+        if response["success"]:
+            drivers = response["data"].get("drivers", [])
+            self.log_result("/drivers/available", "GET", "WORKING", 
+                          f"Found {len(drivers)} available drivers")
+        else:
+            self.log_result("/drivers/available", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_accept_trip(self):
+        """Test POST /api/trips/{trip_id}/accept"""
+        test_trip_id = "test_trip_123"
+        response = await self.make_request("POST", f"/trips/{test_trip_id}/accept", {
+            "driver_id": TEST_DRIVER_ID
+        })
+        
+        if response["success"]:
+            self.log_result("/trips/{trip_id}/accept", "POST", "WORKING", "Trip accepted successfully")
+        elif response["status_code"] == 404:
+            self.log_result("/trips/{trip_id}/accept", "POST", "WORKING", "Trip not found (expected)")
+        else:
+            self.log_result("/trips/{trip_id}/accept", "POST", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_update_trip_location(self):
+        """Test PUT /api/trips/{trip_id}/location"""
+        test_trip_id = "test_trip_123"
+        response = await self.make_request("PUT", f"/trips/{test_trip_id}/location", {
+            "latitude": 6.5244,
+            "longitude": 3.3792
+        })
+        
+        if response["success"]:
+            self.log_result("/trips/{trip_id}/location", "PUT", "WORKING", "Trip location updated")
+        elif response["status_code"] == 404:
+            self.log_result("/trips/{trip_id}/location", "PUT", "WORKING", "Trip not found (expected)")
+        else:
+            self.log_result("/trips/{trip_id}/location", "PUT", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_places_autocomplete(self):
+        """Test GET /api/places/autocomplete"""
+        response = await self.make_request("GET", "/places/autocomplete?input=Victoria%20Island&lat=6.5244&lng=3.3792")
+        
+        if response["success"]:
+            places = response["data"].get("predictions", [])
+            self.log_result("/places/autocomplete", "GET", "WORKING", 
+                          f"Found {len(places)} place suggestions")
+        else:
+            self.log_result("/places/autocomplete", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_get_notifications(self):
+        """Test GET /api/users/{user_id}/notifications"""
+        response = await self.make_request("GET", f"/users/{TEST_DRIVER_ID}/notifications")
+        
+        if response["success"]:
+            notifications = response["data"].get("notifications", [])
+            self.log_result("/users/{user_id}/notifications", "GET", "WORKING", 
+                          f"Retrieved {len(notifications)} notifications")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}/notifications", "GET", "PARTIAL", "User not found (expected)")
+        else:
+            self.log_result("/users/{user_id}/notifications", "GET", "BROKEN", f"Failed: {response['data']}")
+    
+    async def test_mark_notification_read(self):
+        """Test POST /api/users/{user_id}/notifications/{notification_id}/read"""
+        test_notification_id = "test_notification_123"
+        response = await self.make_request("POST", f"/users/{TEST_DRIVER_ID}/notifications/{test_notification_id}/read")
+        
+        if response["success"]:
+            self.log_result("/users/{user_id}/notifications/{id}/read", "POST", "WORKING", "Notification marked as read")
+        elif response["status_code"] == 404:
+            self.log_result("/users/{user_id}/notifications/{id}/read", "POST", "WORKING", "Notification not found (expected)")
+        else:
+            self.log_result("/users/{user_id}/notifications/{id}/read", "POST", "BROKEN", f"Failed: {response['data']}")
+    
     # ==================== MAIN TEST RUNNER ====================
     
     async def run_all_tests(self):
