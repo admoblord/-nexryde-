@@ -3299,7 +3299,10 @@ async def request_trip(rider_id: str, request: TripRequest):
         polyline=polyline,
         recording_enabled=request.enable_recording,
         fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
-        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}"
+        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}",
+        security_code=str(random.randint(1000, 9999)),  # Generate 4-digit security code
+        security_code_verified=False,
+        security_code_attempts=0
     )
     
     await db.trips.insert_one(trip.dict())
