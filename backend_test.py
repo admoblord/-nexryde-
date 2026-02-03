@@ -704,6 +704,28 @@ class NexrydeAPITester:
     
     # ==================== MAIN TEST RUNNER ====================
     
+    async def run_priority_tests(self):
+        """Run priority endpoints from review request"""
+        print("🎯 PRIORITY ENDPOINTS VERIFICATION FROM REVIEW REQUEST")
+        print(f"📡 Testing against: {BACKEND_URL}")
+        print("=" * 60)
+        
+        # Critical endpoints that were previously failing
+        print("\n🔥 CRITICAL ENDPOINTS (Previously Failing):")
+        await self.test_cancel_trip()  # PUT /api/trips/test_trip_123/cancel with cancelled_by
+        await self.test_accept_trip()  # PUT /api/trips/test_trip_123/accept with driver_id
+        await self.test_wallet_topup()  # POST /api/wallet/user_123/topup
+        await self.test_admin_dashboard()  # GET /api/admin/dashboard
+        
+        # Critical endpoints to verify still working
+        print("\n✅ VERIFY STILL WORKING:")
+        await self.test_fare_estimate()  # POST /api/fares/estimate-google
+        await self.test_get_available_drivers()  # GET /api/drivers/available
+        await self.test_places_autocomplete()  # GET /api/places/autocomplete?input=Lagos
+        
+        # Print priority summary
+        self.print_priority_summary()
+
     async def run_all_tests(self):
         """Run all API endpoint tests"""
         print("🚀 Starting NEXRYDE Backend API Testing Suite")
