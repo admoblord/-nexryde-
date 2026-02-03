@@ -91,9 +91,65 @@ export default function BookingScreen() {
   const [fareEstimate, setFareEstimate] = useState<any>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [tripType, setTripType] = useState<'intra' | 'inter'>('intra');
+  const [isGettingLocation, setIsGettingLocation] = useState(false);
   
   const pickupRef = useRef<any>();
   const destRef = useRef<any>();
+
+  // Get Current Location with GPS
+  const getCurrentLocation = async () => {
+    setIsGettingLocation(true);
+    try {
+      // Request location permission
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please enable location access to use current location feature'
+        );
+        setIsGettingLocation(false);
+        return;
+      }
+
+      // Get current position with high accuracy
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+      });
+
+      // Reverse geocode to get address from coordinates
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (address && address.length > 0) {
+        const addr = address[0];
+        // Format address: "Street, City, State"
+        const formattedAddress = [
+          addr.street,
+          addr.city || addr.subregion,
+          addr.region,
+          'Nigeria'
+        ]
+          .filter(Boolean)
+          .join(', ');
+
+        setPickup(formattedAddress);
+        Alert.alert('Location Detected', `Your location: ${formattedAddress}`);
+      } else {
+        Alert.alert('Location Error', 'Could not detect your address. Please enter manually.');
+      }
+    } catch (error) {
+      console.error('Location error:', error);
+      Alert.alert(
+        'Location Error',
+        'Unable to get your current location. Please ensure GPS is enabled and try again.'
+      );
+    } finally {
+      setIsGettingLocation(false);
+    }
+  };
 
   // Add Stop
   const addStop = () => {
