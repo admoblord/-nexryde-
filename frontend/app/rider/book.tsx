@@ -517,12 +517,15 @@ export default function BookingScreen() {
               <View style={styles.locationInputRow}>
                 <View style={[styles.locationDot, { backgroundColor: COLORS.green }]} />
                 <View style={styles.inputWrapper}>
-                  <TextInput
-                    style={styles.input}
-                    placeholder="Pickup location"
-                    placeholderTextColor={COLORS.textSecondary}
+                  <LocationAutocomplete
                     value={pickup}
                     onChangeText={setPickup}
+                    onPlaceSelected={(place) => setPickup(place.description)}
+                    placeholder="Pickup location"
+                    apiKey={GOOGLE_MAPS_API_KEY}
+                    countryCode="ng"
+                    inputStyle={styles.input}
+                    placeholderTextColor={COLORS.textSecondary}
                   />
                 </View>
               </View>
