@@ -274,15 +274,18 @@ backend:
 
   - task: "NEW: Intra-City vs Inter-City Trip Type Pricing"
     implemented: true
-    working: "NA"
+    working: true
     file: "server.py, book-new.tsx"
     stuck_count: 0
     priority: "high"
-    needs_retesting: true
+    needs_retesting: false
     status_history:
         - working: "NA"
         - agent: "main"
         - comment: "✅ FULLY IMPLEMENTED: Complete Intra-city vs Inter-city trip pricing system integrated with existing Google Maps fare calculation. BACKEND (server.py lines 7954-8081): POST /api/fares/estimate-google endpoint accepts trip_type parameter ('intra' or 'inter'). INTRA-CITY pricing (within Lagos): Economy ₦400 base + ₦400/km + ₦80/min, Comfort ₦600 base + ₦500/km + ₦100/min, XL ₦500 base + ₦450/km + ₦90/min, Premium ₦800 base + ₦600/km + ₦120/min. INTER-CITY pricing (between cities): Economy ₦1000 base + ₦400/km + ₦5000/hr, Comfort ₦1200 base + ₦500/km + ₦6000/hr, XL ₦1100 base + ₦450/km + ₦5500/hr, Premium ₦1500 base + ₦600/km + ₦7000/hr. Pricing based on competitive analysis of inDrive, Bolt, and Lag Ride as per user request. FRONTEND (book-new.tsx lines 41-273): Trip type selector UI added with 2 options - 'Intra-City (Within Lagos)' and 'Inter-City (Lagos to other cities)' with business/airplane icons. State management via selectedTripType hook. trip_type parameter passed to backend API call (line 99). Fully integrated with existing Google Maps distance calculation. Ready for testing with real coordinates."
+        - working: true
+        - agent: "testing"
+        - comment: "✅ COMPREHENSIVE TESTING COMPLETE - 100% SUCCESS RATE: NEW Intra-City vs Inter-City trip pricing feature working PERFECTLY. Tested POST /api/fares/estimate-google endpoint with all specified scenarios. MAIN TESTS (2/2 PASSED): 1) Intra-city Economy (Victoria Island → Lekki Phase 1): 6.99km, 10min, ₦3,994.13 using per-minute rate (₦80/min), 2) Inter-city Economy (Victoria Island → Ibadan): 143.66km, 134min, ₦69,629.49 using hourly rate (₦5000/hr). ALL VEHICLE TYPES (8/8 PASSED): Intra-city fares range ₦3,994-₦6,191, Inter-city fares range ₦69,629-₦102,707. PRICING VALIDATION (3/3 PASSED): Inter-city 1643% higher than intra-city (appropriate for long distance + hourly vs per-minute charging), all 4 vehicle types have different pricing. Google Maps integration confirmed working with real distances/durations. Complete pricing breakdown includes base_fare, distance_fee, time_fee, total_fare matching documented rates. Feature ready for production use."
 
   - task: "Real-Time AI Chat API (GPT-4o)"
     implemented: true
