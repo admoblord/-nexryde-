@@ -753,7 +753,7 @@ frontend:
 
   - task: "Driver Subscription Screen Loading"
     implemented: true
-    working: true
+    working: false
     file: "app/driver/subscription.tsx"
     stuck_count: 0
     priority: "high"
@@ -768,6 +768,9 @@ frontend:
         - working: true
         - agent: "testing"
         - comment: "✅ RESOLVED - SUBSCRIPTION SCREEN WORKING CORRECTLY (390x844): Driver subscription screen at /driver/subscription now loads correctly and displays all required elements perfectly. WORKING FEATURES: Subscription header present, ₦25,000 monthly plan displayed, UBA bank details (ADMOBLORDGROUP LIMITED, 1028400669) visible, subscription status shows 'EXPIRED' with 0 days remaining, payment features accessible. Screen is NOT stuck on loading as previously reported - loads properly with all subscription management features. Mobile responsive design excellent with dark glassmorphism theme. Previous loading issue appears to have been resolved."
+        - working: false
+        - agent: "testing"
+        - comment: "❌ CRITICAL ERROR: Driver subscription screen now shows 'Oops! Something went wrong' with TypeError: Cannot read properties of undefined (reading 'current_phase') at SubscriptionScreen. This indicates a JavaScript runtime error related to subscription pricing data. Error suggests API response is missing 'current_phase' property or subscription data is not being fetched correctly. This is a regression from previous working state. URGENT: Fix TypeError in subscription screen data handling."
 
 metadata:
   created_by: "main_agent"
