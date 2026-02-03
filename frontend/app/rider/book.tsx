@@ -90,6 +90,7 @@ export default function BookingScreen() {
   const [isCalculating, setIsCalculating] = useState(false);
   const [tripType, setTripType] = useState<'intra' | 'inter'>('intra');
   const [isGettingLocation, setIsGettingLocation] = useState(false);
+  const [availableDrivers, setAvailableDrivers] = useState<any[]>([]);
   
   const pickupRef = useRef<any>();
   const destRef = useRef<any>();
