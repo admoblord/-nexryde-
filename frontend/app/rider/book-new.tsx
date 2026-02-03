@@ -423,6 +423,48 @@ const styles = StyleSheet.create({
     color: COLORS.brandGreen,
     marginLeft: 8,
   },
+  tripTypeSection: {
+    marginTop: 24,
+  },
+  tripTypeContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  tripTypeCard: {
+    flex: 1,
+    backgroundColor: COLORS.cardBg,
+    borderRadius: 16,
+    padding: 16,
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
+    minHeight: 100,
+  },
+  tripTypeCardSelected: {
+    borderColor: COLORS.brandGreen,
+    backgroundColor: 'rgba(0, 212, 106, 0.1)',
+  },
+  tripTypeLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    marginTop: 8,
+  },
+  tripTypeLabelSelected: {
+    color: COLORS.brandGreen,
+  },
+  tripTypeDesc: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  tripTypeCheck: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+  },
   vehicleSection: {
     marginTop: 32,
   },
