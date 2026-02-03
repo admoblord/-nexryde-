@@ -668,12 +668,12 @@ class NexrydeAPITester:
     
     async def test_places_autocomplete(self):
         """Test GET /api/places/autocomplete"""
-        response = await self.make_request("GET", "/places/autocomplete?input=Victoria%20Island&lat=6.5244&lng=3.3792")
+        response = await self.make_request("GET", "/places/autocomplete?input=Lagos&lat=6.5244&lng=3.3792")
         
         if response["success"]:
             places = response["data"].get("predictions", [])
             self.log_result("/places/autocomplete", "GET", "WORKING", 
-                          f"Found {len(places)} place suggestions")
+                          f"Found {len(places)} place suggestions for Lagos")
         else:
             self.log_result("/places/autocomplete", "GET", "BROKEN", f"Failed: {response['data']}")
     
