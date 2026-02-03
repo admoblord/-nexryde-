@@ -320,49 +320,32 @@ export default function BookRideScreen() {
                 ))}
               </View>
             </View>
-          )} 
-                    size={24} 
-                    color={selectedTripType === tripType.id ? COLORS.brandGreen : COLORS.textSecondary} 
-                  />
-                  <Text style={[
-                    styles.tripTypeLabel,
-                    selectedTripType === tripType.id && styles.tripTypeLabelSelected
-                  ]}>
-                    {tripType.label}
-                  </Text>
-                  <Text style={[
-                    styles.tripTypeDesc,
-                    selectedTripType === tripType.id && { color: COLORS.brandGreen }
-                  ]}>
-                    {tripType.desc}
-                  </Text>
-                  {selectedTripType === tripType.id && (
-                    <View style={styles.tripTypeCheck}>
-                      <Ionicons name="checkmark-circle" size={20} color={COLORS.brandGreen} />
-                    </View>
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+          )}
 
-          {/* Vehicle Types */}
-          <View style={styles.vehicleSection}>
-            <Text style={styles.sectionTitle}>Select Vehicle</Text>
-            <View style={styles.vehicleGrid}>
-              {VEHICLE_TYPES.map((vehicle) => (
-                <TouchableOpacity
-                  key={vehicle.id}
-                  style={[
-                    styles.vehicleCard,
-                    selectedVehicle === vehicle.id && styles.vehicleCardSelected
-                  ]}
-                  onPress={() => setSelectedVehicle(vehicle.id)}
-                >
-                  <View style={[styles.vehicleIcon, { backgroundColor: vehicle.color + '20' }]}>
-                    <Ionicons name={vehicle.icon as any} size={28} color={vehicle.color} />
-                  </View>
-                  <Text style={styles.vehicleName}>{vehicle.name}</Text>
+          {/* Book Button - Only show when city is selected */}
+          {selectedCity && (
+            <TouchableOpacity
+              style={styles.bookButton}
+              onPress={handleConfirmBooking}
+              disabled={isLoading || !pickup || !destination}
+            >
+              <LinearGradient
+                colors={[COLORS.brandGreen, COLORS.brandBlue]}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={styles.bookGradient}
+              >
+                {isLoading ? (
+                  <ActivityIndicator color={COLORS.white} />
+                ) : (
+                  <>
+                    <Text style={styles.bookButtonText}>Confirm Booking</Text>
+                    <Ionicons name="arrow-forward-circle" size={24} color={COLORS.white} />
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
                   {selectedVehicle === vehicle.id && (
                     <View style={styles.checkmark}>
                       <Ionicons name="checkmark-circle" size={20} color={COLORS.brandGreen} />
