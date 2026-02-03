@@ -362,9 +362,10 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   earningValue: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 32,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: 1,
   },
 
   // STATS
@@ -377,11 +378,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   statValue: {
-    fontSize: 32,
-    fontWeight: '700',
+    fontSize: 48,
+    fontWeight: '900',
     color: COLORS.text,
     marginTop: 12,
     marginBottom: 4,
+    letterSpacing: 2,
   },
   statLabel: {
     fontSize: 13,
