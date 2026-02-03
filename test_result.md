@@ -787,9 +787,8 @@ test_plan:
     - "Final UI Polish Verification"
     - "Vehicle Registration System"
   stuck_tasks:
-    - "Rider Booking Screen - Pressable handlers"
-    - "Splash Screen Navigation"
-    - "Driver Subscription Screen Loading"
+    - "Rider Booking Screen - UI Rendering Issues"
+    - "Driver Subscription Screen - TypeError current_phase"
   test_all: true
   test_priority: "comprehensive"
 
