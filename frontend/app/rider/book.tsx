@@ -216,38 +216,46 @@ export default function BookingScreen() {
                 <View style={styles.inputDotInner} />
               </View>
               <View style={{ flex: 1 }}>
-                <GooglePlacesAutocomplete
-                  ref={pickupRef}
-                  placeholder='Pickup location'
-                  minLength={2}
-                  fetchDetails={true}
-                  onPress={(data, details = null) => {
-                    setPickup(data.description);
-                  }}
-                  query={{
-                    key: GOOGLE_MAPS_API_KEY,
-                    language: 'en',
-                    components: 'country:ng',
-                  }}
-                  requestUrl={{
-                    url: 'https://maps.googleapis.com/maps/api',
-                    useOnPlatform: 'web',
-                  }}
-                  styles={{
-                    textInput: styles.autocompleteInput,
-                    listView: styles.autocompleteList,
-                    row: styles.autocompleteRow,
-                    description: styles.autocompleteDescription,
-                  }}
-                  textInputProps={{
-                    placeholderTextColor: '#9ca3af',
-                    returnKeyType: 'next',
-                    onSubmitEditing: () => destRef.current?.focus(),
-                  }}
-                  enablePoweredByContainer={false}
-                  nearbyPlacesAPI="GooglePlacesSearch"
-                  debounce={300}
-                />
+                {Platform.OS === 'web' ? (
+                  <TextInput
+                    style={styles.autocompleteInput}
+                    placeholder="Pickup location"
+                    placeholderTextColor="#9ca3af"
+                    value={pickup}
+                    onChangeText={setPickup}
+                    returnKeyType="next"
+                    onSubmitEditing={() => destRef.current?.focus()}
+                  />
+                ) : (
+                  <GooglePlacesAutocomplete
+                    ref={pickupRef}
+                    placeholder='Pickup location'
+                    minLength={2}
+                    fetchDetails={true}
+                    onPress={(data, details = null) => {
+                      setPickup(data.description);
+                    }}
+                    query={{
+                      key: GOOGLE_MAPS_API_KEY,
+                      language: 'en',
+                      components: 'country:ng',
+                    }}
+                    styles={{
+                      textInput: styles.autocompleteInput,
+                      listView: styles.autocompleteList,
+                      row: styles.autocompleteRow,
+                      description: styles.autocompleteDescription,
+                    }}
+                    textInputProps={{
+                      placeholderTextColor: '#9ca3af',
+                      returnKeyType: 'next',
+                      onSubmitEditing: () => destRef.current?.focus(),
+                    }}
+                    enablePoweredByContainer={false}
+                    nearbyPlacesAPI="GooglePlacesSearch"
+                    debounce={300}
+                  />
+                )}
               </View>
             </View>
 
