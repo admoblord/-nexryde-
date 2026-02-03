@@ -45,12 +45,36 @@ const TRIP_TYPES = [
 
 export default function BookRideScreen() {
   const router = useRouter();
+  const [selectedCity, setSelectedCity] = useState('');
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
   const [stops, setStops] = useState<string[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
-  const [selectedTripType, setSelectedTripType] = useState('intra');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Auto-detect trip type based on pickup and destination cities
+  const detectTripType = () => {
+    if (!pickup || !destination) return 'intra';
+    
+    const pickupLower = pickup.toLowerCase();
+    const destLower = destination.toLowerCase();
+    
+    // Check if both are in Lagos
+    const pickupInLagos = pickupLower.includes('lagos');
+    const destInLagos = destLower.includes('lagos');
+    
+    // Check if both are in Abuja
+    const pickupInAbuja = pickupLower.includes('abuja');
+    const destInAbuja = destLower.includes('abuja');
+    
+    // If both in same city, it's intra-city
+    if ((pickupInLagos && destInLagos) || (pickupInAbuja && destInAbuja)) {
+      return 'intra';
+    }
+    
+    // If different cities or one going to another city, it's inter-city
+    return 'inter';
+  };
 
   const addStop = () => {
     if (stops.length < 3) {
