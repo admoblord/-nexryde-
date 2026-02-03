@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Dict, Any, List
 
 # Backend URL from environment
-BACKEND_URL = "https://rider-driver-rebuild.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-restore.preview.emergentagent.com/api"
 
 # Test data
 TEST_PHONE = "+2348012345678"

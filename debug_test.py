@@ -2,7 +2,7 @@
 import requests
 
 def test_user_blocking():
-    base_url = "https://rider-driver-rebuild.preview.emergentagent.com/api"
+    base_url = "https://nexryde-restore.preview.emergentagent.com/api"
     test_user_id = "test-user-123"
     
     # Test unblock user
