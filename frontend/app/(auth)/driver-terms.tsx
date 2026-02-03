@@ -199,9 +199,10 @@ export default function DriverTermsScreen() {
             <Text style={styles.sectionHeader}>12. Contact & Support</Text>
             <Text style={styles.paragraph}>
               For questions or support:{'\n'}
-              • Email: drivers@nexryde.ng{'\n'}
+              • Email: support@nexryde.ng{'\n'}
               • Phone: +234 800 NEXRYDE{'\n'}
-              • In-app chat support available 24/7
+              • In-app chat support available 24/7{'\n'}
+              • Visit: www.nexryde.ng
             </Text>
           </View>
         </ScrollView>
