@@ -195,9 +195,11 @@ backend:
     file: "server.py"
     stuck_count: 0
     priority: "high"
-    needs_retesting: false
+    needs_retesting: true
     status_history:
         - working: true
+        - agent: "main"
+        - comment: "✅ UPDATED: Registration endpoint now supports NIN for riders and terms acceptance for drivers. Added validation: drivers must accept T&C, riders must provide 11-digit NIN. User model extended with nin, terms_accepted, terms_accepted_at fields."
         - agent: "main"
         - comment: "User registration with role selection working"
 
