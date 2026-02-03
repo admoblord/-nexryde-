@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
+import { VoiceAssistantButton } from '@/src/components/VoiceAssistant';
+import { VoiceIntent } from '@/src/services/voiceAssistant';
 
 const { width, height } = Dimensions.get('window');
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
@@ -507,6 +509,72 @@ export default function BookScreen() {
     }
   };
 
+  // Handle voice commands for booking
+  const handleVoiceCommand = async (intent: VoiceIntent, params?: any) => {
+    console.log('Voice command received:', intent, params);
+    
+    if (intent === 'book_ride' && params?.destination) {
+      // Search for the destination location
+      try {
+        const response = await fetch(
+          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+            params.destination
+          )}&components=country:ng&key=${GOOGLE_MAPS_API_KEY}`
+        );
+        const data = await response.json();
+        
+        if (data.predictions && data.predictions.length > 0) {
+          // Get details of first prediction
+          const placeDetails = await getPlaceDetails(data.predictions[0].place_id);
+          
+          if (placeDetails) {
+            // Set as dropoff location
+            setStops(stops.map(stop =>
+              stop.type === 'dropoff'
+                ? {
+                    ...stop,
+                    address: placeDetails.address,
+                    coordinates: {
+                      latitude: placeDetails.latitude,
+                      longitude: placeDetails.longitude,
+                    },
+                  }
+                : stop
+            ));
+            
+            Alert.alert(
+              '✅ Destination Set',
+              `I've set your destination to ${placeDetails.address}. Where would you like to be picked up?`,
+              [{ text: 'OK' }]
+            );
+          }
+        }
+      } catch (error) {
+        console.error('Error processing voice destination:', error);
+        Alert.alert(
+          'Voice Command',
+          `I heard "${params.destination}" but couldn't find that location. Please try again or select manually.`,
+          [{ text: 'OK' }]
+        );
+      }
+    } else if (intent === 'check_fare') {
+      if (estimatedDistance && estimatedDuration) {
+        const price = calculatePrice(estimatedDistance, selectedVehicle, rideType, estimatedDuration);
+        Alert.alert(
+          '💰 Estimated Fare',
+          `Your ${selectedVehicle} ride will cost approximately ₦${price.toLocaleString()}.`,
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Set Locations First',
+          'Please set your pickup and destination locations first, then I can tell you the fare.',
+          [{ text: 'OK' }]
+        );
+      }
+    }
+  };
+
   // LOCATION SELECTION SCREEN
   if (step === 'location') {
     return (
@@ -716,6 +784,13 @@ export default function BookScreen() {
               </LinearGradient>
             </TouchableOpacity>
           </View>
+
+          {/* Voice Assistant Button */}
+          <VoiceAssistantButton 
+            onCommand={handleVoiceCommand}
+            position="bottom-right"
+            userType="rider"
+          />
 
           {/* Location Search Modal */}
           <Modal
