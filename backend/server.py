@@ -2305,6 +2305,69 @@ async def toggle_driver_online(user_id: str, is_online: bool):
     await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
+@app.get("/api/drivers/available")
+async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None):
+    """
+    Get all available drivers, optionally filtered by vehicle type and location
+    """
+    try:
+        # Build query for online drivers with active subscriptions
+        query = {"is_online": True, "verification_status": "approved"}
+        
+        if vehicle_type:
+            query["vehicle_type"] = vehicle_type
+        
+        # Get drivers
+        drivers_cursor = db.driver_profiles.find(query)
+        drivers = await drivers_cursor.to_list(length=100)
+        
+        available_drivers = []
+        for driver in drivers:
+            # Check if driver has active subscription
+            subscription = await db.subscriptions.find_one({
+                "driver_id": driver.get("user_id"),
+                "status": {"$in": ["active", "grace_period"]}
+            })
+            
+            if subscription:
+                driver_data = {
+                    "driver_id": driver.get("user_id"),
+                    "name": driver.get("name", "Driver"),
+                    "rating": driver.get("rating", 4.5),
+                    "total_rides": driver.get("total_rides", 0),
+                    "vehicle_type": driver.get("vehicle_type", "economy"),
+                    "vehicle_plate": driver.get("vehicle_plate", ""),
+                    "vehicle_model": driver.get("vehicle_model", ""),
+                    "current_location": driver.get("current_location", {}),
+                    "profile_photo": driver.get("profile_photo", ""),
+                }
+                
+                # Calculate distance if lat/lng provided
+                if lat and lng and driver.get("current_location"):
+                    driver_lat = driver["current_location"].get("lat")
+                    driver_lng = driver["current_location"].get("lng")
+                    if driver_lat and driver_lng:
+                        # Simple distance calculation (Haversine formula)
+                        import math
+                        R = 6371  # Earth radius in km
+                        dlat = math.radians(driver_lat - lat)
+                        dlng = math.radians(driver_lng - lng)
+                        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat)) * math.cos(math.radians(driver_lat)) * math.sin(dlng/2)**2
+                        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                        distance = R * c
+                        driver_data["distance_km"] = round(distance, 2)
+                        driver_data["eta_minutes"] = round(distance * 2.5)  # Rough estimate: 2.5 min per km
+                
+                available_drivers.append(driver_data)
+        
+        return {
+            "drivers": available_drivers,
+            "count": len(available_drivers)
+        }
+    except Exception as e:
+        logging.error(f"Error fetching available drivers: {str(e)}")
+        return {"drivers": [], "count": 0}
+
 @api_router.get("/drivers/{user_id}/stats")
 async def get_driver_stats(user_id: str):
     user = await db.users.find_one({"id": user_id})
