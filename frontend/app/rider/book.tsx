@@ -257,7 +257,7 @@ export default function BookingScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* 3D MAP WITH CARS */}
+          {/* 3D MAP WITH REAL AVAILABLE DRIVERS */}
           <Animated.View style={[styles.mapSection, { opacity: fadeAnim }]}>
             <View style={styles.mapContainer}>
               <View style={styles.mapBuildings}>
@@ -268,24 +268,62 @@ export default function BookingScreen() {
                 <View style={[styles.building, { height: 80, width: 75, backgroundColor: '#2D2D2D', right: 30, bottom: 60 }]} />
                 
                 {/* Yellow route line */}
-                <View style={styles.routeLine} />
+                {pickup && destination && (
+                  <View style={styles.routeLine} />
+                )}
                 
-                {/* ANIMATED CARS ON MAP */}
-                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], left: '25%', top: '45%' }]}>
-                  <Ionicons name="car" size={24} color={COLORS.yellow} />
-                </Animated.View>
-                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], right: '30%', bottom: '40%' }]}>
-                  <Ionicons name="car" size={24} color={COLORS.green} />
-                </Animated.View>
-                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], left: '60%', top: '30%' }]}>
-                  <Ionicons name="car" size={20} color={COLORS.purple} />
-                </Animated.View>
+                {/* REAL AVAILABLE DRIVERS ON MAP */}
+                {availableDrivers.length > 0 ? (
+                  availableDrivers.slice(0, 5).map((driver, index) => {
+                    // Get color based on vehicle type
+                    const vehicleColor = CAR_TYPES.find(c => c.id === driver.vehicle_type)?.color || COLORS.yellow;
+                    
+                    // Position drivers in different areas of the map
+                    const positions = [
+                      { left: '25%', top: '45%' },
+                      { right: '30%', bottom: '40%' },
+                      { left: '60%', top: '30%' },
+                      { left: '15%', bottom: '35%' },
+                      { right: '20%', top: '50%' },
+                    ];
+                    
+                    return (
+                      <Animated.View 
+                        key={driver.id || index}
+                        style={[
+                          styles.carOnMap, 
+                          { transform: [{ scale: carPulse }] },
+                          positions[index] || positions[0]
+                        ]}
+                      >
+                        <Ionicons name="car" size={24} color={vehicleColor} />
+                        {driver.driver_name && (
+                          <Text style={styles.driverNameOnMap}>{driver.driver_name.split(' ')[0]}</Text>
+                        )}
+                      </Animated.View>
+                    );
+                  })
+                ) : (
+                  // Show "Searching" message if no drivers available
+                  <View style={styles.noDriversMessage}>
+                    <ActivityIndicator size="small" color={COLORS.yellow} />
+                    <Text style={styles.noDriversText}>Searching for drivers...</Text>
+                  </View>
+                )}
                 
                 {/* Your location marker */}
                 <View style={styles.locationMarker}>
                   <Ionicons name="location" size={24} color={COLORS.red} />
                   <Text style={styles.locationLabel}>Your Location</Text>
                 </View>
+
+                {/* Driver count badge */}
+                {availableDrivers.length > 0 && (
+                  <View style={styles.driverCountBadge}>
+                    <Ionicons name="car" size={14} color={COLORS.text} />
+                    <Text style={styles.driverCountText}>{availableDrivers.length} available</Text>
+                  </View>
+                )}
               </View>
             </View>
           </Animated.View>
