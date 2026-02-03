@@ -193,8 +193,46 @@ export default function RiderTrafficStatusScreen() {
               placeholderTextColor={COLORS.lightTextMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearchLocation}
+              returnKeyType="search"
             />
+            {searchLoading ? (
+              <ActivityIndicator size="small" color={COLORS.accentBlue} />
+            ) : (
+              <TouchableOpacity onPress={handleSearchLocation} disabled={!searchQuery.trim()}>
+                <Ionicons 
+                  name="arrow-forward-circle" 
+                  size={28} 
+                  color={searchQuery.trim() ? COLORS.accentBlue : COLORS.lightTextMuted} 
+                />
+              </TouchableOpacity>
+            )}
           </View>
+          
+          {/* Searched Location Result */}
+          {searchedLocation && (
+            <View style={styles.searchResult}>
+              <View style={styles.searchResultHeader}>
+                <Ionicons name="location" size={20} color={COLORS.accentBlue} />
+                <Text style={styles.searchResultTitle}>{searchedLocation.name}</Text>
+              </View>
+              {searchedLocation.prediction && (
+                <View style={styles.searchResultContent}>
+                  <Text style={styles.searchResultLabel}>Traffic Status:</Text>
+                  <Text style={[
+                    styles.searchResultValue,
+                    { color: searchedLocation.prediction.severity === 'low' ? COLORS.success : 
+                             searchedLocation.prediction.severity === 'medium' ? COLORS.warning : COLORS.danger }
+                  ]}>
+                    {searchedLocation.prediction.severity.toUpperCase()}
+                  </Text>
+                  <Text style={styles.searchResultDesc}>
+                    {searchedLocation.prediction.description}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Traffic Predictions */}
