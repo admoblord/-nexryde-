@@ -289,7 +289,7 @@ export default function BookRideScreen() {
             {/* Show pickup/destination only after city is selected */}
             {selectedCity && (
               <>
-                {/* Pickup Card */}
+                {/* Pickup Card with GPS Button */}
                 <View style={[styles.locationCard, { marginTop: -10 }]}>
                   <View style={styles.locationIconContainer}>
                     <View style={[styles.iconCircle, { backgroundColor: COLORS.brandGreen }]}>
@@ -299,7 +299,23 @@ export default function BookRideScreen() {
                   </View>
                   
                   <View style={styles.locationInput}>
-                    <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
+                      <TouchableOpacity 
+                        onPress={useCurrentLocation}
+                        style={styles.gpsButton}
+                        disabled={isGettingLocation}
+                      >
+                        {isGettingLocation ? (
+                          <ActivityIndicator size="small" color={COLORS.brandGreen} />
+                        ) : (
+                          <>
+                            <Ionicons name="navigate" size={16} color={COLORS.brandGreen} />
+                            <Text style={styles.gpsButtonText}>Use GPS</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
                     <LocationAutocomplete
                       placeholder="Enter pickup location..."
                       value={pickup}
