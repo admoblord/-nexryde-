@@ -3273,7 +3273,7 @@ async def request_trip(rider_id: str, request: TripRequest):
         time_fee=fare["time_fee"],
         traffic_fee=fare["traffic_fee"],
         fare=fare["total_fare"],
-        surge_multiplier=fare["multiplier"],
+        surge_multiplier=fare["surge_multiplier"],
         service_type=request.service_type,
         payment_method=request.payment_method,
         polyline=polyline,
