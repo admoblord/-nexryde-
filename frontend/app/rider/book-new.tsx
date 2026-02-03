@@ -180,90 +180,117 @@ export default function BookRideScreen() {
         >
           {/* Location Cards */}
           <View style={styles.locationsContainer}>
-            {/* Pickup Card */}
+            {/* City Selection Card - FIRST */}
             <View style={styles.locationCard}>
               <View style={styles.locationIconContainer}>
-                <View style={[styles.iconCircle, { backgroundColor: COLORS.brandGreen }]}>
-                  <Ionicons name="location" size={20} color={COLORS.white} />
+                <View style={[styles.iconCircle, { backgroundColor: '#FFB800' }]}>
+                  <Ionicons name="business" size={20} color={COLORS.white} />
                 </View>
                 <View style={styles.verticalLine} />
               </View>
               
               <View style={styles.locationInput}>
-                <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
+                <Text style={styles.locationLabel}>ENTER CITY</Text>
                 <LocationAutocomplete
-                  placeholder="Enter pickup location..."
-                  value={pickup}
-                  onChangeText={setPickup}
-                  onPlaceSelected={(location) => setPickup(location.description)}
+                  placeholder="Lagos, Abuja, Port Harcourt..."
+                  value={selectedCity}
+                  onChangeText={setSelectedCity}
+                  onPlaceSelected={(location) => setSelectedCity(location.description)}
                   apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
                   placeholderTextColor="#A8B3C5"
                 />
               </View>
             </View>
 
-            {/* STOPS - Dynamic Stop Addition */}
-            {stops.map((stop, index) => (
-              <View key={index} style={[styles.locationCard, { marginTop: -10 }]}>
-                <View style={styles.locationIconContainer}>
-                  <View style={[styles.iconCircle, { backgroundColor: '#FFB800' }]}>
-                    <Text style={{ color: COLORS.white, fontWeight: '800', fontSize: 14 }}>
-                      {index + 1}
-                    </Text>
+            {/* Show pickup/destination only after city is selected */}
+            {selectedCity && (
+              <>
+                {/* Pickup Card */}
+                <View style={[styles.locationCard, { marginTop: -10 }]}>
+                  <View style={styles.locationIconContainer}>
+                    <View style={[styles.iconCircle, { backgroundColor: COLORS.brandGreen }]}>
+                      <Ionicons name="location" size={20} color={COLORS.white} />
+                    </View>
+                    <View style={styles.verticalLine} />
                   </View>
-                  {index < stops.length - 1 && <View style={styles.verticalLine} />}
-                </View>
-                
-                <View style={styles.locationInput}>
-                  <View style={styles.stopHeader}>
-                    <Text style={styles.locationLabel}>STOP {index + 1}</Text>
-                    <TouchableOpacity onPress={() => removeStop(index)}>
-                      <Ionicons name="close-circle" size={20} color="#EF4444" />
-                    </TouchableOpacity>
+                  
+                  <View style={styles.locationInput}>
+                    <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
+                    <LocationAutocomplete
+                      placeholder="Enter pickup location..."
+                      value={pickup}
+                      onChangeText={setPickup}
+                      onPlaceSelected={(location) => setPickup(location.description)}
+                      apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                      placeholderTextColor="#A8B3C5"
+                    />
                   </View>
-                  <LocationAutocomplete
-                    placeholder={`Enter stop ${index + 1} location...`}
-                    value={stop}
-                    onChangeText={(text) => updateStop(index, text)}
-                    onPlaceSelected={(location) => updateStop(index, location.description)}
-                    apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
-                    placeholderTextColor="#A8B3C5"
-                  />
                 </View>
-              </View>
-            ))}
 
-            {/* Add Stop Button */}
-            {stops.length < 3 && (
-              <TouchableOpacity
-                style={styles.addStopButton}
-                onPress={addStop}
-              >
-                <Ionicons name="add-circle-outline" size={20} color={COLORS.brandGreen} />
-                <Text style={styles.addStopText}>Add Stop</Text>
-              </TouchableOpacity>
+                {/* STOPS - Dynamic Stop Addition */}
+                {stops.map((stop, index) => (
+                  <View key={index} style={[styles.locationCard, { marginTop: -10 }]}>
+                    <View style={styles.locationIconContainer}>
+                      <View style={[styles.iconCircle, { backgroundColor: '#9333EA' }]}>
+                        <Text style={{ color: COLORS.white, fontWeight: '800', fontSize: 14 }}>
+                          {index + 1}
+                        </Text>
+                      </View>
+                      {index < stops.length - 1 && <View style={styles.verticalLine} />}
+                    </View>
+                    
+                    <View style={styles.locationInput}>
+                      <View style={styles.stopHeader}>
+                        <Text style={styles.locationLabel}>STOP {index + 1}</Text>
+                        <TouchableOpacity onPress={() => removeStop(index)}>
+                          <Ionicons name="close-circle" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                      <LocationAutocomplete
+                        placeholder={`Enter stop ${index + 1} location...`}
+                        value={stop}
+                        onChangeText={(text) => updateStop(index, text)}
+                        onPlaceSelected={(location) => updateStop(index, location.description)}
+                        apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                        placeholderTextColor="#A8B3C5"
+                      />
+                    </View>
+                  </View>
+                ))}
+
+                {/* Add Stop Button */}
+                {stops.length < 3 && (
+                  <TouchableOpacity
+                    style={styles.addStopButton}
+                    onPress={addStop}
+                  >
+                    <Ionicons name="add-circle-outline" size={20} color={COLORS.brandGreen} />
+                    <Text style={styles.addStopText}>Add Stop</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Destination Card */}
+                <View style={[styles.locationCard, { marginTop: -10 }]}>
+                  <View style={styles.locationIconContainer}>
+                    <View style={[styles.iconCircle, { backgroundColor: COLORS.brandBlue }]}>
+                      <Ionicons name="flag" size={20} color={COLORS.white} />
+                    </View>
+                  </View>
+                  
+                  <View style={styles.locationInput}>
+                    <Text style={styles.locationLabel}>DESTINATION</Text>
+                    <LocationAutocomplete
+                      placeholder="Where are you going?"
+                      value={destination}
+                      onChangeText={setDestination}
+                      onPlaceSelected={(location) => setDestination(location.description)}
+                      apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
+                      placeholderTextColor="#A8B3C5"
+                    />
+                  </View>
+                </View>
+              </>
             )}
-
-            {/* Destination Card */}
-            <View style={[styles.locationCard, { marginTop: -10 }]}>
-              <View style={styles.locationIconContainer}>
-                <View style={[styles.iconCircle, { backgroundColor: COLORS.brandBlue }]}>
-                  <Ionicons name="flag" size={20} color={COLORS.white} />
-                </View>
-              </View>
-              
-              <View style={styles.locationInput}>
-                <Text style={styles.locationLabel}>DESTINATION</Text>
-                <LocationAutocomplete
-                  placeholder="Where are you going?"
-                  value={destination}
-                  onChangeText={setDestination}
-                  onPlaceSelected={(location) => setDestination(location.description)}
-                  apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY}
-                  placeholderTextColor="#A8B3C5"
-                />
-              </View>
-            </View>
           </View>
 
           {/* TRIP TYPE SELECTOR - INTRA-CITY vs INTER-CITY */}
