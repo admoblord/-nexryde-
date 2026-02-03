@@ -126,23 +126,47 @@ export default function ModernBookingScreen() {
   };
 
   // Handle booking
-  const handleConfirmBooking = () => {
+  const handleConfirmBooking = async () => {
     if (!pickup || !destination) {
       Alert.alert('Missing Information', 'Please enter pickup and destination');
       return;
     }
 
-    Alert.alert(
-      'Confirm Booking',
-      `Vehicle: ${VEHICLE_TYPES.find(v => v.id === selectedVehicle)?.name}\nFrom: ${pickup}\nTo: ${destination}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Confirm', onPress: () => {
-          Alert.alert('Success', 'Searching for nearby drivers...');
-          router.back();
-        }}
-      ]
-    );
+    // Calculate real fare using backend
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/fares/estimate-google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pickup_address: pickup,
+          destination_address: destination,
+          service_type: selectedVehicle,
+        }),
+      });
+
+      const fareData = await response.json();
+      
+      if (response.ok && fareData.total_fare) {
+        Alert.alert(
+          'Confirm Booking',
+          `Vehicle: ${VEHICLE_TYPES.find(v => v.id === selectedVehicle)?.name}\nFrom: ${pickup}\nTo: ${destination}\n\nFare: ₦${fareData.total_fare.toFixed(2)}`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Confirm', onPress: () => {
+              Alert.alert('Success', 'Searching for nearby drivers...');
+              router.back();
+            }}
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Could not calculate fare. Please try again.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not calculate fare. Please check your connection.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const selectedVehicleData = VEHICLE_TYPES.find(v => v.id === selectedVehicle);
