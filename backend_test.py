@@ -638,18 +638,18 @@ class NexrydeAPITester:
             self.log_result("/drivers/available", "GET", "BROKEN", f"Failed: {response['data']}")
     
     async def test_accept_trip(self):
-        """Test POST /api/trips/{trip_id}/accept"""
+        """Test PUT /api/trips/{trip_id}/accept"""
         test_trip_id = "test_trip_123"
-        response = await self.make_request("POST", f"/trips/{test_trip_id}/accept", {
-            "driver_id": TEST_DRIVER_ID
+        response = await self.make_request("PUT", f"/trips/{test_trip_id}/accept", {
+            "driver_id": "driver_123"
         })
         
         if response["success"]:
-            self.log_result("/trips/{trip_id}/accept", "POST", "WORKING", "Trip accepted successfully")
+            self.log_result("/trips/{trip_id}/accept", "PUT", "WORKING", "Trip accepted successfully")
         elif response["status_code"] == 404:
-            self.log_result("/trips/{trip_id}/accept", "POST", "WORKING", "Trip not found (expected)")
+            self.log_result("/trips/{trip_id}/accept", "PUT", "WORKING", "Trip not found (expected)")
         else:
-            self.log_result("/trips/{trip_id}/accept", "POST", "BROKEN", f"Failed: {response['data']}")
+            self.log_result("/trips/{trip_id}/accept", "PUT", "BROKEN", f"Failed: {response['data']}")
     
     async def test_update_trip_location(self):
         """Test PUT /api/trips/{trip_id}/location"""
