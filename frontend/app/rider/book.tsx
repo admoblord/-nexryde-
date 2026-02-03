@@ -531,28 +531,13 @@ export default function BookingScreen() {
                   <View style={styles.locationInputRow}>
                     <View style={[styles.locationDot, { backgroundColor: COLORS.yellow }]} />
                     <View style={styles.inputWrapper}>
-                      {Platform.OS === 'web' ? (
-                        <TextInput
-                          style={styles.input}
-                          placeholder={`Stop ${index + 1}`}
-                          placeholderTextColor={COLORS.textSecondary}
-                          value={stop.location}
-                          onChangeText={(text) => updateStop(stop.id, text)}
-                        />
-                      ) : (
-                        <GooglePlacesAutocomplete
-                          placeholder={`Stop ${index + 1}`}
-                          minLength={2}
-                          fetchDetails={true}
-                          onPress={(data) => updateStop(stop.id, data.description)}
-                          query={{ key: GOOGLE_MAPS_API_KEY, language: 'en', components: 'country:ng' }}
-                          styles={{ textInput: styles.input }}
-                          textInputProps={{ placeholderTextColor: COLORS.textSecondary }}
-                          enablePoweredByContainer={false}
-                          nearbyPlacesAPI="GooglePlacesSearch"
-                          debounce={300}
-                        />
-                      )}
+                      <TextInput
+                        style={styles.input}
+                        placeholder={`Stop ${index + 1}`}
+                        placeholderTextColor={COLORS.textSecondary}
+                        value={stop.location}
+                        onChangeText={(text) => updateStop(stop.id, text)}
+                      />
                     </View>
                     <TouchableOpacity onPress={() => removeStop(stop.id)} style={styles.removeBtn}>
                       <Ionicons name="close-circle" size={20} color={COLORS.red} />
