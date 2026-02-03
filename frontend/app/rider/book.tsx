@@ -27,7 +27,7 @@ if (Platform.OS !== 'web') {
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const GOOGLE_MAPS_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || 'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY';
 
-// EXACT COLORS FROM DESIGN
+// UNIFIED COLORS
 const COLORS = {
   background: '#121212',
   cardBg: '#1E1E1E',
@@ -39,7 +39,7 @@ const COLORS = {
   red: '#F85D50',
 };
 
-// VEHICLE TYPES WITH DESIGN COLORS
+// VEHICLE TYPES - UNIFIED
 const CAR_TYPES = [
   { 
     id: 'economy', 
@@ -97,12 +97,21 @@ export default function BookingScreen() {
   // Animations
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const carPulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
+
+    // Car pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(carPulse, { toValue: 1.1, duration: 1000, useNativeDriver: true }),
+        Animated.timing(carPulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    ).start();
   }, []);
 
   // Get Current Location
@@ -204,12 +213,12 @@ export default function BookingScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        {/* HEADER - DESIGN STYLE */}
+        {/* HEADER - BOLD */}
         <Animated.View style={[styles.header, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={COLORS.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Available rides</Text>
+          <Text style={styles.headerTitle}>Available Rides</Text>
           <TouchableOpacity onPress={() => router.back()}>
             <Text style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
@@ -220,28 +229,42 @@ export default function BookingScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* 3D MAP PREVIEW - DESIGN STYLE */}
+          {/* 3D MAP WITH CARS */}
           <Animated.View style={[styles.mapSection, { opacity: fadeAnim }]}>
             <View style={styles.mapContainer}>
               <View style={styles.mapBuildings}>
+                {/* Buildings */}
                 <View style={[styles.building, { height: 70, width: 80, backgroundColor: '#2A2A2A', left: 30, top: 40 }]} />
                 <View style={[styles.building, { height: 90, width: 70, backgroundColor: '#2F2F2F', left: 120, top: 30 }]} />
                 <View style={[styles.building, { height: 60, width: 60, backgroundColor: '#353535', right: 90, top: 50 }]} />
                 <View style={[styles.building, { height: 80, width: 75, backgroundColor: '#2D2D2D', right: 30, bottom: 60 }]} />
+                
                 {/* Yellow route line */}
                 <View style={styles.routeLine} />
+                
+                {/* ANIMATED CARS ON MAP */}
+                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], left: '25%', top: '45%' }]}>
+                  <Ionicons name="car" size={24} color={COLORS.yellow} />
+                </Animated.View>
+                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], right: '30%', bottom: '40%' }]}>
+                  <Ionicons name="car" size={24} color={COLORS.green} />
+                </Animated.View>
+                <Animated.View style={[styles.carOnMap, { transform: [{ scale: carPulse }], left: '60%', top: '30%' }]}>
+                  <Ionicons name="car" size={20} color={COLORS.purple} />
+                </Animated.View>
+                
                 {/* Your location marker */}
                 <View style={styles.locationMarker}>
-                  <Ionicons name="location" size={20} color={COLORS.yellow} />
-                  <Text style={styles.locationLabel}>Your location</Text>
+                  <Ionicons name="location" size={24} color={COLORS.red} />
+                  <Text style={styles.locationLabel}>Your Location</Text>
                 </View>
               </View>
             </View>
           </Animated.View>
 
-          {/* RIDE OPTIONS SECTION */}
+          {/* OPTIONS CONTAINER */}
           <View style={styles.optionsContainer}>
-            {/* TRIP TYPE SELECTOR */}
+            {/* TRIP TYPE - BOLD */}
             <View style={styles.tripTypeRow}>
               <TouchableOpacity
                 style={[styles.tripTypeBtn, tripType === 'intra' && styles.tripTypeBtnActive]}
@@ -261,36 +284,37 @@ export default function BookingScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* LOCATION INPUTS */}
+            {/* LOCATION INPUTS - UNIFIED CARD */}
             <View style={styles.locationCard}>
-              {/* GPS Button */}
-              <TouchableOpacity 
-                style={styles.quickActionBtn}
-                onPress={getCurrentLocation}
-                disabled={isGettingLocation}
-              >
-                <View style={styles.quickActionIcon}>
-                  {isGettingLocation ? (
-                    <ActivityIndicator size="small" color={COLORS.green} />
-                  ) : (
-                    <Ionicons name="locate" size={20} color={COLORS.green} />
-                  )}
-                </View>
-                <Text style={styles.quickActionText}>
-                  {isGettingLocation ? 'Detecting...' : 'Use GPS'}
-                </Text>
-              </TouchableOpacity>
+              {/* Quick Actions Row */}
+              <View style={styles.quickActionsRow}>
+                <TouchableOpacity 
+                  style={[styles.quickActionBtn, { backgroundColor: COLORS.green + '20' }]}
+                  onPress={getCurrentLocation}
+                  disabled={isGettingLocation}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: COLORS.green + '30' }]}>
+                    {isGettingLocation ? (
+                      <ActivityIndicator size="small" color={COLORS.green} />
+                    ) : (
+                      <Ionicons name="locate" size={18} color={COLORS.green} />
+                    )}
+                  </View>
+                  <Text style={styles.quickActionText}>
+                    {isGettingLocation ? 'Detecting...' : 'Use GPS'}
+                  </Text>
+                </TouchableOpacity>
 
-              {/* Voice Booking */}
-              <TouchableOpacity 
-                style={styles.quickActionBtn}
-                onPress={() => router.push('/rider/voice-booking' as any)}
-              >
-                <View style={styles.quickActionIcon}>
-                  <Ionicons name="mic" size={20} color={COLORS.purple} />
-                </View>
-                <Text style={styles.quickActionText}>Voice</Text>
-              </TouchableOpacity>
+                <TouchableOpacity 
+                  style={[styles.quickActionBtn, { backgroundColor: COLORS.purple + '20' }]}
+                  onPress={() => router.push('/rider/voice-booking' as any)}
+                >
+                  <View style={[styles.quickActionIcon, { backgroundColor: COLORS.purple + '30' }]}>
+                    <Ionicons name="mic" size={18} color={COLORS.purple} />
+                  </View>
+                  <Text style={styles.quickActionText}>Voice</Text>
+                </TouchableOpacity>
+              </View>
 
               {/* Pickup */}
               <View style={styles.locationInputRow}>
@@ -388,16 +412,17 @@ export default function BookingScreen() {
                 </View>
               </View>
 
-              {/* Add Stop */}
+              {/* Add Stop - BOLD */}
               {stops.length < 3 && (
                 <TouchableOpacity style={styles.addStopBtn} onPress={addStop}>
-                  <Ionicons name="add-circle-outline" size={18} color={COLORS.yellow} />
-                  <Text style={styles.addStopText}>Add stop</Text>
+                  <Ionicons name="add-circle-outline" size={20} color={COLORS.yellow} />
+                  <Text style={styles.addStopText}>Add Stop</Text>
                 </TouchableOpacity>
               )}
             </View>
 
-            {/* VEHICLE SELECTION - DESIGN STYLE */}
+            {/* VEHICLE SELECTION - UNIFIED & BOLD */}
+            <Text style={styles.sectionTitle}>Choose Vehicle</Text>
             {CAR_TYPES.map((car) => (
               <TouchableOpacity
                 key={car.id}
@@ -410,7 +435,7 @@ export default function BookingScreen() {
               >
                 <View style={styles.vehicleLeft}>
                   <View style={[styles.vehicleIcon, { backgroundColor: car.color + '20' }]}>
-                    <Ionicons name={car.icon as any} size={28} color={car.color} />
+                    <Ionicons name={car.icon as any} size={32} color={car.color} />
                   </View>
                   <View>
                     <Text style={styles.vehicleName}>{car.name}</Text>
@@ -422,7 +447,14 @@ export default function BookingScreen() {
                   {isCalculating ? (
                     <ActivityIndicator size="small" color={COLORS.green} />
                   ) : fareEstimate ? (
-                    <Text style={styles.vehiclePrice}>₦{fareEstimate.total_fare?.toLocaleString()}</Text>
+                    <>
+                      <Text style={styles.vehiclePrice}>₦{fareEstimate.total_fare?.toLocaleString()}</Text>
+                      {selectedCar === car.id && (
+                        <View style={styles.selectedBadge}>
+                          <Ionicons name="checkmark-circle" size={20} color={COLORS.green} />
+                        </View>
+                      )}
+                    </>
                   ) : (
                     <Text style={styles.vehiclePriceEmpty}>--</Text>
                   )}
@@ -430,7 +462,7 @@ export default function BookingScreen() {
               </TouchableOpacity>
             ))}
 
-            {/* TRIP SUMMARY */}
+            {/* TRIP SUMMARY - BOLD */}
             {fareEstimate && (
               <View style={styles.summaryCard}>
                 <Text style={styles.summaryTitle}>Trip Summary</Text>
@@ -439,7 +471,7 @@ export default function BookingScreen() {
                   <Text style={styles.summaryValue}>{fareEstimate.distance_km?.toFixed(1)} km</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Time</Text>
+                  <Text style={styles.summaryLabel}>Estimated Time</Text>
                   <Text style={styles.summaryValue}>{fareEstimate.duration_min?.toFixed(0)} min</Text>
                 </View>
                 <View style={styles.summaryDivider} />
@@ -452,7 +484,7 @@ export default function BookingScreen() {
           </View>
         </ScrollView>
 
-        {/* CONFIRM BUTTON - DESIGN STYLE */}
+        {/* CONFIRM BUTTON - BOLD & UNIFIED */}
         <View style={styles.bottomBar}>
           <TouchableOpacity
             style={[styles.confirmBtn, (!pickup || !destination) && styles.confirmBtnDisabled]}
@@ -460,14 +492,21 @@ export default function BookingScreen() {
             disabled={!pickup || !destination}
             activeOpacity={0.9}
           >
-            <Text style={styles.confirmText}>
-              {fareEstimate 
-                ? `Confirm ${CAR_TYPES.find(c => c.id === selectedCar)?.name}` 
-                : 'Enter Locations'}
-            </Text>
+            <LinearGradient
+              colors={(!pickup || !destination) ? ['#4A5568', '#2D3748'] : [COLORS.green, '#00D98C']}
+              style={styles.confirmGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.confirmText}>
+                {fareEstimate 
+                  ? `Confirm ${CAR_TYPES.find(c => c.id === selectedCar)?.name}` 
+                  : 'Enter Locations'}
+              </Text>
+            </LinearGradient>
           </TouchableOpacity>
           <TouchableOpacity style={styles.scheduleBtn}>
-            <Ionicons name="calendar-outline" size={24} color={COLORS.text} />
+            <Ionicons name="calendar" size={26} color={COLORS.text} />
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -484,7 +523,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // HEADER
+  // HEADER - BOLD
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -499,20 +538,21 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 22,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: -0.5,
   },
   cancelText: {
     fontSize: 16,
     color: COLORS.red,
-    fontWeight: '600',
+    fontWeight: '800',
   },
   content: {
     flex: 1,
   },
 
-  // 3D MAP
+  // 3D MAP WITH CARS
   mapSection: {
     height: 250,
     marginBottom: 0,
@@ -529,15 +569,31 @@ const styles = StyleSheet.create({
   building: {
     position: 'absolute',
     borderRadius: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 6,
+    elevation: 8,
   },
   routeLine: {
     position: 'absolute',
     bottom: '30%',
     left: '20%',
     right: '20%',
-    height: 3,
+    height: 4,
     backgroundColor: COLORS.yellow,
     borderRadius: 2,
+    shadowColor: COLORS.yellow,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+  },
+  carOnMap: {
+    position: 'absolute',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.5,
+    shadowRadius: 4,
   },
   locationMarker: {
     position: 'absolute',
@@ -546,9 +602,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   locationLabel: {
-    fontSize: 10,
-    color: COLORS.yellow,
-    fontWeight: '600',
+    fontSize: 11,
+    color: COLORS.red,
+    fontWeight: '800',
     marginTop: 2,
   },
 
@@ -562,7 +618,7 @@ const styles = StyleSheet.create({
     paddingTop: 20,
   },
 
-  // TRIP TYPE
+  // TRIP TYPE - BOLD
   tripTypeRow: {
     flexDirection: 'row',
     gap: 10,
@@ -570,69 +626,81 @@ const styles = StyleSheet.create({
   },
   tripTypeBtn: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 20,
     backgroundColor: COLORS.cardBg,
     alignItems: 'center',
   },
   tripTypeBtnActive: {
-    backgroundColor: COLORS.green + '30',
+    backgroundColor: COLORS.green,
   },
   tripTypeText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '800',
     color: COLORS.textSecondary,
+    letterSpacing: 0.3,
   },
   tripTypeTextActive: {
-    color: COLORS.green,
+    color: COLORS.text,
   },
 
-  // LOCATION CARD
+  // LOCATION CARD - UNIFIED
   locationCard: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 20,
+    padding: 18,
+    marginBottom: 20,
+  },
+  quickActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
     marginBottom: 16,
   },
   quickActionBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    gap: 8,
   },
   quickActionIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.background,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
   quickActionText: {
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '800',
     color: COLORS.text,
   },
   locationInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginVertical: 8,
+    marginVertical: 10,
   },
   locationDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   inputWrapper: {
     flex: 1,
   },
   input: {
-    fontSize: 15,
+    fontSize: 16,
     color: COLORS.text,
     paddingVertical: 8,
-    fontWeight: '500',
+    fontWeight: '700',
   },
   removeBtn: {
     padding: 4,
@@ -640,146 +708,185 @@ const styles = StyleSheet.create({
   addStopBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
+    paddingVertical: 12,
+    paddingTop: 16,
     gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.background,
     marginTop: 8,
   },
   addStopText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '900',
     color: COLORS.yellow,
+    letterSpacing: 0.3,
   },
 
-  // VEHICLE CARDS
+  // SECTION TITLE - BOLD
+  sectionTitle: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.text,
+    marginBottom: 16,
+    letterSpacing: -0.5,
+  },
+
+  // VEHICLE CARDS - UNIFIED & BOLD
   vehicleCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 18,
+    padding: 18,
     marginBottom: 12,
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: 'transparent',
   },
   vehicleCardActive: {
     backgroundColor: COLORS.text,
     borderColor: COLORS.green,
+    shadowColor: COLORS.green,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 10,
   },
   vehicleLeft: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
-    gap: 14,
+    gap: 16,
   },
   vehicleIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
   vehicleName: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '900',
     color: COLORS.text,
-    marginBottom: 2,
+    marginBottom: 3,
+    letterSpacing: -0.3,
   },
   vehicleDesc: {
-    fontSize: 12,
+    fontSize: 13,
     color: COLORS.textSecondary,
-    marginBottom: 2,
+    fontWeight: '700',
+    marginBottom: 3,
   },
   vehicleCapacity: {
-    fontSize: 11,
+    fontSize: 12,
     color: COLORS.textSecondary,
+    fontWeight: '700',
   },
   vehicleRight: {
     alignItems: 'flex-end',
   },
   vehiclePrice: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: -0.5,
   },
   vehiclePriceEmpty: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 20,
+    fontWeight: '900',
     color: COLORS.textSecondary,
   },
+  selectedBadge: {
+    marginTop: 4,
+  },
 
-  // SUMMARY
+  // SUMMARY - BOLD
   summaryCard: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 18,
+    padding: 20,
     marginTop: 8,
     marginBottom: 20,
   },
   summaryTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
     color: COLORS.text,
-    marginBottom: 12,
+    marginBottom: 14,
+    letterSpacing: -0.3,
   },
   summaryRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 10,
   },
   summaryLabel: {
-    fontSize: 14,
+    fontSize: 15,
     color: COLORS.textSecondary,
+    fontWeight: '700',
   },
   summaryValue: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 15,
+    fontWeight: '900',
     color: COLORS.text,
   },
   summaryDivider: {
     height: 1,
     backgroundColor: COLORS.background,
-    marginVertical: 8,
+    marginVertical: 12,
   },
   summaryTotalLabel: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: -0.3,
   },
   summaryTotalValue: {
-    fontSize: 20,
-    fontWeight: '700',
+    fontSize: 26,
+    fontWeight: '900',
     color: COLORS.green,
+    letterSpacing: -0.5,
   },
 
-  // BOTTOM BAR
+  // BOTTOM BAR - BOLD
   bottomBar: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingVertical: 18,
     backgroundColor: COLORS.background,
     gap: 12,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.cardBg,
   },
   confirmBtn: {
     flex: 1,
-    backgroundColor: COLORS.green,
-    paddingVertical: 16,
-    borderRadius: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: COLORS.green,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  confirmBtnDisabled: {
+    shadowOpacity: 0.2,
+  },
+  confirmGradient: {
+    paddingVertical: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  confirmBtnDisabled: {
-    backgroundColor: COLORS.textSecondary,
-  },
   confirmText: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 18,
+    fontWeight: '900',
     color: COLORS.text,
+    letterSpacing: 0.3,
   },
   scheduleBtn: {
-    width: 56,
-    height: 56,
-    borderRadius: 12,
+    width: 60,
+    height: 60,
+    borderRadius: 16,
     backgroundColor: COLORS.cardBg,
     alignItems: 'center',
     justifyContent: 'center',
