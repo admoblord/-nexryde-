@@ -754,4 +754,43 @@ const styles = StyleSheet.create({
     color: COLORS.accentYellow,
     opacity: 0.8,
   },
+  searchResult: {
+    backgroundColor: COLORS.accentBlueSoft,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  searchResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  searchResultTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    flex: 1,
+  },
+  searchResultContent: {
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.lightBorder,
+  },
+  searchResultLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    marginBottom: SPACING.xs,
+  },
+  searchResultValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    marginBottom: SPACING.xs,
+  },
+  searchResultDesc: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    lineHeight: 18,
+  },
 });
