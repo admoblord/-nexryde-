@@ -503,8 +503,8 @@ export default function BookingScreen() {
                 </TouchableOpacity>
 
                 <TouchableOpacity 
-                  style={[styles.quickActionBtn, { backgroundColor: COLORS.purple + '20' }]}
-                  onPress={() => router.push('/rider/voice-booking' as any)}
+                  style={[styles.quickActionBtn, { backgroundColor: COLORS.purple + '20', opacity: 0.5 }]}
+                  disabled={true}
                 >
                   <View style={[styles.quickActionIcon, { backgroundColor: COLORS.purple + '30' }]}>
                     <Ionicons name="mic" size={18} color={COLORS.purple} />
