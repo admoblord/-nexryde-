@@ -40,7 +40,7 @@ const PRIORITY_FEATURES = [
     label: 'Book Ride', 
     subtitle: 'Quick booking',
     icon: 'car', 
-    route: '/rider/book', 
+    route: '/rider/book-new', 
     gradient: [COLORS.primary, COLORS.primaryDark],
     size: 'large',
   },
