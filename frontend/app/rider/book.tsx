@@ -305,6 +305,33 @@ export default function BookingScreen() {
               <Text style={styles.locationCardTitle}>Route Details</Text>
             </View>
 
+            {/* USE CURRENT LOCATION BUTTON - PROACTIVE GPS */}
+            <TouchableOpacity 
+              style={styles.currentLocationBtn}
+              onPress={getCurrentLocation}
+              disabled={isGettingLocation}
+              activeOpacity={0.8}
+            >
+              <LinearGradient
+                colors={[COLORS.mint, '#00D98C']}
+                style={styles.currentLocationGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                {isGettingLocation ? (
+                  <>
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                    <Text style={styles.currentLocationText}>Detecting location...</Text>
+                  </>
+                ) : (
+                  <>
+                    <Ionicons name="locate" size={20} color="#FFFFFF" />
+                    <Text style={styles.currentLocationText}>Use Current Location</Text>
+                  </>
+                )}
+              </LinearGradient>
+            </TouchableOpacity>
+
             {/* Pickup */}
             <View style={styles.locationRow}>
               <View style={[styles.locationDot, { backgroundColor: COLORS.mint }]} />
