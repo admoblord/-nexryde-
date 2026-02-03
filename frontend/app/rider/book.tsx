@@ -123,8 +123,19 @@ export default function ModernBookingScreen() {
 
   // Handle booking
   const handleConfirmBooking = async () => {
-    if (!pickup || !destination) {
-      Alert.alert('Missing Information', 'Please enter pickup and destination');
+    // Validate inputs more strictly
+    if (!pickup || pickup.trim() === '' || pickup.toLowerCase().includes('null')) {
+      Alert.alert('Invalid Pickup', 'Please select a valid pickup location from the suggestions');
+      return;
+    }
+    
+    if (!destination || destination.trim() === '' || destination.toLowerCase().includes('null')) {
+      Alert.alert('Invalid Destination', 'Please select a valid destination from the suggestions');
+      return;
+    }
+
+    if (pickup === destination) {
+      Alert.alert('Same Location', 'Pickup and destination cannot be the same');
       return;
     }
 
@@ -156,10 +167,11 @@ export default function ModernBookingScreen() {
           ]
         );
       } else {
-        Alert.alert('Error', 'Could not calculate fare. Please try again.');
+        Alert.alert('Error', fareData.detail || 'Could not calculate fare. Please ensure both locations are valid and try again.');
       }
     } catch (error) {
-      Alert.alert('Error', 'Could not calculate fare. Please check your connection.');
+      console.error('Fare calculation error:', error);
+      Alert.alert('Error', 'Could not calculate fare. Please check your internet connection and try again.');
     } finally {
       setIsLoading(false);
     }
