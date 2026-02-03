@@ -259,31 +259,6 @@ export default function RiderHomeScreen() {
             </View>
           </View>
 
-          {/* STATS CARDS - GLASSMORPHISM */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Your Activity</Text>
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <LinearGradient
-                  colors={['rgba(0, 245, 255, 0.1)', 'rgba(0, 132, 255, 0.1)']}
-                  style={styles.statGradient}
-                >
-                  <Text style={styles.statValue}>24</Text>
-                  <Text style={styles.statLabel}>Total Rides</Text>
-                </LinearGradient>
-              </View>
-              <View style={styles.statCard}>
-                <LinearGradient
-                  colors={['rgba(255, 0, 110, 0.1)', 'rgba(255, 69, 137, 0.1)']}
-                  style={styles.statGradient}
-                >
-                  <Text style={styles.statValue}>4.8★</Text>
-                  <Text style={styles.statLabel}>Your Rating</Text>
-                </LinearGradient>
-              </View>
-            </View>
-          </View>
-
           <View style={{ height: 40 }} />
         </ScrollView>
       </SafeAreaView>
