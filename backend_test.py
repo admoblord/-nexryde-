@@ -296,18 +296,18 @@ class NexrydeAPITester:
             self.log_result("/trips/{trip_id}", "GET", "BROKEN", f"Failed: {response['data']}")
     
     async def test_cancel_trip(self):
-        """Test POST /api/trips/{trip_id}/cancel"""
+        """Test PUT /api/trips/{trip_id}/cancel"""
         test_trip_id = "test_trip_123"
-        response = await self.make_request("POST", f"/trips/{test_trip_id}/cancel", {
+        response = await self.make_request("PUT", f"/trips/{test_trip_id}/cancel", {
             "reason": "Testing cancellation"
         })
         
         if response["success"]:
-            self.log_result("/trips/{trip_id}/cancel", "POST", "WORKING", "Trip cancelled successfully")
+            self.log_result("/trips/{trip_id}/cancel", "PUT", "WORKING", "Trip cancelled successfully")
         elif response["status_code"] == 404:
-            self.log_result("/trips/{trip_id}/cancel", "POST", "WORKING", "Trip not found (expected)")
+            self.log_result("/trips/{trip_id}/cancel", "PUT", "WORKING", "Trip not found (expected)")
         else:
-            self.log_result("/trips/{trip_id}/cancel", "POST", "BROKEN", f"Failed: {response['data']}")
+            self.log_result("/trips/{trip_id}/cancel", "PUT", "BROKEN", f"Failed: {response['data']}")
     
     # ==================== DRIVER TESTS ====================
     
