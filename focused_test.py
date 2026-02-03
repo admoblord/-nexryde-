@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 
 # Backend URL from environment
-BACKEND_URL = "https://nexryde-restore.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-debug.preview.emergentagent.com/api"
 
 # Test data
 TEST_PHONE = "+2348012345678"
