@@ -61,7 +61,8 @@
           "resizeMode": "contain",
           "backgroundColor": "#0D1420"
         }
-      ]
+      ],
+      "@react-native-voice/voice"
     ],
     "experiments": {
       "typedRoutes": true
