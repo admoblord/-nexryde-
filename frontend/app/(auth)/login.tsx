@@ -135,69 +135,6 @@ export default function LoginScreen() {
     }
   };
 
-  // WhatsApp OTP request function
-  const [whatsappLoading, setWhatsappLoading] = useState(false);
-  
-  const handleWhatsAppOTP = async () => {
-    if (phone.length < 10) return;
-    setWhatsappLoading(true);
-    storePhone(phone);
-    
-    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
-    const fullPhone = `+234${phone}`;
-    
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      controller.abort();
-      setWhatsappLoading(false);
-      Alert.alert("Connection Timeout", "Could not reach server. Please try SMS instead.");
-    }, 15000);
-    
-    try {
-      const res = await fetch(`${BASE_URL}/api/auth/request-otp-whatsapp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: fullPhone }),
-        signal: controller.signal,
-      });
-      
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch {}
-      
-      if (!res.ok) {
-        if (res.status === 429 && data?.detail) {
-          Alert.alert("Please Wait", data.detail);
-        } else {
-          Alert.alert('WhatsApp OTP failed', data?.detail || data?.message || 'Try SMS instead');
-        }
-        return;
-      }
-
-      if (!data?.success) {
-        Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
-        return;
-      }
-      
-      router.push({
-        pathname: '/(auth)/verify',
-        params: {
-          phone: phone,
-          provider: 'whatsapp',
-        }
-      });
-      
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        return;
-      }
-      Alert.alert('Connection Error', 'Cannot connect to server. Please try SMS instead.');
-    } finally {
-      clearTimeout(t);
-      setWhatsappLoading(false);
-    }
-  };
-
   // Get backend URL for Google auth
   const getBackendUrl = () => process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
 
