@@ -269,7 +269,6 @@ export default function ModernBookingScreen() {
                 </View>
                 <Text style={styles.vehicleName}>{vehicle.name}</Text>
                 <Text style={styles.vehicleTime}>{vehicle.time}</Text>
-                <Text style={styles.vehiclePrice}>{vehicle.price}</Text>
                 {selectedVehicle === vehicle.id && (
                   <View style={[styles.selectedBadge, { backgroundColor: vehicle.color }]}>
                     <Ionicons name="checkmark" size={16} color="#FFF" />
