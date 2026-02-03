@@ -146,9 +146,10 @@ export default function ModernBookingScreen() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pickup_address: pickup,
-          destination_address: destination,
-          service_type: selectedVehicle,
+          pickup: pickup,
+          destination: destination,
+          vehicle_type: selectedVehicle,  // economy, comfort, or xl
+          trip_type: 'intra',  // intra-city by default
         }),
       });
 
