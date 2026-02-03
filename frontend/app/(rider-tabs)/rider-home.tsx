@@ -316,26 +316,32 @@ export default function RiderHomeScreen() {
             </View>
           </Animated.View>
 
-          {/* SERVICE CARDS GRID */}
-          <View style={styles.servicesGrid}>
-            {/* Top Row */}
-            <View style={styles.servicesRow}>
-              {renderServiceCard(SERVICES[0], 0)}
-              {renderServiceCard(SERVICES[1], 1)}
+          {/* ALL RIDER FEATURES GRID */}
+          <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
+            <Text style={styles.sectionTitle}>All Features</Text>
+            <View style={styles.featuresGrid}>
+              {RIDER_FEATURES.map((feature, index) => (
+                <TouchableOpacity
+                  key={feature.id}
+                  style={[styles.featureCard, { backgroundColor: feature.color + '20' }]}
+                  onPress={() => router.push(feature.route as any)}
+                  activeOpacity={0.8}
+                >
+                  <View style={[styles.featureIconBg, { backgroundColor: feature.color + '30' }]}>
+                    <Ionicons name={feature.icon as any} size={24} color={feature.color} />
+                  </View>
+                  <Text style={styles.featureTitle} numberOfLines={2}>{feature.title}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            {/* Bottom Row */}
-            <View style={styles.servicesRow}>
-              {renderServiceCard(SERVICES[2], 2)}
-              {renderServiceCard(SERVICES[3], 3)}
-            </View>
-          </View>
+          </Animated.View>
 
           {/* ONBOARD SECTION - RIDE HISTORY */}
           <Animated.View style={[styles.onboardSection, { opacity: fadeAnim }]}>
             <View style={styles.onboardHeader}>
-              <Text style={styles.onboardTitle}>Onbord</Text>
+              <Text style={styles.onboardTitle}>Recent Trips</Text>
               <TouchableOpacity onPress={() => router.push('/(rider-tabs)/rider-trips' as any)}>
-                <Text style={styles.viewHistory}>View History</Text>
+                <Text style={styles.viewHistory}>View All</Text>
               </TouchableOpacity>
             </View>
 
