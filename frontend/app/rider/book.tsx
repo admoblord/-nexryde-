@@ -56,8 +56,8 @@ interface VehicleOption {
   name: string;
   icon: string;
   description: string;
-  multiplier: number; // Price multiplier relative to base fare
-  examples?: string; // Example car models
+  multiplier: number;
+  capacity: string;
 }
 
 const VEHICLE_OPTIONS: VehicleOption[] = [
@@ -65,33 +65,33 @@ const VEHICLE_OPTIONS: VehicleOption[] = [
     type: 'economy', 
     name: 'Economy', 
     icon: 'car-outline', 
-    description: 'Standard cars', 
+    description: 'Affordable rides', 
     multiplier: 1.0,
-    examples: 'Toyota Corolla, Honda Civic'
+    capacity: '1-4 people'
   },
   { 
     type: 'comfort', 
     name: 'Comfort', 
     icon: 'car-sport-outline', 
-    description: 'Premium comfort', 
+    description: 'Extra legroom', 
     multiplier: 1.25,
-    examples: 'Camry, Accord'
+    capacity: '1-4 people'
   },
   { 
     type: 'suv', 
     name: 'SUV', 
     icon: 'car-sport', 
-    description: 'Large vehicles', 
+    description: 'Spacious rides', 
     multiplier: 1.5,
-    examples: 'Prado, Highlander'
+    capacity: '1-6 people'
   },
   { 
     type: 'premium', 
     name: 'Premium', 
     icon: 'car', 
-    description: 'Luxury sedans', 
+    description: 'Luxury vehicles', 
     multiplier: 2.0,
-    examples: 'Mercedes, BMW, Lexus'
+    capacity: '1-4 people'
   },
 ];
 
@@ -121,10 +121,9 @@ export default function BookScreen() {
     longitude: number;
   } | null>(null);
   const [estimatedDistance, setEstimatedDistance] = useState<number | null>(null);
-  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null); // in hours
+  const [estimatedDuration, setEstimatedDuration] = useState<number | null>(null);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState(false);
 
-  // Fetch driver subscription status
   useEffect(() => {
     if (user?.id) {
       fetchSubscriptionStatus();
@@ -167,7 +166,6 @@ export default function BookScreen() {
     }
   };
 
-  // ⭐ GOOGLE MAPS API - Get REAL distance and duration with traffic!
   const getRouteDetails = async (
     originLat: number,
     originLng: number,
@@ -177,7 +175,6 @@ export default function BookScreen() {
     try {
       setIsCalculatingRoute(true);
       
-      // Google Maps Distance Matrix API - provides distance + duration with traffic
       const response = await fetch(
         `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originLat},${originLng}&destinations=${destLat},${destLng}&mode=driving&departure_time=now&key=${GOOGLE_MAPS_API_KEY}`
       );
@@ -186,45 +183,29 @@ export default function BookScreen() {
       
       if (data.status === 'OK' && data.rows[0]?.elements[0]?.status === 'OK') {
         const element = data.rows[0].elements[0];
-        
-        // Distance in meters, convert to kilometers
         const distanceKm = element.distance.value / 1000;
-        
-        // Duration in seconds (with traffic!), convert to hours
         const durationHours = element.duration.value / 3600;
-        
-        console.log('✅ Google Maps Route:', {
-          distance: `${distanceKm.toFixed(1)} km`,
-          duration: `${durationHours.toFixed(2)} hours`,
-          durationText: element.duration.text,
-        });
         
         setIsCalculatingRoute(false);
         return { distance: distanceKm, duration: durationHours };
       } else {
-        console.error('❌ Google Maps API error:', data.status);
         setIsCalculatingRoute(false);
-        
-        // Fallback to Haversine if API fails
         return fallbackDistanceCalculation(originLat, originLng, destLat, destLng);
       }
     } catch (error) {
-      console.error('❌ Error calling Google Maps API:', error);
+      console.error('Error calling Google Maps API:', error);
       setIsCalculatingRoute(false);
-      
-      // Fallback to Haversine if API fails
       return fallbackDistanceCalculation(originLat, originLng, destLat, destLng);
     }
   };
 
-  // Fallback: Calculate distance using Haversine formula (straight-line distance)
   const fallbackDistanceCalculation = (
     lat1: number,
     lon1: number,
     lat2: number,
     lon2: number
   ): { distance: number; duration: number } => {
-    const R = 6371; // Earth's radius in km
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = 
@@ -233,37 +214,26 @@ export default function BookScreen() {
       Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     const distance = R * c;
-    
-    // Estimate duration (fallback: assume 60 km/h average)
     const duration = distance / 60;
     
-    console.log('⚠️ Using fallback calculation (Haversine)');
     return { distance, duration };
   };
 
-  // ⭐ DYNAMIC PRICING CALCULATION (With Real-Time Traffic!)
   const calculatePrice = (
     distance: number, 
     vehicleType: VehicleType, 
     rideType: RideType, 
-    duration?: number // Real duration from Google Maps API!
+    duration?: number
   ): number => {
     const vehicleMultiplier = VEHICLE_OPTIONS.find(v => v.type === vehicleType)?.multiplier || 1.0;
     
     if (rideType === 'intra_city') {
-      // INTRA-CITY PRICING (within city, max 50km)
-      // Components:
-      // 1. Base Fare: ₦200
-      // 2. Distance Rate: ₦100/km
-      // 3. Optional: Time Rate for traffic (₦5/minute)
       const baseFare = 200;
       const perKm = 100;
-      const perMinute = 5; // Traffic compensation
+      const perMinute = 5;
       
-      // Calculate base price
       let price = baseFare + (distance * perKm);
       
-      // Add time cost if duration provided (compensates for traffic)
       if (duration) {
         const minutes = duration * 60;
         price += minutes * perMinute;
@@ -271,32 +241,22 @@ export default function BookScreen() {
       
       return Math.round(price * vehicleMultiplier);
     } else {
-      // INTER-CITY PRICING (city to city, 50km+)
-      // Components:
-      // 1. Base Fare: ₦1,000
-      // 2. Distance Rate: ₦120/km
-      // 3. Time Rate: ₦800/hour (driver's time is valuable!)
       const baseFare = 1000;
       const perKm = 120;
       const perHour = 800;
       
-      // Use real duration from Google Maps, or fallback estimate
-      const hours = duration || (distance / 70); // Fallback: 70 km/h average
-      
+      const hours = duration || (distance / 70);
       const price = baseFare + (distance * perKm) + (hours * perHour);
       
       return Math.round(price * vehicleMultiplier);
     }
   };
 
-  // ⭐ Update route details when both pickup and dropoff are set
-  // Uses Google Maps API for REAL distance and duration with traffic!
   useEffect(() => {
     const pickup = stops.find(s => s.type === 'pickup');
     const dropoff = stops.find(s => s.type === 'dropoff');
     
     if (pickup?.coordinates && dropoff?.coordinates) {
-      // Call Google Maps API to get real distance and duration
       getRouteDetails(
         pickup.coordinates.latitude,
         pickup.coordinates.longitude,
@@ -307,7 +267,6 @@ export default function BookScreen() {
           setEstimatedDistance(routeData.distance);
           setEstimatedDuration(routeData.duration);
           
-          // Auto-switch to inter-city if distance > 50km
           if (routeData.distance > 50 && subscription?.can_access_intercity) {
             setRideType('inter_city');
           } else if (routeData.distance <= 50) {
@@ -326,7 +285,6 @@ export default function BookScreen() {
 
     setIsSearching(true);
     try {
-      // Add bias for intra-city or inter-city search
       const locationBias = rideType === 'intra_city' 
         ? `&radius=50000&location=${currentLocation?.latitude || 6.5244},${currentLocation?.longitude || 3.3792}`
         : '&components=country:ng';
@@ -442,12 +400,12 @@ export default function BookScreen() {
   const handleRideTypeChange = (type: RideType) => {
     if (type === 'inter_city' && !subscription?.can_access_intercity) {
       Alert.alert(
-        '🏆 Upgrade to Road Warrior',
-        'Inter-city trips are exclusively for Road Warrior subscribers. Upgrade now to unlock unlimited city-to-city rides!',
+        'Upgrade Required',
+        'Inter-city trips are available with Road Warrior subscription. Upgrade now to unlock city-to-city rides!',
         [
-          { text: 'Maybe Later', style: 'cancel' },
+          { text: 'Cancel', style: 'cancel' },
           { 
-            text: 'Upgrade Now', 
+            text: 'Upgrade', 
             onPress: () => router.push('/driver/subscription')
           }
         ]
@@ -464,7 +422,6 @@ export default function BookScreen() {
 
   const handleContinueToVehicleSelection = () => {
     if (canContinue) {
-      // Check if distance matches ride type
       if (estimatedDistance) {
         if (rideType === 'intra_city' && estimatedDistance > 50) {
           Alert.alert(
@@ -480,7 +437,6 @@ export default function BookScreen() {
   };
 
   const handleConfirmRide = () => {
-    // Navigate to bid screen or find driver screen
     const pickup = stops.find(s => s.type === 'pickup');
     const dropoff = stops.find(s => s.type === 'dropoff');
     
@@ -509,12 +465,8 @@ export default function BookScreen() {
     }
   };
 
-  // Handle voice commands for booking
   const handleVoiceCommand = async (intent: VoiceIntent, params?: any) => {
-    console.log('Voice command received:', intent, params);
-    
     if (intent === 'book_ride' && params?.destination) {
-      // Search for the destination location
       try {
         const response = await fetch(
           `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
@@ -524,11 +476,9 @@ export default function BookScreen() {
         const data = await response.json();
         
         if (data.predictions && data.predictions.length > 0) {
-          // Get details of first prediction
           const placeDetails = await getPlaceDetails(data.predictions[0].place_id);
           
           if (placeDetails) {
-            // Set as dropoff location
             setStops(stops.map(stop =>
               stop.type === 'dropoff'
                 ? {
@@ -543,34 +493,14 @@ export default function BookScreen() {
             ));
             
             Alert.alert(
-              '✅ Destination Set',
-              `I've set your destination to ${placeDetails.address}. Where would you like to be picked up?`,
+              'Destination Set',
+              `Destination set to ${placeDetails.address}`,
               [{ text: 'OK' }]
             );
           }
         }
       } catch (error) {
         console.error('Error processing voice destination:', error);
-        Alert.alert(
-          'Voice Command',
-          `I heard "${params.destination}" but couldn't find that location. Please try again or select manually.`,
-          [{ text: 'OK' }]
-        );
-      }
-    } else if (intent === 'check_fare') {
-      if (estimatedDistance && estimatedDuration) {
-        const price = calculatePrice(estimatedDistance, selectedVehicle, rideType, estimatedDuration);
-        Alert.alert(
-          '💰 Estimated Fare',
-          `Your ${selectedVehicle} ride will cost approximately ₦${price.toLocaleString()}.`,
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Set Locations First',
-          'Please set your pickup and destination locations first, then I can tell you the fare.',
-          [{ text: 'OK' }]
-        );
       }
     }
   };
@@ -579,177 +509,102 @@ export default function BookScreen() {
   if (step === 'location') {
     return (
       <View style={styles.container}>
-        <LinearGradient
-          colors={['#F8FAFC', '#EFF6FF', '#F8FAFC']}
-          style={StyleSheet.absoluteFill}
-        />
-
         <SafeAreaView style={styles.safeArea}>
           {/* Header */}
           <View style={styles.header}>
             <TouchableOpacity 
-              style={styles.closeButton}
+              style={styles.backButton}
               onPress={() => router.back()}
             >
-              <Ionicons name="close" size={24} color="#0F172A" />
+              <Ionicons name="arrow-back" size={24} color="#000" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>Book a Ride</Text>
+            <Text style={styles.headerTitle}>Plan your ride</Text>
             <View style={styles.headerRight} />
           </View>
 
-          {/* Ride Type Tabs */}
-          <View style={styles.tabsContainer}>
+          {/* Ride Type Selector */}
+          <View style={styles.rideTypeContainer}>
             <TouchableOpacity
-              style={[styles.tab, rideType === 'intra_city' && styles.tabActive]}
+              style={[styles.rideTypeButton, rideType === 'intra_city' && styles.rideTypeButtonActive]}
               onPress={() => handleRideTypeChange('intra_city')}
             >
-              <LinearGradient
-                colors={rideType === 'intra_city' ? ['#22C55E', '#16A34A'] : ['transparent', 'transparent']}
-                style={styles.tabGradient}
-              >
-                <View style={styles.tabContent}>
-                  <Ionicons 
-                    name="business" 
-                    size={22} 
-                    color={rideType === 'intra_city' ? '#FFFFFF' : '#64748B'} 
-                  />
-                  <View style={styles.tabTextContainer}>
-                    <Text style={[styles.tabText, rideType === 'intra_city' && styles.tabTextActive]}>
-                      Intra-City
-                    </Text>
-                    <Text style={[styles.tabSubtext, rideType === 'intra_city' && styles.tabSubtextActive]}>
-                      Within city (Max 50km)
-                    </Text>
-                  </View>
-                </View>
-              </LinearGradient>
+              <Text style={[styles.rideTypeText, rideType === 'intra_city' && styles.rideTypeTextActive]}>
+                Within City
+              </Text>
             </TouchableOpacity>
-
             <TouchableOpacity
-              style={[styles.tab, rideType === 'inter_city' && styles.tabActive]}
+              style={[styles.rideTypeButton, rideType === 'inter_city' && styles.rideTypeButtonActive]}
               onPress={() => handleRideTypeChange('inter_city')}
             >
-              <LinearGradient
-                colors={rideType === 'inter_city' ? ['#F59E0B', '#D97706'] : ['transparent', 'transparent']}
-                style={styles.tabGradient}
-              >
-                <View style={styles.tabContent}>
-                  <Ionicons 
-                    name="navigate" 
-                    size={22} 
-                    color={rideType === 'inter_city' ? '#FFFFFF' : '#64748B'} 
-                  />
-                  <View style={styles.tabTextContainer}>
-                    <Text style={[styles.tabText, rideType === 'inter_city' && styles.tabTextActive]}>
-                      Inter-City
-                    </Text>
-                    <Text style={[styles.tabSubtext, rideType === 'inter_city' && styles.tabSubtextActive]}>
-                      City to city
-                    </Text>
-                  </View>
-                  {!subscription?.can_access_intercity && (
-                    <View style={styles.lockBadge}>
-                      <Ionicons name="lock-closed" size={14} color="#F59E0B" />
-                    </View>
-                  )}
-                </View>
-              </LinearGradient>
+              <Text style={[styles.rideTypeText, rideType === 'inter_city' && styles.rideTypeTextActive]}>
+                City to City
+              </Text>
+              {!subscription?.can_access_intercity && (
+                <Ionicons name="lock-closed" size={14} color="#999" style={{ marginLeft: 4 }} />
+              )}
             </TouchableOpacity>
           </View>
 
           <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-            {/* Info Banner */}
-            <View style={[styles.infoBanner, { 
-              backgroundColor: rideType === 'intra_city' ? '#DCFCE7' : '#FEF3C7' 
-            }]}>
-              <Ionicons 
-                name="information-circle" 
-                size={20} 
-                color={rideType === 'intra_city' ? '#16A34A' : '#D97706'} 
-              />
-              <Text style={[styles.infoBannerText, { 
-                color: rideType === 'intra_city' ? '#166534' : '#92400E' 
-              }]}>
-                {rideType === 'intra_city' 
-                  ? 'Travel within the same city. Max distance: 50km'
-                  : 'Travel between different cities. Road Warrior exclusive!'}
-              </Text>
-            </View>
-
-            {/* Location Inputs */}
-            <View style={styles.locationsCard}>
+            {/* Location Input Card */}
+            <View style={styles.locationCard}>
               {/* Pickup */}
               <TouchableOpacity
-                style={styles.locationRow}
+                style={styles.locationInputRow}
                 onPress={() => openLocationPicker('1')}
               >
-                <View style={styles.locationDot}>
-                  <View style={[styles.dot, { backgroundColor: '#22C55E' }]} />
+                <View style={styles.iconContainer}>
+                  <View style={styles.pickupDot} />
                 </View>
-                <View style={styles.locationInputContainer}>
-                  <Text style={styles.locationLabel}>PICKUP LOCATION</Text>
-                  <Text style={[
-                    styles.locationText,
-                    !stops[0].address && styles.locationPlaceholder
-                  ]} numberOfLines={1}>
-                    {stops[0].address || 'Enter pickup location'}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputLabel}>Pickup Location</Text>
+                  <Text style={[styles.inputValue, !stops[0].address && styles.inputPlaceholder]}>
+                    {stops[0].address || 'Choose a pickup location'}
                   </Text>
                 </View>
-                <Ionicons name="search" size={20} color="#94A3B8" />
               </TouchableOpacity>
 
-              <View style={styles.locationLine} />
+              <View style={styles.dividerLine} />
 
               {/* Dropoff */}
               <TouchableOpacity
-                style={styles.locationRow}
+                style={styles.locationInputRow}
                 onPress={() => openLocationPicker('2')}
               >
-                <View style={styles.locationDot}>
-                  <View style={[styles.dot, { backgroundColor: '#EF4444' }]} />
+                <View style={styles.iconContainer}>
+                  <View style={styles.dropoffDot} />
                 </View>
-                <View style={styles.locationInputContainer}>
-                  <Text style={styles.locationLabel}>DROP-OFF LOCATION</Text>
-                  <Text style={[
-                    styles.locationText,
-                    !stops[1].address && styles.locationPlaceholder
-                  ]} numberOfLines={1}>
-                    {stops[1].address || 'Enter destination'}
+                <View style={styles.inputContainer}>
+                  <Text style={styles.inputLabel}>Dropoff Location</Text>
+                  <Text style={[styles.inputValue, !stops[1].address && styles.inputPlaceholder]}>
+                    {stops[1].address || 'Choose a destination'}
                   </Text>
                 </View>
-                <Ionicons name="search" size={20} color="#94A3B8" />
               </TouchableOpacity>
             </View>
 
-            {/* Distance & Duration Display */}
+            {/* Route Info */}
             {isCalculatingRoute && (
-              <View style={styles.distanceCard}>
-                <ActivityIndicator size="small" color="#3B82F6" />
-                <Text style={styles.distanceText}>Calculating route...</Text>
+              <View style={styles.routeInfoCard}>
+                <ActivityIndicator size="small" color="#000" />
+                <Text style={styles.routeInfoText}>Calculating route...</Text>
               </View>
             )}
             
             {!isCalculatingRoute && estimatedDistance !== null && (
-              <View style={styles.distanceCard}>
-                <Ionicons name="map-outline" size={20} color="#3B82F6" />
-                <View style={styles.routeDetails}>
-                  <Text style={styles.distanceText}>
-                    Distance: <Text style={styles.distanceValue}>{estimatedDistance.toFixed(1)} km</Text>
-                  </Text>
-                  {estimatedDuration !== null && (
-                    <Text style={styles.distanceText}>
-                      Duration: <Text style={styles.distanceValue}>
-                        {estimatedDuration < 1 
-                          ? `${Math.round(estimatedDuration * 60)} mins`
-                          : `${estimatedDuration.toFixed(1)} hours`
-                        }
-                      </Text>
-                    </Text>
-                  )}
-                  <Text style={styles.trafficNote}>
-                    <Ionicons name="checkmark-circle" size={12} color="#22C55E" /> With real-time traffic
+              <View style={styles.routeInfoCard}>
+                <View style={styles.routeInfoRow}>
+                  <Ionicons name="navigate-outline" size={16} color="#666" />
+                  <Text style={styles.routeInfoText}>
+                    {estimatedDistance.toFixed(1)} km • {' '}
+                    {estimatedDuration !== null && (
+                      estimatedDuration < 1 
+                        ? `${Math.round(estimatedDuration * 60)} min`
+                        : `${estimatedDuration.toFixed(1)} hr`
+                    )}
                   </Text>
                 </View>
+                <Text style={styles.routeInfoSubtext}>Based on current traffic</Text>
               </View>
             )}
           </ScrollView>
@@ -761,27 +616,9 @@ export default function BookScreen() {
               onPress={handleContinueToVehicleSelection}
               disabled={!canContinue}
             >
-              <LinearGradient
-                colors={canContinue 
-                  ? ['#22C55E', '#16A34A'] 
-                  : ['#CBD5E1', '#94A3B8']
-                }
-                style={styles.continueGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={[
-                  styles.continueText,
-                  !canContinue && styles.continueTextDisabled
-                ]}>
-                  Continue to Vehicle Selection
-                </Text>
-                <Ionicons 
-                  name="arrow-forward-circle" 
-                  size={24} 
-                  color={canContinue ? '#FFFFFF' : '#64748B'} 
-                />
-              </LinearGradient>
+              <Text style={[styles.continueButtonText, !canContinue && styles.continueButtonTextDisabled]}>
+                Choose vehicle
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -796,33 +633,33 @@ export default function BookScreen() {
           <Modal
             visible={showMapPicker}
             animationType="slide"
-            presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+            presentationStyle="fullScreen"
           >
             <SafeAreaView style={styles.modalContainer}>
               <View style={styles.modalHeader}>
                 <TouchableOpacity 
-                  style={styles.modalCloseButton}
+                  style={styles.modalBackButton}
                   onPress={() => {
                     setShowMapPicker(false);
                     setSearchQuery('');
                     setPredictions([]);
                   }}
                 >
-                  <Ionicons name="close" size={24} color="#0F172A" />
+                  <Ionicons name="arrow-back" size={24} color="#000" />
                 </TouchableOpacity>
                 <Text style={styles.modalTitle}>
-                  {rideType === 'intra_city' ? 'Search Location' : 'Search City'}
+                  {activeStopId === '1' ? 'Pickup location' : 'Dropoff location'}
                 </Text>
                 <View style={{ width: 40 }} />
               </View>
 
               <View style={styles.searchContainer}>
                 <View style={styles.searchInputContainer}>
-                  <Ionicons name="search" size={20} color="#94A3B8" />
+                  <Ionicons name="search" size={20} color="#999" />
                   <TextInput
                     style={styles.searchInput}
-                    placeholder={rideType === 'intra_city' ? 'Search for a place...' : 'Search for a city...'}
-                    placeholderTextColor="#94A3B8"
+                    placeholder="Search for a location"
+                    placeholderTextColor="#999"
                     value={searchQuery}
                     onChangeText={(text) => {
                       setSearchQuery(text);
@@ -835,7 +672,7 @@ export default function BookScreen() {
                       setSearchQuery('');
                       setPredictions([]);
                     }}>
-                      <Ionicons name="close-circle" size={20} color="#94A3B8" />
+                      <Ionicons name="close-circle" size={20} color="#999" />
                     </TouchableOpacity>
                   )}
                 </View>
@@ -849,17 +686,18 @@ export default function BookScreen() {
               >
                 <View style={styles.currentLocationIcon}>
                   {isLoadingLocation ? (
-                    <ActivityIndicator size="small" color="#3B82F6" />
+                    <ActivityIndicator size="small" color="#000" />
                   ) : (
-                    <Ionicons name="locate" size={20} color="#3B82F6" />
+                    <Ionicons name="locate" size={20} color="#000" />
                   )}
                 </View>
-                <Text style={styles.currentLocationText}>Use Current Location</Text>
+                <Text style={styles.currentLocationText}>Use current location</Text>
+                <Ionicons name="chevron-forward" size={20} color="#ccc" />
               </TouchableOpacity>
 
               {isSearching && (
                 <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="small" color="#22C55E" />
+                  <ActivityIndicator size="small" color="#000" />
                 </View>
               )}
 
@@ -870,12 +708,8 @@ export default function BookScreen() {
                     style={styles.resultItem}
                     onPress={() => handleSelectPrediction(prediction)}
                   >
-                    <View style={styles.resultIcon}>
-                      <Ionicons 
-                        name={rideType === 'inter_city' ? 'navigate' : 'location-outline'} 
-                        size={20} 
-                        color="#64748B" 
-                      />
+                    <View style={styles.resultIconContainer}>
+                      <Ionicons name="location-outline" size={20} color="#666" />
                     </View>
                     <View style={styles.resultContent}>
                       <Text style={styles.resultMain}>
@@ -898,59 +732,43 @@ export default function BookScreen() {
   // VEHICLE SELECTION SCREEN
   return (
     <View style={styles.container}>
-      <LinearGradient
-        colors={['#F8FAFC', '#EFF6FF', '#F8FAFC']}
-        style={StyleSheet.absoluteFill}
-      />
-
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity 
-            style={styles.closeButton}
+            style={styles.backButton}
             onPress={() => setStep('location')}
           >
-            <Ionicons name="arrow-back" size={24} color="#0F172A" />
+            <Ionicons name="arrow-back" size={24} color="#000" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Select Vehicle</Text>
+          <Text style={styles.headerTitle}>Choose a ride</Text>
           <View style={styles.headerRight} />
         </View>
 
         <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
-          {/* Route Summary */}
-          <View style={styles.routeSummaryCard}>
-            <View style={styles.routeSummaryRow}>
-              <View style={styles.routeSummaryDot}>
-                <View style={[styles.dot, { backgroundColor: '#22C55E' }]} />
+          {/* Trip Summary */}
+          <View style={styles.tripSummary}>
+            <View style={styles.tripRoute}>
+              <View style={styles.tripDotContainer}>
+                <View style={styles.pickupDot} />
               </View>
-              <Text style={styles.routeSummaryText} numberOfLines={1}>
+              <Text style={styles.tripAddress} numberOfLines={1}>
                 {stops[0].address}
               </Text>
             </View>
-            <View style={styles.routeSummaryLine} />
-            <View style={styles.routeSummaryRow}>
-              <View style={styles.routeSummaryDot}>
-                <View style={[styles.dot, { backgroundColor: '#EF4444' }]} />
+            <View style={styles.tripConnector} />
+            <View style={styles.tripRoute}>
+              <View style={styles.tripDotContainer}>
+                <View style={styles.dropoffDot} />
               </View>
-              <Text style={styles.routeSummaryText} numberOfLines={1}>
+              <Text style={styles.tripAddress} numberOfLines={1}>
                 {stops[1].address}
               </Text>
             </View>
-            {estimatedDistance !== null && (
-              <View style={styles.routeSummaryDistance}>
-                <Ionicons name="map-outline" size={16} color="#64748B" />
-                <Text style={styles.routeSummaryDistanceText}>
-                  {estimatedDistance.toFixed(1)} km • {rideType === 'intra_city' ? 'Intra-City' : 'Inter-City'}
-                </Text>
-              </View>
-            )}
           </View>
 
           {/* Vehicle Options */}
           <View style={styles.vehiclesSection}>
-            <Text style={styles.vehiclesSectionTitle}>Choose Your Ride</Text>
-            <Text style={styles.vehiclesSectionSubtitle}>Prices based on distance and vehicle type</Text>
-            
             {VEHICLE_OPTIONS.map((vehicle) => {
               const price = calculatePrice(
                 estimatedDistance || 0, 
@@ -966,61 +784,36 @@ export default function BookScreen() {
                   style={[styles.vehicleCard, isSelected && styles.vehicleCardSelected]}
                   onPress={() => setSelectedVehicle(vehicle.type)}
                 >
-                  <View style={[styles.vehicleIcon, isSelected && styles.vehicleIconSelected]}>
-                    <Ionicons 
-                      name={vehicle.icon as any} 
-                      size={28} 
-                      color={isSelected ? '#FFFFFF' : '#64748B'} 
-                    />
-                  </View>
-                  <View style={styles.vehicleInfo}>
-                    <Text style={[styles.vehicleName, isSelected && styles.vehicleNameSelected]}>
-                      {vehicle.name}
-                    </Text>
-                    <Text style={[styles.vehicleDesc, isSelected && styles.vehicleDescSelected]}>
-                      {vehicle.description}
-                    </Text>
-                  </View>
-                  <View style={styles.vehiclePriceContainer}>
-                    <Text style={[styles.vehiclePrice, isSelected && styles.vehiclePriceSelected]}>
-                      ₦{price.toLocaleString()}
-                    </Text>
-                    {isSelected && (
-                      <View style={styles.selectedBadge}>
-                        <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
+                  <View style={styles.vehicleLeft}>
+                    <View style={styles.vehicleIconCircle}>
+                      <Ionicons 
+                        name={vehicle.icon as any} 
+                        size={24} 
+                        color="#000" 
+                      />
+                    </View>
+                    <View style={styles.vehicleInfo}>
+                      <View style={styles.vehicleHeader}>
+                        <Text style={styles.vehicleName}>{vehicle.name}</Text>
+                        {estimatedDuration !== null && (
+                          <Text style={styles.vehicleEta}>
+                            {estimatedDuration < 1 
+                              ? `${Math.round(estimatedDuration * 60)} min`
+                              : `${estimatedDuration.toFixed(1)} hr`
+                            }
+                          </Text>
+                        )}
                       </View>
-                    )}
+                      <Text style={styles.vehicleDesc}>{vehicle.description}</Text>
+                      <Text style={styles.vehicleCapacity}>{vehicle.capacity}</Text>
+                    </View>
+                  </View>
+                  <View style={styles.vehicleRight}>
+                    <Text style={styles.vehiclePrice}>₦{price.toLocaleString()}</Text>
                   </View>
                 </TouchableOpacity>
               );
             })}
-          </View>
-
-          {/* Pricing Info */}
-          <View style={styles.pricingInfo}>
-            <View style={styles.pricingInfoHeader}>
-              <Ionicons name="information-circle-outline" size={20} color="#3B82F6" />
-              <Text style={styles.pricingInfoTitle}>How Pricing Works</Text>
-            </View>
-            <View style={styles.pricingInfoContent}>
-              {rideType === 'intra_city' ? (
-                <>
-                  <Text style={styles.pricingInfoText}>• Base Fare: ₦200</Text>
-                  <Text style={styles.pricingInfoText}>• Distance Rate: ₦100/km</Text>
-                  <Text style={styles.pricingInfoText}>• Time Rate: ₦5/minute (traffic)</Text>
-                  <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
-                  <Text style={styles.pricingInfoNote}>✅ Real-time traffic included</Text>
-                </>
-              ) : (
-                <>
-                  <Text style={styles.pricingInfoText}>• Base Fare: ₦1,000</Text>
-                  <Text style={styles.pricingInfoText}>• Distance Rate: ₦120/km</Text>
-                  <Text style={styles.pricingInfoText}>• Time Rate: ₦800/hour</Text>
-                  <Text style={styles.pricingInfoText}>• Comfort: +25% • SUV: +50% • Premium: +100%</Text>
-                  <Text style={styles.pricingInfoNote}>✅ Real-time traffic & duration included</Text>
-                </>
-              )}
-            </View>
           </View>
         </ScrollView>
 
@@ -1030,17 +823,9 @@ export default function BookScreen() {
             style={styles.confirmButton}
             onPress={handleConfirmRide}
           >
-            <LinearGradient
-              colors={['#22C55E', '#16A34A']}
-              style={styles.confirmGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <Text style={styles.confirmText}>
-                Confirm Ride • ₦{calculatePrice(estimatedDistance || 0, selectedVehicle, rideType, estimatedDuration || undefined).toLocaleString()}
-              </Text>
-              <Ionicons name="checkmark-circle" size={24} color="#FFFFFF" />
-            </LinearGradient>
+            <Text style={styles.confirmButtonText}>
+              Request {VEHICLE_OPTIONS.find(v => v.type === selectedVehicle)?.name}
+            </Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -1051,7 +836,7 @@ export default function BookScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
   },
   safeArea: {
     flex: 1,
@@ -1061,214 +846,160 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: '#F0F0F0',
   },
-  closeButton: {
+  backButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#000',
   },
   headerRight: {
     width: 40,
   },
   scrollView: {
     flex: 1,
-    padding: 16,
   },
-  tabsContainer: {
+  rideTypeContainer: {
     flexDirection: 'row',
-    gap: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
-  },
-  tab: {
-    flex: 1,
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  tabActive: {
-    borderColor: 'transparent',
-  },
-  tabGradient: {
-    padding: 16,
-  },
-  tabContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
     gap: 12,
   },
-  tabTextContainer: {
+  rideTypeButton: {
     flex: 1,
-  },
-  tabText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#64748B',
-  },
-  tabTextActive: {
-    color: '#FFFFFF',
-  },
-  tabSubtext: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginTop: 2,
-  },
-  tabSubtextActive: {
-    color: 'rgba(255,255,255,0.9)',
-  },
-  lockBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
+    flexDirection: 'row',
     justifyContent: 'center',
   },
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 16,
+  rideTypeButtonActive: {
+    backgroundColor: '#000',
   },
-  infoBannerText: {
-    flex: 1,
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  locationsCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    padding: 20,
-    marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  locationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  locationDot: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#F8FAFC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-  },
-  locationLine: {
-    width: 2,
-    height: 24,
-    backgroundColor: '#E2E8F0',
-    marginLeft: 11,
-    marginVertical: 8,
-  },
-  locationInputContainer: {
-    flex: 1,
-  },
-  locationLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#94A3B8',
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  locationText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  locationPlaceholder: {
-    color: '#CBD5E1',
-  },
-  distanceCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    backgroundColor: '#EFF6FF',
-    padding: 14,
-    borderRadius: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#DBEAFE',
-  },
-  routeDetails: {
-    flex: 1,
-  },
-  distanceText: {
+  rideTypeText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#475569',
-    marginBottom: 4,
+    color: '#666',
   },
-  distanceValue: {
-    fontWeight: '800',
-    color: '#3B82F6',
+  rideTypeTextActive: {
+    color: '#FFF',
   },
-  trafficNote: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#22C55E',
-    marginTop: 6,
+  locationCard: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  locationInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 12,
+  },
+  iconContainer: {
+    width: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pickupDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#000',
+  },
+  dropoffDot: {
+    width: 10,
+    height: 10,
+    backgroundColor: '#000',
+  },
+  inputContainer: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#999',
+    marginBottom: 4,
+  },
+  inputValue: {
+    fontSize: 15,
+    fontWeight: '400',
+    color: '#000',
+  },
+  inputPlaceholder: {
+    color: '#CCC',
+  },
+  dividerLine: {
+    height: 1,
+    backgroundColor: '#F0F0F0',
+    marginLeft: 44,
+  },
+  routeInfoCard: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 8,
+  },
+  routeInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  routeInfoText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#000',
+  },
+  routeInfoSubtext: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
   bottomContainer: {
     padding: 16,
-    backgroundColor: '#FFFFFF',
     borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
+    borderTopColor: '#F0F0F0',
+    backgroundColor: '#FFFFFF',
   },
   continueButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
+    backgroundColor: '#000',
+    paddingVertical: 16,
+    borderRadius: 8,
+    alignItems: 'center',
   },
   continueButtonDisabled: {
-    opacity: 0.5,
+    backgroundColor: '#E0E0E0',
   },
-  continueGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    gap: 10,
-  },
-  continueText: {
+  continueButtonText: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
-  continueTextDisabled: {
-    color: '#64748B',
+  continueButtonTextDisabled: {
+    color: '#999',
   },
   // Modal styles
   modalContainer: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#FFFFFF',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -1276,66 +1007,60 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 16,
     paddingVertical: 16,
-    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
-    borderBottomColor: '#E2E8F0',
+    borderBottomColor: '#F0F0F0',
   },
-  modalCloseButton: {
+  modalBackButton: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F8FAFC',
     alignItems: 'center',
     justifyContent: 'center',
   },
   modalTitle: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
+    fontWeight: '600',
+    color: '#000',
   },
   searchContainer: {
     padding: 16,
-    backgroundColor: '#FFFFFF',
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F8FAFC',
-    borderRadius: 12,
+    backgroundColor: '#F5F5F5',
+    borderRadius: 8,
     paddingHorizontal: 12,
-    gap: 8,
     height: 48,
+    gap: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    color: '#0F172A',
-    fontWeight: '600',
+    fontSize: 16,
+    color: '#000',
   },
   currentLocationButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     padding: 16,
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    backgroundColor: '#F8F8F8',
+    borderRadius: 8,
   },
   currentLocationIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#EFF6FF',
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#E8E8E8',
     alignItems: 'center',
     justifyContent: 'center',
   },
   currentLocationText: {
+    flex: 1,
     fontSize: 15,
-    fontWeight: '700',
-    color: '#3B82F6',
+    fontWeight: '500',
+    color: '#000',
+    marginLeft: 12,
   },
   loadingContainer: {
     padding: 16,
@@ -1347,215 +1072,149 @@ const styles = StyleSheet.create({
   resultItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
     padding: 16,
     marginHorizontal: 16,
     marginBottom: 8,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+    borderRadius: 8,
   },
-  resultIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#F8FAFC',
+  resultIconContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
   },
   resultContent: {
     flex: 1,
+    marginLeft: 12,
   },
   resultMain: {
     fontSize: 15,
-    fontWeight: '700',
-    color: '#0F172A',
+    fontWeight: '500',
+    color: '#000',
     marginBottom: 2,
   },
   resultSecondary: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#64748B',
+    color: '#666',
   },
   // Vehicle selection styles
-  routeSummaryCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
+  tripSummary: {
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
     padding: 16,
-    marginBottom: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 2,
+    backgroundColor: '#F8F8F8',
+    borderRadius: 12,
   },
-  routeSummaryRow: {
+  tripRoute: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
   },
-  routeSummaryDot: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#F8FAFC',
+  tripDotContainer: {
+    width: 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  routeSummaryLine: {
+  tripConnector: {
     width: 2,
     height: 16,
-    backgroundColor: '#E2E8F0',
-    marginLeft: 9,
-    marginVertical: 6,
+    backgroundColor: '#DDD',
+    marginLeft: 11,
+    marginVertical: 4,
   },
-  routeSummaryText: {
+  tripAddress: {
     flex: 1,
     fontSize: 14,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  routeSummaryDistance: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#F1F5F9',
-  },
-  routeSummaryDistanceText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
+    fontWeight: '400',
+    color: '#000',
+    marginLeft: 12,
   },
   vehiclesSection: {
-    marginBottom: 20,
-  },
-  vehiclesSectionTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 4,
-  },
-  vehiclesSectionSubtitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#64748B',
-    marginBottom: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   vehicleCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    backgroundColor: '#FFFFFF',
+    justifyContent: 'space-between',
     padding: 16,
-    borderRadius: 16,
     marginBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
     borderWidth: 2,
-    borderColor: '#E2E8F0',
+    borderColor: '#F0F0F0',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.05,
     shadowRadius: 4,
-    elevation: 1,
+    elevation: 2,
   },
   vehicleCardSelected: {
-    borderColor: '#22C55E',
-    backgroundColor: '#F0FDF4',
+    borderColor: '#000',
+    backgroundColor: '#F8F8F8',
   },
-  vehicleIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#F8FAFC',
+  vehicleLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  vehicleIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#F5F5F5',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  vehicleIconSelected: {
-    backgroundColor: '#22C55E',
   },
   vehicleInfo: {
     flex: 1,
+    marginLeft: 12,
+  },
+  vehicleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 2,
   },
   vehicleName: {
     fontSize: 16,
-    fontWeight: '800',
-    color: '#0F172A',
-    marginBottom: 2,
+    fontWeight: '600',
+    color: '#000',
   },
-  vehicleNameSelected: {
-    color: '#166534',
+  vehicleEta: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: '#666',
   },
   vehicleDesc: {
     fontSize: 13,
-    fontWeight: '500',
-    color: '#64748B',
+    color: '#666',
+    marginBottom: 2,
   },
-  vehicleDescSelected: {
-    color: '#16A34A',
+  vehicleCapacity: {
+    fontSize: 12,
+    color: '#999',
   },
-  vehiclePriceContainer: {
+  vehicleRight: {
     alignItems: 'flex-end',
+    marginLeft: 12,
   },
   vehiclePrice: {
     fontSize: 18,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  vehiclePriceSelected: {
-    color: '#16A34A',
-  },
-  selectedBadge: {
-    marginTop: 4,
-  },
-  pricingInfo: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 20,
-  },
-  pricingInfoHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  pricingInfoTitle: {
-    fontSize: 15,
     fontWeight: '700',
-    color: '#1E40AF',
-  },
-  pricingInfoContent: {
-    gap: 6,
-  },
-  pricingInfoText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  pricingInfoNote: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#3B82F6',
-    marginTop: 8,
-    fontStyle: 'italic',
+    color: '#000',
   },
   confirmButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  confirmGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: '#000',
     paddingVertical: 16,
-    gap: 10,
+    borderRadius: 8,
+    alignItems: 'center',
   },
-  confirmText: {
+  confirmButtonText: {
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '600',
     color: '#FFFFFF',
   },
 });
