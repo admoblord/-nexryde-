@@ -15,7 +15,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Speech from 'expo-speech';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { 
+  useSpeechRecognitionEvent,
+  ExpoSpeechRecognitionModule,
+  AudioEncodingAndroid,
+  AudioSourceAndroid,
+} from 'expo-speech-recognition';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -23,54 +28,65 @@ export default function VoiceBookingScreen() {
   const router = useRouter();
   const [isListening, setIsListening] = useState(false);
   const [recognizedText, setRecognizedText] = useState('');
-  const [selectedLanguage, setSelectedLanguage] = useState('en-NG'); // Nigerian English
+  const [selectedLanguage, setSelectedLanguage] = useState('en-NG');
   const [parsedLocation, setParsedLocation] = useState({ pickup: '', destination: '' });
   const [isProcessing, setIsProcessing] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(false);
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
-
-  // Recognition instance for web
-  const recognitionRef = useRef<any>(null);
 
   const languages = [
     { id: 'en-NG', label: 'Nigerian English', flag: '🇳🇬', example: 'Take me to Ikorodu from Lekki' },
     { id: 'en-US', label: 'English', flag: '🌍', example: 'Book a ride to Victoria Island' },
-    { id: 'pcm', label: 'Pidgin', flag: '🇳🇬', example: 'I wan go Yaba from VI' },
   ];
 
+  // Request permissions on mount
   useEffect(() => {
-    // Initialize Web Speech API for web platform
-    if (Platform.OS === 'web' && 'webkitSpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = selectedLanguage;
+    requestPermissions();
+  }, []);
 
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setRecognizedText(transcript);
-        setIsListening(false);
-        processVoiceCommand(transcript);
-      };
-
-      recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsListening(false);
-        speakResponse('Sorry, I could not hear you. Please try again.');
-      };
-
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
-    }
-
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
+  const requestPermissions = async () => {
+    try {
+      const result = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+      if (result.granted) {
+        setPermissionGranted(true);
+      } else {
+        Alert.alert(
+          'Microphone Permission Required',
+          'Voice booking needs microphone access to work. Please enable it in settings.',
+          [{ text: 'OK' }]
+        );
       }
-    };
-  }, [selectedLanguage]);
+    } catch (error) {
+      console.error('Permission error:', error);
+    }
+  };
+
+  // Listen for speech recognition events
+  useSpeechRecognitionEvent('start', () => {
+    console.log('Speech recognition started');
+    setIsListening(true);
+  });
+
+  useSpeechRecognitionEvent('end', () => {
+    console.log('Speech recognition ended');
+    setIsListening(false);
+  });
+
+  useSpeechRecognitionEvent('result', (event) => {
+    console.log('Speech result:', event.results[0]?.transcript);
+    const transcript = event.results[0]?.transcript || '';
+    if (transcript) {
+      setRecognizedText(transcript);
+      processVoiceCommand(transcript);
+    }
+  });
+
+  useSpeechRecognitionEvent('error', (event) => {
+    console.error('Speech recognition error:', event.error);
+    setIsListening(false);
+    speakResponse('Sorry, I could not hear you clearly. Please try again.');
+  });
 
   useEffect(() => {
     if (isListening) {
@@ -109,11 +125,16 @@ export default function VoiceBookingScreen() {
     Speech.speak(text, {
       language: selectedLanguage,
       pitch: 1.0,
-      rate: 0.9, // Slightly slower for clarity
+      rate: 0.9,
     });
   };
 
-  const startListening = () => {
+  const startListening = async () => {
+    if (!permissionGranted) {
+      await requestPermissions();
+      return;
+    }
+
     setIsListening(true);
     setRecognizedText('');
     setParsedLocation({ pickup: '', destination: '' });
@@ -122,44 +143,57 @@ export default function VoiceBookingScreen() {
     speakResponse('Yes, where do you want to go?');
 
     // Start recognition after speech finishes
-    setTimeout(() => {
-      if (Platform.OS === 'web' && recognitionRef.current) {
-        try {
-          recognitionRef.current.lang = selectedLanguage;
-          recognitionRef.current.start();
-        } catch (error) {
-          console.error('Error starting recognition:', error);
-          setIsListening(false);
-          Alert.alert('Error', 'Could not start voice recognition. Please try again.');
-        }
-      } else {
-        // For mobile (Expo Go), we'll simulate until proper library is configured
-        simulateVoiceRecognition();
+    setTimeout(async () => {
+      try {
+        const result = await ExpoSpeechRecognitionModule.start({
+          lang: selectedLanguage,
+          interimResults: true,
+          maxAlternatives: 1,
+          continuous: false,
+          requiresOnDeviceRecognition: false,
+          addsPunctuation: false,
+          contextualStrings: [
+            // Nigerian cities for better recognition
+            'Lekki', 'Ikorodu', 'Ikeja', 'Yaba', 'Surulere', 'Apapa',
+            'Victoria Island', 'Ajah', 'Sangotedo', 'Festac', 'Oshodi',
+            'Abuja', 'Wuse', 'Garki', 'Gwarimpa', 'Maitama',
+            'Lagos', 'Kano', 'Port Harcourt', 'Ibadan', 'Enugu',
+          ],
+          ...(Platform.OS === 'android' && {
+            androidIntentOptions: {
+              EXTRA_LANGUAGE_MODEL: 'free_form',
+              EXTRA_MAX_RESULTS: 5,
+              EXTRA_PARTIAL_RESULTS: true,
+            },
+            androidRecognitionServicePackage: 'com.google.android.googlequicksearchbox',
+          }),
+        });
+        
+        console.log('Speech recognition started:', result);
+      } catch (error) {
+        console.error('Error starting recognition:', error);
+        setIsListening(false);
+        Alert.alert('Error', 'Could not start voice recognition. Please check microphone permission.');
       }
     }, 1500);
   };
 
-  // Simulate voice recognition for mobile (until proper setup)
-  const simulateVoiceRecognition = () => {
-    setTimeout(() => {
-      const examples = [
-        'Take me to Ikorodu from Lekki',
-        'I want to go to Victoria Island',
-        'Book me go Yaba from Ikeja',
-        'I wan reach Surulere from Apapa',
-      ];
-      const randomExample = examples[Math.floor(Math.random() * examples.length)];
-      setRecognizedText(randomExample);
+  const stopListening = async () => {
+    try {
+      await ExpoSpeechRecognitionModule.stop();
       setIsListening(false);
-      processVoiceCommand(randomExample);
-    }, 3000);
+    } catch (error) {
+      console.error('Error stopping recognition:', error);
+      setIsListening(false);
+    }
   };
 
   const processVoiceCommand = async (text: string) => {
     setIsProcessing(true);
     
     try {
-      // Call backend to parse the voice command
+      console.log('Processing voice command:', text);
+      
       const response = await fetch(`${BACKEND_URL}/api/voice/parse-booking`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -171,9 +205,9 @@ export default function VoiceBookingScreen() {
 
       if (response.ok) {
         const result = await response.json();
+        console.log('Parsed result:', result);
         setParsedLocation(result);
         
-        // Provide confirmation
         const confirmMessage = `Okay, booking ride from ${result.pickup} to ${result.destination}. Is this correct?`;
         speakResponse(confirmMessage);
         
@@ -185,19 +219,26 @@ export default function VoiceBookingScreen() {
               text: 'Confirm & Book', 
               onPress: () => confirmBooking(result.pickup, result.destination)
             },
-            { text: 'Try Again', style: 'cancel', onPress: () => {
-              setRecognizedText('');
-              setParsedLocation({ pickup: '', destination: '' });
-            }}
+            { 
+              text: 'Try Again', 
+              style: 'cancel', 
+              onPress: () => {
+                setRecognizedText('');
+                setParsedLocation({ pickup: '', destination: '' });
+                fadeAnim.setValue(0);
+              }
+            }
           ]
         );
       } else {
-        speakResponse('Sorry, I could not understand your destination. Please try again.');
-        Alert.alert('Error', 'Could not parse voice command. Please try again with clearer pronunciation.');
+        const error = await response.json();
+        speakResponse('Sorry, I could not understand. Please try again.');
+        Alert.alert('Could Not Understand', error.detail || 'Please speak more clearly.');
       }
     } catch (error) {
       console.error('Error processing voice command:', error);
       speakResponse('Sorry, something went wrong. Please try again.');
+      Alert.alert('Error', 'Could not process voice command. Please try again.');
     } finally {
       setIsProcessing(false);
     }
@@ -205,32 +246,27 @@ export default function VoiceBookingScreen() {
 
   const confirmBooking = (pickup: string, destination: string) => {
     speakResponse('Perfect! Booking your ride now.');
-    // Navigate to tracking with the locations
     router.push({
-      pathname: '/rider/tracking',
-      params: { pickup, destination }
+      pathname: '/rider/book',
+      params: { 
+        voicePickup: pickup,
+        voiceDestination: destination 
+      }
     });
-  };
-
-  const stopListening = () => {
-    setIsListening(false);
-    if (Platform.OS === 'web' && recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient colors={['#667eea', '#764ba2']} style={styles.gradient}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+          <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
 
         <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <View style={styles.content}>
             <Text style={styles.title}>🎤 Voice Booking</Text>
             <Text style={styles.subtitle}>
-              Book rides with your voice - Nigerian accent supported!
+              Say "Take me to [Location]" - Nigerian accent supported!
             </Text>
 
             {/* Language Selector */}
@@ -259,13 +295,17 @@ export default function VoiceBookingScreen() {
             {/* Example Phrases */}
             <View style={styles.examplesCard}>
               <Text style={styles.examplesTitle}>📢 Say something like:</Text>
-              {languages.find(l => l.id === selectedLanguage)?.example && (
-                <Text style={styles.exampleText}>
-                  "{languages.find(l => l.id === selectedLanguage)?.example}"
-                </Text>
-              )}
+              <Text style={styles.exampleText}>
+                "Take me to Ajah from Sangotedo"
+              </Text>
+              <Text style={styles.exampleText}>
+                "I want to go to Ikorodu"
+              </Text>
+              <Text style={styles.exampleText}>
+                "Book me go Lekki from Yaba"
+              </Text>
               <Text style={styles.examplesSubtext}>
-                Or just say: "Take me to [Location]" or "I want to go to [Place]"
+                Works with 600+ Nigerian locations!
               </Text>
             </View>
 
@@ -278,7 +318,7 @@ export default function VoiceBookingScreen() {
                     isListening && styles.micButtonActive
                   ]}
                   onPress={isListening ? stopListening : startListening}
-                  disabled={isProcessing}
+                  disabled={isProcessing || !permissionGranted}
                 >
                   <LinearGradient
                     colors={isListening ? ['#ef4444', '#dc2626'] : ['#10b981', '#059669']}
@@ -298,7 +338,7 @@ export default function VoiceBookingScreen() {
               </Animated.View>
               
               <Text style={styles.micStatus}>
-                {isProcessing ? 'Processing...' : isListening ? 'Listening...' : 'Tap to Speak'}
+                {!permissionGranted ? 'Permission Required' : isProcessing ? 'Processing...' : isListening ? '🎤 Listening...' : 'Tap to Speak'}
               </Text>
             </View>
 
@@ -331,10 +371,11 @@ export default function VoiceBookingScreen() {
             {/* Tips */}
             <View style={styles.tipsCard}>
               <Text style={styles.tipsTitle}>💡 Tips for Best Results:</Text>
-              <Text style={styles.tipText}>• Speak clearly and naturally</Text>
-              <Text style={styles.tipText}>• Mention both pickup and destination</Text>
-              <Text style={styles.tipText}>• Use familiar Nigerian location names</Text>
-              <Text style={styles.tipText}>• Works with Pidgin, Yoruba accent, Igbo accent, Hausa accent!</Text>
+              <Text style={styles.tipText}>• Speak clearly in a quiet environment</Text>
+              <Text style={styles.tipText}>• Say EXACT location names (e.g., "Ajah", "Sangotedo")</Text>
+              <Text style={styles.tipText}>• Use "from X to Y" or just "to Y"</Text>
+              <Text style={styles.tipText}>• Works with 600+ Nigerian cities!</Text>
+              <Text style={styles.tipText}>• Supports Pidgin: "I wan go Yaba"</Text>
             </View>
           </View>
         </ScrollView>
@@ -344,16 +385,12 @@ export default function VoiceBookingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  gradient: {
-    flex: 1,
-  },
+  container: { flex: 1 },
+  gradient: { flex: 1 },
   backButton: {
     position: 'absolute',
-    top: SPACING.xl,
-    left: SPACING.lg,
+    top: 60,
+    left: 20,
     zIndex: 10,
     width: 44,
     height: 44,
@@ -363,40 +400,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingTop: SPACING.xxl + 40,
-    paddingBottom: SPACING.xxl,
+    paddingTop: 100,
+    paddingBottom: 40,
   },
   content: {
-    paddingHorizontal: SPACING.lg,
+    paddingHorizontal: 20,
   },
   title: {
     fontSize: 36,
     fontWeight: '900',
     color: '#fff',
     textAlign: 'center',
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
   },
   subtitle: {
     fontSize: 16,
     color: 'rgba(255, 255, 255, 0.9)',
     textAlign: 'center',
-    marginBottom: SPACING.xl,
+    marginBottom: 32,
     lineHeight: 24,
   },
   languageSelector: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.xl,
+    gap: 12,
+    marginBottom: 32,
   },
   languageButton: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 25,
     gap: 8,
     borderWidth: 2,
     borderColor: 'transparent',
@@ -418,31 +455,32 @@ const styles = StyleSheet.create({
   },
   examplesCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    marginBottom: SPACING.xl,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 32,
   },
   examplesTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: '#fff',
-    marginBottom: SPACING.sm,
+    marginBottom: 12,
   },
   exampleText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '600',
     color: '#fff',
     fontStyle: 'italic',
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
   },
   examplesSubtext: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.8)',
     lineHeight: 20,
+    marginTop: 8,
   },
   micContainer: {
     alignItems: 'center',
-    marginVertical: SPACING.xxl,
+    marginVertical: 40,
   },
   micButton: {
     width: 160,
@@ -466,7 +504,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   micStatus: {
-    marginTop: SPACING.lg,
+    marginTop: 20,
     fontSize: 20,
     fontWeight: '800',
     color: '#fff',
@@ -474,15 +512,15 @@ const styles = StyleSheet.create({
   },
   resultCard: {
     backgroundColor: '#fff',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    marginBottom: SPACING.lg,
+    borderRadius: 20,
+    padding: 20,
+    marginBottom: 20,
   },
   resultHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
+    gap: 12,
+    marginBottom: 12,
   },
   resultTitle: {
     fontSize: 18,
@@ -493,19 +531,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#374151',
     fontStyle: 'italic',
-    marginBottom: SPACING.md,
+    marginBottom: 16,
     lineHeight: 24,
   },
   parsedInfo: {
     borderTopWidth: 1,
     borderTopColor: '#e5e7eb',
-    paddingTop: SPACING.md,
-    gap: SPACING.sm,
+    paddingTop: 16,
+    gap: 12,
   },
   locationRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
+    gap: 12,
   },
   locationLabel: {
     fontSize: 14,
@@ -521,19 +559,19 @@ const styles = StyleSheet.create({
   },
   tipsCard: {
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
+    borderRadius: 20,
+    padding: 20,
   },
   tipsTitle: {
     fontSize: 16,
     fontWeight: '800',
     color: '#fff',
-    marginBottom: SPACING.sm,
+    marginBottom: 12,
   },
   tipText: {
     fontSize: 14,
     color: 'rgba(255, 255, 255, 0.9)',
-    marginBottom: 6,
+    marginBottom: 8,
     lineHeight: 20,
   },
 });
