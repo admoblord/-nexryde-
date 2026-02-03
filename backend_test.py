@@ -522,7 +522,7 @@ class NexrydeAPITester:
     
     async def test_rider_assistant(self):
         """Test GET /api/ai/rider-assistant"""
-        response = await self.make_request("GET", "/ai/rider-assistant?question=How%20do%20I%20book%20a%20ride?")
+        response = await self.make_request("GET", f"/ai/rider-assistant?user_id={TEST_USER_ID}&question=How%20do%20I%20book%20a%20ride?")
         
         if response["success"]:
             assistant_response = response["data"].get("response", "")
