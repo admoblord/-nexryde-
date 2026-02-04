@@ -147,17 +147,29 @@ export const useAppStore = create<AppState>()(
         }
       },
       
-      logout: () => set({
-        user: null,
-        isAuthenticated: false,
-        driverProfile: null,
-        subscription: null,
-        isOnline: false,
-        currentTrip: null,
-        pendingTrips: [],
-        pickupLocation: null,
-        dropoffLocation: null
-      })
+      logout: async () => {
+        // Clear SecureStore session
+        try {
+          const { clearUserSession } = await import('@/utils/authStorage');
+          await clearUserSession();
+          console.log('✅ SecureStore session cleared');
+        } catch (error) {
+          console.error('❌ Error clearing SecureStore:', error);
+        }
+        
+        // Clear store state
+        set({
+          user: null,
+          isAuthenticated: false,
+          driverProfile: null,
+          subscription: null,
+          isOnline: false,
+          currentTrip: null,
+          pendingTrips: [],
+          pickupLocation: null,
+          dropoffLocation: null
+        });
+      }
     }),
     {
       name: 'nexryde-storage',
