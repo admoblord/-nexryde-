@@ -41,6 +41,9 @@ from map_service import map_router
 # Import Call Service (Privacy Protected)
 from call_service import call_router
 
+# Import Places Service (Google Maps Autocomplete Proxy)
+from places_service import places_router
+
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
 load_dotenv(ROOT_DIR / '.env')
@@ -7099,6 +7102,7 @@ app.include_router(route_cache_router)  # NEW: Route caching for API cost protec
 app.include_router(route_planner_router)  # NEW: Smart Route Planner for return passengers
 app.include_router(map_router)
 app.include_router(call_router)
+app.include_router(places_router)  # NEW: Google Places autocomplete proxy
 
 # Payment reminder background job
 @app.on_event("startup")

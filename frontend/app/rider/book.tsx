@@ -285,22 +285,31 @@ export default function BookScreen() {
 
     setIsSearching(true);
     try {
+      // Use backend proxy instead of calling Google directly
       const locationBias = rideType === 'intra_city' 
-        ? `&radius=50000&location=${currentLocation?.latitude || 6.5244},${currentLocation?.longitude || 3.3792}`
-        : '&components=country:ng';
+        ? `&location_bias=${currentLocation?.latitude || 6.5244},${currentLocation?.longitude || 3.3792}&radius=50000`
+        : '';
         
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
-          query
-        )}${locationBias}&key=${GOOGLE_MAPS_API_KEY}`
+        `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(query)}&components=country:ng${locationBias}`
       );
       const data = await response.json();
       
       if (data.predictions) {
-        setPredictions(data.predictions);
+        // Format predictions to match expected structure
+        const formattedPredictions = data.predictions.map((pred: any) => ({
+          place_id: pred.place_id,
+          description: pred.description,
+          structured_formatting: {
+            main_text: pred.main_text,
+            secondary_text: pred.secondary_text
+          }
+        }));
+        setPredictions(formattedPredictions);
       }
     } catch (error) {
       console.error('Error searching places:', error);
+      Alert.alert('Error', 'Failed to search locations. Please check your internet connection.');
     }
     setIsSearching(false);
   };
@@ -311,33 +320,36 @@ export default function BookScreen() {
     address: string;
   } | null> => {
     try {
+      // Use backend proxy instead of calling Google directly
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/place/details/json?place_id=${placeId}&fields=geometry,formatted_address&key=${GOOGLE_MAPS_API_KEY}`
+        `${BACKEND_URL}/api/places/details/${placeId}`
       );
       const data = await response.json();
       
-      if (data.result) {
+      if (data.status === 'OK') {
         return {
-          latitude: data.result.geometry.location.lat,
-          longitude: data.result.geometry.location.lng,
-          address: data.result.formatted_address,
+          latitude: data.latitude,
+          longitude: data.longitude,
+          address: data.address,
         };
       }
     } catch (error) {
       console.error('Error getting place details:', error);
+      Alert.alert('Error', 'Failed to get location details.');
     }
     return null;
   };
 
   const reverseGeocode = async (latitude: number, longitude: number): Promise<string> => {
     try {
+      // Use backend proxy instead of calling Google directly
       const response = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?latlng=${latitude},${longitude}&key=${GOOGLE_MAPS_API_KEY}`
+        `${BACKEND_URL}/api/places/geocode?lat=${latitude}&lng=${longitude}`
       );
       const data = await response.json();
       
-      if (data.results && data.results.length > 0) {
-        return data.results[0].formatted_address;
+      if (data.status === 'OK' && data.address) {
+        return data.address;
       }
     } catch (error) {
       console.error('Error reverse geocoding:', error);
@@ -468,10 +480,11 @@ export default function BookScreen() {
   const handleVoiceCommand = async (intent: VoiceIntent, params?: any) => {
     if (intent === 'book_ride' && params?.destination) {
       try {
+        // Use backend proxy instead of calling Google directly
         const response = await fetch(
-          `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(
+          `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
             params.destination
-          )}&components=country:ng&key=${GOOGLE_MAPS_API_KEY}`
+          )}&components=country:ng`
         );
         const data = await response.json();
         
@@ -501,6 +514,7 @@ export default function BookScreen() {
         }
       } catch (error) {
         console.error('Error processing voice destination:', error);
+        Alert.alert('Error', 'Failed to process voice command.');
       }
     }
   };
