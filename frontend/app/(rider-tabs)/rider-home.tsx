@@ -139,7 +139,7 @@ export default function ModernRiderHome() {
         <Animated.View style={[styles.heroSection, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <TouchableOpacity
             style={styles.heroCard}
-            onPress={() => router.push('/rider/book' as any)}
+            onPress={() => router.push('/rider/book-new' as any)}
             activeOpacity={0.9}
           >
             <LinearGradient
