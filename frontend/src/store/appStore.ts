@@ -103,7 +103,7 @@ interface AppState {
   setPickupLocation: (location: Location | null) => void;
   setDropoffLocation: (location: Location | null) => void;
   switchRole: () => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>()(
