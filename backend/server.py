@@ -8090,7 +8090,8 @@ async def google_places_autocomplete(
     language: str = "en"
 ):
     """
-    Proxy endpoint for Google Places Autocomplete API to avoid CORS issues
+    Proxy endpoint for Google Places Autocomplete API
+    Enhanced to search: establishments, neighborhoods, streets, landmarks, businesses
     """
     try:
         google_maps_api_key = os.getenv('GOOGLE_MAPS_API_KEY', 'AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY')
@@ -8100,7 +8101,9 @@ async def google_places_autocomplete(
             'input': input,
             'key': google_maps_api_key,
             'components': f'country:{country}',
-            'language': language
+            'language': language,
+            # Include ALL place types: addresses, establishments, regions
+            'types': 'establishment|geocode'  # Searches businesses AND addresses
         }
         
         async with httpx.AsyncClient() as client:
