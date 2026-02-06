@@ -22,7 +22,7 @@ export default function RiderTripsScreen() {
 
   const handleViewReceipt = (trip: any) => {
     router.push({
-      pathname: '/receipt',
+      pathname: '/rider/trip-receipt',
       params: {
         receiptId: `NEX-2026-${trip.id.padStart(6, '0')}`,
         date: trip.date,
