@@ -7933,8 +7933,8 @@ async def seed_promo_codes():
 
 # Include routers
 app.include_router(api_router)
+app.include_router(two_tier_router)  # NEW: Two-tier subscription system (MUST BE FIRST)
 app.include_router(subscription_router)  # Old single-tier system (keep for backward compatibility)
-app.include_router(two_tier_router)  # NEW: Two-tier subscription system
 app.include_router(route_cache_router)  # NEW: Route caching for API cost protection
 app.include_router(route_planner_router)  # NEW: Smart Route Planner for return passengers
 app.include_router(map_router)
