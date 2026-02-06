@@ -218,34 +218,81 @@ export default function BookRideScreen() {
         body: JSON.stringify({
           pickup: pickup,
           destination: destination,
-          vehicle_type: selectedVehicle,  // economy, comfort, xl, premium
-          trip_type: tripType,  // auto-detected: intra or inter
+          vehicle_type: selectedVehicle,
+          trip_type: tripType,
         }),
       });
 
       const fareData = await response.json();
       
       if (response.ok && fareData.total_fare) {
-        const tripTypeLabel = tripType === 'intra' ? '🏙️ Intra-City' : '🛣️ Inter-City';
+        // Show price adjustment UI instead of immediate booking
+        setRecommendedFare(fareData.total_fare);
+        setAdjustedFare(fareData.total_fare);
+        setFareDetails(fareData);
+        setShowPriceAdjustment(true);
+        setIsLoading(false);
+      } else {
+        setIsLoading(false);
+        Alert.alert('Error', fareData.detail || 'Could not calculate fare. Please ensure both locations are valid and try again.');
+      }
+    } catch (error) {
+      console.error('Fare calculation error:', error);
+      setIsLoading(false);
+      Alert.alert('Error', 'Could not calculate fare. Please check your internet connection and try again.');
+    }
+  };
+
+  // Price adjustment functions
+  const increaseFare = () => {
+    const maxFare = recommendedFare * 2; // Max 200% of recommended
+    setAdjustedFare(prev => Math.min(maxFare, prev + 100));
+  };
+
+  const decreaseFare = () => {
+    const minFare = recommendedFare * 0.5; // Min 50% of recommended
+    setAdjustedFare(prev => Math.max(minFare, prev - 100));
+  };
+
+  const findOffers = async () => {
+    setIsLoading(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/trips/create-with-custom-price`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          rider_id: 'user_123', // TODO: Get from auth
+          pickup: pickup,
+          destination: destination,
+          recommended_fare: recommendedFare,
+          offered_fare: adjustedFare,
+          vehicle_type: selectedVehicle,
+          trip_type: detectTripType(),
+        }),
+      });
+
+      const result = await response.json();
+      
+      if (response.ok && result.success) {
+        setIsLoading(false);
         Alert.alert(
-          '🚗 Confirm Booking',
-          `${tripTypeLabel}\nVehicle: ${VEHICLE_TYPES.find(v => v.id === selectedVehicle)?.name}\n\nFrom: ${pickup}\n\nTo: ${destination}\n\nFare: ₦${fareData.total_fare.toFixed(2)}`,
+          '🎯 Finding Drivers!',
+          `Your offer of ₦${adjustedFare.toLocaleString()} has been sent to ${result.drivers_notified} nearby drivers.\n\nYou'll be notified when a driver accepts!`,
           [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Book Now', onPress: () => {
-              Alert.alert('✅ Success', 'Searching for nearby drivers...');
+            { text: 'OK', onPress: () => {
+              setShowPriceAdjustment(false);
               router.back();
             }}
           ]
         );
       } else {
-        Alert.alert('Error', fareData.detail || 'Could not calculate fare. Please ensure both locations are valid and try again.');
+        setIsLoading(false);
+        Alert.alert('Error', result.detail || 'Could not broadcast offer. Please try again.');
       }
     } catch (error) {
-      console.error('Fare calculation error:', error);
-      Alert.alert('Error', 'Could not calculate fare. Please check your internet connection and try again.');
-    } finally {
+      console.error('Find offers error:', error);
       setIsLoading(false);
+      Alert.alert('Error', 'Could not send offer to drivers. Please check your connection.');
     }
   };
 
