@@ -73,28 +73,40 @@ export default function AISuggestions() {
           <View style={styles.placeholder} />
         </View>
 
-        <ScrollView style={styles.content}>
+        <ScrollView 
+          style={styles.content}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} colors={['#667eea']} />
+          }
+        >
           <LinearGradient colors={['#667eea', '#764ba2']} style={styles.heroCard}>
             <Ionicons name="bulb" size={48} color="#FFF" />
-            <Text style={styles.heroTitle}>Smart Tips for You</Text>
-            <Text style={styles.heroSubtitle}>AI-powered insights to boost your earnings</Text>
+            <Text style={styles.heroTitle}>AI Coach</Text>
+            <Text style={styles.heroSubtitle}>Personalized tips powered by ChatGPT</Text>
           </LinearGradient>
 
-          {suggestions.map((suggestion, index) => (
-            <TouchableOpacity key={index} style={styles.suggestionCard}>
-              <View style={[styles.iconCircle, { backgroundColor: suggestion.color + '20' }]}>
-                <Ionicons name={suggestion.icon} size={28} color={suggestion.color} />
-              </View>
-              <View style={styles.suggestionContent}>
-                <Text style={styles.suggestionTitle}>{suggestion.title}</Text>
-                <Text style={styles.suggestionDesc}>{suggestion.desc}</Text>
-                <View style={styles.impactBadge}>
-                  <Text style={styles.impactText}>{suggestion.impact}</Text>
+          {loading ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#667eea" />
+              <Text style={styles.loadingText}>Analyzing your performance...</Text>
+            </View>
+          ) : (
+            suggestions.map((suggestion, index) => (
+              <TouchableOpacity key={index} style={styles.suggestionCard}>
+                <View style={[styles.iconCircle, { backgroundColor: suggestion.color + '20' }]}>
+                  <Ionicons name={suggestion.icon} size={28} color={suggestion.color} />
                 </View>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-            </TouchableOpacity>
-          ))}
+                <View style={styles.suggestionContent}>
+                  <Text style={styles.suggestionTitle}>{suggestion.title}</Text>
+                  <Text style={styles.suggestionDesc}>{suggestion.description}</Text>
+                  <View style={styles.impactBadge}>
+                    <Text style={styles.impactText}>{suggestion.impact}</Text>
+                  </View>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+              </TouchableOpacity>
+            ))
+          )}
         </ScrollView>
       </SafeAreaView>
     </View>
