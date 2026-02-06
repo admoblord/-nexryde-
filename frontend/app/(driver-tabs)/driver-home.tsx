@@ -511,6 +511,29 @@ export default function ModernDriverHome() {
         </View>
       </Modal>
 
+      {/* Language Picker Modal */}
+      <Modal visible={showLangPicker} transparent animationType="fade">
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
+          <View style={{ marginHorizontal: 20, backgroundColor: '#1E293B', borderRadius: 16, padding: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#94A3B8', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
+            {availableLanguages.map((lang) => (
+              <TouchableOpacity
+                key={lang.code}
+                onPress={() => { setLanguage(lang.code as SupportedLanguage); setShowLangPicker(false); }}
+                style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: language === lang.code ? 'rgba(34,225,128,0.15)' : 'transparent', gap: 12 }}
+              >
+                <Text style={{ fontSize: 22 }}>{lang.flag}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{lang.nativeName}</Text>
+                  <Text style={{ fontSize: 12, color: '#64748B' }}>{lang.name}</Text>
+                </View>
+                {language === lang.code && <Ionicons name="checkmark-circle" size={22} color="#22E180" />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
     </SafeAreaView>
   );
 }
