@@ -216,15 +216,24 @@ export class AreaBoySafety {
    */
   static async reportDangerZone(report: Omit<DangerReport, 'id' | 'timestamp'>): Promise<boolean> {
     try {
-      // In production, call backend API
-      // const response = await fetch('/api/safety/report', {
-      //   method: 'POST',
-      //   body: JSON.stringify(report),
-      // });
-      // return response.ok;
-
-      console.log('Danger zone reported:', report);
-      return true;
+      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const response = await fetch(`${BACKEND_URL}/api/safety/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: report.userId,
+          user_name: report.userName,
+          role: report.userRole,
+          type: report.incidentType,
+          severity: report.severity,
+          description: report.description,
+          latitude: 6.5244, // Default Lagos coords
+          longitude: 3.3792,
+          address: 'Reported Location',
+        }),
+      });
+      const data = await response.json();
+      return data.success === true;
     } catch (error) {
       console.error('Failed to report danger zone:', error);
       return false;
