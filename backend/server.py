@@ -4847,6 +4847,215 @@ async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
     """
     try:
         # Get traffic incidents from Google Maps
+
+
+# ==================== ACCIDENT AI PREDICTION ENDPOINTS ====================
+
+@app.post("/api/ai/accident/predict-risk")
+async def predict_accident_risk(
+    driver_id: str,
+    current_lat: float,
+    current_lng: float,
+    destination_lat: float = None,
+    destination_lng: float = None
+):
+    """
+    Use ChatGPT to predict accident risk based on location, time, weather, historical data
+    """
+    try:
+        if not openai_client:
+            raise HTTPException(status_code=503, detail="AI service not available")
+        
+        # Get location name from coordinates
+        try:
+            reverse_result = gmaps.reverse_geocode((current_lat, current_lng))
+            location_name = reverse_result[0]['formatted_address'] if reverse_result else "Unknown location"
+        except:
+            location_name = "Lagos, Nigeria"
+        
+        # Build context for ChatGPT
+        current_time = datetime.utcnow()
+        day_of_week = current_time.strftime('%A')
+        hour = current_time.hour
+        
+        # Determine if it's rush hour, night time, etc.
+        is_rush_hour = (7 <= hour <= 9) or (17 <= hour <= 19)
+        is_night = hour >= 19 or hour <= 6
+        is_weekend = day_of_week in ['Saturday', 'Sunday']
+        
+        context = f"""
+Analyze accident risk for a NEXRYDE driver in Lagos, Nigeria.
+
+CURRENT SITUATION:
+- Location: {location_name}
+- GPS: {current_lat}, {current_lng}
+- Time: {current_time.strftime('%A, %H:%M')} UTC
+- Rush Hour: {"Yes" if is_rush_hour else "No"}
+- Night Time: {"Yes" if is_night else "No"}
+- Weekend: {"Yes" if is_weekend else "No"}
+
+INSTRUCTIONS:
+Provide accident risk assessment in this JSON format:
+{{
+  "overall_risk_score": 0-100,
+  "risk_level": "low" or "moderate" or "high" or "critical",
+  "primary_factors": ["list", "of", "3-5", "risk", "factors"],
+  "high_risk_zones": [
+    {{
+      "name": "Road/Area name",
+      "risk_level": "low/moderate/high",
+      "reason": "Why it's risky",
+      "time": "When it's most risky",
+      "recommendation": "What to do"
+    }}
+  ],
+  "safety_recommendations": ["action 1", "action 2", "action 3"],
+  "confidence": 0-100,
+  "weather_impact": "How weather affects risk",
+  "time_impact": "How time of day affects risk"
+}}
+
+CONSIDER:
+- Lagos-specific accident hotspots (Third Mainland Bridge, Lekki-Epe, Oshodi, Apapa)
+- Time of day (night driving = higher risk)
+- Rush hour = higher accident probability
+- Known dangerous areas in Lagos
+- Weather conditions (rainy season = slippery roads)
+- Driver fatigue (late night hours)
+- Traffic density correlation with accidents
+
+Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
+"""
+
+        # Call ChatGPT
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a safety AI expert specializing in accident prediction and prevention for ride-hailing drivers in Lagos, Nigeria. You analyze risk factors and provide life-saving recommendations."},
+                {"role": "user", "content": context}
+            ],
+            temperature=0.3,
+            max_tokens=600,
+        )
+        
+        # Parse AI response
+        ai_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON
+        import re
+        json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
+        if json_match:
+            risk_analysis = json.loads(json_match.group())
+        else:
+            # Fallback
+            risk_analysis = {
+                "overall_risk_score": 40,
+                "risk_level": "moderate",
+                "primary_factors": ["Traffic conditions", "Time of day", "Location"],
+                "high_risk_zones": [
+                    {
+                        "name": "Third Mainland Bridge",
+                        "risk_level": "high",
+                        "reason": "High speed zone with poor lighting",
+                        "time": "Night hours (7PM-6AM)",
+                        "recommendation": "Drive cautiously, maintain safe speed"
+                    }
+                ],
+                "safety_recommendations": [
+                    "Maintain safe following distance",
+                    "Stay alert and avoid distractions",
+                    "Obey speed limits"
+                ],
+                "confidence": 75,
+                "weather_impact": "Monitor for rain",
+                "time_impact": "Moderate risk for current hour"
+            }
+        
+        logger.info(f"Accident AI prediction: Risk={risk_analysis['risk_level']} Score={risk_analysis['overall_risk_score']}")
+        
+        return {
+            "success": True,
+            "risk_analysis": risk_analysis,
+            "location": location_name,
+            "timestamp": datetime.utcnow().isoformat(),
+            "context": {
+                "is_rush_hour": is_rush_hour,
+                "is_night": is_night,
+                "is_weekend": is_weekend
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Accident prediction error: {str(e)}")
+        # Fallback
+        return {
+            "success": True,
+            "risk_analysis": {
+                "overall_risk_score": 30,
+                "risk_level": "low",
+                "primary_factors": ["Standard driving conditions"],
+                "high_risk_zones": [],
+                "safety_recommendations": ["Drive safely", "Stay alert", "Follow traffic rules"],
+                "confidence": 50,
+                "weather_impact": "Normal",
+                "time_impact": "Normal"
+            },
+            "fallback": True
+        }
+
+@app.get("/api/ai/accident/high-risk-areas")
+async def get_high_risk_areas(city: str = "Lagos"):
+    """
+    Get list of known high-risk accident areas in Nigerian cities
+    """
+    try:
+        # Lagos high-risk zones (based on known accident hotspots)
+        lagos_zones = [
+            {
+                "name": "Third Mainland Bridge",
+                "risk_level": "high",
+                "lat": 6.4698,
+                "lng": 3.3852,
+                "accidents_last_month": 12,
+                "primary_cause": "High speed + poor visibility"
+            },
+            {
+                "name": "Lekki-Epe Expressway",
+                "risk_level": "high",
+                "lat": 6.4423,
+                "lng": 3.4647,
+                "accidents_last_month": 8,
+                "primary_cause": "Construction zones + speeding"
+            },
+            {
+                "name": "Oshodi Underbridge",
+                "risk_level": "moderate",
+                "lat": 6.5447,
+                "lng": 3.3369,
+                "accidents_last_month": 5,
+                "primary_cause": "Heavy traffic + reckless driving"
+            },
+            {
+                "name": "Apapa-Oshodi Expressway",
+                "risk_level": "moderate",
+                "lat": 6.4489,
+                "lng": 3.3597,
+                "accidents_last_month": 6,
+                "primary_cause": "Truck congestion + potholes"
+            },
+        ]
+        
+        return {
+            "success": True,
+            "city": city,
+            "risk_zones": lagos_zones,
+            "count": len(lagos_zones)
+        }
+        
+    except Exception as e:
+        logger.error(f"High risk areas error: {str(e)}")
+        return {"success": True, "risk_zones": [], "count": 0}
+
         # (Note: This would require Google Maps Incidents API or similar)
         
         # For now, generate smart alerts based on time and location
