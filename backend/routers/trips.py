@@ -262,29 +262,33 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest):
     
     fare = calculate_fare(distance_km, duration_min, traffic_duration_min, request.service_type)
     
-    trip = Trip(
-        rider_id=booker_id,
-        pickup_location={"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        dropoff_location={"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        distance_km=round(distance_km, 2),
-        duration_mins=duration_min,
-        base_fare=fare["base_fare"],
-        distance_fee=fare["distance_fee"],
-        time_fee=fare["time_fee"],
-        traffic_fee=fare["traffic_fee"],
-        fare=fare["total_fare"],
-        surge_multiplier=fare["multiplier"],
-        service_type=request.service_type,
-        payment_method=request.payment_method,
-        polyline=polyline,
-        fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
-        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}"
-    )
-    
-    trip_dict = trip.dict()
-    trip_dict["booked_for"] = {"name": request.rider_name, "phone": request.rider_phone}
+    trip_dict = {
+        "id": str(uuid4()),
+        "rider_id": booker_id,
+        "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
+        "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        "distance_km": round(distance_km, 2),
+        "duration_mins": duration_min,
+        "base_fare": fare["base_fare"],
+        "distance_fee": fare["distance_fee"],
+        "time_fee": fare["time_fee"],
+        "traffic_fee": fare["traffic_fee"],
+        "fare": fare["total_fare"],
+        "surge_multiplier": fare.get("surge_multiplier", fare.get("multiplier", 1.0)),
+        "service_type": request.service_type,
+        "status": "pending",
+        "payment_method": request.payment_method,
+        "polyline": polyline,
+        "fare_locked_until": (datetime.now(timezone.utc) + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
+        "insurance_id": f"INS_{uuid4().hex[:8].upper()}",
+        "is_monitored": True,
+        "is_insured": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "booked_for": {"name": request.rider_name, "phone": request.rider_phone},
+    }
     
     await db.trips.insert_one(trip_dict)
+    trip_dict.pop("_id", None)
     
     return {"message": "Trip booked for other person", "trip": trip_dict}
 
