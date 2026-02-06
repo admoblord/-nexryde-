@@ -207,12 +207,18 @@ async def driver_assistant(user_id: str, question: str, lat: float = None, lng: 
         if user:
             context += f", Rating={user.get('rating', 5.0):.1f}"
         
+        # Detect driver's city
+        loc = detect_city(lat, lng, city)
+        city_name, state = loc["city"], loc["state"]
+        zones_str = ", ".join(loc["zones"])
+        
         # Use LLM for response
         if EMERGENT_LLM_KEY:
+            prompt = DRIVER_ASSISTANT_PROMPT.format(city=city_name, state=state, zones=zones_str)
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"driver-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=DRIVER_ASSISTANT_PROMPT + context
+                system_message=prompt + context
             ).with_model("openai", "gpt-4o")
             
             user_message = UserMessage(text=question)
