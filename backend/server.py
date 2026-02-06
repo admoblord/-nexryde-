@@ -4111,7 +4111,8 @@ async def initiate_trip_call(trip_id: str, request: dict):
 
         # Get target user's phone
         target_user = await db.users.find_one({"id": target_id}, {"_id": 0})
-        if not target_user or not target_user.get("phone_number"):
+        phone = target_user.get("phone_number") or target_user.get("phone") if target_user else None
+        if not phone:
             raise HTTPException(status_code=404, detail="Phone number not available")
 
         # Rate limit: max 5 calls per trip
