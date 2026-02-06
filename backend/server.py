@@ -4544,15 +4544,41 @@ async def request_female_driver(rider_id: str, pickup_lat: float, pickup_lng: fl
 # ==================== DRIVER HEAT MAPS ====================
 
 @api_router.get("/driver/heatmap")
-async def get_heatmap():
-    """Get demand heatmap for drivers"""
-    zones = [
-        {"lat": 6.5244, "lng": 3.3792, "intensity": 0.9, "name": "Lagos Island", "surge": 1.5},
-        {"lat": 6.4281, "lng": 3.4219, "intensity": 0.8, "name": "Victoria Island", "surge": 1.3},
-        {"lat": 6.4355, "lng": 3.4567, "intensity": 0.7, "name": "Lekki Phase 1", "surge": 1.2},
-        {"lat": 6.5833, "lng": 3.3500, "intensity": 0.85, "name": "Ikeja", "surge": 1.4},
-    ]
-    return {"zones": zones, "recommendation": "Head to Victoria Island for best earnings"}
+async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
+    """Get demand heatmap for drivers - location-aware"""
+    from routers.ai_features import detect_city
+    loc = detect_city(lat, lng, city)
+    city_name = loc["city"]
+    base_lat, base_lng = loc["lat"], loc["lng"]
+    zones_data = loc["zones"]
+    
+    # Generate dynamic heatmap zones around the detected city
+    import random
+    random.seed(int(datetime.utcnow().hour))  # Vary by hour
+    zones = []
+    for i, zone_name in enumerate(zones_data):
+        offset_lat = random.uniform(-0.05, 0.05)
+        offset_lng = random.uniform(-0.05, 0.05)
+        intensity = round(random.uniform(0.5, 0.95), 2)
+        surge = round(1.0 + random.uniform(0, 0.5), 1)
+        zones.append({
+            "lat": round(base_lat + offset_lat, 4),
+            "lng": round(base_lng + offset_lng, 4),
+            "intensity": intensity,
+            "name": zone_name,
+            "surge": surge,
+        })
+    
+    # Sort by intensity (highest demand first)
+    zones.sort(key=lambda z: z["intensity"], reverse=True)
+    top_zone = zones[0]["name"] if zones else city_name
+    
+    return {
+        "city": city_name,
+        "state": loc["state"],
+        "zones": zones,
+        "recommendation": f"Head to {top_zone} for best earnings in {city_name}"
+    }
 
 # ==================== PROMO CODES & REFERRALS ====================
 
