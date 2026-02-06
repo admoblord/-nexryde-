@@ -2406,7 +2406,7 @@ async def complete_driver_profile(request: dict):
     try:
         driver_id = request.get("driver_id")
         
-        # Update driver profile with personal details
+        # Update driver profile with personal details AND vehicle information
         profile_update = {
             "full_name": request.get("full_name"),
             "phone": request.get("phone"),
@@ -2419,6 +2419,14 @@ async def complete_driver_profile(request: dict):
             "bank_name": request.get("bank_name"),
             "account_number": request.get("account_number"),
             "account_name": request.get("account_name"),
+            # Vehicle information
+            "vehicle_type": request.get("vehicle_type"),
+            "vehicle_make": request.get("vehicle_make"),
+            "vehicle_model": request.get("vehicle_model"),
+            "vehicle_year": request.get("vehicle_year"),
+            "vehicle_plate_number": request.get("vehicle_plate_number"),
+            "vehicle_color": request.get("vehicle_color"),
+            "vehicle_registered": True,
             "profile_completed": True,
             "profile_completed_at": datetime.utcnow().isoformat(),
         }
