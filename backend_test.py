@@ -1,282 +1,396 @@
 #!/usr/bin/env python3
 """
-Comprehensive Backend API Testing for KODA Driver Features
-Tests all new driver-specific API endpoints as requested in the review
+Backend Test Script for NEXRYDE AI Endpoints
+Testing 4 AI endpoints migrated from direct OpenAI to Emergent LLM
 """
 
-import requests
+import asyncio
+import httpx
 import json
 import time
-from datetime import datetime
+import sys
+from typing import Dict, Any
 
-# Backend URL from environment
+# Backend URL from frontend environment
 BACKEND_URL = "https://smart-mode-preview.preview.emergentagent.com/api"
 
-def log_test_result(test_name, success, response_data, status_code):
-    """Log test results with timestamp"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    status = "✅ PASS" if success else "❌ FAIL"
-    print(f"\n[{timestamp}] {status} {test_name}")
-    print(f"Status Code: {status_code}")
-    print(f"Response: {json.dumps(response_data, indent=2)}")
-    print("-" * 80)
-
-def test_driver_stories_api():
-    """Test Group 1: Driver Stories API"""
-    print("\n" + "="*80)
-    print("TEST GROUP 1: Driver Stories API")
-    print("="*80)
-    
-    story_id = None
-    
-    # Test 1.1: POST /api/driver/stories
-    print("\n1.1 Testing POST /api/driver/stories")
-    story_data = {
-        "driver_id": "test-driver-001",
-        "text": "Started at 5am today. Already done 8 trips! Lagos no dey sleep!",
-        "mood": "hustle",
-        "location": "Victoria Island"
+# Test data
+TEST_DATA = {
+    "smart_mode": {
+        "ride": {
+            "pickup": "Victoria Island", 
+            "destination": "Ikeja GRA", 
+            "distance_km": 15.2, 
+            "duration_min": 45, 
+            "fare": 4500, 
+            "rider_rating": 4.8
+        },
+        "settings": {
+            "enabled": True,
+            "max_distance": 20,
+            "min_rating": 4.0,
+            "surge_threshold": 1.5,
+            "auto_accept": True,
+            "preferred_areas": []
+        }
+    },
+    "coordinates": {
+        "victoria_island": {"lat": 6.5244, "lng": 3.3792},
+        "ikeja": {"lat": 6.4541, "lng": 3.3947}
     }
+}
+
+class BackendTester:
+    def __init__(self):
+        self.results = []
+        self.client = httpx.AsyncClient(timeout=60.0)
     
-    try:
-        response = requests.post(
-            f"{BACKEND_URL}/driver/stories",
-            json=story_data,
-            headers={"Content-Type": "application/json"},
-            timeout=10
-        )
-        response_data = response.json()
-        success = response.status_code == 200 and response_data.get("success") == True
-        
-        if success and response_data.get("story"):
-            story_id = response_data["story"]["_id"]
-            
-        log_test_result("POST /api/driver/stories", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("POST /api/driver/stories", False, {"error": str(e)}, 0)
+    async def cleanup(self):
+        await self.client.aclose()
     
-    # Test 1.2: GET /api/driver/stories?limit=20
-    print("\n1.2 Testing GET /api/driver/stories?limit=20")
-    try:
-        response = requests.get(
-            f"{BACKEND_URL}/driver/stories?limit=20",
-            timeout=10
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  "stories" in response_data and
-                  len(response_data["stories"]) > 0)
-        
-        log_test_result("GET /api/driver/stories", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("GET /api/driver/stories", False, {"error": str(e)}, 0)
+    def log_result(self, test_name: str, success: bool, details: Dict[str, Any]):
+        """Log test result"""
+        self.results.append({
+            "test": test_name,
+            "success": success,
+            "details": details
+        })
+        status = "✅ PASS" if success else "❌ FAIL"
+        print(f"{status}: {test_name}")
+        if not success and "error" in details:
+            print(f"   Error: {details['error']}")
+        elif success and "key_findings" in details:
+            for finding in details["key_findings"]:
+                print(f"   • {finding}")
+        print()
     
-    # Test 1.3: POST /api/driver/stories/{story_id}/like
-    if story_id:
-        print(f"\n1.3 Testing POST /api/driver/stories/{story_id}/like")
+    async def test_smart_mode_analyze_ride(self) -> bool:
+        """Test 1: POST /api/ai/smart-mode/analyze-ride"""
+        print("🧪 Testing Smart Mode Analyze Ride API...")
+        
         try:
-            response = requests.post(
-                f"{BACKEND_URL}/driver/stories/{story_id}/like",
-                timeout=10
-            )
-            response_data = response.json()
-            success = response.status_code == 200 and response_data.get("success") == True
+            # Prepare request data
+            params = {"driver_id": "demo"}
+            payload = {
+                **TEST_DATA["smart_mode"]["ride"],
+                "settings": TEST_DATA["smart_mode"]["settings"]
+            }
             
-            log_test_result("POST /api/driver/stories/{story_id}/like", success, response_data, response.status_code)
+            # Make request
+            response = await self.client.post(
+                f"{BACKEND_URL}/ai/smart-mode/analyze-ride",
+                params=params,
+                json=payload
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                "ai_analysis" in data,
+                "recommendation" in data.get("ai_analysis", {}),
+                data.get("ai_analysis", {}).get("recommendation") in ["ACCEPT", "REJECT"],
+                "confidence" in data.get("ai_analysis", {}),
+                "reasoning" in data.get("ai_analysis", {}),
+                "score" in data.get("ai_analysis", {}),
+                data.get("fallback") != True  # Must NOT be fallback
+            ]
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                ai_analysis = data["ai_analysis"]
+                key_findings = [
+                    f"Recommendation: {ai_analysis['recommendation']}",
+                    f"Confidence: {ai_analysis['confidence']}%",
+                    f"Score: {ai_analysis['score']}/100",
+                    f"Reasoning: {ai_analysis['reasoning'][:60]}...",
+                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}"
+                ]
+            
+            self.log_result(
+                "Smart Mode Analyze Ride",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Validation failed: {[i for i, check in enumerate(success_checks) if not check]}"
+                }
+            )
+            
+            return all_success
             
         except Exception as e:
-            log_test_result("POST /api/driver/stories/{story_id}/like", False, {"error": str(e)}, 0)
-    else:
-        print("\n1.3 SKIPPED: POST /api/driver/stories/{story_id}/like - No story_id from previous test")
+            self.log_result(
+                "Smart Mode Analyze Ride",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+    
+    async def test_ai_coach_suggestions(self) -> bool:
+        """Test 2: POST /api/ai/coach/get-suggestions?driver_id=demo"""
+        print("🧪 Testing AI Coach Suggestions API...")
+        
+        try:
+            # Make request
+            params = {"driver_id": "demo"}
+            response = await self.client.post(
+                f"{BACKEND_URL}/ai/coach/get-suggestions",
+                params=params
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                "suggestions" in data,
+                isinstance(data.get("suggestions"), list),
+                len(data.get("suggestions", [])) >= 4,  # Should have 4-5 suggestions
+                data.get("fallback") != True  # Must NOT be fallback
+            ]
+            
+            # Validate suggestion structure
+            suggestions = data.get("suggestions", [])
+            if suggestions and len(suggestions) > 0:
+                first_suggestion = suggestions[0]
+                suggestion_checks = [
+                    "title" in first_suggestion,
+                    "description" in first_suggestion,
+                    "impact" in first_suggestion,
+                    "icon" in first_suggestion,
+                    "color" in first_suggestion,
+                    "priority" in first_suggestion,
+                    "category" in first_suggestion
+                ]
+                success_checks.extend(suggestion_checks)
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                key_findings = [
+                    f"Suggestions count: {len(suggestions)}",
+                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}",
+                    f"Sample suggestion: {suggestions[0]['title']} - {suggestions[0]['impact']}" if suggestions else "No suggestions"
+                ]
+            
+            self.log_result(
+                "AI Coach Suggestions",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Validation failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "AI Coach Suggestions",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+    
+    async def test_traffic_prediction(self) -> bool:
+        """Test 3: POST /api/ai/traffic/predict"""
+        print("🧪 Testing Traffic Prediction API...")
+        
+        try:
+            # Prepare coordinates
+            vic_island = TEST_DATA["coordinates"]["victoria_island"]
+            ikeja = TEST_DATA["coordinates"]["ikeja"]
+            
+            params = {
+                "origin_lat": vic_island["lat"],
+                "origin_lng": vic_island["lng"], 
+                "destination_lat": ikeja["lat"],
+                "destination_lng": ikeja["lng"],
+                "driver_id": "demo"
+            }
+            
+            # Make request
+            response = await self.client.post(
+                f"{BACKEND_URL}/ai/traffic/predict",
+                params=params
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                "ai_analysis" in data,
+                "traffic_level" in data.get("ai_analysis", {}),
+                "recommendation" in data.get("ai_analysis", {}),
+                "confidence" in data.get("ai_analysis", {})
+            ]
+            
+            all_success = all(success_checks)
+            
+            # Check if it's real AI (not fallback with "API unavailable")
+            ai_analysis = data.get("ai_analysis", {})
+            factors = ai_analysis.get("factors", [])
+            is_real_ai = not (data.get("fallback") is True or "API unavailable" in str(factors))
+            
+            key_findings = []
+            if all_success:
+                key_findings = [
+                    f"Traffic Level: {ai_analysis.get('traffic_level', 'N/A')}",
+                    f"Confidence: {ai_analysis.get('confidence', 'N/A')}%",
+                    f"Recommendation: {ai_analysis.get('recommendation', 'N/A')[:50]}...",
+                    f"Real AI Analysis: {'✅' if is_real_ai else '❌'}"
+                ]
+            
+            self.log_result(
+                "Traffic Prediction AI",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Validation failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "Traffic Prediction AI",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+    
+    async def test_accident_risk_prediction(self) -> bool:
+        """Test 4: POST /api/ai/accident/predict-risk"""
+        print("🧪 Testing Accident Risk Prediction API...")
+        
+        try:
+            # Prepare coordinates
+            vic_island = TEST_DATA["coordinates"]["victoria_island"]
+            
+            params = {
+                "driver_id": "demo",
+                "current_lat": vic_island["lat"],
+                "current_lng": vic_island["lng"]
+            }
+            
+            # Make request
+            response = await self.client.post(
+                f"{BACKEND_URL}/ai/accident/predict-risk",
+                params=params
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                "risk_analysis" in data,
+                "overall_risk_score" in data.get("risk_analysis", {}),
+                "risk_level" in data.get("risk_analysis", {}),
+                "safety_recommendations" in data.get("risk_analysis", {})
+            ]
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                risk_analysis = data["risk_analysis"]
+                key_findings = [
+                    f"Overall Risk Score: {risk_analysis.get('overall_risk_score', 'N/A')}/100",
+                    f"Risk Level: {risk_analysis.get('risk_level', 'N/A')}",
+                    f"Safety Recommendations: {len(risk_analysis.get('safety_recommendations', []))} items",
+                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}"
+                ]
+            
+            self.log_result(
+                "Accident Risk Prediction",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Validation failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "Accident Risk Prediction",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+    
+    async def run_all_tests(self):
+        """Run all AI endpoint tests"""
+        print("🚀 Starting Backend AI Endpoint Tests")
+        print("=" * 50)
+        print(f"Backend URL: {BACKEND_URL}")
+        print()
+        
+        # Run tests
+        tests = [
+            self.test_smart_mode_analyze_ride,
+            self.test_ai_coach_suggestions,
+            self.test_traffic_prediction,
+            self.test_accident_risk_prediction
+        ]
+        
+        results = []
+        for test in tests:
+            result = await test()
+            results.append(result)
+            await asyncio.sleep(1)  # Small delay between tests
+        
+        # Summary
+        print("=" * 50)
+        print("🎯 TEST SUMMARY")
+        print("=" * 50)
+        
+        passed = sum(results)
+        total = len(results)
+        
+        for i, result in enumerate(self.results):
+            status = "✅ PASS" if result["success"] else "❌ FAIL"
+            print(f"{status}: {result['test']}")
+        
+        print()
+        print(f"Overall Result: {passed}/{total} tests passed")
+        
+        if passed == total:
+            print("🎉 ALL TESTS PASSED - Emergent LLM integration working correctly!")
+        else:
+            print("⚠️  SOME TESTS FAILED - Check individual test results above")
+        
+        return passed == total
 
-def test_fleet_tracker_api():
-    """Test Group 2: Fleet Tracker API"""
-    print("\n" + "="*80)
-    print("TEST GROUP 2: Fleet Tracker API")
-    print("="*80)
+async def main():
+    """Main test runner"""
+    tester = BackendTester()
     
-    # Test 2.1: GET /api/driver/fleet/nearby
-    print("\n2.1 Testing GET /api/driver/fleet/nearby?lat=6.5244&lng=3.3792&radius_km=5")
     try:
-        params = {
-            "lat": 6.5244,
-            "lng": 3.3792,
-            "radius_km": 5
-        }
-        response = requests.get(
-            f"{BACKEND_URL}/driver/fleet/nearby",
-            params=params,
-            timeout=10
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  "fleet" in response_data and
-                  "count" in response_data)
-        
-        log_test_result("GET /api/driver/fleet/nearby", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("GET /api/driver/fleet/nearby", False, {"error": str(e)}, 0)
-
-def test_driver_awareness_api():
-    """Test Group 3: Driver Awareness API"""
-    print("\n" + "="*80)
-    print("TEST GROUP 3: Driver Awareness API")
-    print("="*80)
-    
-    # Test 3.1: GET /api/driver/awareness
-    print("\n3.1 Testing GET /api/driver/awareness?driver_id=demo&lat=6.5244&lng=3.3792")
-    try:
-        params = {
-            "driver_id": "demo",
-            "lat": 6.5244,
-            "lng": 3.3792
-        }
-        response = requests.get(
-            f"{BACKEND_URL}/driver/awareness",
-            params=params,
-            timeout=10
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  "alerts" in response_data and
-                  "driver_score" in response_data and
-                  "driving_hours_today" in response_data and
-                  "break_recommended" in response_data)
-        
-        log_test_result("GET /api/driver/awareness", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("GET /api/driver/awareness", False, {"error": str(e)}, 0)
-
-def test_traffic_ai_apis():
-    """Test Group 4: Traffic AI APIs"""
-    print("\n" + "="*80)
-    print("TEST GROUP 4: Traffic AI APIs")
-    print("="*80)
-    
-    # Test 4.1: GET /api/ai/traffic/alerts
-    print("\n4.1 Testing GET /api/ai/traffic/alerts?driver_id=demo&lat=6.5244&lng=3.3792")
-    try:
-        params = {
-            "driver_id": "demo",
-            "lat": 6.5244,
-            "lng": 3.3792
-        }
-        response = requests.get(
-            f"{BACKEND_URL}/ai/traffic/alerts",
-            params=params,
-            timeout=10
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  "alerts" in response_data)
-        
-        log_test_result("GET /api/ai/traffic/alerts", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("GET /api/ai/traffic/alerts", False, {"error": str(e)}, 0)
-    
-    # Test 4.2: POST /api/ai/traffic/predict
-    print("\n4.2 Testing POST /api/ai/traffic/predict")
-    try:
-        params = {
-            "origin_lat": 6.5244,
-            "origin_lng": 3.3792,
-            "destination_lat": 6.4541,
-            "destination_lng": 3.3947,
-            "driver_id": "demo"
-        }
-        response = requests.post(
-            f"{BACKEND_URL}/ai/traffic/predict",
-            params=params,
-            timeout=15  # Longer timeout for AI prediction
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  "ai_analysis" in response_data)
-        
-        log_test_result("POST /api/ai/traffic/predict", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("POST /api/ai/traffic/predict", False, {"error": str(e)}, 0)
-
-def test_accident_ai_apis():
-    """Test Group 5: Accident AI APIs"""
-    print("\n" + "="*80)
-    print("TEST GROUP 5: Accident AI APIs")
-    print("="*80)
-    
-    # Test 5.1: POST /api/ai/accident/predict-risk
-    print("\n5.1 Testing POST /api/ai/accident/predict-risk")
-    try:
-        params = {
-            "driver_id": "demo",
-            "current_lat": 6.5244,
-            "current_lng": 3.3792
-        }
-        response = requests.post(
-            f"{BACKEND_URL}/ai/accident/predict-risk",
-            params=params,
-            timeout=15  # Longer timeout for AI prediction
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  ("ai_analysis" in response_data or "risk_analysis" in response_data))
-        
-        log_test_result("POST /api/ai/accident/predict-risk", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("POST /api/ai/accident/predict-risk", False, {"error": str(e)}, 0)
-    
-    # Test 5.2: GET /api/ai/accident/high-risk-areas
-    print("\n5.2 Testing GET /api/ai/accident/high-risk-areas?lat=6.5244&lng=3.3792")
-    try:
-        params = {
-            "lat": 6.5244,
-            "lng": 3.3792
-        }
-        response = requests.get(
-            f"{BACKEND_URL}/ai/accident/high-risk-areas",
-            params=params,
-            timeout=10
-        )
-        response_data = response.json()
-        success = (response.status_code == 200 and 
-                  response_data.get("success") == True and
-                  ("high_risk_areas" in response_data or "risk_zones" in response_data))
-        
-        log_test_result("GET /api/ai/accident/high-risk-areas", success, response_data, response.status_code)
-        
-    except Exception as e:
-        log_test_result("GET /api/ai/accident/high-risk-areas", False, {"error": str(e)}, 0)
-
-def main():
-    """Run all backend API tests"""
-    print("NEXRYDE BACKEND API TESTING")
-    print("Testing Driver Features API Endpoints")
-    print("Backend URL:", BACKEND_URL)
-    print("Test Started at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    
-    # Run all test groups
-    test_driver_stories_api()
-    test_fleet_tracker_api()
-    test_driver_awareness_api()
-    test_traffic_ai_apis()
-    test_accident_ai_apis()
-    
-    print("\n" + "="*80)
-    print("ALL BACKEND API TESTS COMPLETED")
-    print("Test Completed at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    print("="*80)
+        success = await tester.run_all_tests()
+        return 0 if success else 1
+    finally:
+        await tester.cleanup()
 
 if __name__ == "__main__":
-    main()
+    sys.exit(asyncio.run(main()))
