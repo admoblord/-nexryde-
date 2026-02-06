@@ -609,8 +609,8 @@ export default function RiderProfileScreen() {
                       <Ionicons name="wallet" size={24} color={COLORS.info} />
                     </View>
                     <View style={styles.benefitContent}>
-                      <Text style={styles.benefitTitle}>Flat ₦25,000/month</Text>
-                      <Text style={styles.benefitDesc}>No hidden commissions</Text>
+                      <Text style={styles.benefitTitle}>From ₦18,000/month</Text>
+                      <Text style={styles.benefitDesc}>City Rider or Road Warrior plans</Text>
                     </View>
                     <View style={styles.benefitCheck}>
                       <Ionicons name="checkmark" size={16} color={COLORS.white} />
