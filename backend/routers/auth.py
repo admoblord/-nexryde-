@@ -231,11 +231,13 @@ async def check_resend_cooldown(phone: str) -> dict:
         if daily_reset.tzinfo is None:
             daily_reset = daily_reset.replace(tzinfo=timezone.utc)
         if now > daily_reset:
-        # Reset daily counter
-        await db.otp_records.update_one(
-            {"phone": phone},
-            {"$set": {"daily_requests": 0, "daily_reset_at": now + timedelta(days=1)}}
-        )
+            # Reset daily counter
+            await db.otp_records.update_one(
+                {"phone": phone},
+                {"$set": {"daily_requests": 0, "daily_reset_at": now + timedelta(days=1)}}
+            )
+        elif record.get("daily_requests", 0) >= OTP_MAX_DAILY_REQUESTS:
+            return {"can_resend": False, "wait_seconds": -1, "error": "Daily limit reached. Try again tomorrow."}
     elif record.get("daily_requests", 0) >= OTP_MAX_DAILY_REQUESTS:
         return {"can_resend": False, "wait_seconds": -1, "error": "Daily limit reached. Try again tomorrow."}
     
