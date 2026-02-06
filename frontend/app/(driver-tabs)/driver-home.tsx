@@ -18,6 +18,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
+import ActiveTripBar from '@/src/components/ActiveTripBar';
 
 const { width } = Dimensions.get('window');
 
