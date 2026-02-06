@@ -609,3 +609,13 @@ export const useVoiceAssistant = () => {
     setPreferredLanguage,
   };
 };
+
+/** Process voice command through AI backend (Emergent LLM → GPT-4o) */
+export async function processVoiceWithAI(userId: string, voiceText: string, role: string = 'driver'): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const endpoint = role === 'driver' ? 'driver-assistant' : 'rider-assistant';
+    const res = await fetch(`${BACKEND_URL}/api/ai/${endpoint}?user_id=${userId}&question=${encodeURIComponent(voiceText)}`);
+    return await res.json();
+  } catch { return null; }
+}
