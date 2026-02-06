@@ -85,43 +85,44 @@ logger = logging.getLogger(__name__)
 
 # ==================== NIGERIAN MARKET FARE CONFIGURATION ====================
 # Comprehensive pricing for Nigerian ride-hailing market
+# Based on inDrive, Bolt, and Lag Ride competitive analysis
 FARE_CONFIG = {
     "lagos": {
         "economy": {
-            "base_fare": 500,           # ₦500 flat fee to start
-            "per_km": 150,              # ₦150 per kilometer
-            "per_min": 25,              # ₦25 per minute (for traffic/waiting)
-            "booking_fee": 0,         # ₦100 platform service fee
-            "min_fare": 0,            # ₦800 minimum fare
+            "base_fare": 400,           # ₦400 flat fee to start
+            "per_km": 400,              # ₦400 per kilometer
+            "per_min": 80,              # ₦80 per minute (for traffic/waiting)
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
             "max_multiplier": 2.5,      # Max 2.5x surge pricing
             "cancellation_fee": 300,    # ₦300 if rider cancels after driver accepts
         },
         "comfort": {
-            "base_fare": 700,           # ₦700 flat fee to start
-            "per_km": 200,              # ₦200 per kilometer
-            "per_min": 35,              # ₦35 per minute
-            "booking_fee": 0,         # ₦150 platform service fee
-            "min_fare": 0,           # ₦1,200 minimum fare
+            "base_fare": 600,           # ₦600 flat fee to start
+            "per_km": 500,              # ₦500 per kilometer
+            "per_min": 100,             # ₦100 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
             "max_multiplier": 2.5,
             "cancellation_fee": 400,
         },
-        "premium": {
-            "base_fare": 1000,          # ₦1,000 flat fee to start
-            "per_km": 350,              # ₦350 per kilometer
-            "per_min": 50,              # ₦50 per minute
-            "booking_fee": 0,         # ₦200 platform service fee
-            "min_fare": 0,           # ₦2,000 minimum fare
-            "max_multiplier": 3.0,      # Premium can surge up to 3x
-            "cancellation_fee": 500,
-        },
         "xl": {
-            "base_fare": 800,           # ₦800 flat fee to start
-            "per_km": 250,              # ₦250 per kilometer
-            "per_min": 40,              # ₦40 per minute
-            "booking_fee": 0,         # ₦150 platform service fee
-            "min_fare": 0,           # ₦1,500 minimum fare
+            "base_fare": 500,           # ₦500 flat fee to start
+            "per_km": 450,              # ₦450 per kilometer
+            "per_min": 90,              # ₦90 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
             "max_multiplier": 2.5,
             "cancellation_fee": 450,
+        },
+        "premium": {
+            "base_fare": 800,           # ₦800 flat fee to start
+            "per_km": 600,              # ₦600 per kilometer
+            "per_min": 120,             # ₦120 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
+            "max_multiplier": 3.0,      # Premium can surge up to 3x
+            "cancellation_fee": 500,
         },
     },
     "abuja": {
