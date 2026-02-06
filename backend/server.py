@@ -8914,6 +8914,8 @@ app.include_router(route_cache_router)  # NEW: Route caching for API cost protec
 app.include_router(route_planner_router)  # NEW: Smart Route Planner for return passengers
 app.include_router(map_router)
 app.include_router(call_router)
+app.include_router(community_router)  # REFACTORED: Community groups, polls, events
+app.include_router(safety_router)  # REFACTORED: Area boys, danger zones, alerts
 
 # Payment reminder background job
 @app.on_event("startup")
