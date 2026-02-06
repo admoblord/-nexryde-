@@ -18,7 +18,7 @@ import uuid
 import time
 from datetime import datetime
 
-BASE_URL = "https://call-ready-app.preview.emergentagent.com"
+BASE_URL = "https://nexryde-modular.preview.emergentagent.com"
 
 # Test user IDs - using unique prefixes for cleanup
 TEST_PREFIX = f"TEST_P0_{int(time.time())}"

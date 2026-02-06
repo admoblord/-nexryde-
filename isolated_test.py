@@ -4,7 +4,7 @@ from datetime import datetime
 
 class AdminAPITester:
     def __init__(self):
-        self.base_url = "https://call-ready-app.preview.emergentagent.com/api"
+        self.base_url = "https://nexryde-modular.preview.emergentagent.com/api"
         self.session = requests.Session()
         self.test_results = []
         

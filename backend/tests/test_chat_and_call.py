@@ -13,7 +13,7 @@ import os
 import time
 from datetime import datetime
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://call-ready-app.preview.emergentagent.com')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://nexryde-modular.preview.emergentagent.com')
 
 # Test data constants
 TEST_TRIP_ID = "test-call-trip"

@@ -9,7 +9,7 @@ import json
 import time
 from datetime import datetime, timedelta
 
-BASE_URL = "https://call-ready-app.preview.emergentagent.com/api"
+BASE_URL = "https://nexryde-modular.preview.emergentagent.com/api"
 
 class PriorityFlowTester:
     def __init__(self):

@@ -19,7 +19,7 @@ Separate flow: Bidding system
 3. Driver makes counter-offer →
 4. Rider accepts offer → Trip created
 
-Base URL: https://call-ready-app.preview.emergentagent.com
+Base URL: https://nexryde-modular.preview.emergentagent.com
 """
 import pytest
 import requests
@@ -28,7 +28,7 @@ import time
 import uuid
 from datetime import datetime
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://call-ready-app.preview.emergentagent.com')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://nexryde-modular.preview.emergentagent.com')
 
 # Test data - unique per test run to avoid conflicts
 TEST_RUN_ID = str(uuid.uuid4())[:8]

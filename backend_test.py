@@ -12,7 +12,7 @@ import sys
 from typing import Dict, Any
 
 # Backend URL from frontend environment
-BACKEND_URL = "https://call-ready-app.preview.emergentagent.com/api"
+BACKEND_URL = "https://nexryde-modular.preview.emergentagent.com/api"
 
 class BackendTester:
     def __init__(self):

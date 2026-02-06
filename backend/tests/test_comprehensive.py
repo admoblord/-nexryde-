@@ -15,7 +15,7 @@ USER FEATURES: Preferences -> Emergency contacts -> Favorite drivers -> Family -
 DRIVER FEATURES: Stats -> Earnings -> Tier -> Streaks -> Certification -> Onboarding -> Heatmap -> Subscription
 OTHER: Fare estimate -> Surge check -> Languages -> Schedule ride -> Lost and found -> Trip share -> Leaderboard
 
-Backend URL: https://call-ready-app.preview.emergentagent.com
+Backend URL: https://nexryde-modular.preview.emergentagent.com
 """
 import pytest
 import requests
@@ -24,7 +24,7 @@ import uuid
 import time
 from datetime import datetime, timedelta
 
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://call-ready-app.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://nexryde-modular.preview.emergentagent.com').rstrip('/')
 
 # Test data - unique per test run
 TEST_RUN_ID = str(uuid.uuid4())[:8]
