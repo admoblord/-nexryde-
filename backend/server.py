@@ -1172,10 +1172,17 @@ def calculate_behavior_score_change(event_type: str) -> float:
 
 # ==================== TRIPS (REFACTORED TO routers/trips.py) ====================
 
-# ==================== SOS & SAFETY ENDPOINTS ====================
+# ==================== SOS & SAFETY (REFACTORED TO routers/support.py) ====================
+# ==================== FAMILY (REFACTORED TO routers/support.py) ====================
+# ==================== TRIP SHARING (REFACTORED TO routers/support.py) ====================
+# ==================== FRAUD DETECTION (REFACTORED TO routers/support.py) ====================
+# ==================== AUDIO/INSURANCE/TRACKING (REFACTORED TO routers/support.py) ====================
+# ==================== RIDER PREFERENCES (REFACTORED TO routers/support.py) ====================
+# ==================== IN-APP MESSAGING (REFACTORED TO routers/support.py) ====================
+# ==================== LOST & FOUND (REFACTORED TO routers/support.py) ====================
+# ==================== SMART MATCHING (REFACTORED TO routers/support.py) ====================
 
-@api_router.post("/sos/trigger")
-async def trigger_sos(request: SOSRequest):
+# ==================== HEALTH CHECK ====================
     """Trigger SOS alert - ENHANCED with real SMS notifications"""
     trip = await db.trips.find_one({"id": request.trip_id})
     if not trip:
