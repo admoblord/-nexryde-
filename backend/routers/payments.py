@@ -37,6 +37,10 @@ class DriverTierUpgradeRequest(BaseModel):
     interior_photo: str
     exterior_photo: str
 
+class GracePeriodRequest(BaseModel):
+    reason: str
+    days_requested: int = 3
+
 
 # Tier config
 TIER_CONFIG = {
