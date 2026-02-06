@@ -2411,61 +2411,7 @@ async def trigger_family_safety_alert(family_id: str, member_id: str, location_l
     
     return {"message": "Safety alert sent to all family members", "notified_count": len(family["members"]) - 1}
 
-# ==================== DRIVER CERTIFICATION LEVELS ====================
-
-@api_router.get("/drivers/{user_id}/certification")
-async def get_driver_certification(user_id: str):
-    """Get driver's certification level and progress"""
-    user = await db.users.find_one({"id": user_id})
-    if not user or user.get("role") != "driver":
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    
-    # Calculate metrics
-    total_trips = user.get("total_trips", 0)
-    rating = user.get("rating", 5.0)
-    created_at = user.get("created_at", datetime.utcnow())
-    months_active = (datetime.utcnow() - created_at).days // 30
-    
-    # Determine current level
-    current_level = "bronze"
-    for level, requirements in DRIVER_CERTIFICATION_LEVELS.items():
-        if (total_trips >= requirements["min_trips"] and 
-            rating >= requirements["min_rating"] and 
-            months_active >= requirements["min_months"]):
-            current_level = level
-    
-    level_info = DRIVER_CERTIFICATION_LEVELS[current_level]
-    
-    # Calculate progress to next level
-    next_level = None
-    progress = {}
-    levels_order = ["bronze", "silver", "gold", "platinum"]
-    current_index = levels_order.index(current_level)
-    
-    if current_index < len(levels_order) - 1:
-        next_level = levels_order[current_index + 1]
-        next_req = DRIVER_CERTIFICATION_LEVELS[next_level]
-        progress = {
-            "trips": {"current": total_trips, "required": next_req["min_trips"], "percent": min(100, (total_trips / next_req["min_trips"]) * 100)},
-            "rating": {"current": rating, "required": next_req["min_rating"], "percent": min(100, (rating / next_req["min_rating"]) * 100)},
-            "months": {"current": months_active, "required": next_req["min_months"], "percent": min(100, (months_active / next_req["min_months"]) * 100)}
-        }
-    
-    return {
-        "current_level": current_level,
-        "level_name": level_info["name"],
-        "badge_color": level_info["badge_color"],
-        "perks": level_info["perks"],
-        "next_level": next_level,
-        "progress_to_next": progress,
-        "stats": {
-            "total_trips": total_trips,
-            "rating": rating,
-            "months_active": months_active
-        }
-    }
+# ==================== DRIVER CERTIFICATION (REFACTORED TO routers/gamification.py) ====================
 
 # ==================== WOMEN-ONLY MODE (REFACTORED TO routers/users.py) ====================
 
