@@ -87,14 +87,13 @@ class RideRequestTester:
             if all_success:
                 key_findings = [
                     f"Trip created successfully with ID: {self.trip_id}",
-                    f"Status: {data.get('trip', {}).get('status')}",
-                    f"Rider ID: {data.get('trip', {}).get('rider_id')}",
-                    f"Pickup: {data.get('trip', {}).get('pickup')}",
-                    f"Destination: {data.get('trip', {}).get('destination')}",
-                    f"Recommended fare: ₦{data.get('trip', {}).get('recommended_fare')}",
-                    f"Offered fare: ₦{data.get('trip', {}).get('offered_fare')}",
-                    f"Vehicle type: {data.get('trip', {}).get('vehicle_type')}",
-                    f"Trip type: {data.get('trip', {}).get('trip_type')}"
+                    f"Success: {data.get('success')}",
+                    f"Recommended fare: ₦{data.get('recommended_fare')}",
+                    f"Offered fare: ₦{data.get('offered_fare')}",
+                    f"Difference: ₦{data.get('difference')}",
+                    f"Difference percent: {data.get('difference_percent')}%",
+                    f"Drivers notified: {data.get('drivers_notified')}",
+                    f"Message: {data.get('message')}"
                 ]
             
             self.log_result(
