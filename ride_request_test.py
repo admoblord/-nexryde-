@@ -52,7 +52,8 @@ class RideRequestTester:
             trip_data = {
                 "rider_id": "rider-test-001",
                 "pickup": "Victoria Island, Lagos",
-                "destination": "Ikeja GRA, Lagos", 
+                "destination": "Ikeja GRA, Lagos",
+                "recommended_fare": 4000.0,
                 "offered_fare": 4500,
                 "vehicle_type": "economy",
                 "trip_type": "intra"
