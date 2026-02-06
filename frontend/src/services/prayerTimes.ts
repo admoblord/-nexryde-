@@ -298,11 +298,21 @@ export function usePrayerTimes() {
   });
   const isPraying = !!currentPrayer && (now - currentPrayer.timestamp) < 30 * 60 * 1000; // within 30 min
 
+  const PRAYER_NAMES: Record<string, { arabic: string; hausa: string }> = {
+    'Fajr': { arabic: 'الفجر', hausa: 'Sallar Asuba' },
+    'Dhuhr': { arabic: 'الظهر', hausa: 'Sallar Azahar' },
+    'Asr': { arabic: 'العصر', hausa: 'Sallar La\'asar' },
+    'Maghrib': { arabic: 'المغرب', hausa: 'Sallar Magariba' },
+    'Isha': { arabic: 'العشاء', hausa: 'Sallar Isha\'i' },
+  };
+
   const formattedPrayerTimes = prayerTimes.length > 0 ? {
     location: location ? `${location.lat.toFixed(2)}°N, ${location.lng.toFixed(2)}°E` : 'Lagos, Nigeria',
     date: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
     prayers: prayerTimes.map(p => ({
       ...p,
+      arabicName: PRAYER_NAMES[p.name]?.arabic || '',
+      hausaName: PRAYER_NAMES[p.name]?.hausa || '',
       isActive: currentPrayer?.name === p.name && isPraying,
       isPassed: p.timestamp < now,
     })),
