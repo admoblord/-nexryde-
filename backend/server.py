@@ -8027,59 +8027,55 @@ async def estimate_fare_google(request: GoogleFareRequest):
         else:
             duration_text = element['duration']['text']
         
-        # Calculate fare based on trip type and vehicle category
-        # MARKET-COMPETITIVE RATES (Based on Bolt, inDrive, Lag Ride Analysis)
+        # Detect city from pickup location
+        pickup_lower = request.pickup.lower()
+        city = "lagos"  # Default to Lagos
+        if "abuja" in pickup_lower:
+            city = "abuja"
+        elif "port harcourt" in pickup_lower or "portharcourt" in pickup_lower:
+            city = "port_harcourt"
+        elif "lagos" in pickup_lower:
+            city = "lagos"
         
-        if request.trip_type == "inter":
-            # INTER-CITY: Between cities (e.g., Lagos to Ibadan)
-            # Formula: Base + (distance × per_km) + (hours × per_hour)
-            if request.vehicle_type == "economy":
-                base_fare = 1000
-                distance_rate = 400  # per km
-                time_rate = 5000  # per hour (₦83.33/min)
-            elif request.vehicle_type == "comfort":
-                base_fare = 1200
-                distance_rate = 500  # per km
-                time_rate = 6000  # per hour (₦100/min)
-            elif request.vehicle_type == "xl":
-                base_fare = 1100
-                distance_rate = 450  # per km
-                time_rate = 5500  # per hour (₦91.67/min)
-            else:  # premium
-                base_fare = 1500
-                distance_rate = 600  # per km
-                time_rate = 7000  # per hour
-            
-            distance_fee = distance_km * distance_rate
-            time_fee = (duration_minutes / 60) * time_rate
-            
-            total_fare = base_fare + distance_fee + time_fee
-        else:
-            # INTRA-CITY: Within city (e.g., Lagos only)
-            # Formula: Base + (distance × per_km) + (minutes × per_min)
-            # BASED ON MARKET ANALYSIS: Competitive with Bolt/inDrive/Lag Ride
-            
-            if request.vehicle_type == "economy":
-                base_fare = 400
-                distance_rate = 400  # per km
-                time_rate = 80  # per minute
-            elif request.vehicle_type == "comfort":
-                base_fare = 600
-                distance_rate = 500  # per km
-                time_rate = 100  # per minute
-            elif request.vehicle_type == "xl":
-                base_fare = 500
-                distance_rate = 450  # per km
-                time_rate = 90  # per minute
-            else:  # premium
-                base_fare = 800
-                distance_rate = 600  # per km
-                time_rate = 120  # per minute
-            
-            distance_fee = distance_km * distance_rate
-            time_fee = duration_minutes * time_rate
-            
-            total_fare = base_fare + distance_fee + time_fee
+        # Get pricing configuration for detected city and vehicle type
+        if city not in FARE_CONFIG:
+            city = "lagos"  # Fallback to Lagos if city not found
+        
+        if request.vehicle_type not in FARE_CONFIG[city]:
+            raise HTTPException(status_code=400, detail=f"Invalid vehicle type: {request.vehicle_type}")
+        
+        # Get the pricing rates from FARE_CONFIG
+        pricing = FARE_CONFIG[city][request.vehicle_type]
+        base_fare = pricing["base_fare"]
+        per_km = pricing["per_km"]
+        per_min = pricing["per_min"]
+        booking_fee = pricing["booking_fee"]
+        min_fare = pricing["min_fare"]
+        
+        # Calculate fare using YOUR SYSTEM
+        # Formula: Base + (distance × per_km) + (duration × per_min) + booking_fee
+        distance_fee = distance_km * per_km
+        time_fee = duration_minutes * per_min
+        
+        total_fare = base_fare + distance_fee + time_fee + booking_fee
+        
+        # Apply minimum fare if configured
+        if min_fare > 0 and total_fare < min_fare:
+            total_fare = min_fare
+        
+        # Get polyline for map display
+        polyline = ""
+        try:
+            directions = gmaps.directions(
+                origin=request.pickup,
+                destination=request.destination,
+                mode="driving",
+                departure_time="now"
+            )
+            if directions and len(directions) > 0:
+                polyline = directions[0]['overview_polyline']['points']
+        except Exception as e:
+            logger.warning(f"Could not get polyline: {str(e)}")
         
         return {
             "pickup": request.pickup,
@@ -8087,18 +8083,21 @@ async def estimate_fare_google(request: GoogleFareRequest):
             "distance": distance_text,
             "distance_km": round(distance_km, 2),
             "duration": duration_text,
-            "duration_minutes": round(duration_minutes, 1),
+            "duration_min": round(duration_minutes, 1),
             "base_fare": base_fare,
             "distance_fee": round(distance_fee, 2),
             "time_fee": round(time_fee, 2),
-            "distance_rate": distance_rate,
-            "time_rate": time_rate,
+            "booking_fee": booking_fee,
+            "per_km_rate": per_km,
+            "per_min_rate": per_min,
             "total_fare": round(total_fare, 2),
             "vehicle_type": request.vehicle_type,
             "trip_type": request.trip_type,
+            "city": city,
+            "polyline": polyline,
             "traffic_considered": 'duration_in_traffic' in element,
             "source": "Google Maps API",
-            "pricing_model": "Market-Competitive (Bolt/inDrive/Lag Ride Analysis)"
+            "pricing_model": f"NEXRYDE {city.upper()} - {request.vehicle_type.upper()}"
         }
         
     except HTTPException:
