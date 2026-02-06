@@ -537,6 +537,82 @@ const styles = StyleSheet.create({
     color: '#FFF',
     letterSpacing: 0.5,
   },
+  // Ride Request Popup Styles
+  rideOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
+  },
+  ridePopup: {
+    backgroundColor: '#FFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    padding: 20, paddingBottom: 40,
+  },
+  rideCountdownBar: {
+    height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, marginBottom: 6, overflow: 'hidden',
+  },
+  rideCountdownFill: {
+    height: 4, backgroundColor: COLORS.primary, borderRadius: 2,
+  },
+  rideCountdownText: {
+    fontSize: 12, fontWeight: '700', color: '#94A3B8', textAlign: 'center', marginBottom: 12,
+  },
+  rideHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 16,
+  },
+  rideHeaderText: {
+    fontSize: 22, fontWeight: '900', color: '#0F172A',
+  },
+  rideFareBox: {
+    backgroundColor: '#F0FDF4', borderRadius: 16, padding: 16, alignItems: 'center', marginBottom: 16,
+  },
+  rideFareLabel: {
+    fontSize: 13, fontWeight: '600', color: '#64748B',
+  },
+  rideFareAmount: {
+    fontSize: 32, fontWeight: '900', color: COLORS.accentGreen, marginTop: 4,
+  },
+  rideRouteBox: {
+    backgroundColor: '#F8FAFC', borderRadius: 16, padding: 16, marginBottom: 16,
+  },
+  rideRouteItem: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+  },
+  rideRouteDot: {
+    width: 12, height: 12, borderRadius: 6, marginTop: 4,
+  },
+  rideRouteLabel: {
+    fontSize: 10, fontWeight: '800', color: '#94A3B8', letterSpacing: 1,
+  },
+  rideRouteText: {
+    fontSize: 15, fontWeight: '700', color: '#0F172A', marginTop: 2,
+  },
+  rideRouteLine: {
+    width: 2, height: 20, backgroundColor: '#CBD5E1', marginLeft: 5, marginVertical: 4,
+  },
+  rideDetailsRow: {
+    flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20,
+  },
+  rideDetail: {
+    alignItems: 'center', gap: 4,
+  },
+  rideDetailText: {
+    fontSize: 12, fontWeight: '700', color: '#64748B',
+  },
+  rideActions: {
+    flexDirection: 'row', gap: 12,
+  },
+  rideDeclineBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#FEF2F2', paddingVertical: 16, borderRadius: 16, borderWidth: 2, borderColor: '#FECACA',
+  },
+  rideDeclineText: {
+    fontSize: 17, fontWeight: '800', color: '#EF4444',
+  },
+  rideAcceptBtn: {
+    flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: COLORS.accentGreen, paddingVertical: 16, borderRadius: 16,
+  },
+  rideAcceptText: {
+    fontSize: 17, fontWeight: '900', color: '#FFF',
+  },
   profileButton: {
     width: 48,
     height: 48,
