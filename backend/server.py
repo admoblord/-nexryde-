@@ -4456,11 +4456,8 @@ async def _driver_assistant_fallback(user_id: str, question: str, driver_stats, 
 
 # ==================== SMART MODE AI ENDPOINTS ====================
 
-# Initialize OpenAI client
-openai_client = None
-if OPENAI_API_KEY:
-    openai_client = OpenAI(api_key=OPENAI_API_KEY)
-    logger.info("✅ OpenAI client initialized for Smart Mode")
+# All AI features now use Emergent LLM (emergentintegrations library)
+# No direct OpenAI client needed - Emergent handles the routing
 
 class SmartModeSettings(BaseModel):
     enabled: bool = True
