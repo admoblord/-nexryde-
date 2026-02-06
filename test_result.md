@@ -1402,7 +1402,19 @@ agent_communication:
     - agent: "testing"
     - message: "✅ RIDE REQUEST FLOW TESTING COMPLETE: Comprehensive testing of the complete rider-to-driver matching flow has been completed successfully. All 5 critical endpoints tested and working perfectly: 1) POST /api/trips/create-with-custom-price (trip creation with custom pricing), 2) GET /api/trips/pending (driver checks pending rides), 3) GET /api/trips/{trip_id}/status (status before acceptance), 4) PUT /api/trips/{trip_id}/accept (driver accepts ride), 5) GET /api/trips/{trip_id}/status (status after acceptance). Fixed minor backend issues: added missing 'time' import and updated trip status filter in accept endpoint. Created comprehensive ride_request_test.py for future testing. Complete ride request flow is operational and ready for production use."
     - agent: "main"
-    - message: "🔧 NEW SESSION: Implemented Community Spice features - Polls, Pinned Messages, Events, and seeded engaging content. New backend endpoints: POST/GET /api/community/groups/{group_id}/polls, POST /api/community/polls/{poll_id}/vote, POST /api/community/messages/{message_id}/pin, GET /api/community/groups/{group_id}/pinned, POST/GET /api/community/events, POST /api/community/events/{event_id}/rsvp. Frontend updated with tabs for Groups/Events, chat tabs for Chat/Polls/Pinned, poll creator modal, event cards with RSVP. Seeded 5 polls, 5 events, and 15+ engaging messages across groups. Need comprehensive backend testing of all new endpoints."
+    - message: "🔧 REFACTORING: Extracted community & safety endpoints from monolithic server.py into separate router modules. Created database.py for shared DB connection, routers/community.py (521 lines - groups, messages, polls, pinned, events, seed), routers/safety.py (174 lines - danger zones, reports, alerts, seed). Server.py reduced from 10,142 to 9,717 lines. All endpoints verified working via curl."
+
+  - task: "Backend Refactoring - Community & Safety Routers"
+    implemented: true
+    working: true
+    file: "routers/community.py, routers/safety.py, database.py"
+    stuck_count: 0
+    priority: "medium"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Extracted community (groups, messages, polls, pinned, events) and safety (danger zones, reports, alerts) into separate router modules. All endpoints manually tested and working. Server.py reduced by ~640 lines."
 
   - task: "Community Polls System"
     implemented: true
