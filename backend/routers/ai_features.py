@@ -465,9 +465,12 @@ async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float
         avg_trip_time = sum([t.get("duration_min", 0) for t in recent_trips]) / max(total_trips, 1)
         avg_earnings_per_trip = driver_earnings.get("today", 0) / max(total_trips, 1) if total_trips > 0 else 0
         
+        # Detect driver's city
+        loc = detect_city(lat, lng, city)
+        
         # Build context for AI
         coaching_context = f"""
-You are an expert AI Coach for NEXRYDE drivers in Nigeria. Analyze this driver's performance and provide 4-5 personalized, actionable suggestions to increase earnings and improve service.
+You are an expert AI Coach for NEXRYDE drivers in {loc["city"]}, {loc["state"]} State, Nigeria. Analyze this driver's performance and provide 4-5 personalized, actionable suggestions to increase earnings and improve service.
 
 DRIVER STATISTICS:
 - Current Rating: {driver_rating}/5.0
