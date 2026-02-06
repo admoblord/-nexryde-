@@ -99,18 +99,20 @@ Provide tips and suggestions specific to {city}. Reference local roads, areas, a
 Be encouraging and practical. Keep responses under 100 words."""
 
 @ai_router.get("/ai/rider-assistant")
-async def rider_assistant(user_id: str, question: str):
+async def rider_assistant(user_id: str, question: str, lat: float = None, lng: float = None, city: str = None):
     """
-    AI Ride Assistant for Riders - Powered by GPT
+    AI Ride Assistant for Riders - Powered by GPT, Location-aware
     """
     try:
+        loc = detect_city(lat, lng, city)
+        city_name, state = loc["city"], loc["state"]
+        
         # Get user's current trip context
         current_trip = await db.trips.find_one({
             "rider_id": user_id,
             "status": {"$in": ["pending", "accepted", "ongoing"]}
         })
         
-        # Build context
         context = ""
         if current_trip:
             context = f"\nRider's current trip: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
@@ -121,12 +123,13 @@ async def rider_assistant(user_id: str, question: str):
         else:
             context = "\nRider has no active trip currently."
         
-        # Use LLM for response
+        prompt = RIDER_ASSISTANT_PROMPT.format(city=city_name, state=state)
+        
         if EMERGENT_LLM_KEY:
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"rider-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=RIDER_ASSISTANT_PROMPT + context
+                system_message=prompt + context
             ).with_model("openai", "gpt-4o")
             
             user_message = UserMessage(text=question)
