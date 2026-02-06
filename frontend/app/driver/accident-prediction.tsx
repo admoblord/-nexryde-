@@ -57,8 +57,8 @@ export default function AccidentPredictionScreen() {
         { method: 'POST' }
       );
       const riskJSON = await riskRes.json();
-      if (riskJSON.success && riskJSON.ai_analysis) {
-        setRiskData(riskJSON.ai_analysis);
+      if (riskJSON.success && (riskJSON.ai_analysis || riskJSON.risk_analysis)) {
+        setRiskData(riskJSON.ai_analysis || riskJSON.risk_analysis);
       }
 
       // Fetch high-risk areas
