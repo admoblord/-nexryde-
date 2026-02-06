@@ -243,7 +243,7 @@ class TestCallEndpoint:
             assert response.status_code in [403, 404], f"Expected 403 or 404, got {response.status_code}"
     
     def test_03_call_pending_trip_no_driver(self):
-        """Test that calling on pending trip with no driver returns 404 (no driver assigned)"""
+        """Test that calling on pending trip with no driver returns 403 (not an active trip)"""
         rider_id = create_test_rider()
         trip_id = create_test_trip(rider_id)
         
@@ -257,14 +257,15 @@ class TestCallEndpoint:
         
         response = requests.post(f"{BASE_URL}/api/trip/{trip_id}/call", json=call_data)
         
-        # Should return 404 because no driver is assigned
-        # The endpoint checks: if caller_role == "rider" and no driver_id -> 404 "No driver assigned yet"
-        assert response.status_code == 404, f"Expected 404 for pending trip with no driver, got {response.status_code}: {response.text}"
+        # The endpoint checks status first before checking for driver assignment
+        # Status "pending_driver_offers" is NOT in ["accepted", "pickup", "ongoing", "pending"]
+        # So it returns 403 "Calls only allowed during active trips"
+        assert response.status_code == 403, f"Expected 403 for pending_driver_offers status, got {response.status_code}: {response.text}"
         
         detail = response.json().get("detail", "")
-        assert "No driver assigned" in detail or "not found" in detail.lower(), f"Error should mention driver not assigned, got: {detail}"
+        assert "active trips" in detail.lower(), f"Error should mention active trips, got: {detail}"
         
-        print(f"✅ PASS: Pending trip call returns 404 (no driver assigned)")
+        print(f"✅ PASS: Pending trip (pending_driver_offers) call returns 403 (not an active trip)")
         
         # Cleanup
         requests.put(f"{BASE_URL}/api/trips/{trip_id}/cancel?cancelled_by={rider_id}")
