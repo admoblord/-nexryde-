@@ -1,5 +1,5 @@
-"""Payments Router - Wallet, subscriptions, fare, tiers, promos for NEXRYDE."""
-from fastapi import APIRouter, HTTPException, Query
+"""Payments Router - Wallet, subscriptions, fare, tiers, promos, receipts for NEXRYDE."""
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -7,7 +7,6 @@ from uuid import uuid4
 import logging
 import os
 import uuid
-import random
 import math
 
 from database import db
@@ -15,39 +14,25 @@ from database import db
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
 
-# Import shared functions (set at startup)
-_get_directions_fn = None
-_calculate_fare_fn = None
-_calculate_distance_fn = None
+# Tier config
+TIER_CONFIG = {
+    "basic": {"name": "Basic", "min_trips": 0, "commission": 0.15, "benefits": ["Standard rides"]},
+    "silver": {"name": "Silver", "min_trips": 50, "commission": 0.12, "benefits": ["Priority dispatch", "5% bonus"]},
+    "gold": {"name": "Gold", "min_trips": 200, "commission": 0.10, "benefits": ["Priority dispatch", "10% bonus", "Insurance"]},
+    "platinum": {"name": "Platinum", "min_trips": 500, "commission": 0.08, "benefits": ["VIP dispatch", "15% bonus", "Full Insurance", "Dedicated support"]},
+    "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "benefits": ["VIP everything", "20% bonus", "Full Insurance", "Priority support", "Free subscription"]},
+}
 
-def set_payments_shared_functions(get_directions, calc_fare, calc_distance):
-    global _get_directions_fn, _calculate_fare_fn, _calculate_distance_fn
-    _get_directions_fn = get_directions
-    _calculate_fare_fn = calc_fare
-    _calculate_distance_fn = calc_distance
+# Fare config
+FARE_CONFIG = {
+    "standard": {"base": 300, "per_km": 100, "per_min": 20, "min_fare": 700},
+    "economy": {"base": 300, "per_km": 100, "per_min": 20, "min_fare": 700},
+    "comfort": {"base": 500, "per_km": 150, "per_min": 30, "min_fare": 1000},
+    "premium": {"base": 800, "per_km": 200, "per_min": 40, "min_fare": 1500},
+    "xl": {"base": 600, "per_km": 170, "per_min": 35, "min_fare": 1200},
+}
 
-async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng):
-    if _get_directions_fn:
-        return await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
-    return None
-
-def calculate_fare(dist, dur, traffic, svc="economy"):
-    if _calculate_fare_fn:
-        return _calculate_fare_fn(dist, dur, traffic, svc)
-    base = max(700, dist * 150)
-    return {"base_fare": 300, "distance_fee": dist * 100, "time_fee": dur * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
-
-def calculate_distance_haversine(lat1, lon1, lat2, lon2):
-    if _calculate_distance_fn:
-        return _calculate_distance_fn(lat1, lon1, lat2, lon2)
-    from math import radians, sin, cos, sqrt, atan2
-    R = 6371
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
-    return R * 2 * atan2(sqrt(a), sqrt(1-a))
-
-
+# ==================== SUBSCRIPTION ENDPOINTS ====================
 @payments_router.get("/subscriptions/config")
 async def get_subscription_config():
     """Get subscription configuration including bank details"""
@@ -318,6 +303,7 @@ async def request_grace_period(driver_id: str, request: GracePeriodRequest):
     }
 
 
+# ==================== FARE ESTIMATE ====================
 @payments_router.post("/fare/estimate")
 async def estimate_fare(request: FareEstimateRequest):
     route_data = await get_directions_from_google(
@@ -387,166 +373,8 @@ async def estimate_fare(request: FareEstimateRequest):
     }
 
 
-# ==================== TRIPS (REFACTORED TO routers/trips.py) ====================
 
-# ==================== SOS & SAFETY ENDPOINTS ====================
-
-@payments_router.post("/sos/trigger")
-async def trigger_sos(request: SOSRequest):
-    """Trigger SOS alert - ENHANCED with real SMS notifications"""
-    trip = await db.trips.find_one({"id": request.trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Determine who triggered (rider or driver)
-    user_id = trip["rider_id"]  # Default to rider
-    user_role = "rider"
-    
-    # Get user's emergency contacts
-    user = await db.users.find_one({"id": user_id})
-    emergency_contacts = user.get("emergency_contacts", []) if user else []
-    user_name = user.get("name", "A user") if user else "A user"
-    
-    # Create SOS alert
-    sos = SOSAlert(
-        trip_id=request.trip_id,
-        user_id=user_id,
-        user_role=user_role,
-        location={"lat": request.location_lat, "lng": request.location_lng},
-        auto_triggered=request.auto_triggered,
-        emergency_contacts_notified=[c["phone"] for c in emergency_contacts],
-        admin_notified=True
-    )
-    
-    await db.sos_alerts.insert_one(sos.dict())
-    
-    # Update trip
-    await db.trips.update_one(
-        {"id": request.trip_id},
-        {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.utcnow()}}
-    )
-    
-    # ENHANCED: Send REAL SMS to emergency contacts via Termii
-    contacts_successfully_notified = 0
-    if TERMII_API_KEY and emergency_contacts:
-        # Create Google Maps link for location
-        location_link = f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-        
-        async with httpx.AsyncClient() as http_client:
-            for contact in emergency_contacts:
-                try:
-                    # Format phone number (remove + for Termii)
-                    contact_phone = contact["phone"].lstrip('+')
-                    
-                    # Craft urgent SOS message
-                    sms_text = (
-                        f"🚨 EMERGENCY! {user_name} triggered SOS on NexRyde! "
-                        f"Location: {location_link} "
-                        f"Trip ID: {request.trip_id}. Please check on them immediately!"
-                    )
-                    
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": contact_phone,
-                        "from": TERMII_FROM_ID or "NexRyde",
-                        "channel": "dnd",
-                        "type": "plain",
-                        "sms": sms_text
-                    }
-                    
-                    response = await http_client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload,
-                        timeout=10.0
-                    )
-                    
-                    if response.status_code == 200:
-                        contacts_successfully_notified += 1
-                        logger.info(f"✅ SOS SMS sent to {contact['name']} ({contact_phone})")
-                    else:
-                        logger.error(f"❌ Failed to send SOS SMS to {contact_phone}: {response.text}")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Error sending SOS SMS to {contact.get('name', 'contact')}: {e}")
-    
-    # Log critical alert
-    logger.critical(f"🚨 SOS TRIGGERED for trip {request.trip_id} by {user_name} at {request.location_lat}, {request.location_lng}")
-    logger.critical(f"📱 Emergency SMS sent to {contacts_successfully_notified}/{len(emergency_contacts)} contacts")
-    
-    return {
-        "success": True,
-        "message": "SOS alert activated! Emergency contacts notified.",
-        "sos_id": sos.id,
-        "contacts_notified": contacts_successfully_notified,
-        "total_contacts": len(emergency_contacts),
-        "support_notified": True,
-        "location_link": f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-    }
-
-@payments_router.post("/sos/{sos_id}/resolve")
-async def resolve_sos(sos_id: str, resolution: str = "resolved"):
-    """Resolve SOS alert"""
-    await db.sos_alerts.update_one(
-        {"id": sos_id},
-        {"$set": {"status": resolution, "resolved_at": datetime.utcnow()}}
-    )
-    return {"message": "SOS resolved"}
-
-@payments_router.get("/sos/trip/{trip_id}")
-async def get_trip_sos(trip_id: str):
-    """Get SOS alerts for a trip"""
-    alerts = await db.sos_alerts.find({"trip_id": trip_id}).to_list(10)
-    for alert in alerts:
-        alert["_id"] = str(alert["_id"])
-    return {"alerts": alerts}
-
-@payments_router.post("/safety/respond")
-async def respond_to_safety_check(request: SafetyResponseRequest):
-    """Respond to safety check prompt"""
-    await db.safety_checks.update_one(
-        {"id": request.check_id},
-        {"$set": {"rider_response": request.response, "responded_at": datetime.utcnow()}}
-    )
-    
-    if request.response == "need_help":
-        # Auto-trigger SOS
-        check = await db.safety_checks.find_one({"id": request.check_id})
-        if check:
-            # Create SOS alert
-            sos = SOSAlert(
-                trip_id=check["trip_id"],
-                user_id="",  # Will be filled from trip
-                user_role="rider",
-                location=check["location"],
-                auto_triggered=True
-            )
-            await db.sos_alerts.insert_one(sos.dict())
-    
-    return {"message": "Response recorded"}
-
-@payments_router.post("/trips/{trip_id}/risk-alert")
-async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertRequest):
-    """Driver or rider triggers risk alert for suspicious behavior"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    is_driver = user_id == trip.get("driver_id")
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {
-            "risk_alert_by_driver" if is_driver else "risk_alert_by_rider": True,
-            "is_monitored": True
-        }}
-    )
-    
-    # Log the alert for admin review
-    logger.warning(f"RISK ALERT on trip {trip_id} by {'driver' if is_driver else 'rider'}: {request.reason}")
-    
-    return {"message": "Risk alert recorded. Support team notified."}
-
-
+# ==================== WALLET ENDPOINTS ====================
 @payments_router.get("/wallet/{user_id}")
 async def get_wallet_balance(user_id: str):
     """Get user wallet balance"""
@@ -609,6 +437,45 @@ async def topup_wallet_balance(user_id: str, request: dict):
     }
 
 
+# ==================== SURGE PRICING ====================
+def calculate_surge_multiplier(lat: float, lng: float) -> dict:
+    """Calculate surge multiplier based on time, demand, and conditions"""
+    now = datetime.utcnow()
+    hour = now.hour
+    
+    base_multiplier = SURGE_CONFIG["base_multiplier"]
+    surge_reason = []
+    
+    # Check peak hours
+    for period, config in SURGE_CONFIG["peak_hours"].items():
+        if config["start"] <= hour < config["end"]:
+            base_multiplier = max(base_multiplier, config["multiplier"])
+            surge_reason.append(f"{period.title()} rush hour")
+    
+    # Simulate demand-based surge
+    demand_ratio = random.uniform(0.3, 0.9)
+    if demand_ratio > SURGE_CONFIG["high_demand_threshold"]:
+        demand_surge = 1 + (demand_ratio - SURGE_CONFIG["high_demand_threshold"]) * 2
+        if demand_surge > base_multiplier:
+            base_multiplier = demand_surge
+            surge_reason.append("High demand in area")
+    
+    final_multiplier = min(base_multiplier, SURGE_CONFIG["max_multiplier"])
+    
+    return {
+        "multiplier": round(final_multiplier, 2),
+        "is_surge": final_multiplier > 1.0,
+        "reasons": surge_reason if surge_reason else ["Normal pricing"],
+        "expires_in_minutes": 5
+    }
+
+@payments_router.get("/surge/check")
+async def check_surge_pricing(lat: float, lng: float):
+    """Check current surge pricing for a location"""
+    return calculate_surge_multiplier(lat, lng)
+
+
+# ==================== PROMO CODES ====================
 @payments_router.post("/promo/apply")
 async def apply_promo(rider_id: str, code: str):
     """Apply promo code"""
@@ -634,8 +501,8 @@ async def get_referral_code(user_id: str):
 
 # Wallet endpoints moved to line 3144 - removed duplicates
 
-# ==================== TRIP RECEIPTS ====================
 
+# ==================== TRIP RECEIPTS ====================
 @payments_router.get("/trips/{trip_id}/receipt")
 async def get_receipt(trip_id: str):
     """Get trip receipt"""
@@ -656,7 +523,15 @@ async def get_receipt(trip_id: str):
         "date": trip.get("created_at", datetime.utcnow()).isoformat() if isinstance(trip.get("created_at"), datetime) else str(trip.get("created_at", "")),
         "pickup": pickup_address,
         "dropoff": dropoff_address,
+        "fare": trip.get("fare", 0),
+        "payment_method": trip.get("payment_method", "cash"),
+        "status": trip.get("status", "completed"),
+        "distance_km": trip.get("distance_km", 0),
+        "duration_mins": trip.get("duration_mins", 0)
+    }
 
+
+# ==================== DRIVER TIER SYSTEM ====================
 @payments_router.get("/driver/tier/{driver_id}")
 async def get_driver_tier(driver_id: str):
     """Get driver's current tier and requirements"""
@@ -772,6 +647,37 @@ async def get_tier_configuration():
     }
 
 
+# ==================== AUTOMATIC FARE ADJUSTMENT ====================
+def get_time_rate(trip_time: datetime) -> float:
+    """Get the time-based rate for fare adjustment"""
+    hour = trip_time.hour
+    weekday = trip_time.weekday()
+    
+    config = FARE_ADJUSTMENT_CONFIG
+    
+    # Night hours (10pm - 5am)
+    if hour >= config["night_hours"]["start"] or hour < config["night_hours"]["end"]:
+        return config["time_rates"]["night"]
+    
+    # Peak hours
+    peak = config["peak_hours"]
+    if (peak["morning"]["start"] <= hour < peak["morning"]["end"] or
+        peak["evening"]["start"] <= hour < peak["evening"]["end"]):
+        return config["time_rates"]["peak"]
+    
+    # Weekend
+    if weekday >= 5:
+        return config["time_rates"]["weekend"]
+    
+    return config["time_rates"]["normal"]
+
+def get_weather_surcharge(weather_condition: str) -> float:
+    """Get weather surcharge percentage"""
+    surcharges = FARE_ADJUSTMENT_CONFIG["weather_surcharges"]
+    return surcharges.get(weather_condition, 0.0)
+
+@payments_router.post("/fare/calculate-adjustment")
+async def calculate_fare_adjustment(trip_id: str):
     """Calculate automatic fare adjustment at trip end"""
     trip = await db.trips.find_one({"id": trip_id})
     if not trip:
@@ -912,4 +818,58 @@ async def get_fare_breakdown(trip_id: str):
         "final_fare": adjustment.get("final_fare"),
         "calculated_at": adjustment.get("calculated_at")
     }
+
+@payments_router.post("/trips/{trip_id}/track")
+async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate):
+    """Update trip tracking data (speed, location)"""
+    tracking = await db.trip_tracking.find_one({"trip_id": trip_id})
+    
+    speed_log = {
+        "timestamp": update.timestamp.isoformat(),
+        "speed_kmh": update.speed_kmh,
+        "location": {"lat": update.latitude, "lng": update.longitude}
+    }
+    
+    if not tracking:
+        tracking = {
+            "id": str(uuid.uuid4()),
+            "trip_id": trip_id,
+            "speed_logs": [speed_log],
+            "traffic_delays": [],
+            "weather_conditions": [],
+            "route_deviations": [],
+            "stationary_periods": [],
+            "created_at": datetime.utcnow()
+        }
+        await db.trip_tracking.insert_one(tracking)
+    else:
+        # Detect traffic (speed < 10 km/h for extended period)
+        speed_logs = tracking.get("speed_logs", [])
+        if len(speed_logs) >= 5:
+            recent_speeds = [log["speed_kmh"] for log in speed_logs[-5:]]
+            avg_speed = sum(recent_speeds) / len(recent_speeds)
+            
+            if avg_speed < 10 and update.speed_kmh < 10:
+                # Traffic detected
+                traffic_delays = tracking.get("traffic_delays", [])
+                if traffic_delays and not traffic_delays[-1].get("end"):
+                    # Continue existing delay
+                    pass
+                else:
+                    # New delay
+                    traffic_delays.append({
+                        "start": datetime.utcnow().isoformat(),
+                        "location": {"lat": update.latitude, "lng": update.longitude}
+                    })
+                    await db.trip_tracking.update_one(
+                        {"trip_id": trip_id},
+                        {"$set": {"traffic_delays": traffic_delays}}
+                    )
+        
+        await db.trip_tracking.update_one(
+            {"trip_id": trip_id},
+            {"$push": {"speed_logs": speed_log}}
+        )
+    
+    return {"message": "Tracking updated", "trip_id": trip_id}
 
