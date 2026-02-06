@@ -9403,6 +9403,142 @@ async def parse_voice_booking(request: VoiceBookingRequest):
         "recognized": True
     }
 
+# ==================== DRIVER COMMUNITY / GROUP ENDPOINTS ====================
+
+@app.on_event("startup")
+async def seed_community_groups():
+    """Seed default community groups if not already in DB"""
+    count = await db.community_groups.count_documents({})
+    if count == 0:
+        groups = [
+            {"group_id": "general", "name": "General Discussion", "description": "Chat about anything NEXRYDE related", "icon": "chatbubbles", "color": "#3B82F6", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "lagos-drivers", "name": "Lagos Drivers", "description": "For drivers operating in Lagos", "icon": "car", "color": "#22C55E", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "abuja-drivers", "name": "Abuja Drivers", "description": "For drivers operating in Abuja", "icon": "car", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "port-harcourt", "name": "Port Harcourt Drivers", "description": "Rivers State drivers community", "icon": "car", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "kano-drivers", "name": "Kano Drivers", "description": "Northern Nigeria drivers", "icon": "car", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "tips-tricks", "name": "Tips & Tricks", "description": "Share driving tips, hacks and strategies", "icon": "bulb", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "safety-zone", "name": "Safety Zone", "description": "Report dangerous areas and safety concerns", "icon": "shield-checkmark", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "announcements", "name": "NEXRYDE Announcements", "description": "Official updates from the NEXRYDE team", "icon": "megaphone", "color": "#0EA5E9", "members": 0, "is_official": True, "created_at": datetime.utcnow().isoformat()},
+        ]
+        await db.community_groups.insert_many(groups)
+        logger.info(f"Seeded {len(groups)} community groups")
+
+
+@app.get("/api/community/groups")
+async def get_community_groups():
+    """Get all community groups"""
+    try:
+        groups = await db.community_groups.find({}).to_list(length=50)
+        for g in groups:
+            g["_id"] = str(g["_id"])
+            # Get recent message count
+            recent = await db.community_messages.count_documents({
+                "group_id": g["group_id"],
+                "created_at": {"$gte": (datetime.utcnow() - timedelta(hours=24)).isoformat()}
+            })
+            g["recent_messages"] = recent
+        return {"success": True, "groups": groups}
+    except Exception as e:
+        logger.error(f"Get groups error: {str(e)}")
+        return {"success": True, "groups": []}
+
+
+@app.get("/api/community/groups/{group_id}/messages")
+async def get_group_messages(group_id: str, limit: int = 50):
+    """Get messages for a specific group"""
+    try:
+        cursor = db.community_messages.find(
+            {"group_id": group_id}
+        ).sort("created_at", -1).limit(limit)
+        messages = await cursor.to_list(length=limit)
+        messages.reverse()  # Oldest first
+        for m in messages:
+            m["_id"] = str(m["_id"])
+        return {"success": True, "messages": messages, "group_id": group_id}
+    except Exception as e:
+        logger.error(f"Get messages error: {str(e)}")
+        return {"success": True, "messages": [], "group_id": group_id}
+
+
+@app.post("/api/community/groups/{group_id}/messages")
+async def post_group_message(group_id: str, request: dict):
+    """Post a message to a community group"""
+    try:
+        message = {
+            "group_id": group_id,
+            "user_id": request.get("user_id", "anonymous"),
+            "user_name": request.get("user_name", "Anonymous Driver"),
+            "user_role": request.get("user_role", "driver"),
+            "text": request.get("text", ""),
+            "likes": 0,
+            "replies": 0,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        if not message["text"].strip():
+            raise HTTPException(status_code=400, detail="Message cannot be empty")
+        
+        result = await db.community_messages.insert_one(message)
+        message["_id"] = str(result.inserted_id)
+        
+        # Update group member count (track unique users)
+        await db.community_groups.update_one(
+            {"group_id": group_id},
+            {"$addToSet": {"member_ids": request.get("user_id")}}
+        )
+        
+        return {"success": True, "message": message}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Post message error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/community/messages/{message_id}/like")
+async def like_community_message(message_id: str):
+    """Like a community message"""
+    try:
+        from bson import ObjectId
+        await db.community_messages.update_one(
+            {"_id": ObjectId(message_id)},
+            {"$inc": {"likes": 1}}
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/community/messages/{message_id}/reply")
+async def reply_to_community_message(message_id: str, request: dict):
+    """Reply to a community message"""
+    try:
+        from bson import ObjectId
+        reply = {
+            "parent_id": message_id,
+            "group_id": request.get("group_id", "general"),
+            "user_id": request.get("user_id", "anonymous"),
+            "user_name": request.get("user_name", "Anonymous"),
+            "user_role": request.get("user_role", "driver"),
+            "text": request.get("text", ""),
+            "likes": 0,
+            "is_reply": True,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        result = await db.community_messages.insert_one(reply)
+        reply["_id"] = str(result.inserted_id)
+        
+        # Increment reply count on parent
+        await db.community_messages.update_one(
+            {"_id": ObjectId(message_id)},
+            {"$inc": {"replies": 1}}
+        )
+        
+        return {"success": True, "reply": reply}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ==================== AREA BOYS / SAFETY ZONE ENDPOINTS ====================
 
 @app.on_event("startup")
