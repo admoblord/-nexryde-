@@ -4940,10 +4940,9 @@ async def predict_accident_risk(
     """
     try:
         import googlemaps
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
         gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
-        
-        if not openai_client:
-            raise Exception("AI service not available - using fallback")
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
         # Get location name from coordinates
         try:
