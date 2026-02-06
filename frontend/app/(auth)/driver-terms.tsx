@@ -109,7 +109,7 @@ export default function DriverTermsScreen() {
               • Zero commission on rides - keep 100% of your earnings{'\n'}
               • Subscription must be active to accept ride requests{'\n'}
               • Payment proof must be submitted for verification{'\n'}
-              • Pricing increases as platform grows (current: Early phase)
+              • Pricing adjusts periodically as the platform grows (N18K, N20K, N25K)
             </Text>
 
             <Text style={styles.sectionHeader}>3. Driver Requirements</Text>
