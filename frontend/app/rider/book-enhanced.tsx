@@ -17,24 +17,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
+import RideMap from '@/src/components/RideMap';
 import * as Location from 'expo-location';
-
-// Conditionally import MapView only for native platforms - with defensive loading
-let MapView: any = null;
-let Marker: any = null;
-let Polyline: any = null;
-
-// Only load react-native-maps on native platforms
-try {
-  if (Platform.OS !== 'web') {
-    const Maps = require('react-native-maps');
-    MapView = Maps.default;
-    Marker = Maps.Marker;
-    Polyline = Maps.Polyline;
-  }
-} catch (error) {
-  console.log('MapView not available:', error);
-}
 
 const { width } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
