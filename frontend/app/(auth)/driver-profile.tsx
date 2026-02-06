@@ -146,7 +146,7 @@ export default function DriverProfileScreen() {
         
         Alert.alert(
           '🎉 Welcome to NEXRYDE!',
-          '24-hour FREE trial activated! You can accept 3 trips to test the platform.\n\nAfter trial: Subscribe for ₦18,000/month (Early Adopter Price)',
+          '24-hour FREE trial activated! You can accept 3 trips to test the platform.\n\nAfter trial: Subscribe from ₦18,000/month (Introductory Price)',
           [
             {
               text: 'Start Driving',
