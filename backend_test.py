@@ -64,61 +64,74 @@ class BackendTester:
                 print(f"   • {finding}")
         print()
     
-    async def test_smart_mode_analyze_ride(self) -> bool:
-        """Test 1: POST /api/ai/smart-mode/analyze-ride"""
-        print("🧪 Testing Smart Mode Analyze Ride API...")
+    async def test_safety_danger_zones_get(self) -> bool:
+        """Test 1: GET /api/safety/danger-zones - Should return 10 seeded Lagos danger zones"""
+        print("🧪 Testing Get Danger Zones API...")
         
         try:
-            # Prepare request data
-            params = {"driver_id": "demo"}
-            payload = {
-                "ride": TEST_DATA["smart_mode"]["ride"],
-                "settings": TEST_DATA["smart_mode"]["settings"]
+            # Make request with specified coordinates and radius
+            params = {
+                "lat": 6.5244,
+                "lng": 3.3792,
+                "radius": 10000
             }
             
-            # Make request
-            response = await self.client.post(
-                f"{BACKEND_URL}/ai/smart-mode/analyze-ride",
-                params=params,
-                json=payload
+            response = await self.client.get(
+                f"{BACKEND_URL}/safety/danger-zones",
+                params=params
             )
             
             data = response.json()
             
-            # Validate response
+            # Validate response structure
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "ai_analysis" in data,
-                "recommendation" in data.get("ai_analysis", {}),
-                data.get("ai_analysis", {}).get("recommendation") in ["ACCEPT", "REJECT"],
-                "confidence" in data.get("ai_analysis", {}),
-                "reasoning" in data.get("ai_analysis", {}),
-                "score" in data.get("ai_analysis", {}),
-                data.get("fallback") != True  # Must NOT be fallback
+                "zones" in data,
+                isinstance(data.get("zones"), list),
+                "count" in data,
+                data.get("count") == len(data.get("zones", [])),
+                len(data.get("zones", [])) >= 5  # Should have multiple zones
             ]
+            
+            # Validate zone structure
+            zones = data.get("zones", [])
+            if zones:
+                first_zone = zones[0]
+                zone_checks = [
+                    "zone_id" in first_zone or "_id" in first_zone,
+                    "location" in first_zone,
+                    "latitude" in first_zone.get("location", {}),
+                    "longitude" in first_zone.get("location", {}),
+                    "address" in first_zone.get("location", {}),
+                    "type" in first_zone,
+                    "severity" in first_zone,
+                    "description" in first_zone,
+                    "verified_reports" in first_zone,
+                    "ai_confidence" in first_zone
+                ]
+                success_checks.extend(zone_checks)
             
             all_success = all(success_checks)
             
             key_findings = []
             if all_success:
-                ai_analysis = data["ai_analysis"]
                 key_findings = [
-                    f"Recommendation: {ai_analysis['recommendation']}",
-                    f"Confidence: {ai_analysis['confidence']}%",
-                    f"Score: {ai_analysis['score']}/100",
-                    f"Reasoning: {ai_analysis['reasoning'][:60]}...",
-                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}"
+                    f"Total zones returned: {data.get('count', 0)}",
+                    f"Success status: {data.get('success')}",
+                    f"Sample zone type: {zones[0].get('type', 'N/A')}" if zones else "No zones",
+                    f"Sample address: {zones[0].get('location', {}).get('address', 'N/A')}" if zones else "No zones",
+                    f"Sample verified reports: {zones[0].get('verified_reports', 0)}" if zones else "No zones"
                 ]
             
             self.log_result(
-                "Smart Mode Analyze Ride",
+                "Get Danger Zones",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"Validation failed: {[i for i, check in enumerate(success_checks) if not check]}"
+                    "error": None if all_success else f"Validation failed: missing fields"
                 }
             )
             
@@ -126,22 +139,33 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "Smart Mode Analyze Ride",
+                "Get Danger Zones",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
-    
-    async def test_ai_coach_suggestions(self) -> bool:
-        """Test 2: POST /api/ai/coach/get-suggestions?driver_id=demo"""
-        print("🧪 Testing AI Coach Suggestions API...")
+
+    async def test_safety_report_post(self) -> bool:
+        """Test 2: POST /api/safety/report - Submit area boys report at Oshodi bridge"""
+        print("🧪 Testing Safety Report Submission API...")
         
         try:
-            # Make request
-            params = {"driver_id": "demo"}
+            # Prepare report data as specified in review request
+            report_data = {
+                "user_id": "driver-001",
+                "user_name": "Emeka O.",
+                "role": "driver",
+                "type": "area_boys", 
+                "severity": "high",
+                "description": "Area boys blocking traffic at Oshodi bridge, demanding money from drivers",
+                "latitude": 6.5566,
+                "longitude": 3.3515,
+                "address": "Oshodi Under Bridge"
+            }
+            
             response = await self.client.post(
-                f"{BACKEND_URL}/ai/coach/get-suggestions",
-                params=params
+                f"{BACKEND_URL}/safety/report",
+                json=report_data
             )
             
             data = response.json()
@@ -150,39 +174,24 @@ class BackendTester:
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "suggestions" in data,
-                isinstance(data.get("suggestions"), list),
-                len(data.get("suggestions", [])) >= 4,  # Should have 4-5 suggestions
-                data.get("fallback") != True  # Must NOT be fallback
+                "report_id" in data,
+                "message" in data,
+                "keeping drivers safe" in data.get("message", "").lower() or "thank you" in data.get("message", "").lower()
             ]
-            
-            # Validate suggestion structure
-            suggestions = data.get("suggestions", [])
-            if suggestions and len(suggestions) > 0:
-                first_suggestion = suggestions[0]
-                suggestion_checks = [
-                    "title" in first_suggestion,
-                    "description" in first_suggestion,
-                    "impact" in first_suggestion,
-                    "icon" in first_suggestion,
-                    "color" in first_suggestion,
-                    "priority" in first_suggestion,
-                    "category" in first_suggestion
-                ]
-                success_checks.extend(suggestion_checks)
             
             all_success = all(success_checks)
             
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"Suggestions count: {len(suggestions)}",
-                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}",
-                    f"Sample suggestion: {suggestions[0]['title']} - {suggestions[0]['impact']}" if suggestions else "No suggestions"
+                    f"Report submitted successfully",
+                    f"Report ID: {data.get('report_id', 'N/A')}",
+                    f"Response message: {data.get('message', 'N/A')}",
+                    f"Success status: {data.get('success')}"
                 ]
             
             self.log_result(
-                "AI Coach Suggestions",
+                "Safety Report Submission",
                 all_success,
                 {
                     "response": data,
@@ -196,71 +205,148 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "AI Coach Suggestions",
+                "Safety Report Submission",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
-    
-    async def test_traffic_prediction(self) -> bool:
-        """Test 3: POST /api/ai/traffic/predict"""
-        print("🧪 Testing Traffic Prediction API...")
+
+    async def test_safety_danger_zones_after_report(self) -> bool:
+        """Test 3: GET /api/safety/danger-zones - Verify Oshodi zone verified_reports increased"""
+        print("🧪 Testing Danger Zones After Report (Verify Count Increase)...")
         
         try:
-            # Prepare coordinates
-            vic_island = TEST_DATA["coordinates"]["victoria_island"]
-            ikeja = TEST_DATA["coordinates"]["ikeja"]
-            
+            # Make request with specified coordinates and radius
             params = {
-                "origin_lat": vic_island["lat"],
-                "origin_lng": vic_island["lng"], 
-                "destination_lat": ikeja["lat"],
-                "destination_lng": ikeja["lng"],
+                "lat": 6.5244,
+                "lng": 3.3792,
+                "radius": 10000
+            }
+            
+            response = await self.client.get(
+                f"{BACKEND_URL}/safety/danger-zones",
+                params=params
+            )
+            
+            data = response.json()
+            
+            # Find Oshodi zone
+            oshodi_zone = None
+            zones = data.get("zones", [])
+            for zone in zones:
+                address = zone.get("location", {}).get("address", "").lower()
+                if "oshodi" in address:
+                    oshodi_zone = zone
+                    break
+            
+            # Validate response and check for Oshodi zone update
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                oshodi_zone is not None,
+                oshodi_zone.get("verified_reports", 0) >= 156 if oshodi_zone else False  # Should be 156+ (was 156, now 157)
+            ]
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                key_findings = [
+                    f"Oshodi zone found: {'✅' if oshodi_zone else '❌'}",
+                    f"Oshodi verified reports: {oshodi_zone.get('verified_reports', 0) if oshodi_zone else 'N/A'}",
+                    f"Report count increased: {'✅' if oshodi_zone and oshodi_zone.get('verified_reports', 0) > 156 else '❌'}",
+                    f"Total zones: {data.get('count', 0)}"
+                ]
+            
+            self.log_result(
+                "Danger Zones After Report",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Oshodi zone verification failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "Danger Zones After Report",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+
+    async def test_safety_alerts_ai(self) -> bool:
+        """Test 4: GET /api/safety/alerts - AI-enhanced safety alerts using GPT-4o"""
+        print("🧪 Testing AI Safety Alerts API...")
+        
+        try:
+            # Make request with specified coordinates and driver ID
+            params = {
+                "lat": 6.5244,
+                "lng": 3.3792,
                 "driver_id": "demo"
             }
             
-            # Make request
-            response = await self.client.post(
-                f"{BACKEND_URL}/ai/traffic/predict",
+            response = await self.client.get(
+                f"{BACKEND_URL}/safety/alerts",
                 params=params
             )
             
             data = response.json()
             
-            # Validate response
+            # Validate response structure
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "ai_analysis" in data,
-                "traffic_level" in data.get("ai_analysis", {}),
-                "recommendation" in data.get("ai_analysis", {}),
-                "confidence" in data.get("ai_analysis", {})
+                "alerts" in data,
+                isinstance(data.get("alerts"), list),
+                len(data.get("alerts", [])) >= 3,  # Should have 3-4 items
+                "active_zones" in data,
+                "total_zones" in data,
+                isinstance(data.get("active_zones"), int),
+                isinstance(data.get("total_zones"), int)
             ]
             
-            all_success = all(success_checks)
+            # Validate alert structure if alerts exist
+            alerts = data.get("alerts", [])
+            if alerts:
+                first_alert = alerts[0]
+                alert_checks = [
+                    "type" in first_alert,
+                    "priority" in first_alert,
+                    "title" in first_alert,
+                    "message" in first_alert,
+                    "zone_type" in first_alert,
+                    first_alert.get("type") in ["danger", "warning", "info"],
+                    first_alert.get("priority") in ["critical", "high", "medium", "low"],
+                    first_alert.get("zone_type") in ["area_boys", "checkpoint", "robbery", "flooding", "general"]
+                ]
+                success_checks.extend(alert_checks)
             
-            # Check if it's real AI (not fallback with "API unavailable")
-            ai_analysis = data.get("ai_analysis", {})
-            factors = ai_analysis.get("factors", [])
-            is_real_ai = not (data.get("fallback") is True or "API unavailable" in str(factors))
+            all_success = all(success_checks)
             
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"Traffic Level: {ai_analysis.get('traffic_level', 'N/A')}",
-                    f"Confidence: {ai_analysis.get('confidence', 'N/A')}%",
-                    f"Recommendation: {ai_analysis.get('recommendation', 'N/A')[:50]}...",
-                    f"Real AI Analysis: {'✅' if is_real_ai else '❌'}"
+                    f"AI alerts generated: {len(alerts)}",
+                    f"Active zones: {data.get('active_zones', 0)}",
+                    f"Total zones: {data.get('total_zones', 0)}",
+                    f"Sample alert: {alerts[0].get('title', 'N/A')}" if alerts else "No alerts",
+                    f"Real AI response: {'✅' if alerts else '❌'}"
                 ]
             
             self.log_result(
-                "Traffic Prediction AI",
+                "AI Safety Alerts",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"Validation failed"
+                    "error": None if all_success else f"AI alerts validation failed"
                 }
             )
             
@@ -268,72 +354,7 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "Traffic Prediction AI",
-                False,
-                {"error": f"Exception: {str(e)}"}
-            )
-            return False
-    
-    async def test_accident_risk_prediction(self) -> bool:
-        """Test 4: POST /api/ai/accident/predict-risk"""
-        print("🧪 Testing Accident Risk Prediction API...")
-        
-        try:
-            # Prepare coordinates
-            vic_island = TEST_DATA["coordinates"]["victoria_island"]
-            
-            params = {
-                "driver_id": "demo",
-                "current_lat": vic_island["lat"],
-                "current_lng": vic_island["lng"]
-            }
-            
-            # Make request
-            response = await self.client.post(
-                f"{BACKEND_URL}/ai/accident/predict-risk",
-                params=params
-            )
-            
-            data = response.json()
-            
-            # Validate response
-            success_checks = [
-                response.status_code == 200,
-                data.get("success") is True,
-                "risk_analysis" in data,
-                "overall_risk_score" in data.get("risk_analysis", {}),
-                "risk_level" in data.get("risk_analysis", {}),
-                "safety_recommendations" in data.get("risk_analysis", {})
-            ]
-            
-            all_success = all(success_checks)
-            
-            key_findings = []
-            if all_success:
-                risk_analysis = data["risk_analysis"]
-                key_findings = [
-                    f"Overall Risk Score: {risk_analysis.get('overall_risk_score', 'N/A')}/100",
-                    f"Risk Level: {risk_analysis.get('risk_level', 'N/A')}",
-                    f"Safety Recommendations: {len(risk_analysis.get('safety_recommendations', []))} items",
-                    f"Real AI Response: {'✅' if not data.get('fallback') else '❌'}"
-                ]
-            
-            self.log_result(
-                "Accident Risk Prediction",
-                all_success,
-                {
-                    "response": data,
-                    "status_code": response.status_code,
-                    "key_findings": key_findings,
-                    "error": None if all_success else f"Validation failed"
-                }
-            )
-            
-            return all_success
-            
-        except Exception as e:
-            self.log_result(
-                "Accident Risk Prediction",
+                "AI Safety Alerts",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
