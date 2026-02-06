@@ -81,8 +81,10 @@ const ALL_FEATURES = [
 
 export default function ModernDriverHome() {
   const router = useRouter();
+  const { user } = useAppStore();
   const [isOnline, setIsOnline] = useState(false);
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
+  const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -92,7 +94,33 @@ export default function ModernDriverHome() {
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
+    
+    // Fetch driver verification status
+    fetchVerificationStatus();
   }, []);
+  
+  const fetchVerificationStatus = async () => {
+    try {
+      if (!user?.id) return;
+      
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/${user.id}/profile`);
+      if (response.ok) {
+        const profile = await response.json();
+        setVerificationStatus(profile.verification_status || null);
+      }
+    } catch (error) {
+      console.error('Error fetching verification status:', error);
+    }
+  };
+  
+  // Filter features based on verification status
+  const filteredFeatures = ALL_FEATURES.filter(feature => {
+    // Hide "Documents" if driver is already approved
+    if (feature.id === 'documents' && verificationStatus === 'approved') {
+      return false;
+    }
+    return true;
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
