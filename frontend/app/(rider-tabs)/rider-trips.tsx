@@ -17,39 +17,8 @@ export default function RiderTripsScreen() {
   const router = useRouter();
   const { user } = useAppStore();
   
-  // Sample trip data (will come from API later)
-  const [trips, setTrips] = useState([
-    {
-      id: '1',
-      driverId: 'drv-001',
-      date: 'Today, 3:45 PM',
-      from: 'Victoria Island, Lagos',
-      to: 'Lekki Phase 1, Lagos',
-      fare: 2375,
-      status: 'Completed',
-      driver: 'John Doe',
-      vehicle: 'Toyota Camry',
-      plate: 'ABC-123XY',
-      distance: '12.5',
-      duration: '25',
-      isFavorite: false,
-    },
-    {
-      id: '2',
-      driverId: 'drv-002',
-      date: 'Yesterday, 9:20 AM',
-      from: 'Ikeja GRA, Lagos',
-      to: 'Victoria Island, Lagos',
-      fare: 1850,
-      status: 'Completed',
-      driver: 'Jane Smith',
-      vehicle: 'Honda Accord',
-      plate: 'XYZ-789AB',
-      distance: '8.3',
-      duration: '18',
-      isFavorite: false,
-    },
-  ]);
+  // Real trip data from database (empty until user takes trips)
+  const [trips, setTrips] = useState([]);
 
   const handleViewReceipt = (trip: any) => {
     router.push({
