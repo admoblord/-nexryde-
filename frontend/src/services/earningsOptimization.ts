@@ -87,3 +87,25 @@ export class EarningsOptimizationAI {
     };
   }
 }
+
+/**
+ * Fetch AI-powered earnings prediction from backend (uses Emergent LLM Key → GPT-4o)
+ */
+export async function fetchAIEarningsPrediction(driverId: string): Promise<{
+  predicted_daily: number; predicted_weekly: number; recommendations: string[]; powered_by: string;
+} | null> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const response = await fetch(`${BACKEND_URL}/api/ai/earnings-predictor/${driverId}`);
+    const data = await response.json();
+    return data.success ? {
+      predicted_daily: data.predicted_daily || 0,
+      predicted_weekly: data.predicted_weekly || 0,
+      recommendations: data.recommendations || [],
+      powered_by: data.powered_by || 'gpt-4o',
+    } : null;
+  } catch (error) {
+    console.error('AI earnings fetch failed:', error);
+    return null;
+  }
+}
