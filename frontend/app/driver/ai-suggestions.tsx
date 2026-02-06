@@ -1,20 +1,66 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAppStore } from '@/src/store/appStore';
 
-export default function AIsuggestions() {
+export default function AISuggestions() {
   const router = useRouter();
+  const { user } = useAppStore();
   
-  const suggestions = [
-    { icon: 'time', color: '#FF6B6B', title: 'Drive during Peak Hours', desc: '7-9 AM & 5-7 PM for 40% more earnings', impact: '+₦12,000/week' },
-    { icon: 'location', color: '#4ECDC4', title: 'Hot Zone Alert', desc: 'Victoria Island has 2x demand right now', impact: '+₦8,000/day' },
-    { icon: 'flash', color: '#FFD93D', title: 'Accept Rate Boost', desc: 'Increase from 75% to 90% for bonuses', impact: '+₦5,000/week' },
-    { icon: 'car', color: '#6C5CE7', title: 'Vehicle Maintenance', desc: 'Oil change due in 500km', impact: 'Prevent ₦50,000 damage' },
-  ];
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    loadSuggestions();
+  }, []);
+
+  const loadSuggestions = async () => {
+    try {
+      if (!user?.id) return;
+      
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/ai/coach/get-suggestions`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ driver_id: user.id }),
+        }
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.suggestions) {
+          setSuggestions(data.suggestions);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load AI suggestions:', error);
+      // Fallback suggestions
+      setSuggestions([
+        { 
+          icon: 'time', 
+          color: '#FF6B6B', 
+          title: 'Drive during Peak Hours', 
+          description: '7-9 AM & 5-7 PM for 40% more earnings', 
+          impact: '+₦12,000/week',
+          priority: 'high'
+        },
+      ]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    loadSuggestions();
+  };
 
   return (
     <View style={styles.container}>
