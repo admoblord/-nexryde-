@@ -9,7 +9,7 @@ import json
 from typing import Dict, Any
 
 # Backend URL from frontend env
-BACKEND_URL = "https://intercity-pricing.preview.emergentagent.com/api"
+BACKEND_URL = "https://ride-hub-ng.preview.emergentagent.com/api"
 
 def test_min_fare_removal():
     """

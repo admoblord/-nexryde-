@@ -10,7 +10,7 @@ import json
 from typing import Dict
 
 # Backend URL from environment
-BACKEND_URL = "https://intercity-pricing.preview.emergentagent.com/api"
+BACKEND_URL = "https://ride-hub-ng.preview.emergentagent.com/api"
 
 # Test data
 TEST_PHONE = "+2348012345678"
