@@ -9407,18 +9407,36 @@ async def parse_voice_booking(request: VoiceBookingRequest):
 
 @app.on_event("startup")
 async def seed_community_groups():
-    """Seed default community groups if not already in DB"""
+    """Seed default community groups based on Bolt/inDrive active Nigerian cities"""
     count = await db.community_groups.count_documents({})
     if count == 0:
         groups = [
+            # Official Channel
+            {"group_id": "announcements", "name": "NEXRYDE Announcements", "description": "Official updates from the NEXRYDE team", "icon": "megaphone", "color": "#0EA5E9", "members": 0, "is_official": True, "created_at": datetime.utcnow().isoformat()},
+            # General / Topic Groups
             {"group_id": "general", "name": "General Discussion", "description": "Chat about anything NEXRYDE related", "icon": "chatbubbles", "color": "#3B82F6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "lagos-drivers", "name": "Lagos Drivers", "description": "For drivers operating in Lagos", "icon": "car", "color": "#22C55E", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "abuja-drivers", "name": "Abuja Drivers", "description": "For drivers operating in Abuja", "icon": "car", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "port-harcourt", "name": "Port Harcourt Drivers", "description": "Rivers State drivers community", "icon": "car", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "kano-drivers", "name": "Kano Drivers", "description": "Northern Nigeria drivers", "icon": "car", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
             {"group_id": "tips-tricks", "name": "Tips & Tricks", "description": "Share driving tips, hacks and strategies", "icon": "bulb", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
             {"group_id": "safety-zone", "name": "Safety Zone", "description": "Report dangerous areas and safety concerns", "icon": "shield-checkmark", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "announcements", "name": "NEXRYDE Announcements", "description": "Official updates from the NEXRYDE team", "icon": "megaphone", "color": "#0EA5E9", "members": 0, "is_official": True, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "earnings-talk", "name": "Earnings Talk", "description": "Discuss fares, surge pricing and earning strategies", "icon": "cash", "color": "#10B981", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "vehicle-maintenance", "name": "Vehicle Maintenance", "description": "Car repair tips, mechanic recommendations, parts deals", "icon": "build", "color": "#6366F1", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "new-drivers", "name": "New Drivers Hub", "description": "Help and support for new NEXRYDE drivers", "icon": "school", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            # Major Cities (Bolt & inDrive active)
+            {"group_id": "lagos-drivers", "name": "Lagos Drivers", "description": "For drivers in Lagos - Nigeria's biggest market", "icon": "car", "color": "#22C55E", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "abuja-drivers", "name": "Abuja (FCT) Drivers", "description": "Federal Capital Territory drivers community", "icon": "car", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "port-harcourt", "name": "Port Harcourt Drivers", "description": "Rivers State - Garden City drivers", "icon": "car", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "ibadan-drivers", "name": "Ibadan Drivers", "description": "Oyo State capital drivers community", "icon": "car", "color": "#EC4899", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "kano-drivers", "name": "Kano Drivers", "description": "Northern Nigeria's commercial capital", "icon": "car", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "benin-drivers", "name": "Benin City Drivers", "description": "Edo State drivers community", "icon": "car", "color": "#14B8A6", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "enugu-drivers", "name": "Enugu Drivers", "description": "Coal City drivers community", "icon": "car", "color": "#0EA5E9", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "owerri-drivers", "name": "Owerri Drivers", "description": "Imo State capital drivers", "icon": "car", "color": "#A855F7", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "warri-drivers", "name": "Warri Drivers", "description": "Delta State oil city drivers", "icon": "car", "color": "#F97316", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "abeokuta-drivers", "name": "Abeokuta Drivers", "description": "Ogun State capital drivers", "icon": "car", "color": "#84CC16", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "uyo-drivers", "name": "Uyo Drivers", "description": "Akwa Ibom State drivers", "icon": "car", "color": "#06B6D4", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "calabar-drivers", "name": "Calabar Drivers", "description": "Cross River State drivers", "icon": "car", "color": "#D946EF", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "kaduna-drivers", "name": "Kaduna Drivers", "description": "Kaduna State drivers community", "icon": "car", "color": "#FB923C", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "jos-drivers", "name": "Jos Drivers", "description": "Plateau State - Tin City drivers", "icon": "car", "color": "#4ADE80", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "ilorin-drivers", "name": "Ilorin Drivers", "description": "Kwara State capital drivers", "icon": "car", "color": "#818CF8", "members": 0, "created_at": datetime.utcnow().isoformat()},
+            {"group_id": "asaba-drivers", "name": "Asaba Drivers", "description": "Delta State capital drivers", "icon": "car", "color": "#F472B6", "members": 0, "created_at": datetime.utcnow().isoformat()},
         ]
         await db.community_groups.insert_many(groups)
         logger.info(f"Seeded {len(groups)} community groups")
