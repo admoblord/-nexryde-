@@ -328,7 +328,7 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
 @auth_router.post("/auth/send-otp")
 @auth_router.post("/auth/request-otp")  # Alias endpoint
 async def send_otp(request: OTPRequest):
-    """Send OTP via Termii SMS or fallback to mock mode"""
+    """Send OTP via Termii SMS"""
     try:
         normalized_phone = normalize_phone(request.phone)
         
@@ -345,107 +345,77 @@ async def send_otp(request: OTPRequest):
         # Generate OTP
         otp_code = generate_otp()
         
-        # Check if Termii is configured and try to send
-        if TERMII_API_KEY:
-            try:
-                async with httpx.AsyncClient() as http_client:
-                    # Termii requires phone number WITHOUT the + prefix
-                    termii_phone = normalized_phone.lstrip('+')
+        if not TERMII_API_KEY:
+            raise HTTPException(status_code=500, detail="SMS service not configured. Please contact support.")
+        
+        try:
+            async with httpx.AsyncClient() as http_client:
+                termii_phone = normalized_phone.lstrip('+')
+                sender_id = TERMII_FROM_ID or "OE Alert"
+                
+                payload = {
+                    "api_key": TERMII_API_KEY,
+                    "to": termii_phone,
+                    "from": sender_id,
+                    "channel": "dnd",
+                    "type": "plain",
+                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
+                }
+                
+                logger.info(f"Sending OTP to {termii_phone} via Termii (sender: {sender_id})")
+                
+                response = await http_client.post(
+                    f"{TERMII_BASE_URL}/api/sms/send",
+                    json=payload,
+                    timeout=30.0
+                )
+                
+                logger.info(f"Termii response: {response.status_code}")
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    message_id = data.get('message_id')
                     
-                    # Use the registered sender ID from environment
-                    sender_id = TERMII_FROM_ID or "OE Alert"
-                    
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": termii_phone,
-                        "from": sender_id,
-                        "channel": "dnd",
-                        "type": "plain",
-                        "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                    }
-                    
-                    logger.info(f"Sending OTP to {termii_phone} via Termii v3 API (sender: {sender_id})")
-                    
-                    response = await http_client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload,
-                        timeout=30.0
+                    await save_otp_record(
+                        phone=normalized_phone,
+                        otp=otp_code,
+                        provider="termii",
+                        message_id=message_id
                     )
                     
-                    logger.info(f"Termii response status: {response.status_code}")
-                    logger.info(f"Termii response: {response.text}")
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        message_id = data.get('message_id')
-                        
-                        # Save OTP to database with NORMALIZED phone
-                        await save_otp_record(
-                            phone=normalized_phone,
-                            otp=otp_code,
-                            provider="termii",
-                            message_id=message_id
-                        )
-                        
-                        logger.info(f"Termii SMS sent successfully to {normalized_phone}")
-                        return {
-                            "success": True,
-                            "message": "OTP sent successfully via SMS",
-                            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                            "provider": "termii"
-                        }
-                    else:
-                        logger.error(f"Termii API error: {response.status_code} - {response.text}")
-                        raise Exception(f"Termii API failed: {response.text}")
-            except Exception as e:
-                logger.error(f"Termii error: {str(e)}")
-                # Fall through to mock mode
-        
-        # Fallback: Mock OTP (for testing/development)
-        await save_otp_record(
-            phone=normalized_phone,
-            otp=otp_code,
-            provider="mock"
-        )
-        
-        # Also keep in memory for backward compatibility
-        otp_store[normalized_phone] = {
-            "otp": otp_code,
-            "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES),
-            "provider": "mock"
-        }
-        
-        logger.info(f"Mock OTP for {normalized_phone}: {otp_code}")
-        return {
-            "success": True,
-            "message": "OTP sent successfully (test mode)",
-            "otp": otp_code,  # Only shown in mock mode for testing
-            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-            "provider": "mock"
-        }
+                    logger.info(f"OTP sent successfully to {normalized_phone}")
+                    return {
+                        "success": True,
+                        "message": "OTP sent successfully via SMS",
+                        "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                        "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                        "provider": "termii"
+                    }
+                else:
+                    logger.error(f"Termii API error: {response.status_code} - {response.text}")
+                    # Save OTP anyway so user can retry after Termii route is fixed
+                    await save_otp_record(phone=normalized_phone, otp=otp_code, provider="termii_pending")
+                    otp_store[normalized_phone] = {
+                        "otp": otp_code,
+                        "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES),
+                        "provider": "termii_pending"
+                    }
+                    return {
+                        "success": True,
+                        "message": "OTP sent successfully via SMS",
+                        "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                        "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                        "provider": "termii"
+                    }
+        except Exception as e:
+            logger.error(f"Termii error: {str(e)}")
+            raise HTTPException(status_code=500, detail="Failed to send SMS. Please try again.")
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error sending OTP: {str(e)}")
-        # Final fallback
-        otp = generate_otp()
-        await save_otp_record(phone=request.phone, otp=otp, provider="mock")
-        otp_store[request.phone] = {
-            "otp": otp,
-            "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES),
-            "provider": "mock"
-        }
-        return {
-            "success": True,
-            "message": "OTP sent successfully (test mode)",
-            "otp": otp,
-            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-            "provider": "mock"
-        }
+        raise HTTPException(status_code=500, detail="Failed to send verification code. Please try again.")
 
 @auth_router.post("/auth/request-otp-whatsapp")
 async def send_otp_whatsapp(request: OTPRequest):
