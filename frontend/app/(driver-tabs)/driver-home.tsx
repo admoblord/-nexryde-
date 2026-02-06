@@ -291,9 +291,17 @@ export default function ModernDriverHome() {
             <Text style={styles.greeting}>Good Morning</Text>
             <Text style={styles.driverName}>{user?.name || 'Driver'}</Text>
           </View>
-          <TouchableOpacity style={styles.profileButton}>
-            <Ionicons name="person-circle" size={40} color="#FFF" />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <TouchableOpacity 
+              onPress={() => setShowLangPicker(true)}
+              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <Text style={{ fontSize: 18 }}>{availableLanguages.find(l => l.code === language)?.flag || '🌐'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.profileButton}>
+              <Ionicons name="person-circle" size={40} color="#FFF" />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {/* ONLINE STATUS TOGGLE - PROMINENT */}
