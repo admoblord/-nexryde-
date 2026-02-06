@@ -9477,51 +9477,9 @@ async def seed_community_and_safety():
     await seed_danger_zones(db)
 
 
+
+
 # ==================== DRIVER STORIES ENDPOINTS ====================
-
-
-@app.post("/api/community/messages/{message_id}/like")
-async def like_community_message(message_id: str):
-    """Like a community message"""
-    try:
-        from bson import ObjectId
-        await db.community_messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {"$inc": {"likes": 1}}
-        )
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-
-@app.post("/api/community/messages/{message_id}/reply")
-async def reply_to_community_message(message_id: str, request: dict):
-    """Reply to a community message"""
-    try:
-        from bson import ObjectId
-        reply = {
-            "parent_id": message_id,
-            "group_id": request.get("group_id", "general"),
-            "user_id": request.get("user_id", "anonymous"),
-            "user_name": request.get("user_name", "Anonymous"),
-            "user_role": request.get("user_role", "driver"),
-            "text": request.get("text", ""),
-            "likes": 0,
-            "is_reply": True,
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        result = await db.community_messages.insert_one(reply)
-        reply["_id"] = str(result.inserted_id)
-        
-        # Increment reply count on parent
-        await db.community_messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {"$inc": {"replies": 1}}
-        )
-        
-        return {"success": True, "reply": reply}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
 
 
 # ==================== COMMUNITY POLLS ====================
