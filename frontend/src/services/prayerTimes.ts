@@ -181,6 +181,19 @@ export function usePrayerTimes() {
       setLoading(false);
     } catch (error) {
       console.error('Failed to fetch prayer times:', error);
+      // Fallback: use approximate Lagos prayer times
+      const today = new Date();
+      const fallbackPrayers: PrayerTime[] = [
+        { name: 'Fajr', time: '05:30', timestamp: parseTimeToTimestamp('05:30', today) },
+        { name: 'Dhuhr', time: '13:05', timestamp: parseTimeToTimestamp('13:05', today) },
+        { name: 'Asr', time: '16:15', timestamp: parseTimeToTimestamp('16:15', today) },
+        { name: 'Maghrib', time: '18:45', timestamp: parseTimeToTimestamp('18:45', today) },
+        { name: 'Isha', time: '20:00', timestamp: parseTimeToTimestamp('20:00', today) },
+      ];
+      setPrayerTimes(fallbackPrayers);
+      const now = Date.now();
+      const next = fallbackPrayers.find(p => p.timestamp > now);
+      setNextPrayer(next || fallbackPrayers[0]);
       setLoading(false);
     }
   };
