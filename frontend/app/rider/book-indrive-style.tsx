@@ -780,6 +780,59 @@ export default function BookInDriveStyle() {
           </View>
         </View>
       </Modal>
+
+      {/* SEARCHING FOR DRIVER MODAL */}
+      <Modal visible={searchingForDriver} animationType="fade" transparent>
+        <View style={styles.searchOverlay}>
+          <View style={styles.searchPopup}>
+            {!driverFound ? (
+              <>
+                <ActivityIndicator size="large" color={COLORS.primary} style={{ marginBottom: 20 }} />
+                <Text style={styles.searchTitle}>Finding Your Driver...</Text>
+                <Text style={styles.searchSubtext}>
+                  Your offer of {'\u20A6'}{currentFare.toLocaleString()} sent to nearby drivers
+                </Text>
+                <View style={styles.searchRoute}>
+                  <View style={styles.searchRouteItem}>
+                    <View style={[styles.searchDot, { backgroundColor: COLORS.accentGreen }]} />
+                    <Text style={styles.searchRouteText} numberOfLines={1}>{pickup || 'Pickup'}</Text>
+                  </View>
+                  <View style={styles.searchRouteItem}>
+                    <View style={[styles.searchDot, { backgroundColor: '#EF4444' }]} />
+                    <Text style={styles.searchRouteText} numberOfLines={1}>{destination || 'Destination'}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={styles.searchCancelBtn} onPress={cancelSearch}>
+                  <Text style={styles.searchCancelText}>Cancel Request</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <Ionicons name="checkmark-circle" size={64} color={COLORS.accentGreen} />
+                <Text style={styles.searchTitle}>Driver Found!</Text>
+                <View style={styles.driverInfoCard}>
+                  <View style={styles.driverAvatar}>
+                    <Ionicons name="person" size={32} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.driverInfoName}>{driverFound.name}</Text>
+                    <Text style={styles.driverInfoVehicle}>{driverFound.vehicle}</Text>
+                    <Text style={styles.driverInfoPlate}>{driverFound.plate} - {driverFound.color}</Text>
+                  </View>
+                  <View style={styles.driverRating}>
+                    <Ionicons name="star" size={16} color="#F59E0B" />
+                    <Text style={styles.driverRatingText}>{driverFound.rating?.toFixed(1)}</Text>
+                  </View>
+                </View>
+                <TouchableOpacity style={styles.searchDoneBtn} onPress={() => { cancelSearch(); router.back(); }}>
+                  <Text style={styles.searchDoneText}>Done</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
