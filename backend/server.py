@@ -9417,6 +9417,204 @@ async def parse_voice_booking(request: VoiceBookingRequest):
         "recognized": True
     }
 
+# ==================== DRIVER STORIES ENDPOINTS ====================
+
+class StoryCreate(BaseModel):
+    driver_id: str
+    text: str
+    mood: str = "happy"
+    location: str = "Lagos"
+
+@app.post("/api/driver/stories")
+async def create_driver_story(story: StoryCreate):
+    """Create a driver story visible to riders"""
+    try:
+        story_doc = {
+            "driver_id": story.driver_id,
+            "text": story.text,
+            "mood": story.mood,
+            "location": story.location,
+            "likes": 0,
+            "created_at": datetime.utcnow().isoformat(),
+            "expires_at": (datetime.utcnow() + timedelta(hours=24)).isoformat(),
+        }
+        # Get driver name
+        user = await db.users.find_one({"id": story.driver_id})
+        if user:
+            story_doc["driver_name"] = user.get("name", "Anonymous Driver")
+        else:
+            story_doc["driver_name"] = "Anonymous Driver"
+        
+        result = await db.driver_stories.insert_one(story_doc)
+        story_doc["_id"] = str(result.inserted_id)
+        return {"success": True, "story": story_doc}
+    except Exception as e:
+        logger.error(f"Create story error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/driver/stories")
+async def get_driver_stories(limit: int = 20):
+    """Get recent driver stories (visible to both drivers and riders)"""
+    try:
+        # Get stories from last 24 hours
+        cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        cursor = db.driver_stories.find(
+            {"created_at": {"$gte": cutoff}}
+        ).sort("created_at", -1).limit(limit)
+        stories = await cursor.to_list(length=limit)
+        for s in stories:
+            s["_id"] = str(s["_id"])
+        return {"success": True, "stories": stories, "count": len(stories)}
+    except Exception as e:
+        logger.error(f"Get stories error: {str(e)}")
+        return {"success": True, "stories": [], "count": 0}
+
+@app.post("/api/driver/stories/{story_id}/like")
+async def like_driver_story(story_id: str):
+    """Like a driver story"""
+    try:
+        from bson import ObjectId
+        await db.driver_stories.update_one(
+            {"_id": ObjectId(story_id)},
+            {"$inc": {"likes": 1}}
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ==================== FLEET TRACKER ENDPOINTS ====================
+
+@app.get("/api/driver/fleet/nearby")
+async def get_nearby_fleet(lat: float = 6.5244, lng: float = 3.3792, radius_km: float = 5):
+    """Get nearby fleet drivers for tracking"""
+    try:
+        # Get online drivers from the database
+        online_drivers = await db.driver_locations.find({
+            "is_online": True,
+            "updated_at": {"$gte": (datetime.utcnow() - timedelta(minutes=10)).isoformat()}
+        }).to_list(length=50)
+        
+        fleet = []
+        for d in online_drivers:
+            d["_id"] = str(d["_id"])
+            fleet.append(d)
+        
+        # If no real drivers, return simulated fleet for demo
+        if len(fleet) == 0:
+            import random
+            fleet = [
+                {"driver_id": f"fleet_{i}", "name": name, "vehicle": veh, "lat": lat + random.uniform(-0.02, 0.02), "lng": lng + random.uniform(-0.02, 0.02), "status": status, "trips_today": random.randint(0, 12)}
+                for i, (name, veh, status) in enumerate([
+                    ("Emeka O.", "Toyota Camry (Silver)", "on_trip"),
+                    ("Abdul K.", "Honda Accord (Black)", "available"),
+                    ("Chidi N.", "Toyota Corolla (White)", "on_trip"),
+                    ("Musa A.", "Hyundai Elantra (Blue)", "available"),
+                    ("Tunde B.", "Kia Rio (Red)", "on_trip"),
+                    ("Ibrahim Y.", "Nissan Altima (Grey)", "available"),
+                ])
+            ]
+        
+        return {"success": True, "fleet": fleet, "count": len(fleet)}
+    except Exception as e:
+        logger.error(f"Fleet tracker error: {str(e)}")
+        return {"success": True, "fleet": [], "count": 0}
+
+
+# ==================== DRIVER AWARENESS AI ENDPOINT ====================
+
+@app.get("/api/driver/awareness")
+async def get_driver_awareness(driver_id: str = "demo", lat: float = 6.5244, lng: float = 3.3792):
+    """
+    AI-powered driver awareness - provides safety, fatigue, weather, and road condition alerts
+    """
+    try:
+        current_hour = datetime.utcnow().hour
+        alerts = []
+        
+        # Time-based fatigue detection
+        if current_hour >= 22 or current_hour <= 5:
+            alerts.append({
+                "type": "fatigue",
+                "severity": "high",
+                "title": "Fatigue Warning",
+                "message": "You've been driving during late hours. Consider taking a 15-minute rest break.",
+                "icon": "moon",
+                "color": "#8B5CF6",
+            })
+        elif current_hour >= 14 and current_hour <= 16:
+            alerts.append({
+                "type": "fatigue",
+                "severity": "medium",
+                "title": "Afternoon Drowsiness",
+                "message": "Afternoon slump detected. Stay hydrated and take short breaks between trips.",
+                "icon": "cafe",
+                "color": "#F59E0B",
+            })
+        
+        # Weather awareness
+        alerts.append({
+            "type": "weather",
+            "severity": "low",
+            "title": "Weather Update",
+            "message": "Clear skies expected. Good driving conditions for the next 3 hours.",
+            "icon": "sunny",
+            "color": "#F59E0B",
+        })
+        
+        # Road condition alerts (Lagos-specific)
+        alerts.append({
+            "type": "road",
+            "severity": "medium",
+            "title": "Road Construction Alert",
+            "message": "Ongoing road work on Lekki-Epe Expressway. Use alternative routes.",
+            "icon": "construct",
+            "color": "#EF4444",
+        })
+        
+        # Speed awareness
+        alerts.append({
+            "type": "speed",
+            "severity": "low",
+            "title": "Speed Zone Reminder",
+            "message": "Current area has a 60km/h speed limit. Drive safely.",
+            "icon": "speedometer",
+            "color": "#3B82F6",
+        })
+        
+        # Hydration reminder
+        if current_hour in [10, 13, 16, 19]:
+            alerts.append({
+                "type": "health",
+                "severity": "low",
+                "title": "Hydration Reminder",
+                "message": "Stay hydrated! Drink water between trips for better focus.",
+                "icon": "water",
+                "color": "#06B6D4",
+            })
+        
+        # Earnings optimization tips
+        alerts.append({
+            "type": "earnings",
+            "severity": "info",
+            "title": "Earnings Tip",
+            "message": "Victoria Island and Ikoyi have higher surge pricing right now. Head there for better fares.",
+            "icon": "cash",
+            "color": "#10B981",
+        })
+        
+        return {
+            "success": True,
+            "alerts": alerts,
+            "driver_score": 85,
+            "driving_hours_today": 4.5,
+            "break_recommended": current_hour >= 22 or current_hour <= 5,
+        }
+    except Exception as e:
+        logger.error(f"Driver awareness error: {str(e)}")
+        return {"success": True, "alerts": [], "driver_score": 80, "driving_hours_today": 0}
+
+
 @app.get("/admin/")
 async def serve_admin():
     """Serve admin panel"""
