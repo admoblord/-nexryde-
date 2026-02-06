@@ -256,6 +256,9 @@ backend:
         - working: true
         - agent: "main"
         - comment: "Request, accept, start, complete, cancel, rate trips working"
+        - working: true
+        - agent: "testing"
+        - comment: "✅ COMPREHENSIVE RIDE REQUEST FLOW TESTING COMPLETE - 100% SUCCESS: All 5 critical endpoints tested successfully in full flow sequence. MAIN FLOW (5/5 PASSED): 1) POST /api/trips/create-with-custom-price creates trip with custom pricing (₦4500 offered vs ₦4000 recommended, 12.5% above), status='pending_driver_offers', broadcasts to 15 nearby drivers, 2) GET /api/trips/pending?driver_lat=6.5244&driver_lng=3.3792 returns pending trips including our created trip with correct pickup/destination/fare, 3) GET /api/trips/{trip_id}/status (before acceptance) shows status='pending_driver_offers' with driver_info=null, 4) PUT /api/trips/{trip_id}/accept with driver_id successfully accepts trip (requires active driver subscription or profile), updates status='accepted' with accepted_at timestamp, 5) GET /api/trips/{trip_id}/status (after acceptance) shows status='accepted' with complete driver_info (name, phone, vehicle details, rating 4.8). FIXES APPLIED: Added missing 'time' import to backend, fixed trip status filter in accept endpoint to include 'pending_driver_offers', created test driver profile with 24-hour trial for subscription requirement. Complete rider-to-driver matching flow is OPERATIONAL!"
 
   - task: "NEW: Fare Estimation API with Google Directions"
     implemented: true
