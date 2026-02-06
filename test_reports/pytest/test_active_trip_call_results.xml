@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="6" skipped="0" tests="8" time="1.793" timestamp="2026-02-06T15:03:13.202387+00:00" hostname="agent-env-0ab420aa-ad8a-487f-95c1-2b621da67e65"><testcase classname="backend.tests.test_active_trip_and_call.TestActiveTrip" name="test_active_trip_no_active_trip" time="0.075" /><testcase classname="backend.tests.test_active_trip_and_call.TestActiveTrip" name="test_active_trip_with_active_trip" time="0.039"><failure message="AssertionError: Failed to create rider: {&quot;detail&quot;:&quot;Riders must provide National Identification Number&quot;}&#10;assert 400 == 200&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_active_trip_and_call.py:55: in test_active_trip_with_active_trip
+    assert rider_response.status_code == 200, f"Failed to create rider: {rider_response.text}"
+E   AssertionError: Failed to create rider: {"detail":"Riders must provide National Identification Number"}
+E   assert 400 == 200
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_active_trip_and_call.TestCallEndpoint" name="test_call_nonexistent_trip" time="0.037" /><testcase classname="backend.tests.test_active_trip_and_call.TestCallEndpoint" name="test_call_completed_trip_returns_403" time="0.386"><failure message="AssertionError: Failed to complete trip: {&quot;detail&quot;:&quot;Cannot complete trip&quot;}&#10;assert 400 in [200, 201]&#10; +  where 400 = &lt;Response [400]&gt;.status_code">backend/tests/test_active_trip_and_call.py:178: in test_call_completed_trip_returns_403
+    assert complete_response.status_code in [200, 201], f"Failed to complete trip: {complete_response.text}"
+E   AssertionError: Failed to complete trip: {"detail":"Cannot complete trip"}
+E   assert 400 in [200, 201]
+E    +  where 400 = &lt;Response [400]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_active_trip_and_call.TestCallEndpoint" name="test_call_rate_limiting" time="0.473"><failure message="AssertionError: Expected 429 for 6th call, got 404: {&quot;detail&quot;:&quot;Trip not found&quot;}&#10;assert 404 == 429&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_active_trip_and_call.py:273: in test_call_rate_limiting
+    assert response.status_code == 429, f"Expected 429 for 6th call, got {response.status_code}: {response.text}"
+E   AssertionError: Expected 429 for 6th call, got 404: {"detail":"Trip not found"}
+E   assert 404 == 429
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_active_trip_and_call.TestCallValidActiveTrip" name="test_call_accepted_trip_rider_to_driver" time="0.272"><failure message="AssertionError: Failed to accept trip: {&quot;detail&quot;:&quot;Trip not found&quot;}&#10;assert 404 == 200&#10; +  where 404 = &lt;Response [404]&gt;.status_code">backend/tests/test_active_trip_and_call.py:334: in test_call_accepted_trip_rider_to_driver
+    assert accept_response.status_code == 200, f"Failed to accept trip: {accept_response.text}"
+E   AssertionError: Failed to accept trip: {"detail":"Trip not found"}
+E   assert 404 == 200
+E    +  where 404 = &lt;Response [404]&gt;.status_code</failure></testcase><testcase classname="backend.tests.test_active_trip_and_call.TestActiveTripDriverPerspective" name="test_driver_has_active_trip_after_accepting" time="0.283"><failure message="AssertionError: Driver should have active trip after accepting&#10;assert False == True&#10; +  where False = &lt;built-in method get of dict object at 0xfbda871de980&gt;('active')&#10; +    where &lt;built-in method get of dict object at 0xfbda871de980&gt; = {'active': False}.get">backend/tests/test_active_trip_and_call.py:427: in test_driver_has_active_trip_after_accepting
+    assert data.get("active") == True, f"Driver should have active trip after accepting"
+E   AssertionError: Driver should have active trip after accepting
+E   assert False == True
+E    +  where False = &lt;built-in method get of dict object at 0xfbda871de980&gt;('active')
+E    +    where &lt;built-in method get of dict object at 0xfbda871de980&gt; = {'active': False}.get</failure></testcase><testcase classname="backend.tests.test_active_trip_and_call.TestCallPendingTrip" name="test_call_pending_trip_no_driver" time="0.109"><failure message="AssertionError: Error should mention driver not assigned&#10;assert ('No driver assigned' in '{&quot;detail&quot;:&quot;Trip not found&quot;}' or 'driver' in '{&quot;detail&quot;:&quot;trip not found&quot;}')&#10; +  where '{&quot;detail&quot;:&quot;Trip not found&quot;}' = &lt;Response [404]&gt;.text&#10; +  and   '{&quot;detail&quot;:&quot;trip not found&quot;}' = &lt;built-in method lower of str object at 0xfbda87309570&gt;()&#10; +    where &lt;built-in method lower of str object at 0xfbda87309570&gt; = '{&quot;detail&quot;:&quot;Trip not found&quot;}'.lower&#10; +      where '{&quot;detail&quot;:&quot;Trip not found&quot;}' = &lt;Response [404]&gt;.text">backend/tests/test_active_trip_and_call.py:478: in test_call_pending_trip_no_driver
+    assert "No driver assigned" in response.text or "driver" in response.text.lower(), f"Error should mention driver not assigned"
+E   AssertionError: Error should mention driver not assigned
+E   assert ('No driver assigned' in '{"detail":"Trip not found"}' or 'driver' in '{"detail":"trip not found"}')
+E    +  where '{"detail":"Trip not found"}' = &lt;Response [404]&gt;.text
+E    +  and   '{"detail":"trip not found"}' = &lt;built-in method lower of str object at 0xfbda87309570&gt;()
+E    +    where &lt;built-in method lower of str object at 0xfbda87309570&gt; = '{"detail":"Trip not found"}'.lower
+E    +      where '{"detail":"Trip not found"}' = &lt;Response [404]&gt;.text</failure></testcase></testsuite></testsuites>
