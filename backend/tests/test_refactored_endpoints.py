@@ -22,7 +22,7 @@ from datetime import datetime
 BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', '').rstrip('/')
 
 if not BASE_URL:
-    BASE_URL = "https://safety-ai-suite-1.preview.emergentagent.com"
+    BASE_URL = "https://call-ready-app.preview.emergentagent.com"
 
 
 class TestHealthCheck:

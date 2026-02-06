@@ -10,7 +10,7 @@ import json
 from typing import Dict
 
 # Backend URL from environment
-BACKEND_URL = "https://safety-ai-suite-1.preview.emergentagent.com/api"
+BACKEND_URL = "https://call-ready-app.preview.emergentagent.com/api"
 
 # Test data
 TEST_PHONE = "+2348012345678"
