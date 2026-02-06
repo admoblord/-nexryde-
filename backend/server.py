@@ -4468,6 +4468,7 @@ async def seed_promo_codes():
     await _seed_promos()
     # Wire up shared functions for trips router
     set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+    set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
 
 app.add_middleware(
     CORSMiddleware,
