@@ -2223,6 +2223,9 @@ app.include_router(gamification_router)
 from routers.drivers import drivers_router
 app.include_router(drivers_router)
 
+from routers.support import support_router
+app.include_router(support_router)
+
 # ==================== SEED ON STARTUP ====================
 @app.on_event("startup")
 async def seed_promo_codes():
