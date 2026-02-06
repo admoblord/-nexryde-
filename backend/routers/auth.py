@@ -1,5 +1,5 @@
 """Auth Router - Authentication, OTP, Registration, and Session Management for NEXRYDE."""
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Request
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
