@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   TextInput,
   ActivityIndicator,
   Image,
+  Switch,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -28,6 +29,65 @@ export default function RiderProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [otpSent, setOtpSent] = useState(false);
   const [profileImage, setProfileImage] = useState(user?.profile_image || null);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricSupported, setBiometricSupported] = useState(false);
+
+  useEffect(() => {
+    checkBiometricSupport();
+  }, []);
+
+  const checkBiometricSupport = async () => {
+    try {
+      const { isBiometricSupported, isBiometricEnabled } = await import('@/utils/authStorage');
+      const supported = await isBiometricSupported();
+      const enabled = await isBiometricEnabled();
+      
+      setBiometricSupported(supported);
+      setBiometricEnabled(enabled);
+    } catch (error) {
+      console.error('Error checking biometric:', error);
+    }
+  };
+
+  const toggleBiometric = async (value: boolean) => {
+    try {
+      const { enableBiometricLogin, disableBiometricLogin, getBiometricTypes } = await import('@/utils/authStorage');
+      
+      if (value) {
+        const types = await getBiometricTypes();
+        const typeText = types.join(', ') || 'Biometric';
+        
+        Alert.alert(
+          `Enable ${typeText}?`,
+          `Use your ${typeText.toLowerCase()} to login quickly and securely.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Enable',
+              onPress: async () => {
+                const success = await enableBiometricLogin();
+                if (success) {
+                  setBiometricEnabled(true);
+                  Alert.alert('✅ Enabled', `${typeText} login is now active!`);
+                } else {
+                  Alert.alert('❌ Failed', 'Could not enable biometric login.');
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        const success = await disableBiometricLogin();
+        if (success) {
+          setBiometricEnabled(false);
+          Alert.alert('Disabled', 'Biometric login has been disabled.');
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling biometric:', error);
+      Alert.alert('Error', 'Failed to toggle biometric login.');
+    }
+  };
 
   const handleLogout = () => {
     Alert.alert(
