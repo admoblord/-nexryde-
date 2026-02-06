@@ -4477,14 +4477,14 @@ async def analyze_ride_with_ai(ride: dict, driver_id: str, settings: SmartModeSe
     Returns AI recommendation with reasoning
     """
     try:
-        if not openai_client:
-            raise HTTPException(status_code=503, detail="AI service not available")
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
         # Get driver's current stats
         driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
         driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
         
-        # Build context for ChatGPT
+        # Build context for AI
         ride_context = f"""
 Analyze this ride request for a NEXRYDE driver:
 
@@ -4528,19 +4528,15 @@ Provide your analysis in this exact JSON format:
 Be practical and consider Nigerian driver economics. A good ride is one that maximizes earnings per hour while maintaining safety.
 """
 
-        # Call ChatGPT
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",  # Fast and cost-effective
-            messages=[
-                {"role": "system", "content": "You are an expert AI assistant for ride-hailing drivers in Nigeria. You analyze rides and provide smart recommendations to maximize driver earnings and safety."},
-                {"role": "user", "content": ride_context}
-            ],
-            temperature=0.3,  # More deterministic
-            max_tokens=300,
-        )
+        # Call AI via Emergent LLM
+        chat = LlmChat(
+            api_key=emergent_key,
+            session_id=f"smart-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
+            system_message="You are an expert AI assistant for ride-hailing drivers in Nigeria. You analyze rides and provide smart recommendations to maximize driver earnings and safety. Always respond with valid JSON only."
+        ).with_model("openai", "gpt-4o")
         
-        # Parse AI response
-        ai_response_text = response.choices[0].message.content.strip()
+        user_msg = UserMessage(text=ride_context)
+        ai_response_text = await chat.send_message(user_msg)
         
         # Try to extract JSON from response
         import re
