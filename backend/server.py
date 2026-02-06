@@ -5638,6 +5638,72 @@ async def get_preset_messages(role: str):
     return {"presets": PRESET_MESSAGES[role]}
 
 
+# ==================== IN-TRIP CALL FEATURE ====================
+
+@api_router.post("/trip/{trip_id}/call")
+async def initiate_trip_call(trip_id: str, request: dict):
+    """Get the other party's phone number for calling during an active trip"""
+    try:
+        caller_id = request.get("caller_id", "")
+        caller_role = request.get("caller_role", "rider")
+
+        trip = await db.trips.find_one({"id": trip_id})
+        if not trip:
+            raise HTTPException(status_code=404, detail="Trip not found")
+
+        if trip.get("status") not in ["accepted", "pickup", "ongoing", "pending"]:
+            raise HTTPException(status_code=403, detail="Calls only allowed during active trips")
+
+        # Determine who to call
+        if caller_role == "rider":
+            target_id = trip.get("driver_id")
+            if not target_id:
+                raise HTTPException(status_code=404, detail="No driver assigned yet")
+        else:
+            target_id = trip.get("rider_id")
+
+        # Get target user's phone
+        target_user = await db.users.find_one({"id": target_id}, {"_id": 0})
+        if not target_user or not target_user.get("phone_number"):
+            raise HTTPException(status_code=404, detail="Phone number not available")
+
+        # Rate limit: max 5 calls per trip
+        call_count = await db.call_logs.count_documents({"trip_id": trip_id, "caller_id": caller_id})
+        if call_count >= 5:
+            raise HTTPException(status_code=429, detail="Maximum 5 calls per trip reached")
+
+        # Log the call
+        call_log = {
+            "call_id": str(uuid.uuid4()),
+            "trip_id": trip_id,
+            "caller_id": caller_id,
+            "caller_role": caller_role,
+            "target_id": target_id,
+            "phone_number": target_user["phone_number"],
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await db.call_logs.insert_one(call_log)
+
+        target_name = ""
+        if caller_role == "rider":
+            driver_profile = await db.driver_profiles.find_one({"user_id": target_id}, {"_id": 0})
+            target_name = f"{driver_profile.get('first_name', '')} {driver_profile.get('last_name', '')}".strip() if driver_profile else "Driver"
+        else:
+            target_name = target_user.get("name", "Rider")
+
+        return {
+            "success": True,
+            "phone_number": target_user["phone_number"],
+            "target_name": target_name,
+            "calls_remaining": 5 - call_count - 1,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Call initiation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initiate call")
+
+
 # ==================== WEBSOCKET CHAT ====================
 
 class ConnectionManager:
