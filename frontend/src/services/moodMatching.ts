@@ -532,3 +532,12 @@ export const useMoodMatching = () => {
     loadPreferences,
   };
 };
+
+/** Fetch AI-powered rider assistant for mood-based suggestions (Emergent LLM → GPT-4o) */
+export async function fetchAIMoodSuggestions(userId: string, mood: string): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/ai/rider-assistant?user_id=${userId}&question=Suggest%20ride%20preferences%20for%20${mood}%20mood`);
+    return await res.json();
+  } catch { return null; }
+}
