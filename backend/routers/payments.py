@@ -76,6 +76,14 @@ SURGE_CONFIG = {
     "holiday_multiplier": 1.5,
 }
 
+fare_estimate_store = {}
+FARE_LOCK_MINUTES = 3
+FARE_ADJUSTMENT_CONFIG = {
+    "cap_amount": 500,
+    "max_adjustment_percent": 10,
+    "min_rating_for_adjustment": 4.0,
+}
+
 
 # Payment-specific models
 class PaymentProofSubmission(BaseModel):
