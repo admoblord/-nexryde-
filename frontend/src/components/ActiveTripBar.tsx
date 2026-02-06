@@ -77,13 +77,33 @@ export default function ActiveTripBar() {
       });
       const data = await res.json();
       if (data.success && data.phone_number) {
-        const phoneUrl = `tel:${data.phone_number}`;
-        const canOpen = await Linking.canOpenURL(phoneUrl);
-        if (canOpen) {
-          await Linking.openURL(phoneUrl);
-        } else {
-          Alert.alert('Call', `Call ${data.target_name} at ${data.phone_number}`);
-        }
+        const masked = data.phone_number.replace(/(\d{4})(\d{3})(\d+)/, '$1***$3');
+        const targetLabel = user?.role === 'driver' ? 'Rider' : 'Driver';
+        Alert.alert(
+          `Call ${data.target_name || targetLabel}`,
+          `NEXRYDE secure call\nNumber: ${masked}\n\nYour number is protected.`,
+          [
+            {
+              text: 'Call via Phone',
+              onPress: async () => {
+                const phoneUrl = `tel:${data.phone_number}`;
+                const canOpen = await Linking.canOpenURL(phoneUrl);
+                if (canOpen) await Linking.openURL(phoneUrl);
+                else Alert.alert('Call', `Dial ${masked} to reach your ${targetLabel.toLowerCase()}`);
+              },
+            },
+            {
+              text: 'WhatsApp Call',
+              onPress: async () => {
+                const waUrl = `https://wa.me/${data.phone_number.replace('+', '')}`;
+                const canOpen = await Linking.canOpenURL(waUrl);
+                if (canOpen) await Linking.openURL(waUrl);
+                else Alert.alert('WhatsApp', 'WhatsApp is not installed on this device');
+              },
+            },
+            { text: 'Cancel', style: 'cancel' },
+          ]
+        );
       } else {
         Alert.alert('Cannot Call', data.detail || 'Phone number not available');
       }
