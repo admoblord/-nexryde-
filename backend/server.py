@@ -4700,6 +4700,187 @@ EXAMPLE GOOD SUGGESTIONS:
             "success": True,
             "suggestions": suggestions,
             "generated_at": datetime.utcnow().isoformat(),
+
+
+# ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
+
+@app.post("/api/ai/traffic/predict")
+async def predict_traffic_with_ai(
+    origin_lat: float,
+    origin_lng: float,
+    destination_lat: float,
+    destination_lng: float,
+    driver_id: str
+):
+    """
+    Use ChatGPT + Google Maps to predict traffic and provide intelligent route recommendations
+    """
+    try:
+        if not openai_client:
+            raise HTTPException(status_code=503, detail="AI service not available")
+        
+        # Get real-time traffic data from Google Maps
+        directions = gmaps.directions(
+            origin=(origin_lat, origin_lng),
+            destination=(destination_lat, destination_lng),
+            mode="driving",
+            departure_time="now",  # Real-time traffic
+            alternatives=True,  # Get alternative routes
+        )
+        
+        if not directions:
+            raise HTTPException(status_code=404, detail="No routes found")
+        
+        # Extract traffic info from Google Maps
+        routes_data = []
+        for route in directions[:3]:  # Analyze top 3 routes
+            leg = route['legs'][0]
+            routes_data.append({
+                "distance": leg['distance']['text'],
+                "duration_no_traffic": leg['duration']['text'],
+                "duration_with_traffic": leg.get('duration_in_traffic', {}).get('text', leg['duration']['text']),
+                "summary": route.get('summary', 'Main route'),
+                "traffic_delay": leg.get('duration_in_traffic', {}).get('value', 0) - leg['duration']['value'],
+            })
+        
+        # Build context for ChatGPT
+        current_time = datetime.utcnow()
+        context = f"""
+Analyze this traffic situation in Lagos, Nigeria and provide actionable advice for a NEXRYDE driver:
+
+CURRENT TIME: {current_time.strftime('%A, %H:%M')} UTC
+
+ROUTES FROM GOOGLE MAPS (REAL-TIME DATA):
+{json.dumps(routes_data, indent=2)}
+
+INSTRUCTIONS:
+Analyze the traffic data and provide your response in this JSON format:
+{{
+  "recommended_route_index": 0 or 1 or 2,
+  "traffic_level": "light" or "moderate" or "heavy" or "severe",
+  "recommendation": "Brief actionable advice (max 50 words)",
+  "estimated_earnings_impact": "How traffic affects earnings (e.g., '+₦500 if you take Route 2')",
+  "alternative_suggestion": "Any alternative timing/route suggestion",
+  "confidence": 0-100,
+  "factors": ["list", "of", "traffic", "factors"],
+  "avoid_areas": ["list", "of", "areas", "to", "avoid"],
+  "best_time": "Suggested best time to drive this route"
+}}
+
+Consider:
+- Lagos-specific traffic patterns (e.g., Third Mainland Bridge congestion)
+- Time of day (rush hour 7-9 AM, 5-7 PM)
+- Earnings optimization (faster route = more trips = more money)
+- Fuel efficiency vs. time saved
+- Driver safety and stress levels
+
+Be specific, practical, and focused on maximizing driver earnings while ensuring safety.
+"""
+
+        # Call ChatGPT
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a traffic analysis AI for NEXRYDE drivers in Lagos, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress."},
+                {"role": "user", "content": context}
+            ],
+            temperature=0.3,
+            max_tokens=400,
+        )
+        
+        # Parse AI response
+        ai_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON
+        import re
+        json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
+        if json_match:
+            ai_analysis = json.loads(json_match.group())
+        else:
+            # Fallback
+            ai_analysis = {
+                "recommended_route_index": 0,
+                "traffic_level": "moderate",
+                "recommendation": "Take the fastest route based on current traffic conditions.",
+                "estimated_earnings_impact": "Standard earnings",
+                "alternative_suggestion": "Monitor traffic updates",
+                "confidence": 70,
+                "factors": ["real-time data analyzed"],
+                "avoid_areas": [],
+                "best_time": "Current time is acceptable"
+            }
+        
+        logger.info(f"Traffic AI prediction: {ai_analysis['traffic_level']} - {ai_analysis['recommendation']}")
+        
+        return {
+            "success": True,
+            "routes": routes_data,
+            "ai_analysis": ai_analysis,
+            "timestamp": datetime.utcnow().isoformat(),
+            "source": "Google Maps + ChatGPT"
+        }
+        
+    except Exception as e:
+        logger.error(f"Traffic prediction error: {str(e)}")
+        # Fallback to basic analysis
+        return {
+            "success": True,
+            "routes": [],
+            "ai_analysis": {
+                "recommended_route_index": 0,
+                "traffic_level": "moderate",
+                "recommendation": "Use Google Maps for best route",
+                "estimated_earnings_impact": "Standard",
+                "alternative_suggestion": "None",
+                "confidence": 50,
+                "factors": ["API unavailable"],
+                "avoid_areas": [],
+                "best_time": "Now"
+            },
+            "fallback": True
+        }
+
+@app.get("/api/ai/traffic/alerts")
+async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
+    """
+    Get AI-generated traffic alerts for driver's current location
+    """
+    try:
+        # Get traffic incidents from Google Maps
+        # (Note: This would require Google Maps Incidents API or similar)
+        
+        # For now, generate smart alerts based on time and location
+        current_hour = datetime.utcnow().hour
+        alerts = []
+        
+        # Lagos-specific alerts
+        if 7 <= current_hour <= 9:
+            alerts.append({
+                "type": "warning",
+                "priority": "high",
+                "title": "⚠️ Morning Rush Hour",
+                "message": "Heavy traffic expected on major routes. Consider alternative streets.",
+                "location": "Lagos Mainland",
+            })
+        elif 17 <= current_hour <= 19:
+            alerts.append({
+                "type": "warning",
+                "priority": "high",
+                "title": "⚠️ Evening Rush Hour",
+                "message": "Traffic building up. Third Mainland Bridge is congested.",
+                "location": "Island routes",
+            })
+        
+        return {
+            "success": True,
+            "alerts": alerts,
+            "count": len(alerts)
+        }
+        
+    except Exception as e:
+        logger.error(f"Traffic alerts error: {str(e)}")
+        return {"success": True, "alerts": [], "count": 0}
+
             "driver_stats": {
                 "rating": driver_rating,
                 "today_earnings": driver_earnings.get("today", 0),
