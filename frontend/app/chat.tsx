@@ -20,6 +20,15 @@ import { useAppStore } from '@/src/store/appStore';
 
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
+// Derive WebSocket URL from BACKEND_URL
+const getWsUrl = () => {
+  const url = BACKEND_URL.replace(/\/$/, '');
+  if (url.startsWith('https://')) return url.replace('https://', 'wss://');
+  if (url.startsWith('http://')) return url.replace('http://', 'ws://');
+  return `wss://${url}`;
+};
+const WS_URL = getWsUrl();
+
 interface Message {
   id: string;
   text: string;
@@ -40,7 +49,7 @@ export default function ChatScreen() {
   const flatListRef = useRef<FlatList>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const reconnectAttemptsRef = useRef(0);
 
   const [activeTab, setActiveTab] = useState<ChatTab>('driver');
   const [message, setMessage] = useState('');
@@ -48,7 +57,9 @@ export default function ChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [calling, setCalling] = useState(false);
-  const [lastMessageTime, setLastMessageTime] = useState<string | null>(null);
+  const [wsConnected, setWsConnected] = useState(false);
+  const [otherTyping, setOtherTyping] = useState(false);
+  const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Driver messages
   const [driverMessages, setDriverMessages] = useState<Message[]>([]);
@@ -74,84 +85,124 @@ export default function ChatScreen() {
 
   const messages = activeTab === 'driver' ? driverMessages : aiMessages;
 
-  // HTTP polling for driver messages
-  useEffect(() => {
-    if (activeTab === 'driver' && tripId) {
-      loadDriverMessages();
-      // Poll every 3 seconds
-      pollIntervalRef.current = setInterval(() => {
-        pollNewMessages();
-      }, 3000);
+  // Map a backend message to our frontend Message type
+  const mapBackendMsg = useCallback((msg: any): Message => {
+    const myRole = user?.role === 'driver' ? 'driver' : 'rider';
+    return {
+      id: msg.id,
+      text: msg.message,
+      sender: msg.sender_role === myRole ? 'user' : 'driver',
+      senderName: msg.sender_name,
+      timestamp: new Date(msg.timestamp || msg.created_at || Date.now()),
+      isRead: msg.is_read ?? false,
+    };
+  }, [user?.role]);
+
+  // ==================== WebSocket Connection ====================
+  const connectWebSocket = useCallback(() => {
+    if (!tripId || !user?.id) return;
+    // Cleanup existing connection
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
     }
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
+
+    const wsEndpoint = `${WS_URL}/api/ws/chat/${tripId}/${user.id}`;
+    const ws = new WebSocket(wsEndpoint);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setWsConnected(true);
+      reconnectAttemptsRef.current = 0;
+      console.log('WebSocket connected');
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+
+        if (data.type === 'history') {
+          // Load full message history from WebSocket
+          const loaded: Message[] = (data.messages || []).map(mapBackendMsg);
+          setDriverMessages(loaded);
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
+        } else if (data.type === 'new_message') {
+          // Received a new message in real-time
+          const newMsg = mapBackendMsg(data);
+          setDriverMessages((prev) => {
+            if (prev.find((m) => m.id === newMsg.id)) return prev;
+            return [...prev, newMsg];
+          });
+          // Send read receipt if the message is from others
+          if (data.sender_id !== user?.id) {
+            ws.send(JSON.stringify({ type: 'read' }));
+          }
+          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+        } else if (data.type === 'typing') {
+          if (data.user_id !== user?.id) {
+            setOtherTyping(data.is_typing);
+            if (data.is_typing) {
+              if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+              typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
+            }
+          }
+        } else if (data.type === 'messages_read') {
+          setDriverMessages((prev) =>
+            prev.map((m) => (m.sender === 'user' ? { ...m, isRead: true } : m))
+          );
+        } else if (data.type === 'connected') {
+          console.log('WS handshake confirmed:', data.message);
+        }
+      } catch (e) {
+        console.error('WS message parse error:', e);
       }
     };
-  }, [activeTab, tripId]);
+
+    ws.onerror = (e) => {
+      console.error('WebSocket error:', e);
+    };
+
+    ws.onclose = () => {
+      setWsConnected(false);
+      wsRef.current = null;
+      // Auto-reconnect with exponential backoff
+      const attempts = reconnectAttemptsRef.current;
+      if (attempts < 5) {
+        const delay = Math.min(1000 * Math.pow(2, attempts), 16000);
+        reconnectAttemptsRef.current = attempts + 1;
+        reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+      }
+    };
+  }, [tripId, user?.id, user?.role, mapBackendMsg]);
+
+  // Connect/disconnect WebSocket based on tab and tripId
+  useEffect(() => {
+    if (activeTab === 'driver' && tripId && user?.id) {
+      connectWebSocket();
+    }
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+        reconnectTimeoutRef.current = null;
+      }
+    };
+  }, [activeTab, tripId, user?.id, connectWebSocket]);
 
   useEffect(() => {
     loadAIChatHistory();
     loadPresetMessages();
   }, []);
 
-  const loadDriverMessages = async () => {
-    if (!tripId || !user?.id) return;
-    try {
-      const response = await fetch(
-        `${BACKEND_URL}/api/chat/messages/${tripId}?user_id=${user.id}`
-      );
-      const data = await response.json();
-      if (data.messages && data.messages.length > 0) {
-        const loaded: Message[] = data.messages.map((msg: any) => ({
-          id: msg.id,
-          text: msg.message,
-          sender: msg.sender_role === (user?.role === 'driver' ? 'driver' : 'rider') ? 'user' : 'driver',
-          senderName: msg.sender_name,
-          timestamp: new Date(msg.timestamp),
-          isRead: msg.is_read,
-        }));
-        setDriverMessages(loaded);
-        const lastTs = data.messages[data.messages.length - 1]?.timestamp;
-        if (lastTs) setLastMessageTime(lastTs);
-      }
-    } catch (error) {
-      console.error('Error loading driver messages:', error);
-    }
-  };
-
-  const pollNewMessages = async () => {
-    if (!tripId || !user?.id) return;
-    try {
-      let url = `${BACKEND_URL}/api/chat/messages/${tripId}?user_id=${user.id}`;
-      if (lastMessageTime) {
-        url += `&since=${encodeURIComponent(lastMessageTime)}`;
-      }
-      const response = await fetch(url);
-      const data = await response.json();
-      if (data.messages && data.messages.length > 0) {
-        const newMsgs: Message[] = data.messages
-          .filter((msg: any) => !driverMessages.find((m) => m.id === msg.id))
-          .map((msg: any) => ({
-            id: msg.id,
-            text: msg.message,
-            sender: msg.sender_role === (user?.role === 'driver' ? 'driver' : 'rider') ? 'user' : 'driver',
-            senderName: msg.sender_name,
-            timestamp: new Date(msg.timestamp),
-            isRead: msg.is_read,
-          }));
-        if (newMsgs.length > 0) {
-          setDriverMessages((prev) => [...prev, ...newMsgs]);
-          const lastTs = data.messages[data.messages.length - 1]?.timestamp;
-          if (lastTs) setLastMessageTime(lastTs);
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        }
-      }
-    } catch (e) {
-      // Silent fail for polling
-    }
-  };
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    };
+  }, []);
 
   const loadAIChatHistory = async () => {
     if (!user?.id) return;
@@ -234,32 +285,56 @@ export default function ChatScreen() {
 
   const sendDriverMessage = async (messageText: string) => {
     if (!messageText.trim() || !tripId || !user?.id) return;
-    const userMsg: Message = {
-      id: Date.now().toString(),
-      text: messageText.trim(),
-      sender: 'user',
-      timestamp: new Date(),
-      isRead: false,
-    };
-    setDriverMessages((prev) => [...prev, userMsg]);
+    const text = messageText.trim();
     setMessage('');
 
-    try {
-      await fetch(`${BACKEND_URL}/api/chat/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          trip_id: tripId,
-          sender_id: user.id,
-          sender_role: user.role === 'driver' ? 'driver' : 'rider',
-          message: messageText.trim(),
-          message_type: 'text',
-        }),
-      });
-    } catch (error) {
-      console.error('Send driver message error:', error);
+    // Send via WebSocket if connected
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'message',
+        message: text,
+        sender_role: user.role === 'driver' ? 'driver' : 'rider',
+        message_type: 'text',
+      }));
+    } else {
+      // Fallback to HTTP if WebSocket is not connected
+      const userMsg: Message = {
+        id: Date.now().toString(),
+        text,
+        sender: 'user',
+        timestamp: new Date(),
+        isRead: false,
+      };
+      setDriverMessages((prev) => [...prev, userMsg]);
+
+      try {
+        await fetch(`${BACKEND_URL}/api/chat/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            trip_id: tripId,
+            sender_id: user.id,
+            sender_role: user.role === 'driver' ? 'driver' : 'rider',
+            message: text,
+            message_type: 'text',
+          }),
+        });
+      } catch (error) {
+        console.error('Send driver message error:', error);
+      }
     }
     setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+  };
+
+  // Send typing indicator via WebSocket
+  const handleTypingChange = (text: string) => {
+    setMessage(text);
+    if (activeTab === 'driver' && wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'typing',
+        is_typing: text.length > 0,
+      }));
+    }
   };
 
   const sendMessage = async () => {
@@ -312,10 +387,14 @@ export default function ChatScreen() {
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (activeTab === 'ai') await loadAIChatHistory();
-    else await loadDriverMessages();
+    if (activeTab === 'ai') {
+      await loadAIChatHistory();
+    } else {
+      // Reconnect WebSocket to get fresh data
+      connectWebSocket();
+    }
     setRefreshing(false);
-  }, [activeTab]);
+  }, [activeTab, connectWebSocket]);
 
   const formatTime = (date: Date) =>
     date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
@@ -358,7 +437,6 @@ export default function ChatScreen() {
             <Ionicons name="arrow-back" size={24} color="#111827" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Messages</Text>
-          {/* Call Button - only show on driver tab with active trip */}
           {activeTab === 'driver' && tripId ? (
             <TouchableOpacity style={styles.callButton} onPress={callDriver} disabled={calling}>
               {calling ? (
@@ -408,10 +486,16 @@ export default function ChatScreen() {
           </View>
         )}
         {activeTab === 'driver' && tripId && (
-          <View style={[styles.infoBanner, styles.connectedBanner]}>
-            <Ionicons name="chatbubbles" size={16} color="#22C55E" />
-            <Text style={[styles.infoBannerText, { color: '#166534' }]}>
-              Chat active • Tap <Ionicons name="call" size={14} color="#22C55E" /> to call {user?.role === 'driver' ? 'rider' : 'driver'}
+          <View style={[styles.infoBanner, wsConnected ? styles.connectedBanner : styles.disconnectedBanner]}>
+            <Ionicons
+              name={wsConnected ? 'wifi' : 'cloud-offline'}
+              size={16}
+              color={wsConnected ? '#22C55E' : '#EF4444'}
+            />
+            <Text style={[styles.infoBannerText, { color: wsConnected ? '#166534' : '#991B1B' }]}>
+              {wsConnected
+                ? `Live chat active • Tap call to reach ${user?.role === 'driver' ? 'rider' : 'driver'}`
+                : 'Reconnecting...'}
             </Text>
           </View>
         )}
@@ -443,12 +527,22 @@ export default function ChatScreen() {
             }
           />
 
-          {/* Typing Indicator */}
+          {/* Typing Indicators */}
           {isAiTyping && (
             <View style={styles.typingContainer}>
               <View style={styles.typingBubble}>
                 <ActivityIndicator size="small" color="#8B5CF6" />
                 <Text style={styles.typingText}>AI is thinking...</Text>
+              </View>
+            </View>
+          )}
+          {otherTyping && activeTab === 'driver' && (
+            <View style={styles.typingContainer}>
+              <View style={[styles.typingBubble, { backgroundColor: '#DCFCE7' }]}>
+                <ActivityIndicator size="small" color="#22C55E" />
+                <Text style={[styles.typingText, { color: '#166534' }]}>
+                  {user?.role === 'driver' ? 'Rider' : 'Driver'} is typing...
+                </Text>
               </View>
             </View>
           )}
@@ -480,7 +574,7 @@ export default function ChatScreen() {
                 placeholder={activeTab === 'ai' ? 'Ask AI anything...' : 'Type a message...'}
                 placeholderTextColor="#9CA3AF"
                 value={message}
-                onChangeText={setMessage}
+                onChangeText={activeTab === 'driver' ? handleTypingChange : setMessage}
                 multiline
                 maxLength={500}
                 editable={activeTab === 'ai' || !!tripId}
