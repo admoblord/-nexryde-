@@ -454,6 +454,13 @@ class RideRequestTester:
         print("5. Rider checks trip status (after driver accepts)")
         print()
         
+        print("Setting up test environment...")
+        setup_success = await self.setup_test_driver()
+        if not setup_success:
+            print("❌ Setup failed - cannot continue with tests")
+            return False
+        print()
+        
         # Run tests in exact sequence as specified
         tests = [
             self.test_1_rider_creates_trip,
