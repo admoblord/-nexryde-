@@ -6189,6 +6189,28 @@ async def direct_send_otp(request: OTPRequest):
     """Direct OTP endpoint without /api prefix"""
     return await send_otp(request)
 
+# ==================== ROUTER INCLUDES ====================
+app.include_router(api_router)
+app.include_router(two_tier_router)
+app.include_router(subscription_router)
+app.include_router(smart_mode_router)
+app.include_router(route_cache_router)
+app.include_router(route_planner_router)
+app.include_router(map_router)
+app.include_router(call_router)
+app.include_router(community_router)
+app.include_router(safety_router)
+app.include_router(ai_router)
+app.include_router(admin_router)
+app.include_router(trips_router)
+
+# ==================== SEED ON STARTUP ====================
+@app.on_event("startup")
+async def seed_promo_codes():
+    """Seed default promo codes"""
+    from routers.admin import seed_promo_codes as _seed_promos
+    await _seed_promos()
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
