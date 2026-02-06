@@ -418,7 +418,8 @@ class RideRequestTester:
                     f"Status check successful after acceptance",
                     f"Trip status: {data.get('status')}",
                     f"Driver info present: {'✅' if data.get('driver_info') else '❌'}",
-                    f"Driver ID: {driver_info.get('driver_id') or driver_info.get('id') if driver_info else 'Not found'}",
+                    f"Driver name: {driver_info.get('name') if driver_info else 'Not found'}",
+                    f"Driver phone: {driver_info.get('phone') if driver_info else 'Not found'}",
                     f"Success flag: {data.get('success')}"
                 ]
             
