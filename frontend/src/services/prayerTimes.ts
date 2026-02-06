@@ -272,12 +272,32 @@ export function usePrayerTimes() {
     return R * c;
   };
 
+  // Build formatted prayer times object for the screen
+  const now = Date.now();
+  const currentPrayer = prayerTimes.find((p, i) => {
+    const next = prayerTimes[i + 1];
+    return p.timestamp <= now && (!next || next.timestamp > now);
+  });
+  const isPraying = !!currentPrayer && (now - currentPrayer.timestamp) < 30 * 60 * 1000; // within 30 min
+
+  const formattedPrayerTimes = prayerTimes.length > 0 ? {
+    location: location ? `${location.lat.toFixed(2)}°N, ${location.lng.toFixed(2)}°E` : 'Lagos, Nigeria',
+    date: new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+    prayers: prayerTimes.map(p => ({
+      ...p,
+      isActive: currentPrayer?.name === p.name && isPraying,
+      isPassed: p.timestamp < now,
+    })),
+    nextPrayer,
+  } : null;
+
   return {
-    prayerTimes,
+    prayerTimes: formattedPrayerTimes,
     nextPrayer,
     settings,
     nearbyMosques,
     loading,
+    isPraying,
     saveSettings,
     fetchPrayerTimes,
     findNearbyMosques,
