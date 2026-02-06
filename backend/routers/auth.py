@@ -41,14 +41,17 @@ class OTPVerify(BaseModel):
     otp: str
 
 class RegisterRequest(BaseModel):
-    phone: str
-    name: Optional[str] = None
+    phone: Optional[str] = None
+    name: str
     email: Optional[str] = None
     role: str = "rider"
-    gender: Optional[str] = None
-    referral_code: Optional[str] = None
+    google_id: Optional[str] = None
+    profile_image: Optional[str] = None
     nin: Optional[str] = None
     terms_accepted: Optional[bool] = None
+    terms_accepted_at: Optional[str] = None
+    gender: Optional[str] = None
+    referral_code: Optional[str] = None
 
 class SessionExchangeRequest(BaseModel):
     session_id: str
