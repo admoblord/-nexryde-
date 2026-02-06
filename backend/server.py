@@ -4700,6 +4700,20 @@ EXAMPLE GOOD SUGGESTIONS:
             "success": True,
             "suggestions": suggestions,
             "generated_at": datetime.utcnow().isoformat(),
+            "driver_stats": {
+                "rating": driver_rating,
+                "today_earnings": driver_earnings.get("today", 0),
+                "trips_today": driver_earnings.get("trips_today", 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"AI Coach error: {str(e)}")
+        return {
+            "success": True,
+            "suggestions": [],
+            "fallback": True
+        }
 
 
 # ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
