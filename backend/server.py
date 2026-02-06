@@ -9626,7 +9626,7 @@ async def create_poll(group_id: str, request: dict):
         if len(options) < 2 or len(options) > 6:
             raise HTTPException(status_code=400, detail="Poll needs 2-6 options")
         poll = {
-            "poll_id": str(uuid4()),
+            "poll_id": str(uuid.uuid4()),
             "group_id": group_id,
             "user_id": request.get("user_id", "anonymous"),
             "user_name": request.get("user_name", "Anonymous"),
@@ -9739,7 +9739,7 @@ async def create_community_event(request: dict):
     """Create a community event"""
     try:
         event = {
-            "event_id": str(uuid4()),
+            "event_id": str(uuid.uuid4()),
             "group_id": request.get("group_id", "general"),
             "title": request.get("title", ""),
             "description": request.get("description", ""),
@@ -9816,7 +9816,7 @@ async def seed_community_content():
     if poll_count == 0:
         polls = [
             {
-                "poll_id": str(uuid4()), "group_id": "general", "user_id": "system",
+                "poll_id": str(uuid.uuid4()), "group_id": "general", "user_id": "system",
                 "user_name": "NEXRYDE Team",
                 "question": "What time of day do you earn the most?",
                 "options": [
@@ -9831,7 +9831,7 @@ async def seed_community_content():
                 "is_active": True,
             },
             {
-                "poll_id": str(uuid4()), "group_id": "lagos-drivers", "user_id": "system",
+                "poll_id": str(uuid.uuid4()), "group_id": "lagos-drivers", "user_id": "system",
                 "user_name": "Lagos Community",
                 "question": "Worst traffic spot in Lagos right now?",
                 "options": [
@@ -9846,7 +9846,7 @@ async def seed_community_content():
                 "is_active": True,
             },
             {
-                "poll_id": str(uuid4()), "group_id": "earnings-talk", "user_id": "system",
+                "poll_id": str(uuid.uuid4()), "group_id": "earnings-talk", "user_id": "system",
                 "user_name": "Earnings Talk",
                 "question": "How much do you target daily (before fuel)?",
                 "options": [
@@ -9861,7 +9861,7 @@ async def seed_community_content():
                 "is_active": True,
             },
             {
-                "poll_id": str(uuid4()), "group_id": "vehicle-maintenance", "user_id": "system",
+                "poll_id": str(uuid.uuid4()), "group_id": "vehicle-maintenance", "user_id": "system",
                 "user_name": "Vehicle Hub",
                 "question": "Which fuel type gives you the best mileage?",
                 "options": [
@@ -9875,7 +9875,7 @@ async def seed_community_content():
                 "is_active": True,
             },
             {
-                "poll_id": str(uuid4()), "group_id": "safety-zone", "user_id": "system",
+                "poll_id": str(uuid.uuid4()), "group_id": "safety-zone", "user_id": "system",
                 "user_name": "Safety Zone",
                 "question": "Have you ever had an encounter with area boys while driving?",
                 "options": [
@@ -9898,7 +9898,7 @@ async def seed_community_content():
     if event_count == 0:
         events = [
             {
-                "event_id": str(uuid4()), "group_id": "announcements",
+                "event_id": str(uuid.uuid4()), "group_id": "announcements",
                 "title": "NEXRYDE Lagos Driver Meetup",
                 "description": "Join fellow NEXRYDE drivers for networking, tips sharing, and refreshments. Special guest speakers from top earners!",
                 "event_type": "meetup", "location": "Ikeja City Mall, Lagos",
@@ -9909,7 +9909,7 @@ async def seed_community_content():
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "event_id": str(uuid4()), "group_id": "announcements",
+                "event_id": str(uuid.uuid4()), "group_id": "announcements",
                 "title": "Fuel Subsidy Awareness Workshop",
                 "description": "Learn about the latest fuel subsidy changes and how to maximize your CNG conversion benefits. Free registration!",
                 "event_type": "training", "location": "Online (Zoom)",
@@ -9920,7 +9920,7 @@ async def seed_community_content():
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "event_id": str(uuid4()), "group_id": "abuja-drivers",
+                "event_id": str(uuid.uuid4()), "group_id": "abuja-drivers",
                 "title": "Abuja Drivers End of Year Party",
                 "description": "Celebrate the year with fellow Abuja drivers! Food, music, and prizes for top earners.",
                 "event_type": "meetup", "location": "Jabi Lake Mall, Abuja",
@@ -9931,7 +9931,7 @@ async def seed_community_content():
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "event_id": str(uuid4()), "group_id": "announcements",
+                "event_id": str(uuid.uuid4()), "group_id": "announcements",
                 "title": "Weekend Bonus: 20% Extra on All Trips!",
                 "description": "This weekend only - earn 20% extra on every completed trip. The more you drive, the more you earn!",
                 "event_type": "promotion", "location": "All cities",
@@ -9942,7 +9942,7 @@ async def seed_community_content():
                 "created_at": datetime.now(timezone.utc).isoformat(),
             },
             {
-                "event_id": str(uuid4()), "group_id": "new-drivers",
+                "event_id": str(uuid.uuid4()), "group_id": "new-drivers",
                 "title": "New Driver Orientation Session",
                 "description": "Everything you need to know to start earning big on NEXRYDE. Tips from experienced drivers and Q&A session.",
                 "event_type": "training", "location": "Online (Google Meet)",
