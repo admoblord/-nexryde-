@@ -50,10 +50,70 @@ export default function SettingsScreen() {
   const [notifications, setNotifications] = useState(true);
   const [femaleDriverPref, setFemaleDriverPref] = useState(false);
   const [showLanguages, setShowLanguages] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricSupported, setBiometricSupported] = useState(false);
 
   useEffect(() => {
     loadPreferences();
+    checkBiometricSupport();
   }, []);
+  
+  const checkBiometricSupport = async () => {
+    try {
+      const { isBiometricSupported, isBiometricEnabled } = await import('@/utils/authStorage');
+      const supported = await isBiometricSupported();
+      const enabled = await isBiometricEnabled();
+      
+      setBiometricSupported(supported);
+      setBiometricEnabled(enabled);
+      
+      console.log('🔐 Biometric support:', supported, '| Enabled:', enabled);
+    } catch (error) {
+      console.error('Error checking biometric:', error);
+    }
+  };
+  
+  const toggleBiometric = async (value: boolean) => {
+    try {
+      const { enableBiometricLogin, disableBiometricLogin, getBiometricTypes } = await import('@/utils/authStorage');
+      
+      if (value) {
+        // User wants to enable biometric
+        const types = await getBiometricTypes();
+        const typeText = types.join(', ') || 'Biometric';
+        
+        Alert.alert(
+          `Enable ${typeText} Login?`,
+          `You'll be able to login using your ${typeText.toLowerCase()} instead of password.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Enable',
+              onPress: async () => {
+                const success = await enableBiometricLogin();
+                if (success) {
+                  setBiometricEnabled(true);
+                  Alert.alert('✅ Enabled', `${typeText} login is now active!`);
+                } else {
+                  Alert.alert('❌ Failed', 'Could not enable biometric login. Please try again.');
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        // User wants to disable biometric
+        const success = await disableBiometricLogin();
+        if (success) {
+          setBiometricEnabled(false);
+          Alert.alert('Disabled', 'Biometric login has been disabled.');
+        }
+      }
+    } catch (error) {
+      console.error('Error toggling biometric:', error);
+      Alert.alert('Error', 'Failed to toggle biometric login.');
+    }
+  };
 
   const loadPreferences = async () => {
     if (!user?.id) return;
