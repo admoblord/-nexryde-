@@ -4769,10 +4769,10 @@ async def predict_traffic_with_ai(
     """
     try:
         import googlemaps
-        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
         
-        if not openai_client:
-            raise Exception("AI service not available - using fallback")
+        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
         # Get real-time traffic data from Google Maps
         directions = gmaps_client.directions(
