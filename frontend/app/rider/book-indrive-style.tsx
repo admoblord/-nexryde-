@@ -378,7 +378,7 @@ export default function BookInDriveStyle() {
           </TouchableOpacity>
 
           {/* Price Section */}
-          {calculatedFare > 0 ? (
+          {currentFare > 0 ? (
             <View style={styles.priceSection}>
               <View style={styles.priceRow}>
                 <TouchableOpacity style={styles.priceButton} onPress={decreaseFare}>
@@ -386,15 +386,7 @@ export default function BookInDriveStyle() {
                 </TouchableOpacity>
 
                 <View style={styles.priceCenter}>
-                  <Text style={styles.priceAmount}>₦{adjustedFare.toLocaleString()}</Text>
-                  {adjustedFare !== calculatedFare && (
-                    <Text style={styles.priceFeedback}>
-                      {adjustedFare > calculatedFare 
-                        ? 'Higher offer • Faster match!' 
-                        : 'Lower offer • May take longer'
-                      }
-                    </Text>
-                  )}
+                  <Text style={styles.priceAmount}>₦{currentFare.toLocaleString()}</Text>
                 </View>
 
                 <TouchableOpacity style={styles.priceButton} onPress={increaseFare}>
@@ -404,10 +396,10 @@ export default function BookInDriveStyle() {
 
               {/* Auto-accept */}
               <View style={styles.autoAcceptRow}>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="flash" size={20} color={COLORS.yellow} />
                   <Text style={styles.autoAcceptText}>
-                    Auto-accept offer of ₦{adjustedFare.toLocaleString()}
+                    Auto-accept offer of ₦{currentFare.toLocaleString()}
                   </Text>
                 </View>
                 <Switch
