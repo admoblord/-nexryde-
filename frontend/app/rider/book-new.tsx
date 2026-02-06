@@ -419,26 +419,6 @@ export default function BookRideScreen() {
                   </TouchableOpacity>
                 ))}
               </View>
-              
-              {/* BID A RIDE - Big Alternative Option */}
-              <TouchableOpacity
-                style={styles.bidRideButton}
-                onPress={() => router.push('/rider/bid')}
-              >
-                <LinearGradient
-                  colors={['#F59E0B', '#EF4444']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={styles.bidRideGradient}
-                >
-                  <Ionicons name="pricetag" size={26} color={COLORS.white} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.bidRideTitle}>💰 Bid a Ride</Text>
-                    <Text style={styles.bidRideSubtitle}>Name your price and negotiate</Text>
-                  </View>
-                  <Ionicons name="arrow-forward-circle" size={28} color={COLORS.white} />
-                </LinearGradient>
-              </TouchableOpacity>
             </View>
           )}
 
