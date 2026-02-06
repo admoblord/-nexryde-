@@ -65,11 +65,10 @@ export default function TrafficPredictionScreen() {
       }
 
       // Fetch AI traffic prediction
-      const predictRes = await fetch(`${BACKEND_URL}/api/ai/traffic/predict`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `origin_lat=${LAT}&origin_lng=${LNG}&destination_lat=6.4541&destination_lng=3.3947&driver_id=demo`,
-      });
+      const predictRes = await fetch(
+        `${BACKEND_URL}/api/ai/traffic/predict?origin_lat=${LAT}&origin_lng=${LNG}&destination_lat=6.4541&destination_lng=3.3947&driver_id=demo`,
+        { method: 'POST' }
+      );
       const predictData = await predictRes.json();
       if (predictData.success && predictData.ai_analysis) {
         setAiAnalysis(predictData.ai_analysis);
