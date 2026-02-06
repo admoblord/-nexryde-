@@ -14,6 +14,30 @@ from database import db
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
 
+
+# Payment-specific models
+class PaymentProofSubmission(BaseModel):
+    driver_id: str
+    screenshot: str
+    amount: float = 25000.0
+    payment_reference: Optional[str] = None
+
+class FareEstimateRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    dropoff_lat: float
+    dropoff_lng: float
+    service_type: str = "economy"
+    city: str = "lagos"
+
+class DriverTierUpgradeRequest(BaseModel):
+    vehicle_year: int
+    leather_seats: bool
+    dual_ac: bool
+    interior_photo: str
+    exterior_photo: str
+
+
 # Tier config
 TIER_CONFIG = {
     "basic": {"name": "Basic", "min_trips": 0, "commission": 0.15, "benefits": ["Standard rides"]},
