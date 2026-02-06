@@ -114,16 +114,21 @@ export function usePrayerTimes() {
     try {
       setLoading(true);
       
-      // Get user location
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        console.log('Location permission denied');
-        setLoading(false);
-        return;
+      // Try to get user location, fallback to Lagos coordinates
+      let latitude = 6.5244;
+      let longitude = 3.3792;
+
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const userLocation = await Location.getCurrentPositionAsync({});
+          latitude = userLocation.coords.latitude;
+          longitude = userLocation.coords.longitude;
+        }
+      } catch (locError) {
+        console.log('Location unavailable, using Lagos defaults');
       }
 
-      const userLocation = await Location.getCurrentPositionAsync({});
-      const { latitude, longitude } = userLocation.coords;
       setLocation({ lat: latitude, lng: longitude });
 
       // Fetch prayer times from Aladhan API (free, accurate, Islamic prayer times API)
