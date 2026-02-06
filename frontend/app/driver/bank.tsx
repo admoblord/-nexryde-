@@ -234,6 +234,39 @@ export default function BankDetailsScreen() {
               )}
             </LinearGradient>
           </TouchableOpacity>
+
+          {/* Option 2: Crypto Coming Soon */}
+          <View style={styles.cryptoOption}>
+            <View style={styles.optionLabel}>
+              <View style={[styles.optionBadge, { backgroundColor: '#F7931A' }]}>
+                <Text style={styles.optionBadgeText}>2</Text>
+              </View>
+              <Text style={styles.optionText}>Cryptocurrency</Text>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>COMING SOON</Text>
+              </View>
+            </View>
+            <View style={styles.cryptoCard}>
+              <View style={styles.cryptoRow}>
+                <Ionicons name="logo-bitcoin" size={28} color="#F7931A" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.cryptoTitle}>Crypto Wallet Payout</Text>
+                  <Text style={styles.cryptoDesc}>Receive earnings in USDT, USDC, or BTC. Protect against Naira devaluation.</Text>
+                </View>
+              </View>
+              <View style={styles.cryptoCoins}>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>{'\u20BF'} BTC</Text>
+                </View>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>{'\u039E'} ETH</Text>
+                </View>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>$ USDT</Text>
+                </View>
+              </View>
+            </View>
+          </View>
         </View>
       </SafeAreaView>
 
