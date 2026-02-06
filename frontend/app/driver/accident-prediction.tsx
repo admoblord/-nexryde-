@@ -52,11 +52,10 @@ export default function AccidentPredictionScreen() {
   const fetchRiskData = async () => {
     try {
       // Fetch AI risk prediction
-      const riskRes = await fetch(`${BACKEND_URL}/api/ai/accident/predict-risk`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `driver_id=demo&current_lat=${LAT}&current_lng=${LNG}`,
-      });
+      const riskRes = await fetch(
+        `${BACKEND_URL}/api/ai/accident/predict-risk?driver_id=demo&current_lat=${LAT}&current_lng=${LNG}`,
+        { method: 'POST' }
+      );
       const riskJSON = await riskRes.json();
       if (riskJSON.success && riskJSON.ai_analysis) {
         setRiskData(riskJSON.ai_analysis);
