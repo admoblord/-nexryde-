@@ -408,7 +408,7 @@ class BackendTester:
         return passed == total
 
 async def main():
-    """Main test runner"""
+    """Main test runner for Area Boys Safety Zone system"""
     tester = BackendTester()
     
     try:
