@@ -87,6 +87,9 @@ class TripRequest(BaseModel):
     payment_method: str = "cash"
     fare_estimate_id: Optional[str] = None
     enable_recording: bool = False
+    offered_fare: Optional[float] = None
+    recommended_fare: Optional[float] = None
+    trip_type: Optional[str] = None
 
 
 class ComfortRatingRequest(BaseModel):
