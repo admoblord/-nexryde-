@@ -9403,6 +9403,294 @@ async def parse_voice_booking(request: VoiceBookingRequest):
         "recognized": True
     }
 
+# ==================== AREA BOYS / SAFETY ZONE ENDPOINTS ====================
+
+@app.on_event("startup")
+async def seed_danger_zones():
+    """Seed Lagos danger zones if not already in DB"""
+    count = await db.danger_zones.count_documents({})
+    if count == 0:
+        zones = [
+            {
+                "zone_id": "dz-oshodi",
+                "location": {"latitude": 6.5566, "longitude": 3.3515, "address": "Oshodi Under Bridge", "landmark": "Oshodi Bus Stop"},
+                "type": "area_boys", "severity": "critical",
+                "active_time": {"start": 6, "end": 22, "all_day": False},
+                "description": "Heavy area boy presence at traffic lights. Reports of window smashing and phone snatching. Be very cautious.",
+                "verified_reports": 156, "ai_confidence": 95, "community_rating": 4.5, "affected_radius": 500,
+                "safe_alternatives": ["Use Agege Motor Road", "Pass through Isolo"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-obalende",
+                "location": {"latitude": 6.4541, "longitude": 3.3947, "address": "Obalende Junction", "landmark": "Obalende Bus Terminal"},
+                "type": "checkpoint", "severity": "moderate",
+                "active_time": {"start": 0, "end": 23, "all_day": True},
+                "description": "Police checkpoint, usual delay 10-15 minutes. Evening hours worse. Have your documents ready.",
+                "verified_reports": 87, "ai_confidence": 88, "community_rating": 3.8, "affected_radius": 300,
+                "safe_alternatives": [],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-cms",
+                "location": {"latitude": 6.4968, "longitude": 3.3731, "address": "CMS Under Bridge", "landmark": "CMS Bus Stop"},
+                "type": "harassment", "severity": "high",
+                "active_time": {"start": 18, "end": 6, "all_day": False},
+                "description": "Area boys active at night. Harassment of ride-hailing drivers especially. Lock doors and keep windows up.",
+                "verified_reports": 92, "ai_confidence": 92, "community_rating": 4.2, "affected_radius": 400,
+                "safe_alternatives": ["Use Eko Bridge", "Pass Marina during day"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-lekki-toll",
+                "location": {"latitude": 6.4281, "longitude": 3.4219, "address": "Lekki Toll Gate", "landmark": "Lekki Toll Plaza"},
+                "type": "toll_delay", "severity": "moderate",
+                "active_time": {"start": 7, "end": 10, "all_day": False},
+                "description": "Long toll queue during morning rush. 20-30 minutes delay typical. Consider alternative if time-sensitive.",
+                "verified_reports": 134, "ai_confidence": 90, "community_rating": 4.0, "affected_radius": 1000,
+                "safe_alternatives": ["Use Lekki-Ikoyi Link Bridge"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-ojuelegba",
+                "location": {"latitude": 6.5027, "longitude": 3.3748, "address": "Ojuelegba Junction", "landmark": "Ojuelegba Bus Stop"},
+                "type": "robbery", "severity": "critical",
+                "active_time": {"start": 22, "end": 6, "all_day": False},
+                "description": "High robbery risk at night. Multiple reports of phone and cash theft at traffic lights. Avoid completely after dark.",
+                "verified_reports": 78, "ai_confidence": 85, "community_rating": 4.8, "affected_radius": 600,
+                "safe_alternatives": ["Avoid at night", "Use Ikorodu Road", "Take Ojota route"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-mile2",
+                "location": {"latitude": 6.4631, "longitude": 3.3154, "address": "Mile 2 Expressway", "landmark": "Mile 2 Bus Stop"},
+                "type": "area_boys", "severity": "high",
+                "active_time": {"start": 7, "end": 20, "all_day": False},
+                "description": "Area boys harass motorists in traffic. They demand money and can get aggressive. Keep moving if possible.",
+                "verified_reports": 110, "ai_confidence": 90, "community_rating": 4.3, "affected_radius": 350,
+                "safe_alternatives": ["Use Apapa-Oshodi Expressway"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-iyana-ipaja",
+                "location": {"latitude": 6.6018, "longitude": 3.2692, "address": "Iyana Ipaja Roundabout", "landmark": "Iyana Ipaja Bus Stop"},
+                "type": "area_boys", "severity": "high",
+                "active_time": {"start": 8, "end": 21, "all_day": False},
+                "description": "Area boys demand illegal tolls from drivers. Especially target commercial and ride-hailing vehicles.",
+                "verified_reports": 65, "ai_confidence": 82, "community_rating": 4.0, "affected_radius": 400,
+                "safe_alternatives": ["Take Ikeja bypass"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-surulere",
+                "location": {"latitude": 6.4912, "longitude": 3.3568, "address": "Surulere Stadium Area", "landmark": "National Stadium"},
+                "type": "harassment", "severity": "moderate",
+                "active_time": {"start": 20, "end": 5, "all_day": False},
+                "description": "Night-time harassment near the stadium. Petty theft and intimidation reported by drivers.",
+                "verified_reports": 45, "ai_confidence": 75, "community_rating": 3.5, "affected_radius": 300,
+                "safe_alternatives": ["Use Adeniran Ogunsanya Street"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-3mb-flood",
+                "location": {"latitude": 6.4835, "longitude": 3.3989, "address": "Third Mainland Bridge (Mainland End)", "landmark": "Adeniji Bus Stop"},
+                "type": "flooding", "severity": "high",
+                "active_time": {"start": 0, "end": 23, "all_day": True},
+                "description": "Flooding during rainy season (April-October). Water can reach car door levels. Check weather before using.",
+                "verified_reports": 98, "ai_confidence": 80, "community_rating": 4.1, "affected_radius": 800,
+                "safe_alternatives": ["Use Carter Bridge", "Use Eko Bridge"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+            {
+                "zone_id": "dz-apapa",
+                "location": {"latitude": 6.4480, "longitude": 3.3610, "address": "Apapa Wharf Road", "landmark": "Apapa Port"},
+                "type": "area_boys", "severity": "high",
+                "active_time": {"start": 6, "end": 22, "all_day": False},
+                "description": "Truck drivers and area boys create chaotic environment. Extortion of commercial vehicles is common.",
+                "verified_reports": 72, "ai_confidence": 87, "community_rating": 4.4, "affected_radius": 700,
+                "safe_alternatives": ["Avoid Wharf Road entirely", "Use Mile 2 to Costain route"],
+                "last_report_time": datetime.utcnow().isoformat(), "created_at": datetime.utcnow().isoformat(),
+            },
+        ]
+        await db.danger_zones.insert_many(zones)
+        logger.info(f"Seeded {len(zones)} Lagos danger zones")
+
+
+@app.get("/api/safety/danger-zones")
+async def get_danger_zones(lat: float = 6.5244, lng: float = 3.3792, radius: float = 10000):
+    """Get danger zones near a location from database"""
+    try:
+        zones = await db.danger_zones.find({}).to_list(length=100)
+        
+        # Filter by distance (simple bounding box for MVP)
+        nearby = []
+        for z in zones:
+            z["_id"] = str(z["_id"])
+            loc = z.get("location", {})
+            dlat = abs(loc.get("latitude", 0) - lat) * 111000  # ~111km per degree
+            dlng = abs(loc.get("longitude", 0) - lng) * 111000 * 0.85  # adjust for longitude
+            dist = (dlat**2 + dlng**2)**0.5
+            if dist <= radius:
+                z["distance_meters"] = round(dist)
+                nearby.append(z)
+        
+        # Sort by distance
+        nearby.sort(key=lambda x: x.get("distance_meters", 99999))
+        
+        return {"success": True, "zones": nearby, "count": len(nearby)}
+    except Exception as e:
+        logger.error(f"Danger zones error: {str(e)}")
+        return {"success": True, "zones": [], "count": 0}
+
+
+@app.post("/api/safety/report")
+async def report_danger_zone(request: dict):
+    """Community-driven danger zone reporting"""
+    try:
+        report = {
+            "reporter_id": request.get("user_id", "anonymous"),
+            "reporter_name": request.get("user_name", "Anonymous"),
+            "reporter_role": request.get("role", "driver"),
+            "incident_type": request.get("type", "area_boys"),
+            "severity": request.get("severity", "moderate"),
+            "description": request.get("description", ""),
+            "location": {
+                "latitude": request.get("latitude", 0),
+                "longitude": request.get("longitude", 0),
+                "address": request.get("address", "Unknown"),
+            },
+            "verified": False,
+            "upvotes": 0,
+            "downvotes": 0,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        
+        result = await db.danger_reports.insert_one(report)
+        report["_id"] = str(result.inserted_id)
+        
+        # Check if this is near an existing zone — if so, increment its report count
+        existing = await db.danger_zones.find_one({
+            "type": report["incident_type"],
+            "location.latitude": {"$gte": report["location"]["latitude"] - 0.005, "$lte": report["location"]["latitude"] + 0.005},
+            "location.longitude": {"$gte": report["location"]["longitude"] - 0.005, "$lte": report["location"]["longitude"] + 0.005},
+        })
+        
+        if existing:
+            await db.danger_zones.update_one(
+                {"_id": existing["_id"]},
+                {"$inc": {"verified_reports": 1}, "$set": {"last_report_time": datetime.utcnow().isoformat()}}
+            )
+        else:
+            # Create a new danger zone from the report
+            new_zone = {
+                "zone_id": f"dz-user-{str(result.inserted_id)[-6:]}",
+                "location": report["location"],
+                "type": report["incident_type"],
+                "severity": report["severity"],
+                "active_time": {"start": 0, "end": 23, "all_day": True},
+                "description": report["description"],
+                "verified_reports": 1,
+                "ai_confidence": 50,
+                "community_rating": 3.0,
+                "affected_radius": 300,
+                "safe_alternatives": [],
+                "last_report_time": datetime.utcnow().isoformat(),
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            await db.danger_zones.insert_one(new_zone)
+        
+        return {"success": True, "report_id": str(result.inserted_id), "message": "Danger zone reported. Thank you for keeping drivers safe!"}
+    except Exception as e:
+        logger.error(f"Report danger error: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/safety/alerts")
+async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id: str = "demo"):
+    """Get AI-enhanced safety alerts for driver's current position"""
+    try:
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
+        
+        # Get nearby danger zones
+        zones = await db.danger_zones.find({}).to_list(length=50)
+        current_hour = datetime.utcnow().hour
+        
+        # Filter active zones
+        active_zones = []
+        for z in zones:
+            at = z.get("active_time", {})
+            is_active = at.get("all_day", False)
+            if not is_active:
+                start, end = at.get("start", 0), at.get("end", 23)
+                if start < end:
+                    is_active = start <= current_hour < end
+                else:
+                    is_active = current_hour >= start or current_hour < end
+            if is_active:
+                active_zones.append(z)
+        
+        # Build zone summary for AI
+        zone_summaries = []
+        for z in active_zones[:8]:
+            loc = z.get("location", {})
+            zone_summaries.append(f"- {loc.get('address', 'Unknown')}: {z.get('type', 'unknown')} ({z.get('severity', 'unknown')}) - {z.get('description', '')}")
+        
+        zones_text = "\n".join(zone_summaries) if zone_summaries else "No active danger zones nearby"
+        
+        # Ask AI for enhanced safety analysis
+        try:
+            chat = LlmChat(
+                api_key=emergent_key,
+                session_id=f"safety-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
+                system_message="You are a Lagos safety expert AI for NEXRYDE drivers. Analyze danger zones and provide actionable safety alerts. Respond in JSON format only."
+            ).with_model("openai", "gpt-4o")
+            
+            prompt = f"""Current time: {datetime.utcnow().strftime('%I:%M %p')} UTC
+Driver location: lat={lat}, lng={lng} (Lagos, Nigeria)
+
+ACTIVE DANGER ZONES:
+{zones_text}
+
+Provide 3-4 safety alerts in this JSON format:
+[
+  {{
+    "type": "danger" or "warning" or "info",
+    "priority": "critical" or "high" or "medium" or "low",
+    "title": "Short alert title",
+    "message": "Actionable safety advice (max 40 words)",
+    "zone_type": "area_boys" or "checkpoint" or "robbery" or "flooding" or "general"
+  }}
+]
+
+Focus on the most critical dangers first. Be specific about Lagos locations."""
+
+            user_msg = UserMessage(text=prompt)
+            ai_text = await chat.send_message(user_msg)
+            
+            import json, re
+            json_match = re.search(r'\[[\s\S]*\]', ai_text)
+            if json_match:
+                ai_alerts = json.loads(json_match.group())
+            else:
+                ai_alerts = []
+        except Exception as ai_err:
+            logger.error(f"AI safety alerts error: {ai_err}")
+            ai_alerts = []
+        
+        # Combine AI alerts with zone data
+        return {
+            "success": True,
+            "alerts": ai_alerts,
+            "active_zones": len(active_zones),
+            "total_zones": len(zones),
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    except Exception as e:
+        logger.error(f"Safety alerts error: {str(e)}")
+        return {"success": True, "alerts": [], "active_zones": 0}
+
+
 # ==================== DRIVER STORIES ENDPOINTS ====================
 
 class StoryCreate(BaseModel):
