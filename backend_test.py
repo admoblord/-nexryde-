@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend Test Script for NEXRYDE AI Endpoints
-Testing 4 AI endpoints migrated from direct OpenAI to Emergent LLM
+Backend Test Script for NEXRYDE Area Boys Safety Zone System
+Testing 3 new safety endpoints with real database + AI integration
 """
 
 import asyncio
