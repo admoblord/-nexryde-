@@ -217,14 +217,14 @@ def test_accident_ai_apis():
     # Test 5.1: POST /api/ai/accident/predict-risk
     print("\n5.1 Testing POST /api/ai/accident/predict-risk")
     try:
-        form_data = {
+        params = {
             "driver_id": "demo",
             "current_lat": 6.5244,
             "current_lng": 3.3792
         }
         response = requests.post(
             f"{BACKEND_URL}/ai/accident/predict-risk",
-            data=form_data,
+            params=params,
             timeout=15  # Longer timeout for AI prediction
         )
         response_data = response.json()
