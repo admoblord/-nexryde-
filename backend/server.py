@@ -3556,20 +3556,35 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest):
 
 @api_router.get("/trips/pending")
 async def get_pending_trips(driver_lat: float, driver_lng: float):
-    # Get driver's blocked riders
-    # For now, return all pending trips within range
-    trips = await db.trips.find({"status": "pending"}).to_list(50)
+    """Get pending ride requests near the driver"""
+    # Find all pending trips (both status types)
+    trips = await db.trips.find({
+        "status": {"$in": ["pending", "pending_driver_offers"]},
+    }).to_list(50)
     
     nearby_trips = []
     for trip in trips:
-        pickup = trip["pickup_location"]
-        distance = calculate_distance_haversine(driver_lat, driver_lng, pickup["lat"], pickup["lng"])
-        if distance <= 10:
+        pickup = trip.get("pickup_location", {})
+        # Handle both object and string pickup formats
+        if isinstance(pickup, dict) and "lat" in pickup:
+            lat = pickup["lat"]
+            lng = pickup["lng"]
+        elif isinstance(pickup, str):
+            # Skip string pickups without coordinates
+            trip["_id"] = str(trip["_id"])
+            trip["distance_to_pickup"] = 0
+            nearby_trips.append(trip)
+            continue
+        else:
+            continue
+            
+        distance = calculate_distance_haversine(driver_lat, driver_lng, lat, lng)
+        if distance <= 15:  # 15km radius
             trip["_id"] = str(trip["_id"])
             trip["distance_to_pickup"] = round(distance, 2)
             nearby_trips.append(trip)
     
-    nearby_trips.sort(key=lambda x: x["distance_to_pickup"])
+    nearby_trips.sort(key=lambda x: x.get("distance_to_pickup", 0))
     return nearby_trips[:10]
 
 @api_router.put("/trips/{trip_id}/accept")
