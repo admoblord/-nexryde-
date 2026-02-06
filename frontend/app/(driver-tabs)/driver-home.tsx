@@ -109,7 +109,7 @@ export default function ModernDriverHome() {
       }
       
       // Check if driver has completed onboarding
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/${user.id}/onboarding-status`);
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/drivers/${user.id}/onboarding-status`);
       if (response.ok) {
         const status = await response.json();
         
