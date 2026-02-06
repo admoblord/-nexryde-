@@ -850,6 +850,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
+  priceLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: 12,
+  },
   priceTitle: {
     fontSize: 48,
     fontWeight: '900',
@@ -877,17 +885,12 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: COLORS.white,
   },
-  recommendedText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: 8,
-  },
-  differenceText: {
+  adjustmentText: {
     fontSize: 14,
     fontWeight: '600',
-    color: COLORS.yellow,
+    color: COLORS.brandGreen,
     textAlign: 'center',
+    marginTop: 8,
   },
   autoAcceptSection: {
     flexDirection: 'row',
