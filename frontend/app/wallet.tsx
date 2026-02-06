@@ -148,6 +148,37 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Payment Methods */}
+          <View style={styles.payMethodsSection}>
+            <Text style={styles.payMethodsTitle}>Payment Methods</Text>
+            
+            <View style={styles.payMethodCard}>
+              <View style={[styles.payMethodIcon, { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                <Ionicons name="cash" size={24} color="#22C55E" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payMethodName}>Cash / Transfer</Text>
+                <Text style={styles.payMethodStatus}>Active</Text>
+              </View>
+              <View style={styles.payMethodActive}>
+                <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
+              </View>
+            </View>
+
+            <View style={[styles.payMethodCard, styles.payMethodCrypto]}>
+              <View style={[styles.payMethodIcon, { backgroundColor: 'rgba(247,147,26,0.12)' }]}>
+                <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payMethodName}>Crypto Payment</Text>
+                <View style={styles.payMethodBadge}>
+                  <Text style={styles.payMethodBadgeText}>COMING SOON</Text>
+                </View>
+              </View>
+              <Ionicons name="time-outline" size={20} color="#F59E0B" />
+            </View>
+          </View>
+
           {/* Referral Card */}
           <View style={styles.referralCard}>
             <View style={styles.referralHeader}>
