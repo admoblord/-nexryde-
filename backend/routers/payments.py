@@ -872,3 +872,44 @@ async def get_tier_configuration():
         "message": "Fare calculated automatically based on actual trip conditions"
     }
 
+@payments_router.get("/fare/breakdown/{trip_id}")
+async def get_fare_breakdown(trip_id: str):
+    """Get detailed fare breakdown for a completed trip"""
+    adjustment = await db.fare_adjustments.find_one({"trip_id": trip_id})
+    trip = await db.trips.find_one({"id": trip_id})
+    
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    if not adjustment:
+        # No adjustment was made
+        return {
+            "trip_id": trip_id,
+            "base_fare": trip.get("fare", 0),
+            "adjustments": None,
+            "final_fare": trip.get("fare", 0),
+            "message": "No adjustments applied to this trip"
+        }
+    
+    return {
+        "trip_id": trip_id,
+        "base_fare": adjustment.get("base_fare"),
+        "estimated_time": adjustment.get("estimated_time_mins"),
+        "actual_time": adjustment.get("actual_time_mins"),
+        "breakdown": {
+            "traffic_delay": {
+                "extra_minutes": adjustment.get("extra_time_mins"),
+                "rate": adjustment.get("time_rate"),
+                "charge": adjustment.get("traffic_charge")
+            },
+            "weather": {
+                "condition": adjustment.get("weather_condition"),
+                "surcharge": adjustment.get("weather_surcharge")
+            }
+        },
+        "total_adjustment": adjustment.get("total_adjustment"),
+        "cap_applied": adjustment.get("cap_applied"),
+        "final_fare": adjustment.get("final_fare"),
+        "calculated_at": adjustment.get("calculated_at")
+    }
+
