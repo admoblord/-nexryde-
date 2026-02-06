@@ -172,7 +172,7 @@ async def _rider_assistant_fallback(user_id: str, question: str, current_trip):
         return {"response": "I'm here to help! You can ask me about your driver's location, fare details, safety features, or trip status.", "type": "help"}
 
 @ai_router.get("/ai/driver-assistant")
-async def driver_assistant(user_id: str, question: str):
+async def driver_assistant(user_id: str, question: str, lat: float = None, lng: float = None, city: str = None):
     """
     AI Assistant for Drivers - Powered by GPT
     """
@@ -436,7 +436,7 @@ async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
 # ==================== AI COACH ENDPOINTS ====================
 
 @ai_router.post("/ai/coach/get-suggestions")
-async def get_ai_coach_suggestions(driver_id: str):
+async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float = None, city: str = None):
     """
     Use ChatGPT to provide personalized coaching suggestions for driver
     """
