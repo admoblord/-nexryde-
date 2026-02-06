@@ -638,20 +638,21 @@ Analyze the traffic data and provide your response in this JSON format:
 }}
 
 Consider:
-- Lagos-specific traffic patterns (e.g., Third Mainland Bridge congestion)
+- Traffic patterns specific to this city and region
 - Time of day (rush hour 7-9 AM, 5-7 PM)
 - Earnings optimization (faster route = more trips = more money)
 - Fuel efficiency vs. time saved
 - Driver safety and stress levels
 
 Be specific, practical, and focused on maximizing driver earnings while ensuring safety.
+- Local road conditions and construction zones
 """
 
         # Call AI via Emergent LLM
         chat = LlmChat(
             api_key=emergent_key,
             session_id=f"traffic-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
-            system_message="You are a traffic analysis AI for NEXRYDE drivers in Lagos, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress. Always respond with valid JSON only."
+            system_message=f"You are a traffic analysis AI for NEXRYDE drivers in {detect_city(origin_lat, origin_lng)['city']}, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress. Always respond with valid JSON only."
         ).with_model("openai", "gpt-4o")
         
         user_msg = UserMessage(text=context)
@@ -901,7 +902,7 @@ Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
         }
 
 @ai_router.get("/ai/accident/high-risk-areas")
-async def get_high_risk_areas(city: str = "Lagos"):
+async def get_high_risk_areas(city: str = "Lagos", lat: float = None, lng: float = None):
     """
     Get list of known high-risk accident areas in Nigerian cities
     """
@@ -1017,11 +1018,11 @@ async def get_smart_mode_settings(driver_id: str):
 
 # ==================== PIDGIN ENGLISH AI SUPPORT ====================
 
-PIDGIN_RIDER_PROMPT = """You be KODA AI assistant for riders wey dey Nigeria. 
+PIDGIN_RIDER_PROMPT = """You be NEXRYDE AI assistant for riders wey dey Nigeria. 
 You go help riders with their trip wahala, price matter, driver info, and safety concern.
 
-Wetin KODA be:
-- KODA na driver-first ride app for Naija
+Wetin NEXRYDE be:
+- NEXRYDE na driver-first ride app for Naija
 - Drivers dey pay flat monthly sub (₦25,000) instead of per-trip commission
 - Riders dey pay drivers direct via cash or bank transfer (person to person)
 - All drivers don verify with NIN and documents
@@ -1030,11 +1031,11 @@ Wetin KODA be:
 Make you dey friendly and helpful. Use pidgin well well.
 Keep response under 100 words."""
 
-PIDGIN_DRIVER_PROMPT = """You be KODA AI assistant for drivers wey dey Naija.
+PIDGIN_DRIVER_PROMPT = """You be NEXRYDE AI assistant for drivers wey dey Naija.
 You go help drivers maximize their earnings, find high-demand areas, and improve their ratings.
 
-Wetin KODA be:
-- Drivers keep 100% of their money - KODA no take commission
+Wetin NEXRYDE be:
+- Drivers keep 100% of their money - NEXRYDE no take commission
 - Monthly subscription na ₦25,000 for unlimited trips  
 - Riders dey pay drivers direct via cash or bank transfer
 - Peak hours: 7-9 AM and 5-8 PM for weekdays
@@ -1170,7 +1171,7 @@ async def predict_earnings(user_id: str, hours_to_drive: int = 8):
             chat = LlmChat(
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"predictor-{user_id}",
-                system_message="You are KODA's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
+                system_message="You are NEXRYDE's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
             ).with_model("openai", "gpt-4o")
             
             user_message = UserMessage(text=f"Driver average fare: ₦{avg_fare:.0f}, planning to drive {hours_to_drive} hours. One tip?")
@@ -1241,7 +1242,7 @@ async def update_drive_time(user_id: str, hours: float):
 # ==================== DRIVER AWARENESS AI ENDPOINT ====================
 
 @ai_router.get("/driver/awareness")
-async def get_driver_awareness(driver_id: str = "demo", lat: float = 6.5244, lng: float = 3.3792):
+async def get_driver_awareness(driver_id: str = "demo", lat: float = None, lng: float = None, city: str = None):
     """
     AI-powered driver awareness - provides safety, fatigue, weather, and road condition alerts
     """
