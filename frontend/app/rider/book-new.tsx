@@ -691,12 +691,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 18,
-    gap: 8,
+    paddingVertical: 24, // BIGGER from 18
+    gap: 12, // More space from 8
   },
   bookButtonText: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 20, // BIGGER from 18
+    fontWeight: '900', // BOLDER from 800
     color: COLORS.white,
+    letterSpacing: 1,
   },
 });
