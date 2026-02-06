@@ -275,7 +275,7 @@ export class AccidentPredictionAI {
 }
 
 /**
- * Accident Prediction Hook
+ * Accident Prediction Hook - Uses Backend AI (Emergent LLM) + Local Analysis
  */
 export const useAccidentPrediction = () => {
   const [currentBehavior, setCurrentBehavior] = useState<DrivingBehavior>({ speed: 0, averageSpeed: 0, maxSpeed: 0, suddenBrakes: 0, rapidAccelerations: 0, sharpTurns: 0, phoneUsage: 0, drivingDuration: 0, nightDriving: false, weatherCondition: 'clear' });
@@ -284,10 +284,47 @@ export const useAccidentPrediction = () => {
   const [activeAlerts, setActiveAlerts] = useState<SafetyAlert[]>([]);
   const [nearbyHotspot, setNearbyHotspot] = useState<AccidentHotspot | null>(null);
   const [isMonitoring, setIsMonitoring] = useState(false);
+  const [aiPrediction, setAiPrediction] = useState<any>(null);
   
   const startMonitoring = useCallback(() => { setIsMonitoring(true); }, []);
   const stopMonitoring = useCallback(() => { setIsMonitoring(false); }, []);
+
+  // Fetch AI-powered risk prediction from backend (uses Emergent LLM Key → GPT-4o)
+  const fetchAIPrediction = useCallback(async (driverId: string, lat: number, lng: number) => {
+    try {
+      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const response = await fetch(
+        `${BACKEND_URL}/api/ai/accident/predict-risk?driver_id=${driverId}&current_lat=${lat}&current_lng=${lng}`,
+        { method: 'POST' }
+      );
+      const data = await response.json();
+      if (data.ai_prediction) {
+        setAiPrediction(data.ai_prediction);
+        // Update risk level from AI
+        const aiRisk = data.ai_prediction.risk_level || 'low';
+        if (['critical', 'high'].includes(aiRisk)) {
+          setRiskLevel(aiRisk as RiskLevel);
+          setSafetyScore(Math.max(0, 100 - (data.ai_prediction.overall_risk_score || 0)));
+        }
+        // Add AI recommendations as alerts
+        const aiAlerts: SafetyAlert[] = (data.ai_prediction.safety_recommendations || []).map((rec: string, i: number) => ({
+          id: `ai-${Date.now()}-${i}`,
+          type: 'behavior' as const,
+          severity: aiRisk as RiskLevel,
+          message: rec,
+          recommendation: rec,
+          timestamp: Date.now(),
+        }));
+        if (aiAlerts.length > 0) {
+          setActiveAlerts(prev => [...aiAlerts, ...prev].slice(0, 8));
+        }
+      }
+    } catch (error) {
+      // Silent fail - local analysis continues as fallback
+    }
+  }, []);
   
+  // Local real-time monitoring (rule-based, instant)
   useEffect(() => {
     if (!isMonitoring) return;
     const interval = setInterval(() => {
@@ -302,5 +339,5 @@ export const useAccidentPrediction = () => {
     return () => clearInterval(interval);
   }, [isMonitoring, currentBehavior]);
   
-  return { currentBehavior, riskLevel, safetyScore, activeAlerts, nearbyHotspot, isMonitoring, startMonitoring, stopMonitoring, updateBehavior: setCurrentBehavior };
+  return { currentBehavior, riskLevel, safetyScore, activeAlerts, nearbyHotspot, isMonitoring, aiPrediction, startMonitoring, stopMonitoring, updateBehavior: setCurrentBehavior, fetchAIPrediction };
 };
