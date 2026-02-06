@@ -344,6 +344,12 @@ const styles = StyleSheet.create({
     color: '#FFF',
     letterSpacing: 0.5,
   },
+  driverName: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#FFF',
+    letterSpacing: 0.5,
+  },
   profileButton: {
     width: 48,
     height: 48,
