@@ -477,7 +477,8 @@ DRIVER STATISTICS:
 - Recent Trips: {total_trips}
 - Average Trip Duration: {avg_trip_time:.0f} minutes
 - Average Earnings/Trip: ₦{avg_earnings_per_trip:,.0f}
-- City: Lagos
+- City: {loc["city"]}, {loc["state"]} State
+- High Demand Zones: {', '.join(loc["zones"])}
 - Time Now: {datetime.utcnow().strftime('%H:%M')} UTC
 
 PROVIDE COACHING IN THIS JSON FORMAT:
@@ -494,17 +495,18 @@ PROVIDE COACHING IN THIS JSON FORMAT:
 ]
 
 GUIDELINES:
-- Be specific to Nigerian driving context (Lagos traffic, peak hours, etc.)
+- Be specific to the driver's city ({loc["city"]}) - use local landmarks, roads, and areas
 - Focus on ACTIONABLE advice (not generic tips)
 - Include realistic earnings impact estimates
 - Consider time of day for time-sensitive suggestions
 - Provide 4-5 suggestions
 - Prioritize high-impact advice first
 - Be encouraging and supportive in tone
+- Reference specific areas in {loc["city"]} for hot zones and routes
 
-EXAMPLE GOOD SUGGESTIONS:
+EXAMPLE GOOD SUGGESTIONS (adapt to driver's city):
 - "Drive during morning rush (7-9 AM) when demand is highest"
-- "Focus on Victoria Island-Lekki corridor for premium fares"
+- "Focus on high-demand areas: {', '.join(loc['zones'][:3])}"
 - "Maintain 4.8+ rating to unlock bonuses"
 - "Accept 90%+ of rides to qualify for incentives"
 """
