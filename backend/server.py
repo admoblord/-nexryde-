@@ -1183,7 +1183,6 @@ def calculate_behavior_score_change(event_type: str) -> float:
 # ==================== SMART MATCHING (REFACTORED TO routers/support.py) ====================
 
 # ==================== HEALTH CHECK ====================
-# ==================== HEALTH CHECK ====================
 
 @api_router.get("/trips/active/{user_id}")
 async def get_active_trip(user_id: str):
