@@ -911,12 +911,12 @@ frontend:
 
 metadata:
   created_by: "main_agent"
-  version: "2.2"
-  test_sequence: 4
+  version: "2.3"
+  test_sequence: 5
   run_ui: false
 
 test_plan:
-  current_focus: []
+  current_focus: ["WebSocket Chat", "Chat Router Refactoring", "Crypto Coming Soon Driver Subscription"]
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
