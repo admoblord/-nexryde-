@@ -218,6 +218,8 @@ async def check_resend_cooldown(phone: str) -> dict:
     last_sent = record.get("last_sent_at")
     
     if last_sent:
+        if last_sent.tzinfo is None:
+            last_sent = last_sent.replace(tzinfo=timezone.utc)
         elapsed = (now - last_sent).total_seconds()
         if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
             wait_time = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
@@ -225,7 +227,10 @@ async def check_resend_cooldown(phone: str) -> dict:
     
     # Check daily limit
     daily_reset = record.get("daily_reset_at")
-    if daily_reset and now > daily_reset:
+    if daily_reset:
+        if daily_reset.tzinfo is None:
+            daily_reset = daily_reset.replace(tzinfo=timezone.utc)
+        if now > daily_reset:
         # Reset daily counter
         await db.otp_records.update_one(
             {"phone": phone},
