@@ -80,6 +80,28 @@ export default function DriverProfileScreen() {
       Alert.alert('Required', 'Please enter emergency contact');
       return;
     }
+    
+    // Vehicle validation
+    if (!vehicleMake.trim()) {
+      Alert.alert('Vehicle Required', 'Please enter your vehicle make (e.g., Toyota)');
+      return;
+    }
+    if (!vehicleModel.trim()) {
+      Alert.alert('Vehicle Required', 'Please enter your vehicle model (e.g., Corolla)');
+      return;
+    }
+    if (!vehicleYear.trim()) {
+      Alert.alert('Vehicle Required', 'Please enter your vehicle year');
+      return;
+    }
+    if (!vehiclePlateNumber.trim()) {
+      Alert.alert('Vehicle Required', 'Please enter your vehicle plate number');
+      return;
+    }
+    if (!vehicleColor.trim()) {
+      Alert.alert('Vehicle Required', 'Please enter your vehicle color');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -99,6 +121,13 @@ export default function DriverProfileScreen() {
           bank_name: bankName,
           account_number: accountNumber,
           account_name: accountName,
+          // Vehicle information
+          vehicle_type: vehicleType,
+          vehicle_make: vehicleMake,
+          vehicle_model: vehicleModel,
+          vehicle_year: vehicleYear,
+          vehicle_plate_number: vehiclePlateNumber,
+          vehicle_color: vehicleColor,
         }),
       });
 
