@@ -18,6 +18,52 @@ def set_fare_estimate_store(store):
     global fare_estimate_store
     fare_estimate_store = store
 
+
+
+class TripRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    pickup_address: str
+    dropoff_lat: float
+    dropoff_lng: float
+    dropoff_address: str
+    service_type: str = "economy"
+    payment_method: str = "cash"
+    fare_estimate_id: Optional[str] = None
+    enable_recording: bool = False
+
+
+class ComfortRatingRequest(BaseModel):
+    overall_rating: float
+    smoothness: Optional[float] = None
+    politeness: Optional[float] = None
+    cleanliness: Optional[float] = None
+    safety: Optional[float] = None
+    comment: Optional[str] = None
+
+
+class BookForOtherRequest(BaseModel):
+    pickup_lat: float
+    pickup_lng: float
+    pickup_address: str
+    dropoff_lat: float
+    dropoff_lng: float
+    dropoff_address: str
+    rider_name: str
+    rider_phone: str
+    service_type: str = "economy"
+    payment_method: str = "cash"
+
+
+class FaceVerificationRequest(BaseModel):
+    face_image: str  # Base64 encoded image
+
+
+class LocationUpdate(BaseModel):
+    latitude: float
+    longitude: float
+
+
 # ==================== TRIP ENDPOINTS ====================
 
 @trips_router.post("/trips/request")
