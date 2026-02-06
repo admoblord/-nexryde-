@@ -459,4 +459,81 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.lightTextPrimary,
   },
+  cryptoCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginTop: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  cryptoGradient: {
+    padding: SPACING.lg,
+  },
+  cryptoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.md,
+  },
+  cryptoTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  cryptoBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  cryptoBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  cryptoDesc: {
+    fontSize: 14,
+    color: '#475569',
+    lineHeight: 20,
+    marginBottom: SPACING.md,
+  },
+  cryptoCoins: {
+    flexDirection: 'row',
+    gap: SPACING.lg,
+    marginBottom: SPACING.md,
+  },
+  cryptoCoin: {
+    alignItems: 'center',
+    backgroundColor: '#FFF',
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cryptoCoinIcon: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: '#F7931A',
+  },
+  cryptoCoinLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#64748B',
+    marginTop: 2,
+  },
+  cryptoFeatures: {
+    gap: 8,
+  },
+  cryptoFeatureItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cryptoFeatureText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
 });
