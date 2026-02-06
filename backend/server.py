@@ -5707,7 +5707,7 @@ async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate):
 @api_router.get("/rider/preferences/{user_id}")
 async def get_rider_preferences(user_id: str):
     """Get rider's preferences"""
-    prefs = await db.rider_preferences.find_one({"user_id": user_id})
+    prefs = await db.rider_preferences.find_one({"user_id": user_id}, {"_id": 0})
     
     if not prefs:
         prefs = {
@@ -5719,9 +5719,10 @@ async def get_rider_preferences(user_id: str):
             "saved_routes": [],
             "default_payment": "cash",
             "auto_tip_percentage": 0.0,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc).isoformat()
         }
         await db.rider_preferences.insert_one(prefs)
+        prefs.pop("_id", None)
     
     return prefs
 
