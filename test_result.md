@@ -1474,4 +1474,34 @@ agent_communication:
     status_history:
         - working: true
         - agent: "main"
+        - comment: "Seeded polls, events, and community messages."
+
+  - task: "Active Trip API Endpoint"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Added GET /api/trips/active/{user_id} endpoint to fetch user's current active trip. Returns {active: true, trip: {...}} or {active: false}. Supports accepted, pickup, ongoing, and pending statuses."
+
+  - task: "ActiveTripBar Component on Home Screens"
+    implemented: true
+    working: true
+    file: "src/components/ActiveTripBar.tsx, rider-home.tsx, driver-home.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Created reusable ActiveTripBar component with call and chat buttons. Added to both rider-home.tsx and driver-home.tsx. Component polls /api/trips/active/{user_id} every 8s, shows floating bar with call and chat when active trip exists."
+
+agent_communication:
+    - agent: "main"
+    - message: "NEW TASK: P0 - Added call button to rider home and driver home screens via new ActiveTripBar component. Backend: New endpoint GET /api/trips/active/{user_id} returns active trip info. Frontend: Reusable ActiveTripBar.tsx component polls for active trips, shows floating bar with Call (green) and Chat (indigo) buttons. Added to both rider-home.tsx and driver-home.tsx. Call uses existing POST /api/trip/{tripId}/call endpoint. Need testing: 1) GET /api/trips/active/{user_id} returns correct data, 2) POST /api/trip/{trip_id}/call works correctly, 3) Frontend component renders on both home screens."
+
         - comment: "Seeded 5 polls across groups (general, lagos-drivers, earnings-talk, vehicle-maintenance, safety-zone), 5 events (meetups, promotions, training), and 15+ engaging messages with Nigerian context. Pinned important first messages in key groups."
