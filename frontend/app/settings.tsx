@@ -310,6 +310,30 @@ export default function SettingsScreen() {
             </View>
           </View>
 
+          {/* Security Section */}
+          {biometricSupported && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>SECURITY</Text>
+              
+              <View style={styles.card}>
+                <SettingRow 
+                  icon="finger-print" 
+                  label="Biometric Login" 
+                  subtitle="Use fingerprint or face recognition"
+                  color={COLORS.green}
+                  rightComponent={
+                    <Switch
+                      value={biometricEnabled}
+                      onValueChange={toggleBiometric}
+                      trackColor={{ false: '#E2E8F0', true: COLORS.green + '50' }}
+                      thumbColor={biometricEnabled ? COLORS.green : '#F1F5F9'}
+                    />
+                  }
+                />
+              </View>
+            </View>
+          )}
+
           {/* Preferences Section */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>PREFERENCES</Text>
