@@ -1343,44 +1343,7 @@ async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertReque
 
     return {"trip_id": trip["id"], "message": "Looking for female drivers..."}
 
-# ==================== DRIVER HEAT MAPS ====================
-
-@api_router.get("/driver/heatmap")
-async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
-    """Get demand heatmap for drivers - location-aware"""
-    from routers.ai_features import detect_city
-    loc = detect_city(lat, lng, city)
-    city_name = loc["city"]
-    base_lat, base_lng = loc["lat"], loc["lng"]
-    zones_data = loc["zones"]
-    
-    # Generate dynamic heatmap zones around the detected city
-    import random
-    random.seed(int(datetime.utcnow().hour))  # Vary by hour
-    zones = []
-    for i, zone_name in enumerate(zones_data):
-        offset_lat = random.uniform(-0.05, 0.05)
-        offset_lng = random.uniform(-0.05, 0.05)
-        intensity = round(random.uniform(0.5, 0.95), 2)
-        surge = round(1.0 + random.uniform(0, 0.5), 1)
-        zones.append({
-            "lat": round(base_lat + offset_lat, 4),
-            "lng": round(base_lng + offset_lng, 4),
-            "intensity": intensity,
-            "name": zone_name,
-            "surge": surge,
-        })
-    
-    # Sort by intensity (highest demand first)
-    zones.sort(key=lambda z: z["intensity"], reverse=True)
-    top_zone = zones[0]["name"] if zones else city_name
-    
-    return {
-        "city": city_name,
-        "state": loc["state"],
-        "zones": zones,
-        "recommendation": f"Head to {top_zone} for best earnings in {city_name}"
-    }
+# ==================== DRIVER HEAT MAPS (REFACTORED TO routers/drivers.py) ====================
 
 # PROMO CODES & REFERRALS - extracted to routers/
 
