@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Backend Test Script for NEXRYDE Area Boys Safety Zone System
-Testing 3 new safety endpoints with real database + AI integration
+Backend Test Script for NEXRYDE Driver Community API
+Testing Driver Community backend API endpoints as requested
 """
 
 import asyncio
@@ -14,36 +14,11 @@ from typing import Dict, Any
 # Backend URL from frontend environment
 BACKEND_URL = "https://smart-mode-preview.preview.emergentagent.com/api"
 
-# Test data
-TEST_DATA = {
-    "smart_mode": {
-        "ride": {
-            "pickup": "Victoria Island", 
-            "destination": "Ikeja GRA", 
-            "distance_km": 15.2, 
-            "duration_min": 45, 
-            "fare": 4500, 
-            "rider_rating": 4.8
-        },
-        "settings": {
-            "enabled": True,
-            "max_distance": 20,
-            "min_rating": 4.0,
-            "surge_threshold": 1.5,
-            "auto_accept": True,
-            "preferred_areas": []
-        }
-    },
-    "coordinates": {
-        "victoria_island": {"lat": 6.5244, "lng": 3.3792},
-        "ikeja": {"lat": 6.4541, "lng": 3.3947}
-    }
-}
-
 class BackendTester:
     def __init__(self):
         self.results = []
         self.client = httpx.AsyncClient(timeout=60.0)
+        self.message_id_from_test2 = None  # Store message ID for later tests
     
     async def cleanup(self):
         await self.client.aclose()
@@ -64,74 +39,72 @@ class BackendTester:
                 print(f"   • {finding}")
         print()
     
-    async def test_safety_danger_zones_get(self) -> bool:
-        """Test 1: GET /api/safety/danger-zones - Should return 10 seeded Lagos danger zones"""
-        print("🧪 Testing Get Danger Zones API...")
+    async def test_1_get_community_groups(self) -> bool:
+        """Test 1: GET /api/community/groups - Should return 8 seeded groups"""
+        print("🧪 Test 1: GET /api/community/groups")
         
         try:
-            # Make request with specified coordinates and radius
-            params = {
-                "lat": 6.5244,
-                "lng": 3.3792,
-                "radius": 10000
-            }
-            
-            response = await self.client.get(
-                f"{BACKEND_URL}/safety/danger-zones",
-                params=params
-            )
-            
+            response = await self.client.get(f"{BACKEND_URL}/community/groups")
             data = response.json()
+            
+            # Expected groups from backend seed function
+            expected_groups = [
+                "general", "lagos-drivers", "abuja-drivers", "port-harcourt", 
+                "kano-drivers", "tips-tricks", "safety-zone", "announcements"
+            ]
             
             # Validate response structure
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "zones" in data,
-                isinstance(data.get("zones"), list),
-                "count" in data,
-                data.get("count") == len(data.get("zones", [])),
-                len(data.get("zones", [])) >= 5  # Should have multiple zones
+                "groups" in data,
+                isinstance(data.get("groups"), list),
+                len(data.get("groups", [])) == 8  # Should have exactly 8 groups
             ]
             
-            # Validate zone structure
-            zones = data.get("zones", [])
-            if zones:
-                first_zone = zones[0]
-                zone_checks = [
-                    "zone_id" in first_zone or "_id" in first_zone,
-                    "location" in first_zone,
-                    "latitude" in first_zone.get("location", {}),
-                    "longitude" in first_zone.get("location", {}),
-                    "address" in first_zone.get("location", {}),
-                    "type" in first_zone,
-                    "severity" in first_zone,
-                    "description" in first_zone,
-                    "verified_reports" in first_zone,
-                    "ai_confidence" in first_zone
-                ]
-                success_checks.extend(zone_checks)
+            # Validate each group has required fields
+            groups = data.get("groups", [])
+            group_ids = [g.get("group_id") for g in groups]
+            
+            if groups:
+                for group in groups:
+                    group_checks = [
+                        "group_id" in group,
+                        "name" in group,
+                        "description" in group,
+                        "icon" in group,
+                        "color" in group,
+                        "members" in group or "member_ids" in group,
+                        "created_at" in group,
+                        "_id" in group
+                    ]
+                    success_checks.extend(group_checks)
+                
+                # Check if all expected groups are present
+                for expected_id in expected_groups:
+                    if expected_id not in group_ids:
+                        success_checks.append(False)
             
             all_success = all(success_checks)
             
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"Total zones returned: {data.get('count', 0)}",
+                    f"Total groups returned: {len(groups)}",
                     f"Success status: {data.get('success')}",
-                    f"Sample zone type: {zones[0].get('type', 'N/A')}" if zones else "No zones",
-                    f"Sample address: {zones[0].get('location', {}).get('address', 'N/A')}" if zones else "No zones",
-                    f"Sample verified reports: {zones[0].get('verified_reports', 0)}" if zones else "No zones"
+                    f"Groups found: {', '.join(group_ids)}",
+                    f"Lagos drivers group present: {'✅' if 'lagos-drivers' in group_ids else '❌'}",
+                    f"Announcements group present: {'✅' if 'announcements' in group_ids else '❌'}"
                 ]
             
             self.log_result(
-                "Get Danger Zones",
+                "GET /api/community/groups",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"Validation failed: missing fields"
+                    "error": None if all_success else f"Expected 8 groups with required fields"
                 }
             )
             
@@ -139,33 +112,27 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "Get Danger Zones",
+                "GET /api/community/groups",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
 
-    async def test_safety_report_post(self) -> bool:
-        """Test 2: POST /api/safety/report - Submit area boys report at Oshodi bridge"""
-        print("🧪 Testing Safety Report Submission API...")
+    async def test_2_post_message_emeka(self) -> bool:
+        """Test 2: POST /api/community/groups/lagos-drivers/messages - Emeka's message"""
+        print("🧪 Test 2: POST /api/community/groups/lagos-drivers/messages (Emeka)")
         
         try:
-            # Prepare report data as specified in review request
-            report_data = {
-                "user_id": "driver-001",
+            message_data = {
+                "user_id": "driver-emeka",
                 "user_name": "Emeka O.",
-                "role": "driver",
-                "type": "area_boys", 
-                "severity": "high",
-                "description": "Area boys blocking traffic at Oshodi bridge, demanding money from drivers",
-                "latitude": 6.5566,
-                "longitude": 3.3515,
-                "address": "Oshodi Under Bridge"
+                "user_role": "driver",
+                "text": "Good morning Lagos drivers! Traffic heavy on Third Mainland Bridge this morning. Use Ikorodu Road instead."
             }
             
             response = await self.client.post(
-                f"{BACKEND_URL}/safety/report",
-                json=report_data
+                f"{BACKEND_URL}/community/groups/lagos-drivers/messages",
+                json=message_data
             )
             
             data = response.json()
@@ -174,30 +141,41 @@ class BackendTester:
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "report_id" in data,
                 "message" in data,
-                "keeping drivers safe" in data.get("message", "").lower() or "thank you" in data.get("message", "").lower()
+                "_id" in data.get("message", {}),
+                data.get("message", {}).get("user_id") == "driver-emeka",
+                data.get("message", {}).get("user_name") == "Emeka O.",
+                data.get("message", {}).get("user_role") == "driver",
+                data.get("message", {}).get("group_id") == "lagos-drivers",
+                "Third Mainland Bridge" in data.get("message", {}).get("text", ""),
+                data.get("message", {}).get("likes") == 0,
+                data.get("message", {}).get("replies") == 0
             ]
             
             all_success = all(success_checks)
             
+            # Store message ID for later tests
+            if all_success and "message" in data and "_id" in data["message"]:
+                self.message_id_from_test2 = data["message"]["_id"]
+            
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"Report submitted successfully",
-                    f"Report ID: {data.get('report_id', 'N/A')}",
-                    f"Response message: {data.get('message', 'N/A')}",
-                    f"Success status: {data.get('success')}"
+                    f"Message posted successfully",
+                    f"Message ID: {data.get('message', {}).get('_id', 'N/A')}",
+                    f"User: {data.get('message', {}).get('user_name', 'N/A')}",
+                    f"Group: {data.get('message', {}).get('group_id', 'N/A')}",
+                    f"Text length: {len(data.get('message', {}).get('text', ''))} characters"
                 ]
             
             self.log_result(
-                "Safety Report Submission",
+                "POST /api/community/groups/lagos-drivers/messages (Emeka)",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"Validation failed"
+                    "error": None if all_success else f"Message creation validation failed"
                 }
             )
             
@@ -205,46 +183,42 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "Safety Report Submission",
+                "POST /api/community/groups/lagos-drivers/messages (Emeka)",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
 
-    async def test_safety_danger_zones_after_report(self) -> bool:
-        """Test 3: GET /api/safety/danger-zones - Verify Oshodi zone verified_reports increased"""
-        print("🧪 Testing Danger Zones After Report (Verify Count Increase)...")
+    async def test_3_post_message_tunde(self) -> bool:
+        """Test 3: POST /api/community/groups/lagos-drivers/messages - Tunde's message"""
+        print("🧪 Test 3: POST /api/community/groups/lagos-drivers/messages (Tunde)")
         
         try:
-            # Make request with specified coordinates and radius
-            params = {
-                "lat": 6.5244,
-                "lng": 3.3792,
-                "radius": 10000
+            message_data = {
+                "user_id": "driver-tunde",
+                "user_name": "Tunde B.",
+                "user_role": "driver",
+                "text": "Thanks for the update bro! Any better route from Ikeja to VI?"
             }
             
-            response = await self.client.get(
-                f"{BACKEND_URL}/safety/danger-zones",
-                params=params
+            response = await self.client.post(
+                f"{BACKEND_URL}/community/groups/lagos-drivers/messages",
+                json=message_data
             )
             
             data = response.json()
             
-            # Find Oshodi zone
-            oshodi_zone = None
-            zones = data.get("zones", [])
-            for zone in zones:
-                address = zone.get("location", {}).get("address", "").lower()
-                if "oshodi" in address:
-                    oshodi_zone = zone
-                    break
-            
-            # Validate response and check for Oshodi zone update
+            # Validate response
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                oshodi_zone is not None,
-                oshodi_zone.get("verified_reports", 0) >= 156 if oshodi_zone else False  # Should be 156+ (was 156, now 157)
+                "message" in data,
+                "_id" in data.get("message", {}),
+                data.get("message", {}).get("user_id") == "driver-tunde",
+                data.get("message", {}).get("user_name") == "Tunde B.",
+                data.get("message", {}).get("user_role") == "driver",
+                data.get("message", {}).get("group_id") == "lagos-drivers",
+                "Ikeja to VI" in data.get("message", {}).get("text", "")
             ]
             
             all_success = all(success_checks)
@@ -252,20 +226,21 @@ class BackendTester:
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"Oshodi zone found: {'✅' if oshodi_zone else '❌'}",
-                    f"Oshodi verified reports: {oshodi_zone.get('verified_reports', 0) if oshodi_zone else 'N/A'}",
-                    f"Report count increased: {'✅' if oshodi_zone and oshodi_zone.get('verified_reports', 0) > 156 else '❌'}",
-                    f"Total zones: {data.get('count', 0)}"
+                    f"Message posted successfully",
+                    f"Message ID: {data.get('message', {}).get('_id', 'N/A')}",
+                    f"User: {data.get('message', {}).get('user_name', 'N/A')}",
+                    f"Group: {data.get('message', {}).get('group_id', 'N/A')}",
+                    f"Text: {data.get('message', {}).get('text', 'N/A')[:50]}..."
                 ]
             
             self.log_result(
-                "Danger Zones After Report",
+                "POST /api/community/groups/lagos-drivers/messages (Tunde)",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"Oshodi zone verification failed"
+                    "error": None if all_success else f"Message creation validation failed"
                 }
             )
             
@@ -273,80 +248,82 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "Danger Zones After Report",
+                "POST /api/community/groups/lagos-drivers/messages (Tunde)",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
 
-    async def test_safety_alerts_ai(self) -> bool:
-        """Test 4: GET /api/safety/alerts - AI-enhanced safety alerts using GPT-4o"""
-        print("🧪 Testing AI Safety Alerts API...")
+    async def test_4_get_group_messages(self) -> bool:
+        """Test 4: GET /api/community/groups/lagos-drivers/messages?limit=50 - Should return 2 messages"""
+        print("🧪 Test 4: GET /api/community/groups/lagos-drivers/messages?limit=50")
         
         try:
-            # Make request with specified coordinates and driver ID
-            params = {
-                "lat": 6.5244,
-                "lng": 3.3792,
-                "driver_id": "demo"
-            }
-            
             response = await self.client.get(
-                f"{BACKEND_URL}/safety/alerts",
-                params=params
+                f"{BACKEND_URL}/community/groups/lagos-drivers/messages?limit=50"
             )
             
             data = response.json()
             
-            # Validate response structure
+            # Validate response
             success_checks = [
                 response.status_code == 200,
                 data.get("success") is True,
-                "alerts" in data,
-                isinstance(data.get("alerts"), list),
-                len(data.get("alerts", [])) >= 3,  # Should have 3-4 items
-                "active_zones" in data,
-                "total_zones" in data,
-                isinstance(data.get("active_zones"), int),
-                isinstance(data.get("total_zones"), int)
+                "messages" in data,
+                isinstance(data.get("messages"), list),
+                len(data.get("messages", [])) >= 2,  # Should have at least 2 messages we posted
+                data.get("group_id") == "lagos-drivers"
             ]
             
-            # Validate alert structure if alerts exist
-            alerts = data.get("alerts", [])
-            if alerts:
-                first_alert = alerts[0]
-                alert_checks = [
-                    "type" in first_alert,
-                    "priority" in first_alert,
-                    "title" in first_alert,
-                    "message" in first_alert,
-                    "zone_type" in first_alert,
-                    first_alert.get("type") in ["danger", "warning", "info"],
-                    first_alert.get("priority") in ["critical", "high", "medium", "low"],
-                    first_alert.get("zone_type") in ["area_boys", "checkpoint", "robbery", "flooding", "general"]
-                ]
-                success_checks.extend(alert_checks)
+            # Validate message structure
+            messages = data.get("messages", [])
+            if messages and len(messages) >= 2:
+                # Check for our specific messages
+                emeka_found = False
+                tunde_found = False
+                
+                for msg in messages:
+                    if msg.get("user_id") == "driver-emeka" and "Third Mainland Bridge" in msg.get("text", ""):
+                        emeka_found = True
+                    if msg.get("user_id") == "driver-tunde" and "Ikeja to VI" in msg.get("text", ""):
+                        tunde_found = True
+                    
+                    # Validate each message structure
+                    msg_checks = [
+                        "_id" in msg,
+                        "user_id" in msg,
+                        "user_name" in msg,
+                        "user_role" in msg,
+                        "text" in msg,
+                        "group_id" in msg,
+                        "likes" in msg,
+                        "replies" in msg,
+                        "created_at" in msg
+                    ]
+                    success_checks.extend(msg_checks)
+                
+                success_checks.extend([emeka_found, tunde_found])
             
             all_success = all(success_checks)
             
             key_findings = []
             if all_success:
                 key_findings = [
-                    f"AI alerts generated: {len(alerts)}",
-                    f"Active zones: {data.get('active_zones', 0)}",
-                    f"Total zones: {data.get('total_zones', 0)}",
-                    f"Sample alert: {alerts[0].get('title', 'N/A')}" if alerts else "No alerts",
-                    f"Real AI response: {'✅' if alerts else '❌'}"
+                    f"Total messages returned: {len(messages)}",
+                    f"Success status: {data.get('success')}",
+                    f"Group ID: {data.get('group_id')}",
+                    f"Emeka's message found: {'✅' if len(messages) >= 2 else '❌'}",
+                    f"Tunde's message found: {'✅' if len(messages) >= 2 else '❌'}"
                 ]
             
             self.log_result(
-                "AI Safety Alerts",
+                "GET /api/community/groups/lagos-drivers/messages",
                 all_success,
                 {
                     "response": data,
                     "status_code": response.status_code,
                     "key_findings": key_findings,
-                    "error": None if all_success else f"AI alerts validation failed"
+                    "error": None if all_success else f"Expected 2 messages with proper structure"
                 }
             )
             
@@ -354,37 +331,172 @@ class BackendTester:
             
         except Exception as e:
             self.log_result(
-                "AI Safety Alerts",
+                "GET /api/community/groups/lagos-drivers/messages",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+
+    async def test_5_like_message(self) -> bool:
+        """Test 5: POST /api/community/messages/{message_id}/like - Like Emeka's message"""
+        print("🧪 Test 5: POST /api/community/messages/{message_id}/like")
+        
+        if not self.message_id_from_test2:
+            self.log_result(
+                "POST /api/community/messages/{message_id}/like",
+                False,
+                {"error": "No message ID from Test 2 - cannot test like functionality"}
+            )
+            return False
+        
+        try:
+            response = await self.client.post(
+                f"{BACKEND_URL}/community/messages/{self.message_id_from_test2}/like"
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True
+            ]
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                key_findings = [
+                    f"Like added successfully",
+                    f"Message ID: {self.message_id_from_test2}",
+                    f"Success status: {data.get('success')}",
+                    f"Response: {data}"
+                ]
+            
+            self.log_result(
+                "POST /api/community/messages/{message_id}/like",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Like functionality failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "POST /api/community/messages/{message_id}/like",
+                False,
+                {"error": f"Exception: {str(e)}"}
+            )
+            return False
+
+    async def test_6_reply_to_message(self) -> bool:
+        """Test 6: POST /api/community/messages/{message_id}/reply - Reply to Emeka's message"""
+        print("🧪 Test 6: POST /api/community/messages/{message_id}/reply")
+        
+        if not self.message_id_from_test2:
+            self.log_result(
+                "POST /api/community/messages/{message_id}/reply",
+                False,
+                {"error": "No message ID from Test 2 - cannot test reply functionality"}
+            )
+            return False
+        
+        try:
+            reply_data = {
+                "group_id": "lagos-drivers",
+                "user_id": "driver-musa",
+                "user_name": "Musa A.",
+                "user_role": "driver",
+                "text": "Noted! Will avoid Third Mainland this morning."
+            }
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/community/messages/{self.message_id_from_test2}/reply",
+                json=reply_data
+            )
+            
+            data = response.json()
+            
+            # Validate response
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                "reply" in data,
+                "_id" in data.get("reply", {}),
+                data.get("reply", {}).get("parent_id") == self.message_id_from_test2,
+                data.get("reply", {}).get("group_id") == "lagos-drivers",
+                data.get("reply", {}).get("user_id") == "driver-musa",
+                data.get("reply", {}).get("user_name") == "Musa A.",
+                data.get("reply", {}).get("user_role") == "driver",
+                "avoid Third Mainland" in data.get("reply", {}).get("text", ""),
+                data.get("reply", {}).get("is_reply") is True
+            ]
+            
+            all_success = all(success_checks)
+            
+            key_findings = []
+            if all_success:
+                key_findings = [
+                    f"Reply posted successfully",
+                    f"Reply ID: {data.get('reply', {}).get('_id', 'N/A')}",
+                    f"Parent ID: {data.get('reply', {}).get('parent_id', 'N/A')}",
+                    f"User: {data.get('reply', {}).get('user_name', 'N/A')}",
+                    f"Text: {data.get('reply', {}).get('text', 'N/A')[:40]}..."
+                ]
+            
+            self.log_result(
+                "POST /api/community/messages/{message_id}/reply",
+                all_success,
+                {
+                    "response": data,
+                    "status_code": response.status_code,
+                    "key_findings": key_findings,
+                    "error": None if all_success else f"Reply functionality validation failed"
+                }
+            )
+            
+            return all_success
+            
+        except Exception as e:
+            self.log_result(
+                "POST /api/community/messages/{message_id}/reply",
                 False,
                 {"error": f"Exception: {str(e)}"}
             )
             return False
     
     async def run_all_tests(self):
-        """Run all safety endpoint tests"""
-        print("🚀 Starting Area Boys Safety Zone Backend Tests")
+        """Run all Driver Community API tests"""
+        print("🚀 Starting Driver Community Backend API Tests")
         print("=" * 60)
         print(f"Backend URL: {BACKEND_URL}")
-        print("Testing 3 safety endpoints with real database + AI integration")
+        print("Testing 6 Community API endpoints in sequence")
         print()
         
-        # Run tests in sequence as requested
+        # Run tests in exact sequence as requested
         tests = [
-            self.test_safety_danger_zones_get,
-            self.test_safety_report_post,  
-            self.test_safety_danger_zones_after_report,
-            self.test_safety_alerts_ai
+            self.test_1_get_community_groups,
+            self.test_2_post_message_emeka,
+            self.test_3_post_message_tunde,
+            self.test_4_get_group_messages,
+            self.test_5_like_message,
+            self.test_6_reply_to_message
         ]
         
         results = []
         for test in tests:
             result = await test()
             results.append(result)
-            await asyncio.sleep(2)  # Delay between tests for database consistency
+            await asyncio.sleep(1)  # Small delay between tests
         
         # Summary
         print("=" * 60)
-        print("🎯 AREA BOYS SAFETY ZONE TEST SUMMARY")
+        print("🎯 DRIVER COMMUNITY API TEST SUMMARY")
         print("=" * 60)
         
         passed = sum(results)
@@ -395,20 +507,22 @@ class BackendTester:
             print(f"{status}: {result['test']}")
         
         print()
-        print(f"Overall Result: {passed}/{total} safety tests passed")
+        print(f"Overall Result: {passed}/{total} community tests passed")
         
         if passed == total:
-            print("🎉 ALL AREA BOYS SAFETY TESTS PASSED!")
-            print("✅ Database integration working correctly")
-            print("✅ AI-enhanced safety alerts operational")  
-            print("✅ Community reporting system functional")
+            print("🎉 ALL DRIVER COMMUNITY API TESTS PASSED!")
+            print("✅ Community groups seeded correctly (8 groups)")
+            print("✅ Message posting working correctly")
+            print("✅ Message retrieval functional")
+            print("✅ Like functionality operational")
+            print("✅ Reply functionality working")
         else:
-            print("⚠️  SOME SAFETY TESTS FAILED - Check individual test results above")
+            print("⚠️  SOME COMMUNITY API TESTS FAILED - Check individual test results above")
         
         return passed == total
 
 async def main():
-    """Main test runner for Area Boys Safety Zone system"""
+    """Main test runner for Driver Community API"""
     tester = BackendTester()
     
     try:
