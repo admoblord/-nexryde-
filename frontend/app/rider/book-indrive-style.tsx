@@ -431,27 +431,38 @@ export default function BookInDriveStyle() {
   const findOffers = async () => {
     setIsLoading(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/trips/create-with-custom-price`, {
+      const riderId = user?.id || 'user_123';
+      const pLat = pickupCoords?.lat || currentLocation?.lat || 0;
+      const pLng = pickupCoords?.lng || currentLocation?.lng || 0;
+      const dLat = destinationCoords?.lat || 0;
+      const dLng = destinationCoords?.lng || 0;
+
+      const response = await fetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rider_id: 'user_123',
-          pickup: pickup,
-          destination: destination,
+          pickup_lat: pLat,
+          pickup_lng: pLng,
+          pickup_address: pickup,
+          dropoff_lat: dLat,
+          dropoff_lng: dLng,
+          dropoff_address: destination,
+          service_type: selectedVehicle,
+          payment_method: 'cash',
           offered_fare: currentFare,
-          vehicle_type: selectedVehicle,
+          recommended_fare: currentFare * 0.9,
           trip_type: detectTripType(),
         }),
       });
 
       const result = await response.json();
       
-      if (response.ok && result.success) {
+      if (response.ok && (result.trip || result.success)) {
         setIsLoading(false);
-        setTripId(result.trip?.id || null);
+        const tid = result.trip?.id || result.trip_id || null;
+        setTripId(tid);
         setSearchingForDriver(true);
-        // Start polling for driver acceptance
-        pollForDriver(result.trip?.id);
+        pollForDriver(tid);
       } else {
         setIsLoading(false);
         Alert.alert('Error', 'Could not send offer. Please try again.');
