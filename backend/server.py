@@ -3848,8 +3848,9 @@ async def get_trip_insurance(trip_id: str):
         },
         "provider": "KODA Insurance Partners",
         "valid_until": trip.get("completed_at") or "Trip completion"
+    }
 
-# DRIVER TIER SYSTEM - extracted to routers/
+# DRIVER TIER SYSTEM - extracted to routers/payments.py
 
 #
 
