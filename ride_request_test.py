@@ -92,6 +92,8 @@ class RideRequestTester:
         except Exception as e:
             print(f"   ❌ Driver setup failed: {str(e)}")
             return False
+    
+    async def test_1_rider_creates_trip(self) -> bool:
         """Test 1: POST /api/trips/create-with-custom-price - Rider creates a trip"""
         print("🧪 Test 1: POST /api/trips/create-with-custom-price")
         
