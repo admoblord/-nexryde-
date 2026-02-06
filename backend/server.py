@@ -1154,57 +1154,9 @@ def calculate_behavior_score_change(event_type: str) -> float:
 
 # ==================== FACE VERIFICATION (REFACTORED TO routers/users.py) ====================
 
-# ==================== DRIVER ENDPOINTS ====================
+# ==================== DRIVER ENDPOINTS (REFACTORED TO routers/drivers.py) ====================
 
-@api_router.get("/drivers/{user_id}/profile")
-async def get_driver_profile(user_id: str):
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if not profile:
-        raise HTTPException(status_code=404, detail="Driver profile not found")
-    profile["_id"] = str(profile["_id"])
-    return profile
-
-@api_router.put("/drivers/{user_id}/profile")
-async def update_driver_profile(user_id: str, request: DriverProfileUpdate):
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
-    if update_data:
-        result = await db.driver_profiles.update_one({"user_id": user_id}, {"$set": update_data})
-        if result.modified_count == 0:
-            profile = DriverProfile(user_id=user_id, **update_data)
-            await db.driver_profiles.insert_one(profile.dict())
-    
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    profile["_id"] = str(profile["_id"])
-    return profile
-
-@api_router.put("/drivers/{user_id}/location")
-async def update_driver_location(user_id: str, request: LocationUpdate):
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"current_location": {"lat": request.latitude, "lng": request.longitude, "updated_at": datetime.utcnow().isoformat()}}}
-    )
-    return {"message": "Location updated"}
-
-@api_router.put("/drivers/{user_id}/online")
-async def toggle_driver_online(user_id: str, is_online: bool):
-    subscription = await db.subscriptions.find_one({
-        "driver_id": user_id,
-        "status": {"$in": ["active", "grace_period", "trial"]}  # Include trial status
-    })
-    
-    if is_online and not subscription:
-        raise HTTPException(status_code=403, detail="Active subscription required to go online")
-    
-    # Check fatigue
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if profile and profile.get("hours_driven_today", 0) >= 10:
-        raise HTTPException(
-            status_code=403, 
-            detail="You've been driving for over 10 hours. Please take a break for safety."
-        )
-    
-    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
-    return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
+# ==================== DRIVER DOCUMENT VERIFICATION (REFACTORED TO routers/drivers.py) ====================
 
 
 
