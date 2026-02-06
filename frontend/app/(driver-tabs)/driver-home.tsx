@@ -397,6 +397,105 @@ export default function ModernDriverHome() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
+
+      {/* INCOMING RIDE REQUEST POPUP */}
+      <Modal visible={!!incomingRide} transparent animationType="slide">
+        <View style={styles.rideOverlay}>
+          <View style={styles.ridePopup}>
+            {/* Countdown Timer */}
+            <View style={styles.rideCountdownBar}>
+              <View style={[styles.rideCountdownFill, { width: `${(rideCountdown / 20) * 100}%` }]} />
+            </View>
+            <Text style={styles.rideCountdownText}>{rideCountdown}s to respond</Text>
+
+            {/* New Ride Header */}
+            <View style={styles.rideHeader}>
+              <Ionicons name="car-sport" size={32} color={COLORS.primary} />
+              <Text style={styles.rideHeaderText}>New Ride Request!</Text>
+            </View>
+
+            {/* Fare */}
+            <View style={styles.rideFareBox}>
+              <Text style={styles.rideFareLabel}>Offered Fare</Text>
+              <Text style={styles.rideFareAmount}>
+                {'\u20A6'}{(incomingRide?.offered_fare || incomingRide?.fare || 0).toLocaleString()}
+              </Text>
+            </View>
+
+            {/* Route Info */}
+            <View style={styles.rideRouteBox}>
+              <View style={styles.rideRouteItem}>
+                <View style={[styles.rideRouteDot, { backgroundColor: COLORS.accentGreen }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rideRouteLabel}>PICKUP</Text>
+                  <Text style={styles.rideRouteText} numberOfLines={2}>
+                    {typeof incomingRide?.pickup_location === 'string' 
+                      ? incomingRide.pickup_location 
+                      : incomingRide?.pickup_location?.address || 'Pickup location'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.rideRouteLine} />
+              <View style={styles.rideRouteItem}>
+                <View style={[styles.rideRouteDot, { backgroundColor: '#EF4444' }]} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rideRouteLabel}>DESTINATION</Text>
+                  <Text style={styles.rideRouteText} numberOfLines={2}>
+                    {typeof incomingRide?.destination === 'string'
+                      ? incomingRide.destination
+                      : incomingRide?.destination?.address || 'Destination'}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Trip Details */}
+            <View style={styles.rideDetailsRow}>
+              <View style={styles.rideDetail}>
+                <Ionicons name="navigate" size={18} color="#64748B" />
+                <Text style={styles.rideDetailText}>
+                  {incomingRide?.distance_to_pickup ? `${incomingRide.distance_to_pickup}km away` : 'Nearby'}
+                </Text>
+              </View>
+              <View style={styles.rideDetail}>
+                <Ionicons name="car" size={18} color="#64748B" />
+                <Text style={styles.rideDetailText}>
+                  {incomingRide?.vehicle_type || 'Standard'}
+                </Text>
+              </View>
+              <View style={styles.rideDetail}>
+                <Ionicons name="swap-horizontal" size={18} color="#64748B" />
+                <Text style={styles.rideDetailText}>
+                  {incomingRide?.trip_type === 'inter' ? 'Interstate' : 'City'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Accept / Decline Buttons */}
+            <View style={styles.rideActions}>
+              <TouchableOpacity style={styles.rideDeclineBtn} onPress={handleDeclineRide}>
+                <Ionicons name="close" size={28} color="#EF4444" />
+                <Text style={styles.rideDeclineText}>Decline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={styles.rideAcceptBtn} 
+                onPress={handleAcceptRide}
+                disabled={acceptingRide}
+              >
+                {acceptingRide ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <>
+                    <Ionicons name="checkmark" size={28} color="#FFF" />
+                    <Text style={styles.rideAcceptText}>Accept</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
