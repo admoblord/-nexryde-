@@ -621,53 +621,66 @@ const styles = StyleSheet.create({
     marginTop: 32,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 22, // BIGGER from 18
+    fontWeight: '900', // BOLDER from 800
     color: COLORS.white,
-    marginBottom: 16,
+    marginBottom: 20, // More space from 16
   },
   vehicleGrid: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 14, // BIGGER from 12
   },
   vehicleCard: {
     flex: 1,
     backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 20, // BIGGER from 16
+    padding: 22, // BIGGER from 16
     alignItems: 'center',
-    borderWidth: 2,
+    borderWidth: 3, // BIGGER from 2
     borderColor: 'transparent',
+    minHeight: 135, // Added for bigger cards
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   vehicleCardSelected: {
     borderColor: COLORS.brandGreen,
-    backgroundColor: COLORS.cardBg,
+    backgroundColor: 'rgba(0, 212, 106, 0.08)',
+    transform: [{ scale: 1.05 }], // Slight pop effect
   },
   vehicleIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 68, // BIGGER from 56
+    height: 68, // BIGGER from 56
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 8,
+    marginBottom: 12, // More space from 8
   },
   vehicleName: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 16, // BIGGER from 14
+    fontWeight: '800', // BOLDER from 700
     color: COLORS.white,
   },
   checkmark: {
     position: 'absolute',
-    top: 8,
-    right: 8,
+    top: 10, // Adjusted
+    right: 10, // Adjusted
   },
   bookButton: {
     position: 'absolute',
     bottom: 20,
     left: 20,
     right: 20,
-    borderRadius: 16,
+    borderRadius: 20, // BIGGER from 16
     overflow: 'hidden',
+    minHeight: 68, // BIGGER button from default
+    shadowColor: COLORS.brandGreen,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.5,
+    shadowRadius: 16,
+    elevation: 16,
     shadowColor: COLORS.brandGreen,
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.4,
