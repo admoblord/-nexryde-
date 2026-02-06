@@ -256,6 +256,7 @@ export default function ModernRiderHome() {
           </View>
         </Animated.View>
       </ScrollView>
+      <ActiveTripBar />
     </SafeAreaView>
   );
 }
