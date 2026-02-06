@@ -7830,6 +7830,7 @@ app.include_router(map_router)
 app.include_router(call_router)
 app.include_router(community_router)  # REFACTORED: Community groups, polls, events
 app.include_router(safety_router)  # REFACTORED: Area boys, danger zones, alerts
+app.include_router(ai_router)  # REFACTORED: All AI features (assistant, coach, traffic, accident, etc.)
 
 # Payment reminder background job
 @app.on_event("startup")
