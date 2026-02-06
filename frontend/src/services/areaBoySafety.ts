@@ -111,15 +111,43 @@ export class AreaBoySafety {
     radius: number = 10000 // 10km default
   ): Promise<DangerZone[]> {
     try {
-      // In production, call backend API
-      // const response = await fetch(`/api/safety/danger-zones?lat=${latitude}&lng=${longitude}&radius=${radius}`);
-      // return response.json();
-
-      // For now, return simulated Lagos danger zones
+      const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+      const response = await fetch(`${BACKEND_URL}/api/safety/danger-zones?lat=${latitude}&lng=${longitude}&radius=${radius}`);
+      const data = await response.json();
+      
+      if (data.success && data.zones?.length > 0) {
+        // Map backend format to frontend DangerZone format
+        return data.zones.map((z: any) => ({
+          id: z.zone_id || z._id,
+          location: {
+            latitude: z.location?.latitude || 0,
+            longitude: z.location?.longitude || 0,
+            address: z.location?.address || 'Unknown',
+            landmark: z.location?.landmark,
+          },
+          type: z.type || 'area_boys',
+          severity: z.severity || 'moderate',
+          activeTime: {
+            start: z.active_time?.start || 0,
+            end: z.active_time?.end || 23,
+            allDay: z.active_time?.all_day || false,
+          },
+          description: z.description || '',
+          reports: [],
+          verifiedReports: z.verified_reports || 0,
+          lastReportTime: new Date(z.last_report_time || Date.now()),
+          aiConfidence: z.ai_confidence || 70,
+          communityRating: z.community_rating || 3.0,
+          affectedRadius: z.affected_radius || 300,
+          safeAlternatives: z.safe_alternatives || [],
+        }));
+      }
+      
+      // Fallback to simulated data if backend unavailable
       return this.simulateLagosDangerZones(latitude, longitude);
     } catch (error) {
       console.error('Failed to get danger zones:', error);
-      return [];
+      return this.simulateLagosDangerZones(latitude, longitude);
     }
   }
 
