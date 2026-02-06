@@ -68,13 +68,30 @@ class GracePeriodRequest(BaseModel):
     days_requested: int = 3
 
 
-# Tier config
+# Tier config (matches server.py exactly)
 TIER_CONFIG = {
-    "basic": {"name": "Basic", "min_trips": 0, "commission": 0.15, "monthly_fee": 25000, "benefits": ["Standard rides"]},
-    "silver": {"name": "Silver", "min_trips": 50, "commission": 0.12, "monthly_fee": 25000, "benefits": ["Priority dispatch", "5% bonus"]},
-    "gold": {"name": "Gold", "min_trips": 200, "commission": 0.10, "monthly_fee": 25000, "benefits": ["Priority dispatch", "10% bonus", "Insurance"]},
-    "platinum": {"name": "Platinum", "min_trips": 500, "commission": 0.08, "monthly_fee": 25000, "benefits": ["VIP dispatch", "15% bonus", "Full Insurance", "Dedicated support"]},
-    "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "monthly_fee": 25000, "benefits": ["VIP everything", "20% bonus", "Full Insurance", "Priority support", "Free subscription"]},
+    "basic": {
+        "name": "KODA Basic",
+        "monthly_fee": 25000,
+        "earning_per_ride": {"min": 200, "max": 300},
+        "commission": 0.15,
+        "requirements": {"vehicle_year_min": None, "leather_seats": False, "dual_ac": False, "min_rating": 4.3},
+        "color": "#C9A9A6",
+        "benefits": ["Standard rides"],
+    },
+    "premium": {
+        "name": "KODA Premium",
+        "monthly_fee": 25000,
+        "earning_per_ride": {"min": 300, "max": 450},
+        "commission": 0.10,
+        "requirements": {"vehicle_year_min": 2018, "leather_seats": True, "dual_ac": True, "min_rating": 4.7, "premium_training": True},
+        "color": "#D4AF37",
+        "benefits": ["Priority support", "Early access to new features", "Free vehicle inspection vouchers", "Premium Driver badge"],
+    },
+    "silver": {"name": "Silver", "min_trips": 50, "commission": 0.12, "monthly_fee": 25000, "earning_per_ride": {"min": 250, "max": 350}, "benefits": ["Priority dispatch", "5% bonus"]},
+    "gold": {"name": "Gold", "min_trips": 200, "commission": 0.10, "monthly_fee": 25000, "earning_per_ride": {"min": 300, "max": 400}, "benefits": ["Priority dispatch", "10% bonus", "Insurance"]},
+    "platinum": {"name": "Platinum", "min_trips": 500, "commission": 0.08, "monthly_fee": 25000, "earning_per_ride": {"min": 350, "max": 450}, "benefits": ["VIP dispatch", "15% bonus", "Full Insurance"]},
+    "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "monthly_fee": 25000, "earning_per_ride": {"min": 400, "max": 500}, "benefits": ["VIP everything", "20% bonus"]},
 }
 
 # Fare config
