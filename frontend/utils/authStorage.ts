@@ -1,9 +1,11 @@
 /**
  * Secure Authentication Storage Service
  * Handles persistent login by storing user data and tokens securely
+ * Now with Biometric Authentication (Fingerprint/Face ID)
  */
 
 import * as SecureStore from 'expo-secure-store';
+import * as LocalAuthentication from 'expo-local-authentication';
 
 // Storage Keys
 const KEYS = {
@@ -11,7 +13,8 @@ const KEYS = {
   AUTH_TOKEN: 'auth_token',
   USER_ID: 'user_id',
   USER_ROLE: 'user_role',
-  IS_LOGGED_IN: 'is_logged_in'
+  IS_LOGGED_IN: 'is_logged_in',
+  BIOMETRIC_ENABLED: 'biometric_enabled'
 };
 
 /**
