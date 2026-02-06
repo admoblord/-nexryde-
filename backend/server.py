@@ -9478,13 +9478,8 @@ async def seed_community_and_safety():
 
 
 
-
 # ==================== DRIVER STORIES ENDPOINTS ====================
-
 # (Community & Safety endpoints moved to routers/community.py and routers/safety.py)
-
-# ==================== DRIVER STORIES ENDPOINTS ====================
-# ==================== DRIVER STORIES ENDPOINTS ====================
 
 class StoryCreate(BaseModel):
     driver_id: str
