@@ -148,6 +148,9 @@ export default function DriverProfileScreen() {
             <Ionicons name="car" size={14} color={COLORS.success} />
             <Text style={styles.driverBadgeText}>Verified Driver</Text>
           </View>
+
+          {/* Member Since */}
+          <Text style={styles.memberSince}>Driving since {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Recently'}</Text>
           
           {/* Driver Stats */}
           <View style={styles.statsRow}>
