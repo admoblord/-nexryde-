@@ -6198,47 +6198,6 @@ async def get_active_trip(user_id: str):
         logger.error(f"Get active trip error: {e}")
         return {"active": False, "error": str(e)}
 
-@api_router.post("/rides/create-custom-price")
-async def create_custom_price_trip_alias(request: dict = Body(...)):
-    """Alias for /trips/create-with-custom-price to work around proxy routing"""
-    from routers.trips import CustomPriceRequest
-    try:
-        trip_req = CustomPriceRequest(**request)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    
-    trip_id = f"trip-{int(time.time() * 1000)}"
-    difference_percent = ((trip_req.offered_fare - trip_req.recommended_fare) / trip_req.recommended_fare) * 100
-    trip = {
-        "id": trip_id,
-        "rider_id": trip_req.rider_id,
-        "pickup_location": trip_req.pickup,
-        "destination": trip_req.destination,
-        "recommended_fare": trip_req.recommended_fare,
-        "offered_fare": trip_req.offered_fare,
-        "final_fare": None,
-        "vehicle_type": trip_req.vehicle_type,
-        "trip_type": trip_req.trip_type,
-        "status": "pending_driver_offers",
-        "broadcast_radius_km": 10,
-        "difference_percent": round(difference_percent, 1),
-        "offers": [],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
-    }
-    await db.trips.insert_one(trip)
-    logger.info(f"Custom price trip created: {trip_id} with offer N{trip_req.offered_fare}")
-    return {
-        "success": True,
-        "trip_id": trip_id,
-        "drivers_notified": 15,
-        "message": f"Your offer of N{trip_req.offered_fare:,.0f} has been broadcast to 15 nearby drivers",
-        "recommended_fare": trip_req.recommended_fare,
-        "offered_fare": trip_req.offered_fare,
-        "difference": trip_req.offered_fare - trip_req.recommended_fare,
-        "difference_percent": round(difference_percent, 1),
-    }
-
 @api_router.get("/")
 async def root():
     return {"message": "KODA API is running", "version": "2.0.0"}
