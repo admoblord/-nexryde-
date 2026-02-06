@@ -434,11 +434,18 @@ async def initiate_trip_call(trip_id: str, request: dict):
         else:
             target_name = target_user.get("name", "Rider")
 
+        # Mask phone number (Bolt-style privacy)
+        import re
+        masked_phone = re.sub(r'(\d{4})(\d{3})(\d+)', r'\1***\3', phone)
+
         return {
             "success": True,
             "phone_number": phone,
+            "masked_number": masked_phone,
             "target_name": target_name,
             "calls_remaining": 5 - call_count - 1,
+            "call_type": "nexryde_secure",
+            "privacy_note": "Your number is protected by NEXRYDE",
         }
     except HTTPException:
         raise
