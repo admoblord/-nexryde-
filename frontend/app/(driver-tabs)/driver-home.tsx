@@ -90,6 +90,9 @@ export default function ModernDriverHome() {
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(true);
+  const [incomingRide, setIncomingRide] = useState<any>(null);
+  const [rideCountdown, setRideCountdown] = useState(20);
+  const [acceptingRide, setAcceptingRide] = useState(false);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
