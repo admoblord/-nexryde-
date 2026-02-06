@@ -2322,7 +2322,7 @@ async def update_driver_location(user_id: str, request: LocationUpdate):
 async def toggle_driver_online(user_id: str, is_online: bool):
     subscription = await db.subscriptions.find_one({
         "driver_id": user_id,
-        "status": {"$in": ["active", "grace_period"]}
+        "status": {"$in": ["active", "grace_period", "trial"]}  # Include trial status
     })
     
     if is_online and not subscription:
@@ -4617,14 +4617,24 @@ async def get_receipt(trip_id: str):
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     
+    # Handle both dict and string pickup/dropoff formats
+    pickup_loc = trip.get("pickup_location") or trip.get("pickup", {})
+    dropoff_loc = trip.get("dropoff_location") or trip.get("dropoff", {})
+    
+    pickup_address = pickup_loc.get("address", pickup_loc) if isinstance(pickup_loc, dict) else str(pickup_loc)
+    dropoff_address = dropoff_loc.get("address", dropoff_loc) if isinstance(dropoff_loc, dict) else str(dropoff_loc)
+    
     return {
         "receipt_id": f"NXR-{trip_id[:8].upper()}",
-        "date": trip.get("created_at", datetime.utcnow()).isoformat(),
-        "pickup": trip.get("pickup", {}).get("address", ""),
-        "dropoff": trip.get("dropoff", {}).get("address", ""),
+        "trip_id": trip_id,
+        "date": trip.get("created_at", datetime.utcnow()).isoformat() if isinstance(trip.get("created_at"), datetime) else str(trip.get("created_at", "")),
+        "pickup": pickup_address,
+        "dropoff": dropoff_address,
         "fare": trip.get("fare", 0),
         "payment_method": trip.get("payment_method", "cash"),
-        "status": trip.get("status", "completed")
+        "status": trip.get("status", "completed"),
+        "distance_km": trip.get("distance_km", 0),
+        "duration_mins": trip.get("duration_mins", 0)
     }
 
 # ==================== MULTI-LANGUAGE ====================
