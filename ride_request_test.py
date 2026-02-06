@@ -44,7 +44,54 @@ class RideRequestTester:
                 print(f"   • {finding}")
         print()
     
-    async def test_1_rider_creates_trip(self) -> bool:
+    async def setup_test_driver(self) -> bool:
+        """Setup test driver profile for accepting rides"""
+        print("🧪 Setup: Creating driver profile for driver-test-001")
+        
+        try:
+            driver_data = {
+                "driver_id": "driver-test-001",
+                "full_name": "Test Driver",
+                "phone": "+2348012345678",
+                "email": "testdriver@example.com",
+                "address": "123 Test Street, Lagos",
+                "city": "Lagos",
+                "state": "Lagos",
+                "date_of_birth": "1990-01-01",
+                "emergency_contact": "+2348087654321",
+                "vehicle_type": "sedan",
+                "make": "Toyota",
+                "model": "Camry",
+                "year": 2020,
+                "plate_number": "ABC-123XY",
+                "color": "Silver"
+            }
+            
+            response = await self.client.post(
+                f"{BACKEND_URL}/drivers/complete-profile",
+                json=driver_data
+            )
+            
+            data = response.json()
+            
+            success_checks = [
+                response.status_code == 200,
+                data.get("success") is True,
+                data.get("trial_activated") is True
+            ]
+            
+            all_success = all(success_checks)
+            
+            if all_success:
+                print(f"   ✅ Driver profile created with 24-hour trial")
+            else:
+                print(f"   ❌ Driver profile creation failed: {data}")
+            
+            return all_success
+            
+        except Exception as e:
+            print(f"   ❌ Driver setup failed: {str(e)}")
+            return False
         """Test 1: POST /api/trips/create-with-custom-price - Rider creates a trip"""
         print("🧪 Test 1: POST /api/trips/create-with-custom-price")
         
