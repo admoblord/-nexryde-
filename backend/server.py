@@ -18,6 +18,7 @@ import httpx
 import hashlib
 import json
 import asyncio
+from openai import OpenAI
 
 # Import LLM Chat for AI Assistants
 from emergentintegrations.llm.chat import LlmChat, UserMessage
