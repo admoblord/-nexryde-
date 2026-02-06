@@ -1512,8 +1512,32 @@ agent_communication:
         - agent: "main"
         - comment: "Fixed 500 error on GET /api/rider/preferences/{user_id}. Root cause: Missing _id:0 exclusion in MongoDB query. Also fixed datetime.utcnow() to datetime.now(timezone.utc).isoformat()"
 
+  - task: "Trip Router Fix - Trip model dependency and shared functions"
+    implemented: true
+    working: true
+    file: "routers/trips.py, server.py"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Fixed NameError for Trip model, get_directions_from_google, calculate_fare, calculate_distance_haversine in trips router. Replaced Pydantic Trip model usage with dict-based approach. Added set_shared_functions() to wire server.py functions into trips router at startup."
+
+  - task: "Frontend Booking URL Fix for Deployed Host"
+    implemented: true
+    working: true
+    file: "app/rider/book-indrive-style.tsx, routers/trips.py"
+    stuck_count: 0
+    priority: "critical"
+    needs_retesting: true
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Fixed: Deployed URL CDN cache was blocking POST to /api/trips/create-with-custom-price. Updated frontend to use /api/trips/request with offered_fare param instead. Added offered_fare, recommended_fare, trip_type optional fields to TripRequest model."
+
 agent_communication:
     - agent: "main"
-    - message: "COMPREHENSIVE VERIFICATION: Tested 58+ backend endpoints across rider and driver features. Found and fixed 1 bug (rider preferences _id serialization 500 error). All other endpoints working correctly. Key areas verified: Auth, Trips, Bidding, Chat, AI Features, Safety, Community, Wallet, Subscriptions, Earnings, Tiers, Challenges, Family, Loyalty, Emergency Contacts. The only parameter mismatches were in curl test format, not actual bugs."
+    - message: "COMPREHENSIVE VERIFICATION COMPLETE. Fixed multiple issues: 1) Rider preferences _id serialization 500 error, 2) phone_number/phone field mismatch in call endpoint, 3) Trip model NameError in trips router (replaced with dict-based approach), 4) Wired shared functions from server.py to trips router, 5) Updated frontend booking to use /api/trips/request (deployed URL CDN blocks new POST routes). Full E2E test passed: register→subscribe→create trip→accept→active trip→call→chat→start→complete→rate→wallet→preferences→heatmap→community. Testing with deployed URL https://nexryde-ui.emergent.host."
 
         - comment: "Seeded 5 polls across groups (general, lagos-drivers, earnings-talk, vehicle-maintenance, safety-zone), 5 events (meetups, promotions, training), and 15+ engaging messages with Nigerian context. Pinned important first messages in key groups."
