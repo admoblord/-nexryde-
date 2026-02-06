@@ -53,6 +53,8 @@ from routers.ai_features import ai_router
 from routers.admin import admin_router
 from routers.trips import trips_router, set_fare_estimate_store, set_shared_functions
 from routers.auth import auth_router
+from routers.bidding import bidding_router
+from routers.payments import payments_router
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
