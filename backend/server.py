@@ -2443,10 +2443,7 @@ async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertReque
     # Log the alert for admin review
     logger.warning(f"RISK ALERT on trip {trip_id} by {'driver' if is_driver else 'rider'}: {request.reason}")
     
-
-# WALLET ENDPOINTS - extracted to routers/
-
-    }
+#
 
 # ==================== CHALLENGES & GAMIFICATION ====================
 
@@ -3118,10 +3115,7 @@ async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
 
 # PROMO CODES & REFERRALS - extracted to routers/
 
-
-# TRIP RECEIPTS - extracted to routers/
-
-    }
+#
 
 # ==================== MULTI-LANGUAGE ====================
 
@@ -3856,10 +3850,7 @@ async def get_trip_insurance(trip_id: str):
 
 # DRIVER TIER SYSTEM - extracted to routers/
 
-
-# AUTOMATIC FARE ADJUSTMENT - extracted to routers/
-
-    }
+#
 
 @api_router.post("/trips/{trip_id}/track")
 async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate):
