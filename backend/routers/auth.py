@@ -808,26 +808,25 @@ async def google_sign_in(request: GoogleSignInRequest):
                 }
             else:
                 # Create new admin driver account with lifetime access
-                new_user = User(
+                new_user = create_user_dict(
                     phone="",
                     name=request.name or "Admin Driver",
                     email=request.email,
-                    role="driver",  # Force driver role
+                    role="driver",
                     is_verified=True,
                     google_id=request.email,
                     profile_image=request.photo_url,
-                    driver_verified=True,
-                    verification_status="approved"
                 )
-                await db.users.insert_one(new_user.dict())
+                await db.users.insert_one(new_user)
+                new_user.pop("_id", None)
                 
                 # Create wallet
-                wallet = Wallet(user_id=new_user.id)
-                await db.wallets.insert_one(wallet.dict())
+                wallet = create_wallet_dict(new_user["id"])
+                await db.wallets.insert_one(wallet)
                 
                 # Create driver profile
-                driver_profile = DriverProfile(user_id=new_user.id)
-                await db.driver_profiles.insert_one(driver_profile.dict())
+                driver_profile = create_driver_profile_dict(new_user["id"])
+                await db.driver_profiles.insert_one(driver_profile)
                 
                 # Create LIFETIME subscription
                 lifetime_subscription = {
