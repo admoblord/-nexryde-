@@ -842,17 +842,13 @@ metadata:
 
 test_plan:
   current_focus:
-    - "Complete Driver Flow Testing - End to End"
-    - "Complete Rider Flow Testing - End to End"
-    - "Settings and All Buttons Testing"
-    - "Payment Proof Upload and Admin Review"
-    - "Final UI Polish Verification"
-    - "Vehicle Registration System"
-  stuck_tasks:
-    - "Rider Booking Screen - UI Rendering Issues"
-    - "Driver Subscription Screen - TypeError current_phase"
-  test_all: true
-  test_priority: "comprehensive"
+    - "Driver Onboarding Security Flow - Backend APIs"
+    - "Driver Onboarding Status Endpoint"
+    - "Driver Document Verification Endpoint"
+    - "Driver Profile Completion Endpoint"
+  stuck_tasks: []
+  test_all: false
+  test_priority: "high_first"
 
   - task: "Driver Vehicle Registration"
     implemented: true
