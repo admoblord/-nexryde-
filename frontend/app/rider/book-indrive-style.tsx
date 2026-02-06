@@ -116,18 +116,180 @@ export default function BookInDriveStyle() {
     }
   };
 
+  // Nigerian States Mapping for Inter-City Detection
+  const NIGERIAN_STATES_MAP: { [key: string]: string } = {
+    // Lagos State
+    'lagos': 'Lagos',
+    'ikeja': 'Lagos',
+    'lekki': 'Lagos',
+    'ikorodu': 'Lagos',
+    'epe': 'Lagos',
+    'badagry': 'Lagos',
+    'ajah': 'Lagos',
+    'victoria island': 'Lagos',
+    'island': 'Lagos',
+    'surulere': 'Lagos',
+    'yaba': 'Lagos',
+    'apapa': 'Lagos',
+    
+    // FCT Abuja
+    'abuja': 'FCT',
+    'gwagwalada': 'FCT',
+    'kuje': 'FCT',
+    'bwari': 'FCT',
+    'kubwa': 'FCT',
+    'nyanya': 'FCT',
+    'maitama': 'FCT',
+    'wuse': 'FCT',
+    'garki': 'FCT',
+    'asokoro': 'FCT',
+    
+    // Ogun State
+    'abeokuta': 'Ogun',
+    'ijebu': 'Ogun',
+    'ota': 'Ogun',
+    'sagamu': 'Ogun',
+    'ilaro': 'Ogun',
+    
+    // Oyo State
+    'ibadan': 'Oyo',
+    'ogbomoso': 'Oyo',
+    'oyo': 'Oyo',
+    
+    // Rivers State
+    'port harcourt': 'Rivers',
+    'portharcourt': 'Rivers',
+    'ph': 'Rivers',
+    
+    // Kano State
+    'kano': 'Kano',
+    
+    // Kaduna State
+    'kaduna': 'Kaduna',
+    'zaria': 'Kaduna',
+    
+    // Enugu State
+    'enugu': 'Enugu',
+    'nsukka': 'Enugu',
+    
+    // Anambra State
+    'awka': 'Anambra',
+    'onitsha': 'Anambra',
+    'nnewi': 'Anambra',
+    
+    // Delta State
+    'asaba': 'Delta',
+    'warri': 'Delta',
+    
+    // Edo State
+    'benin': 'Edo',
+    'benin city': 'Edo',
+    
+    // Imo State
+    'owerri': 'Imo',
+    
+    // Abia State
+    'aba': 'Abia',
+    'umuahia': 'Abia',
+    
+    // Akwa Ibom State
+    'uyo': 'Akwa Ibom',
+    
+    // Cross River State
+    'calabar': 'Cross River',
+    
+    // Bayelsa State
+    'yenagoa': 'Bayelsa',
+    
+    // Plateau State
+    'jos': 'Plateau',
+    
+    // Kwara State
+    'ilorin': 'Kwara',
+    
+    // Osun State
+    'osogbo': 'Osun',
+    'ile-ife': 'Osun',
+    
+    // Ondo State
+    'akure': 'Ondo',
+    
+    // Ekiti State
+    'ado-ekiti': 'Ekiti',
+    
+    // Niger State
+    'minna': 'Niger',
+    'suleja': 'Niger',
+    
+    // Katsina State
+    'katsina': 'Katsina',
+    
+    // Sokoto State
+    'sokoto': 'Sokoto',
+    
+    // Kebbi State
+    'birnin kebbi': 'Kebbi',
+    
+    // Zamfara State
+    'gusau': 'Zamfara',
+    
+    // Borno State
+    'maiduguri': 'Borno',
+    
+    // Yobe State
+    'damaturu': 'Yobe',
+    
+    // Adamawa State
+    'yola': 'Adamawa',
+    
+    // Taraba State
+    'jalingo': 'Taraba',
+    
+    // Gombe State
+    'gombe': 'Gombe',
+    
+    // Bauchi State
+    'bauchi': 'Bauchi',
+    
+    // Benue State
+    'makurdi': 'Benue',
+    
+    // Nassarawa State
+    'lafia': 'Nassarawa',
+    'nassarawa': 'Nassarawa',
+    
+    // Kogi State
+    'lokoja': 'Kogi',
+  };
+
+  const detectStateFromLocation = (location: string): string | null => {
+    const locationLower = location.toLowerCase();
+    
+    // Check each state mapping
+    for (const [keyword, state] of Object.entries(NIGERIAN_STATES_MAP)) {
+      if (locationLower.includes(keyword)) {
+        return state;
+      }
+    }
+    
+    return null; // Unknown state
+  };
+
   const detectTripType = () => {
     if (!pickup || !destination) return 'intra';
-    const pickupLower = pickup.toLowerCase();
-    const destLower = destination.toLowerCase();
-    const pickupInLagos = pickupLower.includes('lagos');
-    const destInLagos = destLower.includes('lagos');
-    const pickupInAbuja = pickupLower.includes('abuja');
-    const destInAbuja = destLower.includes('abuja');
     
-    if ((pickupInLagos && destInLagos) || (pickupInAbuja && destInAbuja)) {
+    const pickupState = detectStateFromLocation(pickup);
+    const destState = detectStateFromLocation(destination);
+    
+    // If we can't detect states, assume intra-city (same state)
+    if (!pickupState || !destState) return 'intra';
+    
+    // If both locations are in the same state = INTRA-CITY
+    if (pickupState === destState) {
       return 'intra';
     }
+    
+    // If different states = INTER-CITY (needs Warrior Pack)
     return 'inter';
   };
 
