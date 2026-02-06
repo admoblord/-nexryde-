@@ -5,6 +5,7 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 import logging
+import uuid
 
 from database import db
 
@@ -108,7 +109,6 @@ async def get_open_bids(lat: float, lng: float):
     return {"bids": [{"bid_id": b["id"], "rider_offered_price": b["rider_offered_price"], 
                       "pickup_address": b["pickup"]["address"], "dropoff_address": b["dropoff"]["address"]} for b in bids]}
 
-# ==================== SCHEDULED RIDES ====================
 
 class ScheduledRideRequest(BaseModel):
     pickup_lat: float
@@ -146,7 +146,6 @@ async def get_scheduled_rides(rider_id: str):
     return {"scheduled_rides": [{"id": r["id"], "pickup_address": r["pickup"]["address"], 
                                  "scheduled_time": r["scheduled_time"].isoformat()} for r in rides]}
 
-# ==================== SPLIT FARE ====================
 
 @bidding_router.post("/rides/{trip_id}/split-fare")
 async def split_fare(trip_id: str, rider_id: str, phones: List[str]):
@@ -167,7 +166,6 @@ async def split_fare(trip_id: str, rider_id: str, phones: List[str]):
     await db.split_fares.insert_one(split)
     return {"split_id": split["id"], "per_person": per_person, "num_participants": len(phones) + 1}
 
-# ==================== PACKAGE DELIVERY ====================
 
 class PackageRequest(BaseModel):
     pickup_lat: float
@@ -202,23 +200,4 @@ async def request_delivery(request: PackageRequest, sender_id: str):
     }
     await db.deliveries.insert_one(delivery)
     return {"delivery_id": delivery["id"], "fare": base_fare, "pickup_code": delivery["pickup_code"]}
-
-# ==================== FEMALE DRIVER OPTION ====================
-
-@bidding_router.post("/rides/request-female-driver")
-async def request_female_driver(rider_id: str, pickup_lat: float, pickup_lng: float, pickup_address: str,
-                                 dropoff_lat: float, dropoff_lng: float, dropoff_address: str):
-    """Request ride with female driver only"""
-    trip = {
-        "id": str(uuid.uuid4()),
-        "rider_id": rider_id,
-        "pickup": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address},
-        "dropoff": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address},
-        "ride_type": "female_only",
-        "female_driver_only": True,
-        "status": "pending",
-        "created_at": datetime.utcnow()
-    }
-    await db.trips.insert_one(trip)
-    return {"trip_id": trip["id"], "message": "Looking for female drivers..."}
 
