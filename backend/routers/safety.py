@@ -99,8 +99,8 @@ Generate 3-4 safety alerts as a JSON array. Each alert should have:
 - message: brief safety message
 - zone_type: area_boys, checkpoint, robbery, flooding, or general"""
 
-        response = await chat.send_message_async(UserMessage(text=prompt))
-        json_match = re.search(r'\[.*\]', response.text, re.DOTALL)
+        response = await chat.send_message(UserMessage(text=prompt))
+        json_match = re.search(r'\[.*\]', response, re.DOTALL)
         if json_match:
             alerts = json.loads(json_match.group())
         else:
