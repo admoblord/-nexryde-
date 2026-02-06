@@ -31,9 +31,12 @@ async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng):
         return await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
     return None
 
-def calculate_fare(dist, dur, traffic, svc="economy"):
+def calculate_fare(dist, dur, traffic, svc="economy", city="lagos"):
     if _calculate_fare_fn:
-        return _calculate_fare_fn(dist, dur, traffic, svc)
+        try:
+            return _calculate_fare_fn(dist, dur, traffic, svc)
+        except TypeError:
+            return _calculate_fare_fn(dist, dur, traffic)
     base = max(700, dist * 150)
     return {"base_fare": 300, "distance_fee": dist * 100, "time_fee": dur * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
 
