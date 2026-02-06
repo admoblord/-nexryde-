@@ -110,6 +110,8 @@ export default function ModernRiderHome() {
   const router = useRouter();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const { language, setLanguage, availableLanguages } = useLanguage();
 
   useEffect(() => {
     Animated.parallel([
@@ -128,15 +130,46 @@ export default function ModernRiderHome() {
           <Text style={styles.greeting}>Hello!</Text>
           <Text style={styles.userName}>Where to today?</Text>
         </View>
-        <TouchableOpacity style={styles.profileButton}>
-          <LinearGradient
-            colors={[COLORS.primary, COLORS.primaryDark]}
-            style={styles.profileGradient}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity 
+            onPress={() => setShowLangPicker(true)}
+            style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
           >
-            <Ionicons name="person" size={24} color="#FFF" />
-          </LinearGradient>
-        </TouchableOpacity>
+            <Text style={{ fontSize: 18 }}>{availableLanguages.find(l => l.code === language)?.flag || '🌐'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.profileButton}>
+            <LinearGradient
+              colors={[COLORS.primary, COLORS.primaryDark]}
+              style={styles.profileGradient}
+            >
+              <Ionicons name="person" size={24} color="#FFF" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
+
+      {/* Language Picker Modal */}
+      <Modal visible={showLangPicker} transparent animationType="fade">
+        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
+          <View style={{ marginHorizontal: 20, backgroundColor: '#FFF', borderRadius: 16, padding: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 }}>
+            <Text style={{ fontSize: 13, fontWeight: '800', color: '#6B7280', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
+            {availableLanguages.map((lang) => (
+              <TouchableOpacity
+                key={lang.code}
+                onPress={() => { setLanguage(lang.code as SupportedLanguage); setShowLangPicker(false); }}
+                style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: language === lang.code ? '#ECFDF5' : 'transparent', gap: 12 }}
+              >
+                <Text style={{ fontSize: 22 }}>{lang.flag}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827' }}>{lang.nativeName}</Text>
+                  <Text style={{ fontSize: 12, color: '#9CA3AF' }}>{lang.name}</Text>
+                </View>
+                {language === lang.code && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* PRIORITY ACTIONS - HERO SECTION */}
