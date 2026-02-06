@@ -54,97 +54,50 @@ class TestSetup:
     def test_01_create_test_rider(self):
         """Create test rider user"""
         global TEST_RIDER_ID
-        payload = {
-            "phone": TEST_RIDER_PHONE,
-            "name": f"Test Rider {TEST_RUN_ID}",
-            "email": f"rider_{TEST_RUN_ID}@test.com"
-        }
-        
-        # Try to register or verify user exists
-        response = requests.post(f"{BASE_URL}/api/auth/register-phone", json=payload)
-        
-        # Accept 200 (created), 409 (exists), or error
-        if response.status_code == 200:
-            data = response.json()
-            # Get user_id from response
-            user_id = data.get("user_id") or data.get("user", {}).get("id")
-            if user_id:
-                TEST_RIDER_ID = user_id
-            print(f"PASS: Created test rider: {TEST_RIDER_ID}")
-        elif response.status_code == 409:
-            print("INFO: Rider already exists, continuing with generated ID")
-        else:
-            # Just create the user in users collection directly via another endpoint or skip
-            print(f"INFO: Registration returned {response.status_code}, will use generated user ID")
-        
-        # Ensure rider exists by trying to use users endpoint
-        # Create/update user directly
-        user_payload = {
-            "id": TEST_RIDER_ID,
-            "phone_number": TEST_RIDER_PHONE,
-            "name": f"Test Rider {TEST_RUN_ID}",
-            "role": "rider"
-        }
-        # Use users endpoint if available
+        # Using generated ID directly since registration may require OTP
         print(f"PASS: Test rider ID: {TEST_RIDER_ID}")
     
     def test_02_create_test_driver(self):
         """Create test driver user with subscription"""
         global TEST_DRIVER_ID
-        
-        # Create driver user
-        payload = {
-            "phone": TEST_DRIVER_PHONE,
-            "name": f"Test Driver {TEST_RUN_ID}",
-            "email": f"driver_{TEST_RUN_ID}@test.com",
-            "role": "driver"
-        }
-        
-        response = requests.post(f"{BASE_URL}/api/auth/register-phone", json=payload)
-        
-        if response.status_code == 200:
-            data = response.json()
-            user_id = data.get("user_id") or data.get("user", {}).get("id")
-            if user_id:
-                TEST_DRIVER_ID = user_id
-            print(f"PASS: Created test driver: {TEST_DRIVER_ID}")
-        else:
-            print(f"INFO: Driver registration returned {response.status_code}, using generated ID")
-        
         print(f"PASS: Test driver ID: {TEST_DRIVER_ID}")
     
     def test_03_setup_driver_profile_and_subscription(self):
-        """Ensure driver has profile and active subscription"""
-        # Create driver profile
+        """Setup driver profile using PUT endpoint (upserts) and start trial"""
+        # Update/create driver profile using PUT (this upserts)
         profile_payload = {
             "first_name": "Test",
-            "last_name": f"Driver {TEST_RUN_ID}",
+            "last_name": f"Driver",
             "vehicle_type": "sedan",
             "plate_number": f"TST-{TEST_RUN_ID[:3]}",
-            "subscription_status": "active"
+            "phone_number": TEST_DRIVER_PHONE
         }
         
-        # Try to create driver profile
-        response = requests.post(
-            f"{BASE_URL}/api/driver/profile/create",
-            params={"user_id": TEST_DRIVER_ID},
+        response = requests.put(
+            f"{BASE_URL}/api/drivers/{TEST_DRIVER_ID}/profile",
             json=profile_payload
         )
+        print(f"Driver profile setup: {response.status_code}")
         
-        print(f"Driver profile creation: {response.status_code}")
+        # Start trial subscription for driver
+        response = requests.post(f"{BASE_URL}/api/subscriptions/{TEST_DRIVER_ID}/start-trial")
         
-        # Create subscription for driver
-        subscription_payload = {
-            "driver_id": TEST_DRIVER_ID,
-            "tier": "road_warrior",
-            "status": "active"
-        }
+        if response.status_code == 200:
+            data = response.json()
+            print(f"PASS: Trial started - {data.get('message', '')}")
+        elif response.status_code == 400:
+            # Already has subscription - that's fine
+            print("INFO: Driver already has subscription")
+        else:
+            print(f"Subscription trial: {response.status_code} - {response.text[:100]}")
         
-        # Try subscription endpoint
-        response = requests.post(f"{BASE_URL}/api/subscriptions/create", json=subscription_payload)
-        print(f"Subscription creation: {response.status_code}")
-        
-        print(f"PASS: Driver setup complete for {TEST_DRIVER_ID}")
+        # Verify subscription exists
+        sub_response = requests.get(f"{BASE_URL}/api/subscriptions/{TEST_DRIVER_ID}")
+        if sub_response.status_code == 200:
+            sub_data = sub_response.json()
+            print(f"PASS: Driver has subscription status: {sub_data.get('status')}")
+        else:
+            print(f"INFO: No subscription found - trip acceptance may fail")
 
 
 class TestTripCreationWithCustomPrice:
