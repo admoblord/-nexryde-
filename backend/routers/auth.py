@@ -253,8 +253,8 @@ async def send_sms_notification(phone: str, message: str):
     """Send SMS notification via Termii"""
     try:
         if not TERMII_API_KEY:
-            logger.info(f"SMS notification (mock): {phone} - {message}")
-            return True
+            logger.warning(f"SMS skipped (Termii not configured): {phone}")
+            return False
         
         async with httpx.AsyncClient() as http_client:
             # Termii requires phone number WITHOUT the + prefix
