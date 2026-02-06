@@ -424,6 +424,10 @@ export default function BookInDriveStyle() {
     setCurrentFare(prev => Math.max(100, prev - 100));
   };
 
+  const [searchingForDriver, setSearchingForDriver] = useState(false);
+  const [tripId, setTripId] = useState<string | null>(null);
+  const [driverFound, setDriverFound] = useState<any>(null);
+
   const findOffers = async () => {
     setIsLoading(true);
     try {
@@ -444,11 +448,10 @@ export default function BookInDriveStyle() {
       
       if (response.ok && result.success) {
         setIsLoading(false);
-        Alert.alert(
-          '🎯 Finding Drivers!',
-          `Your offer of ₦${currentFare.toLocaleString()} has been sent to nearby drivers!`,
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+        setTripId(result.trip?.id || null);
+        setSearchingForDriver(true);
+        // Start polling for driver acceptance
+        pollForDriver(result.trip?.id);
       } else {
         setIsLoading(false);
         Alert.alert('Error', 'Could not send offer. Please try again.');
@@ -458,6 +461,43 @@ export default function BookInDriveStyle() {
       setIsLoading(false);
       Alert.alert('Error', 'Could not send offer to drivers.');
     }
+  };
+
+  const pollForDriver = (id: string | null) => {
+    if (!id) return;
+    let attempts = 0;
+    const maxAttempts = 30; // 30 * 3s = 90 seconds max
+    
+    const interval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/trips/${id}/status`);
+        const data = await res.json();
+        
+        if (data.success && data.status === 'accepted' && data.driver_info) {
+          clearInterval(interval);
+          setDriverFound(data.driver_info);
+        }
+      } catch (e) {
+        console.error('Poll error:', e);
+      }
+      
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        setSearchingForDriver(false);
+        Alert.alert(
+          'No Drivers Available',
+          'No drivers accepted your request. Try increasing your fare or try again later.',
+          [{ text: 'OK' }]
+        );
+      }
+    }, 3000);
+  };
+
+  const cancelSearch = () => {
+    setSearchingForDriver(false);
+    setDriverFound(null);
+    setTripId(null);
   };
 
   const openLocationEditor = (field: 'pickup' | 'destination' | 'city') => {
