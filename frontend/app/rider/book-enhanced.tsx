@@ -299,24 +299,6 @@ export default function BookRideEnhanced() {
             contentContainerStyle={styles.content}
             showsVerticalScrollIndicator={false}
           >
-            {/* Map Preview (Optional - can be added later) */}
-            {routeCoordinates.length > 0 && mapRegion && (
-              <View style={styles.mapContainer}>
-                <MapView
-                  style={styles.map}
-                  region={mapRegion}
-                  scrollEnabled={false}
-                  zoomEnabled={false}
-                >
-                  <Polyline
-                    coordinates={routeCoordinates}
-                    strokeColor={COLORS.brandGreen}
-                    strokeWidth={4}
-                  />
-                </MapView>
-              </View>
-            )}
-
             {/* Location Input Section */}
             <View style={styles.locationSection}>
               {/* Enter City */}
