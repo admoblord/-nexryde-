@@ -2330,6 +2330,149 @@ async def toggle_driver_online(user_id: str, is_online: bool):
     await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
+
+
+@app.post("/api/drivers/verify-documents")
+async def verify_driver_documents(driver_id: str = Form(...)):
+    """
+    AI-powered document verification for drivers
+    Simulates AI verification - in production, integrate with actual AI service
+    """
+    try:
+        # In production: Upload images to cloud storage (S3, Cloudinary, etc.)
+        # In production: Call AI verification service (Google Vision, AWS Rekognition, custom model)
+        
+        # For now: Simulate instant AI approval (replace with real AI in production)
+        import random
+        import time
+        
+        # Simulate AI processing delay
+        time.sleep(2)
+        
+        # Simulate 90% approval rate (in production, actual AI determines this)
+        is_approved = random.random() < 0.9
+        
+        if is_approved:
+            # Update driver verification status
+            await db.driver_profiles.update_one(
+                {"user_id": driver_id},
+                {
+                    "$set": {
+                        "verification_status": "approved",
+                        "documents_verified": True,
+                        "verified_at": datetime.utcnow().isoformat(),
+                    }
+                },
+                upsert=True
+            )
+            
+            return {
+                "success": True,
+                "verification_status": "approved",
+                "driver_id": driver_id,
+                "message": "Documents verified successfully by AI"
+            }
+        else:
+            # Flag for manual review
+            await db.driver_profiles.update_one(
+                {"user_id": driver_id},
+                {
+                    "$set": {
+                        "verification_status": "pending",
+                        "documents_verified": False,
+                        "requires_manual_review": True,
+                        "submitted_at": datetime.utcnow().isoformat(),
+                    }
+                },
+                upsert=True
+            )
+            
+            return {
+                "success": True,
+                "verification_status": "pending",
+                "driver_id": driver_id,
+                "message": "Documents require manual review. You'll be notified within 24 hours."
+            }
+            
+    except Exception as e:
+        logger.error(f"Document verification error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Document verification failed")
+
+@app.post("/api/drivers/complete-profile")
+async def complete_driver_profile(request: dict):
+    """
+    Complete driver profile and activate 24-hour trial
+    """
+    try:
+        driver_id = request.get("driver_id")
+        
+        # Update driver profile with personal details
+        profile_update = {
+            "full_name": request.get("full_name"),
+            "phone": request.get("phone"),
+            "email": request.get("email"),
+            "address": request.get("address"),
+            "city": request.get("city"),
+            "state": request.get("state"),
+            "date_of_birth": request.get("date_of_birth"),
+            "emergency_contact": request.get("emergency_contact"),
+            "bank_name": request.get("bank_name"),
+            "account_number": request.get("account_number"),
+            "account_name": request.get("account_name"),
+            "profile_completed": True,
+            "profile_completed_at": datetime.utcnow().isoformat(),
+        }
+        
+        # Remove None values
+        profile_update = {k: v for k, v in profile_update.items() if v is not None}
+        
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": profile_update},
+            upsert=True
+        )
+        
+        # Activate 24-hour FREE trial
+        trial_start = datetime.utcnow()
+        trial_end = trial_start + timedelta(hours=24)
+        
+        trial_subscription = {
+            "driver_id": driver_id,
+            "tier": "trial",
+            "status": "active",
+            "start_date": trial_start.isoformat(),
+            "end_date": trial_end.isoformat(),
+            "trips_allowed": 3,
+            "trips_used": 0,
+            "is_trial": True,
+            "created_at": trial_start.isoformat(),
+        }
+        
+        # Insert trial subscription
+        await db.subscriptions.insert_one(trial_subscription)
+        
+        # Get updated driver profile
+        driver = await db.driver_profiles.find_one({"user_id": driver_id})
+        driver["_id"] = str(driver["_id"])
+        
+        # Also get user data
+        user = await db.users.find_one({"id": driver_id})
+        if user:
+            user["_id"] = str(user["_id"])
+            driver["user"] = user
+        
+        return {
+            "success": True,
+            "driver": driver,
+            "trial_activated": True,
+            "trial_expires_at": trial_end.isoformat(),
+            "message": "Profile completed! 24-hour trial activated. You can accept 3 trips."
+        }
+        
+    except Exception as e:
+        logger.error(f"Profile completion error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Profile completion failed: {str(e)}")
+
 @app.get("/api/drivers/available")
 async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optional[float] = None, lng: Optional[float] = None):
     """
