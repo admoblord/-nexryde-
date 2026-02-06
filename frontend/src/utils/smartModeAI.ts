@@ -373,3 +373,15 @@ export const useSmartMode = (preferences: SmartModePreferences) => {
     simulateEvaluation: () => SmartModeAI.simulateEvaluation(preferences),
   };
 };
+
+/** Fetch AI-powered ride analysis from backend (Emergent LLM → GPT-4o) */
+export async function fetchAISmartModeAnalysis(driverId: string, rideData: any): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/ai/smart-mode/analyze-ride?driver_id=${driverId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(rideData),
+    });
+    return await res.json();
+  } catch { return null; }
+}
