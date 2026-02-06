@@ -97,19 +97,11 @@ export async function fetchAICoachingSuggestions(driverId: string, tripData: {
 }): Promise<{ suggestions: string[]; powered_by: string } | null> {
   try {
     const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-    const response = await fetch(`${BACKEND_URL}/api/ai/coach/get-suggestions`, {
+    const response = await fetch(`${BACKEND_URL}/api/ai/coach/get-suggestions?driver_id=${driverId}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        driver_id: driverId,
-        avg_speed: tripData.avgSpeed,
-        sudden_brakes: tripData.suddenBrakes,
-        customer_rating: tripData.customerRating,
-        trip_duration: tripData.tripDuration,
-      }),
     });
     const data = await response.json();
-    return data.success ? { suggestions: data.suggestions || [], powered_by: data.powered_by || 'gpt-4o' } : null;
+    return data.suggestions ? { suggestions: data.suggestions || [], powered_by: data.powered_by || 'gpt-4o' } : null;
   } catch (error) {
     console.error('AI coaching fetch failed:', error);
     return null;
