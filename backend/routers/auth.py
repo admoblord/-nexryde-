@@ -168,7 +168,7 @@ async def get_otp_record(phone: str):
 
 async def save_otp_record(phone: str, otp: str, provider: str, message_id: str = None):
     """Save OTP record to database with expiry"""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expiry = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
     
     # Check for existing record
@@ -214,7 +214,7 @@ async def check_resend_cooldown(phone: str) -> dict:
     if not record:
         return {"can_resend": True, "wait_seconds": 0}
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     last_sent = record.get("last_sent_at")
     
     if last_sent:
@@ -316,7 +316,7 @@ async def send_driver_verification_notification(user_id: str, status: str, reaso
             "title": "Driver Verification " + status.upper(),
             "message": message,
             "read": False,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.now(timezone.utc)
         }
         await db.notifications.insert_one(notification)
         
@@ -412,7 +412,7 @@ async def send_otp(request: OTPRequest):
         # Also keep in memory for backward compatibility
         otp_store[normalized_phone] = {
             "otp": otp_code,
-            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
+            "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
         
@@ -435,7 +435,7 @@ async def send_otp(request: OTPRequest):
         await save_otp_record(phone=request.phone, otp=otp, provider="mock")
         otp_store[request.phone] = {
             "otp": otp,
-            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
+            "expires": datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
         return {
@@ -462,7 +462,7 @@ async def send_otp_whatsapp(request: OTPRequest):
         otp_code = str(random.randint(100000, 999999))
         
         # Store OTP
-        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
         otp_store[request.phone] = {
             "otp": otp_code,
             "expires": expires_at,
@@ -545,7 +545,7 @@ async def verify_otp(request: OTPVerify):
     
     # Check expiry
     expiry = stored.get("expires_at") or stored.get("expires")
-    if expiry and datetime.utcnow() > expiry:
+    if expiry and datetime.now(timezone.utc) > expiry:
         await delete_otp_record(normalized_phone)
         if normalized_phone in otp_store:
             del otp_store[normalized_phone]
@@ -611,7 +611,7 @@ async def get_otp_status(phone: str):
             "attempts_remaining": OTP_MAX_ATTEMPTS
         }
     
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     
     # Check if expired
     expiry = record.get("expires_at")
@@ -782,8 +782,8 @@ async def google_sign_in(request: GoogleSignInRequest):
                     "driver_id": user["id"],
                     "plan": "lifetime",
                     "status": "active",
-                    "start_date": datetime.utcnow(),
-                    "end_date": datetime.utcnow() + timedelta(days=36500),  # 100 years
+                    "start_date": datetime.now(timezone.utc),
+                    "end_date": datetime.now(timezone.utc) + timedelta(days=36500),  # 100 years
                     "trial_used": True,
                     "amount_paid": 0,
                     "payment_verified": True
@@ -834,8 +834,8 @@ async def google_sign_in(request: GoogleSignInRequest):
                     "driver_id": new_user.id,
                     "plan": "lifetime",
                     "status": "active",
-                    "start_date": datetime.utcnow(),
-                    "end_date": datetime.utcnow() + timedelta(days=36500),  # 100 years
+                    "start_date": datetime.now(timezone.utc),
+                    "end_date": datetime.now(timezone.utc) + timedelta(days=36500),  # 100 years
                     "trial_used": True,
                     "amount_paid": 0,
                     "payment_verified": True
