@@ -85,6 +85,7 @@ export default function ModernDriverHome() {
   const [isOnline, setIsOnline] = useState(false);
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -95,23 +96,68 @@ export default function ModernDriverHome() {
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
     
-    // Fetch driver verification status
-    fetchVerificationStatus();
+    // Check onboarding status first — this is the verification gate
+    checkOnboardingStatus();
   }, []);
   
-  const fetchVerificationStatus = async () => {
+  const checkOnboardingStatus = async () => {
     try {
-      if (!user?.id) return;
+      if (!user?.id) {
+        setCheckingOnboarding(false);
+        return;
+      }
       
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/${user.id}/profile`);
+      // Check if driver has completed onboarding
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/${user.id}/onboarding-status`);
       if (response.ok) {
-        const profile = await response.json();
-        setVerificationStatus(profile.verification_status || null);
+        const status = await response.json();
+        
+        if (!status.completed) {
+          // Redirect driver to the appropriate onboarding step
+          if (status.step === 'terms') {
+            router.replace({
+              pathname: '/(auth)/driver-terms',
+              params: { phone: user.phone, name: user.name || '', email: user.email || '' },
+            });
+            return;
+          } else if (status.step === 'documents') {
+            router.replace({
+              pathname: '/(auth)/driver-documents',
+              params: { driver_id: user.id, phone: user.phone, name: user.name || '' },
+            });
+            return;
+          } else if (status.step === 'profile') {
+            router.replace({
+              pathname: '/(auth)/driver-profile',
+              params: { driver_id: user.id, phone: user.phone, name: user.name || '' },
+            });
+            return;
+          }
+        }
+        
+        // Driver is approved — set verification status and show dashboard
+        setVerificationStatus(status.verification_status || 'approved');
       }
     } catch (error) {
-      console.error('Error fetching verification status:', error);
+      console.error('Error checking onboarding status:', error);
+    } finally {
+      setCheckingOnboarding(false);
     }
   };
+  
+  // Show loading while checking onboarding
+  if (checkingOnboarding) {
+    return (
+      <SafeAreaView style={styles.container} edges={['top']}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+          <Text style={{ marginTop: 16, color: COLORS.textSecondary, fontSize: 16, fontWeight: '600' }}>
+            Checking your status...
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
   
   // Filter features based on verification status
   const filteredFeatures = ALL_FEATURES.filter(feature => {
