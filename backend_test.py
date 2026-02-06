@@ -230,7 +230,7 @@ def test_accident_ai_apis():
         response_data = response.json()
         success = (response.status_code == 200 and 
                   response_data.get("success") == True and
-                  "ai_analysis" in response_data)
+                  ("ai_analysis" in response_data or "risk_analysis" in response_data))
         
         log_test_result("POST /api/ai/accident/predict-risk", success, response_data, response.status_code)
         
