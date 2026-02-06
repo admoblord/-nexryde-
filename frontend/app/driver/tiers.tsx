@@ -68,7 +68,7 @@ export default function SubscriptionTiersScreen() {
 
             <View style={styles.savingsCard}>
               <Ionicons name="trending-down" size={20} color={COLORS.accentGreen} />
-              <Text style={styles.savingsText}>Save ₦7,000 with Early Adopter Price!</Text>
+              <Text style={styles.savingsText}>Current introductory price - subscribe now!</Text>
             </View>
 
             <View style={styles.benefitsSection}>
