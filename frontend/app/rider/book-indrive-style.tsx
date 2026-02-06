@@ -1164,4 +1164,64 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.white,
   },
+  // Searching for driver modal styles
+  searchOverlay: {
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', alignItems: 'center',
+  },
+  searchPopup: {
+    backgroundColor: '#FFF', borderRadius: 28, padding: 32, width: '85%', alignItems: 'center',
+  },
+  searchTitle: {
+    fontSize: 22, fontWeight: '900', color: '#0F172A', marginBottom: 8,
+  },
+  searchSubtext: {
+    fontSize: 14, color: '#64748B', textAlign: 'center', marginBottom: 20, lineHeight: 20,
+  },
+  searchRoute: {
+    width: '100%', backgroundColor: '#F8FAFC', borderRadius: 16, padding: 14, marginBottom: 20,
+  },
+  searchRouteItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 4,
+  },
+  searchDot: {
+    width: 10, height: 10, borderRadius: 5,
+  },
+  searchRouteText: {
+    fontSize: 14, fontWeight: '600', color: '#334155', flex: 1,
+  },
+  searchCancelBtn: {
+    paddingVertical: 14, paddingHorizontal: 40, borderRadius: 16, borderWidth: 2, borderColor: '#EF4444',
+  },
+  searchCancelText: {
+    fontSize: 16, fontWeight: '800', color: '#EF4444',
+  },
+  driverInfoCard: {
+    flexDirection: 'row', alignItems: 'center', width: '100%',
+    backgroundColor: '#F8FAFC', borderRadius: 16, padding: 14, marginVertical: 16,
+  },
+  driverAvatar: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: '#E0F2FE',
+    alignItems: 'center', justifyContent: 'center', marginRight: 12,
+  },
+  driverInfoName: {
+    fontSize: 17, fontWeight: '800', color: '#0F172A',
+  },
+  driverInfoVehicle: {
+    fontSize: 13, color: '#64748B', marginTop: 2,
+  },
+  driverInfoPlate: {
+    fontSize: 12, fontWeight: '700', color: '#94A3B8', marginTop: 2,
+  },
+  driverRating: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+  },
+  driverRatingText: {
+    fontSize: 15, fontWeight: '800', color: '#0F172A',
+  },
+  searchDoneBtn: {
+    backgroundColor: COLORS.accentGreen, paddingVertical: 14, paddingHorizontal: 60, borderRadius: 16,
+  },
+  searchDoneText: {
+    fontSize: 17, fontWeight: '900', color: '#FFF',
+  },
 });
