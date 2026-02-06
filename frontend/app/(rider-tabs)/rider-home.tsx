@@ -222,7 +222,7 @@ export default function ModernRiderHome() {
               <Text style={styles.emptyText}>Book your first ride to get started</Text>
               <TouchableOpacity 
                 style={styles.emptyButton}
-                onPress={() => router.push('/rider/book-new' as any)}
+                onPress={() => router.push('/rider/book-enhanced' as any)}
               >
                 <LinearGradient
                   colors={[COLORS.primary, COLORS.primaryDark]}
