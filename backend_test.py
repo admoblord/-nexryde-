@@ -361,30 +361,31 @@ class BackendTester:
             return False
     
     async def run_all_tests(self):
-        """Run all AI endpoint tests"""
-        print("🚀 Starting Backend AI Endpoint Tests")
-        print("=" * 50)
+        """Run all safety endpoint tests"""
+        print("🚀 Starting Area Boys Safety Zone Backend Tests")
+        print("=" * 60)
         print(f"Backend URL: {BACKEND_URL}")
+        print("Testing 3 safety endpoints with real database + AI integration")
         print()
         
-        # Run tests
+        # Run tests in sequence as requested
         tests = [
-            self.test_smart_mode_analyze_ride,
-            self.test_ai_coach_suggestions,
-            self.test_traffic_prediction,
-            self.test_accident_risk_prediction
+            self.test_safety_danger_zones_get,
+            self.test_safety_report_post,  
+            self.test_safety_danger_zones_after_report,
+            self.test_safety_alerts_ai
         ]
         
         results = []
         for test in tests:
             result = await test()
             results.append(result)
-            await asyncio.sleep(1)  # Small delay between tests
+            await asyncio.sleep(2)  # Delay between tests for database consistency
         
         # Summary
-        print("=" * 50)
-        print("🎯 TEST SUMMARY")
-        print("=" * 50)
+        print("=" * 60)
+        print("🎯 AREA BOYS SAFETY ZONE TEST SUMMARY")
+        print("=" * 60)
         
         passed = sum(results)
         total = len(results)
@@ -394,12 +395,15 @@ class BackendTester:
             print(f"{status}: {result['test']}")
         
         print()
-        print(f"Overall Result: {passed}/{total} tests passed")
+        print(f"Overall Result: {passed}/{total} safety tests passed")
         
         if passed == total:
-            print("🎉 ALL TESTS PASSED - Emergent LLM integration working correctly!")
+            print("🎉 ALL AREA BOYS SAFETY TESTS PASSED!")
+            print("✅ Database integration working correctly")
+            print("✅ AI-enhanced safety alerts operational")  
+            print("✅ Community reporting system functional")
         else:
-            print("⚠️  SOME TESTS FAILED - Check individual test results above")
+            print("⚠️  SOME SAFETY TESTS FAILED - Check individual test results above")
         
         return passed == total
 
