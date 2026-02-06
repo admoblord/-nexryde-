@@ -6257,6 +6257,8 @@ async def seed_promo_codes():
     """Seed default promo codes"""
     from routers.admin import seed_promo_codes as _seed_promos
     await _seed_promos()
+    # Wire up shared functions for trips router
+    set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
 
 app.add_middleware(
     CORSMiddleware,
