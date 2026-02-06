@@ -792,6 +792,64 @@
                     </div>
                 </div>
             </div>
+            <!-- System Health Page -->
+            <div class="page-section" id="page-system-health">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-server-line"></i></div>
+                        <div class="value" id="healthApiStatus">Checking...</div>
+                        <div class="label">API Status</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-database-2-line"></i></div>
+                        <div class="value" id="healthDbStatus">Checking...</div>
+                        <div class="label">Database</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-router-line"></i></div>
+                        <div class="value" id="healthRoutersCount">0</div>
+                        <div class="label">Active Routers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon orange"><i class="ri-time-line"></i></div>
+                        <div class="value" id="healthUptime">--</div>
+                        <div class="label">Last Check</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Subscription Overview</h3>
+                    </div>
+                    <div id="subscriptionOverview" style="padding: 20px;">
+                        <div class="stats-grid">
+                            <div class="stat-card" style="background: rgba(0,208,132,0.1); border-color: rgba(0,208,132,0.3);">
+                                <div class="value" id="subsActive" style="color: #00D084;">0</div>
+                                <div class="label">Active Subscriptions</div>
+                            </div>
+                            <div class="stat-card" style="background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3);">
+                                <div class="value" id="subsTrial" style="color: #F59E0B;">0</div>
+                                <div class="label">Trial Users</div>
+                            </div>
+                            <div class="stat-card" style="background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3);">
+                                <div class="value" id="subsExpired" style="color: #EF4444;">0</div>
+                                <div class="label">Expired</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3>Auto-Refresh</h3>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="width: 18px; height: 18px;">
+                            <span style="color: #94A3B8; font-size: 14px;">Enable 30s auto-refresh</span>
+                        </label>
+                    </div>
+                    <div style="padding: 20px; color: #64748B; font-size: 14px;" id="autoRefreshStatus">
+                        Auto-refresh is disabled. Enable to keep dashboard data updated.
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
