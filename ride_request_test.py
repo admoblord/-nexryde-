@@ -96,6 +96,7 @@ class RideRequestTester:
                     f"Rider ID: {data.get('trip', {}).get('rider_id')}",
                     f"Pickup: {data.get('trip', {}).get('pickup')}",
                     f"Destination: {data.get('trip', {}).get('destination')}",
+                    f"Recommended fare: ₦{data.get('trip', {}).get('recommended_fare')}",
                     f"Offered fare: ₦{data.get('trip', {}).get('offered_fare')}",
                     f"Vehicle type: {data.get('trip', {}).get('vehicle_type')}",
                     f"Trip type: {data.get('trip', {}).get('trip_type')}"
