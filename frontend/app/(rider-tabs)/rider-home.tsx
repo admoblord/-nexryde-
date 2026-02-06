@@ -139,7 +139,7 @@ export default function ModernRiderHome() {
         <Animated.View style={[styles.heroSection, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <TouchableOpacity
             style={styles.heroCard}
-            onPress={() => router.push('/rider/book-enhanced' as any)}
+            onPress={() => router.push('/rider/book-indrive-style' as any)}
             activeOpacity={0.9}
           >
             <LinearGradient
@@ -222,7 +222,7 @@ export default function ModernRiderHome() {
               <Text style={styles.emptyText}>Book your first ride to get started</Text>
               <TouchableOpacity 
                 style={styles.emptyButton}
-                onPress={() => router.push('/rider/book-enhanced' as any)}
+                onPress={() => router.push('/rider/book-indrive-style' as any)}
               >
                 <LinearGradient
                   colors={[COLORS.primary, COLORS.primaryDark]}
