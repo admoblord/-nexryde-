@@ -120,6 +120,14 @@ export default function BankDetailsScreen() {
         </View>
 
         <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {/* Option Label */}
+          <View style={styles.optionLabel}>
+            <View style={[styles.optionBadge, { backgroundColor: COLORS.accentGreen }]}>
+              <Text style={styles.optionBadgeText}>1</Text>
+            </View>
+            <Text style={styles.optionText}>Bank Transfer (Active)</Text>
+          </View>
+
           {/* Info Card */}
           <View style={styles.infoCard}>
             <Ionicons name="shield-checkmark" size={32} color={COLORS.accentGreen} />
