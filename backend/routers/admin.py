@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import hashlib
 import logging
 
-from database import db
+from database import db, SUBSCRIPTION_CONFIG
 
 logger = logging.getLogger('server')
 admin_router = APIRouter(prefix="/api", tags=["Admin"])
