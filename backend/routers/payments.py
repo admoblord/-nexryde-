@@ -14,6 +14,32 @@ from database import db
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
 
+# Subscription config
+SUBSCRIPTION_CONFIG = {
+    "monthly_fee": 25000,
+    "trial_days": 7,
+    "currency": "NGN",
+    "bank_details": {
+        "bank_name": "UBA",
+        "account_name": "ADMOBLORDGROUP LIMITED",
+        "account_number": "1028400669",
+    }
+}
+
+# Surge pricing config
+SURGE_CONFIG = {
+    "enabled": True,
+    "base_multiplier": 1.0,
+    "max_multiplier": 3.0,
+    "peak_hours": {
+        "morning": {"start": 7, "end": 9, "multiplier": 1.5},
+        "evening": {"start": 17, "end": 20, "multiplier": 1.8},
+    },
+    "high_demand_threshold": 0.7,
+    "rain_multiplier": 1.3,
+    "holiday_multiplier": 1.5,
+}
+
 
 # Payment-specific models
 class PaymentProofSubmission(BaseModel):
