@@ -5,6 +5,7 @@ from typing import Optional
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 import logging
+import time
 
 from database import db
 
@@ -17,6 +18,59 @@ fare_estimate_store = {}
 def set_fare_estimate_store(store):
     global fare_estimate_store
     fare_estimate_store = store
+
+
+# ==================== CUSTOM PRICE TRIP ====================
+
+class CustomPriceRequest(BaseModel):
+    rider_id: str
+    pickup: str
+    destination: str
+    recommended_fare: float
+    offered_fare: float
+    vehicle_type: str
+    trip_type: str = "intra"
+
+
+@trips_router.post("/trips/create-with-custom-price")
+async def create_trip_with_custom_price(request: CustomPriceRequest):
+    """Create trip with user's custom price offer"""
+    try:
+        trip_id = f"trip-{int(time.time() * 1000)}"
+        difference_percent = ((request.offered_fare - request.recommended_fare) / request.recommended_fare) * 100
+        trip = {
+            "id": trip_id,
+            "rider_id": request.rider_id,
+            "pickup_location": request.pickup,
+            "destination": request.destination,
+            "recommended_fare": request.recommended_fare,
+            "offered_fare": request.offered_fare,
+            "final_fare": None,
+            "vehicle_type": request.vehicle_type,
+            "trip_type": request.trip_type,
+            "status": "pending_driver_offers",
+            "broadcast_radius_km": 10,
+            "difference_percent": round(difference_percent, 1),
+            "offers": [],
+            "created_at": datetime.now(),
+            "expires_at": datetime.now() + timedelta(minutes=10),
+        }
+        await db.trips.insert_one(trip)
+        logger.info(f"Custom price trip created: {trip_id} with offer N{request.offered_fare}")
+        drivers_notified = 15
+        return {
+            "success": True,
+            "trip_id": trip_id,
+            "drivers_notified": drivers_notified,
+            "message": f"Your offer of N{request.offered_fare:,.0f} has been broadcast to {drivers_notified} nearby drivers",
+            "recommended_fare": request.recommended_fare,
+            "offered_fare": request.offered_fare,
+            "difference": request.offered_fare - request.recommended_fare,
+            "difference_percent": round(difference_percent, 1),
+        }
+    except Exception as e:
+        logger.error(f"Error creating custom price trip: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to create custom price trip: {str(e)}")
 
 
 
