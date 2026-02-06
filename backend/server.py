@@ -4832,19 +4832,15 @@ Consider:
 Be specific, practical, and focused on maximizing driver earnings while ensuring safety.
 """
 
-        # Call ChatGPT
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a traffic analysis AI for NEXRYDE drivers in Lagos, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress."},
-                {"role": "user", "content": context}
-            ],
-            temperature=0.3,
-            max_tokens=400,
-        )
+        # Call AI via Emergent LLM
+        chat = LlmChat(
+            api_key=emergent_key,
+            session_id=f"traffic-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
+            system_message="You are a traffic analysis AI for NEXRYDE drivers in Lagos, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress. Always respond with valid JSON only."
+        ).with_model("openai", "gpt-4o")
         
-        # Parse AI response
-        ai_text = response.choices[0].message.content.strip()
+        user_msg = UserMessage(text=context)
+        ai_text = await chat.send_message(user_msg)
         
         # Extract JSON
         import re
