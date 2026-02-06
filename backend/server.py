@@ -9485,26 +9485,7 @@ async def seed_community_and_safety():
 
 # ==================== DRIVER STORIES ENDPOINTS ====================
 
-
-@app.get("/api/community/groups/{group_id}/polls")
-async def get_group_polls(group_id: str):
-    """Get polls for a community group"""
-    try:
-        polls = await db.community_polls.find(
-            {"group_id": group_id}, {"_id": 0}
-        ).sort("created_at", -1).to_list(length=20)
-        # Mark expired polls
-        now = datetime.now(timezone.utc).isoformat()
-        for p in polls:
-            if p.get("expires_at", "") < now:
-                p["is_active"] = False
-            # Remove voter_ids from response for privacy
-            for opt in p.get("options", []):
-                opt.pop("voter_ids", None)
-        return {"success": True, "polls": polls}
-    except Exception as e:
-        logger.error(f"Get polls error: {str(e)}")
-        return {"success": True, "polls": []}
+class StoryCreate(BaseModel):
 
 
 @app.post("/api/community/polls/{poll_id}/vote")
