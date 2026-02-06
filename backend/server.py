@@ -9956,9 +9956,22 @@ async def seed_community_content():
         await db.community_events.insert_many(events)
         logger.info(f"Seeded {len(events)} community events")
 
+    # Pin important existing messages in key groups
+    pinned_count = await db.community_messages.count_documents({"is_pinned": True})
+    if pinned_count == 0:
+        # Pin the first message in important groups
+        for gid in ["announcements", "earnings-talk", "tips-tricks", "safety-zone", "new-drivers"]:
+            first_msg = await db.community_messages.find_one({"group_id": gid}, sort=[("created_at", 1)])
+            if first_msg:
+                await db.community_messages.update_one(
+                    {"_id": first_msg["_id"]},
+                    {"$set": {"is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat()}}
+                )
+        logger.info("Pinned important messages in key groups")
+
     # Seed additional engaging messages if message count is low
     msg_count = await db.community_messages.count_documents({})
-    if msg_count < 10:
+    if msg_count < 30:
         seed_messages = [
             # Announcements
             {"group_id": "announcements", "user_id": "system", "user_name": "NEXRYDE Official", "user_role": "admin",
