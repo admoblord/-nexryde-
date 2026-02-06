@@ -9616,6 +9616,395 @@ async def reply_to_community_message(message_id: str, request: dict):
         return {"success": False, "error": str(e)}
 
 
+# ==================== COMMUNITY POLLS ====================
+
+@app.post("/api/community/groups/{group_id}/polls")
+async def create_poll(group_id: str, request: dict):
+    """Create a poll in a community group"""
+    try:
+        options = request.get("options", [])
+        if len(options) < 2 or len(options) > 6:
+            raise HTTPException(status_code=400, detail="Poll needs 2-6 options")
+        poll = {
+            "poll_id": str(uuid4()),
+            "group_id": group_id,
+            "user_id": request.get("user_id", "anonymous"),
+            "user_name": request.get("user_name", "Anonymous"),
+            "question": request.get("question", ""),
+            "options": [{"text": o, "votes": 0, "voter_ids": []} for o in options],
+            "total_votes": 0,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=int(request.get("duration_hours", 24)))).isoformat(),
+            "is_active": True,
+        }
+        if not poll["question"].strip():
+            raise HTTPException(status_code=400, detail="Question cannot be empty")
+        await db.community_polls.insert_one(poll)
+        poll.pop("_id", None)
+        return {"success": True, "poll": poll}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create poll error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/community/groups/{group_id}/polls")
+async def get_group_polls(group_id: str):
+    """Get polls for a community group"""
+    try:
+        polls = await db.community_polls.find(
+            {"group_id": group_id}, {"_id": 0}
+        ).sort("created_at", -1).to_list(length=20)
+        # Mark expired polls
+        now = datetime.now(timezone.utc).isoformat()
+        for p in polls:
+            if p.get("expires_at", "") < now:
+                p["is_active"] = False
+            # Remove voter_ids from response for privacy
+            for opt in p.get("options", []):
+                opt.pop("voter_ids", None)
+        return {"success": True, "polls": polls}
+    except Exception as e:
+        logger.error(f"Get polls error: {str(e)}")
+        return {"success": True, "polls": []}
+
+
+@app.post("/api/community/polls/{poll_id}/vote")
+async def vote_on_poll(poll_id: str, request: dict):
+    """Vote on a community poll"""
+    try:
+        user_id = request.get("user_id", "anonymous")
+        option_index = request.get("option_index", 0)
+        poll = await db.community_polls.find_one({"poll_id": poll_id}, {"_id": 0})
+        if not poll:
+            raise HTTPException(status_code=404, detail="Poll not found")
+        # Check if already voted
+        for opt in poll.get("options", []):
+            if user_id in opt.get("voter_ids", []):
+                raise HTTPException(status_code=400, detail="Already voted")
+        if option_index < 0 or option_index >= len(poll.get("options", [])):
+            raise HTTPException(status_code=400, detail="Invalid option")
+        await db.community_polls.update_one(
+            {"poll_id": poll_id},
+            {
+                "$inc": {f"options.{option_index}.votes": 1, "total_votes": 1},
+                "$push": {f"options.{option_index}.voter_ids": user_id}
+            }
+        )
+        return {"success": True, "message": "Vote recorded"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Vote error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ==================== PINNED MESSAGES ====================
+
+@app.post("/api/community/messages/{message_id}/pin")
+async def pin_community_message(message_id: str, request: dict):
+    """Pin/unpin a community message"""
+    try:
+        from bson import ObjectId
+        action = request.get("action", "pin")  # "pin" or "unpin"
+        is_pinned = action == "pin"
+        await db.community_messages.update_one(
+            {"_id": ObjectId(message_id)},
+            {"$set": {"is_pinned": is_pinned, "pinned_at": datetime.now(timezone.utc).isoformat() if is_pinned else None}}
+        )
+        return {"success": True, "pinned": is_pinned}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/community/groups/{group_id}/pinned")
+async def get_pinned_messages(group_id: str):
+    """Get pinned messages for a group"""
+    try:
+        pinned = await db.community_messages.find(
+            {"group_id": group_id, "is_pinned": True}
+        ).sort("pinned_at", -1).to_list(length=10)
+        for m in pinned:
+            m["_id"] = str(m["_id"])
+        return {"success": True, "pinned_messages": pinned}
+    except Exception as e:
+        return {"success": True, "pinned_messages": []}
+
+
+# ==================== COMMUNITY EVENTS ====================
+
+@app.post("/api/community/events")
+async def create_community_event(request: dict):
+    """Create a community event"""
+    try:
+        event = {
+            "event_id": str(uuid4()),
+            "group_id": request.get("group_id", "general"),
+            "title": request.get("title", ""),
+            "description": request.get("description", ""),
+            "event_type": request.get("event_type", "meetup"),  # meetup, promotion, training, announcement
+            "location": request.get("location", ""),
+            "date": request.get("date", ""),
+            "time": request.get("time", ""),
+            "created_by": request.get("user_id", "system"),
+            "created_by_name": request.get("user_name", "NEXRYDE"),
+            "rsvp_count": 0,
+            "rsvp_users": [],
+            "is_featured": request.get("is_featured", False),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if not event["title"].strip():
+            raise HTTPException(status_code=400, detail="Event title required")
+        await db.community_events.insert_one(event)
+        event.pop("_id", None)
+        return {"success": True, "event": event}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Create event error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/community/events")
+async def get_community_events(group_id: str = None):
+    """Get community events, optionally filtered by group"""
+    try:
+        query = {}
+        if group_id:
+            query["group_id"] = group_id
+        events = await db.community_events.find(query, {"_id": 0}).sort("created_at", -1).to_list(length=30)
+        return {"success": True, "events": events}
+    except Exception as e:
+        return {"success": True, "events": []}
+
+
+@app.post("/api/community/events/{event_id}/rsvp")
+async def rsvp_to_event(event_id: str, request: dict):
+    """RSVP to a community event"""
+    try:
+        user_id = request.get("user_id", "anonymous")
+        event = await db.community_events.find_one({"event_id": event_id}, {"_id": 0})
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        if user_id in event.get("rsvp_users", []):
+            # Un-RSVP
+            await db.community_events.update_one(
+                {"event_id": event_id},
+                {"$pull": {"rsvp_users": user_id}, "$inc": {"rsvp_count": -1}}
+            )
+            return {"success": True, "action": "removed", "message": "RSVP removed"}
+        else:
+            await db.community_events.update_one(
+                {"event_id": event_id},
+                {"$push": {"rsvp_users": user_id}, "$inc": {"rsvp_count": 1}}
+            )
+            return {"success": True, "action": "added", "message": "RSVP confirmed!"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ==================== SEED COMMUNITY CONTENT ====================
+
+@app.on_event("startup")
+async def seed_community_content():
+    """Seed polls, events, and engaging messages for community groups"""
+    # Seed polls if none exist
+    poll_count = await db.community_polls.count_documents({})
+    if poll_count == 0:
+        polls = [
+            {
+                "poll_id": str(uuid4()), "group_id": "general", "user_id": "system",
+                "user_name": "NEXRYDE Team",
+                "question": "What time of day do you earn the most?",
+                "options": [
+                    {"text": "Morning rush (6-9 AM)", "votes": 45, "voter_ids": []},
+                    {"text": "Afternoon (12-3 PM)", "votes": 23, "voter_ids": []},
+                    {"text": "Evening rush (5-8 PM)", "votes": 67, "voter_ids": []},
+                    {"text": "Night owl (9 PM - 2 AM)", "votes": 34, "voter_ids": []},
+                ],
+                "total_votes": 169,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+                "is_active": True,
+            },
+            {
+                "poll_id": str(uuid4()), "group_id": "lagos-drivers", "user_id": "system",
+                "user_name": "Lagos Community",
+                "question": "Worst traffic spot in Lagos right now?",
+                "options": [
+                    {"text": "Lekki-Ikoyi Link Bridge", "votes": 89, "voter_ids": []},
+                    {"text": "Third Mainland Bridge", "votes": 56, "voter_ids": []},
+                    {"text": "Ojota/Ketu axis", "votes": 72, "voter_ids": []},
+                    {"text": "Oshodi-Apapa Expressway", "votes": 95, "voter_ids": []},
+                ],
+                "total_votes": 312,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=5)).isoformat(),
+                "is_active": True,
+            },
+            {
+                "poll_id": str(uuid4()), "group_id": "earnings-talk", "user_id": "system",
+                "user_name": "Earnings Talk",
+                "question": "How much do you target daily (before fuel)?",
+                "options": [
+                    {"text": "Below ₦15,000", "votes": 18, "voter_ids": []},
+                    {"text": "₦15,000 - ₦25,000", "votes": 54, "voter_ids": []},
+                    {"text": "₦25,000 - ₦40,000", "votes": 41, "voter_ids": []},
+                    {"text": "Above ₦40,000", "votes": 22, "voter_ids": []},
+                ],
+                "total_votes": 135,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+                "is_active": True,
+            },
+            {
+                "poll_id": str(uuid4()), "group_id": "vehicle-maintenance", "user_id": "system",
+                "user_name": "Vehicle Hub",
+                "question": "Which fuel type gives you the best mileage?",
+                "options": [
+                    {"text": "PMS (Petrol)", "votes": 78, "voter_ids": []},
+                    {"text": "CNG (Gas)", "votes": 112, "voter_ids": []},
+                    {"text": "Hybrid", "votes": 15, "voter_ids": []},
+                ],
+                "total_votes": 205,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+                "is_active": True,
+            },
+            {
+                "poll_id": str(uuid4()), "group_id": "safety-zone", "user_id": "system",
+                "user_name": "Safety Zone",
+                "question": "Have you ever had an encounter with area boys while driving?",
+                "options": [
+                    {"text": "Yes, multiple times", "votes": 134, "voter_ids": []},
+                    {"text": "Yes, once or twice", "votes": 89, "voter_ids": []},
+                    {"text": "No, never", "votes": 45, "voter_ids": []},
+                    {"text": "I avoid those areas completely", "votes": 67, "voter_ids": []},
+                ],
+                "total_votes": 335,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),
+                "is_active": True,
+            },
+        ]
+        await db.community_polls.insert_many(polls)
+        logger.info(f"Seeded {len(polls)} community polls")
+
+    # Seed events if none exist
+    event_count = await db.community_events.count_documents({})
+    if event_count == 0:
+        events = [
+            {
+                "event_id": str(uuid4()), "group_id": "announcements",
+                "title": "NEXRYDE Lagos Driver Meetup",
+                "description": "Join fellow NEXRYDE drivers for networking, tips sharing, and refreshments. Special guest speakers from top earners!",
+                "event_type": "meetup", "location": "Ikeja City Mall, Lagos",
+                "date": (datetime.now(timezone.utc) + timedelta(days=14)).strftime("%Y-%m-%d"),
+                "time": "2:00 PM",
+                "created_by": "system", "created_by_name": "NEXRYDE Official",
+                "rsvp_count": 87, "rsvp_users": [], "is_featured": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {
+                "event_id": str(uuid4()), "group_id": "announcements",
+                "title": "Fuel Subsidy Awareness Workshop",
+                "description": "Learn about the latest fuel subsidy changes and how to maximize your CNG conversion benefits. Free registration!",
+                "event_type": "training", "location": "Online (Zoom)",
+                "date": (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d"),
+                "time": "11:00 AM",
+                "created_by": "system", "created_by_name": "NEXRYDE Official",
+                "rsvp_count": 156, "rsvp_users": [], "is_featured": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {
+                "event_id": str(uuid4()), "group_id": "abuja-drivers",
+                "title": "Abuja Drivers End of Year Party",
+                "description": "Celebrate the year with fellow Abuja drivers! Food, music, and prizes for top earners.",
+                "event_type": "meetup", "location": "Jabi Lake Mall, Abuja",
+                "date": (datetime.now(timezone.utc) + timedelta(days=21)).strftime("%Y-%m-%d"),
+                "time": "4:00 PM",
+                "created_by": "system", "created_by_name": "Abuja Community",
+                "rsvp_count": 43, "rsvp_users": [], "is_featured": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {
+                "event_id": str(uuid4()), "group_id": "announcements",
+                "title": "Weekend Bonus: 20% Extra on All Trips!",
+                "description": "This weekend only - earn 20% extra on every completed trip. The more you drive, the more you earn!",
+                "event_type": "promotion", "location": "All cities",
+                "date": (datetime.now(timezone.utc) + timedelta(days=3)).strftime("%Y-%m-%d"),
+                "time": "All day",
+                "created_by": "system", "created_by_name": "NEXRYDE Official",
+                "rsvp_count": 234, "rsvp_users": [], "is_featured": True,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+            {
+                "event_id": str(uuid4()), "group_id": "new-drivers",
+                "title": "New Driver Orientation Session",
+                "description": "Everything you need to know to start earning big on NEXRYDE. Tips from experienced drivers and Q&A session.",
+                "event_type": "training", "location": "Online (Google Meet)",
+                "date": (datetime.now(timezone.utc) + timedelta(days=5)).strftime("%Y-%m-%d"),
+                "time": "10:00 AM",
+                "created_by": "system", "created_by_name": "NEXRYDE Support",
+                "rsvp_count": 67, "rsvp_users": [], "is_featured": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            },
+        ]
+        await db.community_events.insert_many(events)
+        logger.info(f"Seeded {len(events)} community events")
+
+    # Seed additional engaging messages if message count is low
+    msg_count = await db.community_messages.count_documents({})
+    if msg_count < 10:
+        seed_messages = [
+            # Announcements
+            {"group_id": "announcements", "user_id": "system", "user_name": "NEXRYDE Official", "user_role": "admin",
+             "text": "Welcome to NEXRYDE Community! This is your space to connect with fellow drivers, share tips, and stay updated. Respect everyone and keep it professional.", "likes": 45, "replies": 12, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+            {"group_id": "announcements", "user_id": "system", "user_name": "NEXRYDE Official", "user_role": "admin",
+             "text": "NEW FEATURE ALERT: You can now create polls and vote in your community groups! Try it out and let us know what you think.", "likes": 67, "replies": 23, "created_at": datetime.now(timezone.utc).isoformat()},
+            # General Discussion
+            {"group_id": "general", "user_id": "driver_001", "user_name": "Chinedu O.", "user_role": "driver",
+             "text": "Good morning drivers! Who else is hitting the road early today? Lagos traffic no dey wait for anybody o! 😂", "likes": 34, "replies": 8, "created_at": datetime.now(timezone.utc).isoformat()},
+            {"group_id": "general", "user_id": "driver_002", "user_name": "Adebayo K.", "user_role": "driver",
+             "text": "Just completed 50 trips this week! The new surge pricing is really helping. Keep pushing guys!", "likes": 56, "replies": 15, "created_at": datetime.now(timezone.utc).isoformat()},
+            # Earnings Talk
+            {"group_id": "earnings-talk", "user_id": "driver_003", "user_name": "Emeka N.", "user_role": "driver",
+             "text": "Pro tip: Victoria Island to Lekki Phase 1 during morning rush is always a goldmine. ₦3,500-₦5,000 per trip and they come back-to-back!", "likes": 89, "replies": 22, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+            {"group_id": "earnings-talk", "user_id": "driver_004", "user_name": "Ibrahim M.", "user_role": "driver",
+             "text": "Weekend nights in Lekki are amazing. I made ₦38,000 last Saturday alone. Airport runs are the real deal!", "likes": 45, "replies": 11, "created_at": datetime.now(timezone.utc).isoformat()},
+            # Tips & Tricks
+            {"group_id": "tips-tricks", "user_id": "driver_005", "user_name": "Blessing A.", "user_role": "driver",
+             "text": "Always keep your AC on and car clean. Riders tip more when the ride is comfortable. Small things make big difference!", "likes": 72, "replies": 18, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+            {"group_id": "tips-tricks", "user_id": "driver_006", "user_name": "Tunde B.", "user_role": "driver",
+             "text": "If you convert to CNG, you save almost 60% on fuel. I converted last month and my daily profit went up by ₦8,000!", "likes": 98, "replies": 31, "created_at": datetime.now(timezone.utc).isoformat()},
+            # Safety Zone
+            {"group_id": "safety-zone", "user_id": "driver_007", "user_name": "Kola S.", "user_role": "driver",
+             "text": "Alert: Area boys very active around Oshodi under bridge this evening. They're collecting ₦500 from drivers. Please avoid or go through Mushin road instead.", "likes": 112, "replies": 27, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+            # Lagos Drivers
+            {"group_id": "lagos-drivers", "user_id": "driver_008", "user_name": "Femi O.", "user_role": "driver",
+             "text": "Third Mainland Bridge traffic is crazy this morning! Use Carter Bridge if you're heading to the Island. Saved me 45 minutes!", "likes": 67, "replies": 14, "created_at": datetime.now(timezone.utc).isoformat()},
+            {"group_id": "lagos-drivers", "user_id": "driver_009", "user_name": "Ngozi U.", "user_role": "driver",
+             "text": "Anyone else notice more ride requests around Ikeja lately? I think a lot of people are switching from Bolt. Good for us! 🙌", "likes": 83, "replies": 19, "created_at": datetime.now(timezone.utc).isoformat()},
+            # Abuja Drivers
+            {"group_id": "abuja-drivers", "user_id": "driver_010", "user_name": "Musa A.", "user_role": "driver",
+             "text": "Abuja drivers, the Wuse to Maitama route is on fire today! Three back-to-back rides in 1 hour. Get on it!", "likes": 41, "replies": 9, "created_at": datetime.now(timezone.utc).isoformat()},
+            # Vehicle Maintenance
+            {"group_id": "vehicle-maintenance", "user_id": "driver_011", "user_name": "Segun D.", "user_role": "driver",
+             "text": "Good mechanic in Surulere area - Baba Ade at 23 Bode Thomas Street. Fixed my AC for ₦15,000 when others were quoting ₦35,000. Tell him Segun sent you!", "likes": 134, "replies": 42, "created_at": datetime.now(timezone.utc).isoformat()},
+            # New Drivers Hub
+            {"group_id": "new-drivers", "user_id": "driver_012", "user_name": "NEXRYDE Support", "user_role": "admin",
+             "text": "Welcome new drivers! Here are 3 golden rules: 1) Always verify rider identity before starting trip. 2) Keep your documents updated. 3) Use the AI Coach feature - it really helps optimize your routes!", "likes": 156, "replies": 38, "is_pinned": True, "pinned_at": datetime.now(timezone.utc).isoformat(), "created_at": datetime.now(timezone.utc).isoformat()},
+            # Port Harcourt
+            {"group_id": "port-harcourt", "user_id": "driver_013", "user_name": "Chibuike E.", "user_role": "driver",
+             "text": "PH drivers! GRA to Trans-Amadi is the money route this week. Oil company workers are booking like crazy!", "likes": 38, "replies": 7, "created_at": datetime.now(timezone.utc).isoformat()},
+        ]
+        await db.community_messages.insert_many(seed_messages)
+        logger.info(f"Seeded {len(seed_messages)} community messages")
+
+
 # ==================== AREA BOYS / SAFETY ZONE ENDPOINTS ====================
 
 @app.on_event("startup")
