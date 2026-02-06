@@ -68,3 +68,15 @@ export class WeatherPricingAI {
     };
   }
 }
+
+/** Fetch AI traffic prediction with weather impact from backend (Emergent LLM → GPT-4o) */
+export async function fetchAITrafficWeatherPrediction(lat: number, lng: number): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/ai/traffic/predict`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng, include_weather: true }),
+    });
+    return await res.json();
+  } catch { return null; }
+}
