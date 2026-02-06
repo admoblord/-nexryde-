@@ -908,7 +908,7 @@ async def register(request: RegisterRequest):
     if request.role == "rider" and not request.nin:
         raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
     
-    user = User(
+    user = create_user_dict(
         phone=request.phone or "",
         name=request.name, 
         email=request.email, 
@@ -916,20 +916,21 @@ async def register(request: RegisterRequest):
         is_verified=True,
         google_id=request.google_id,
         profile_image=request.profile_image,
-        nin=request.nin,  # NIN for riders
-        terms_accepted=request.terms_accepted,  # Terms acceptance for drivers
-        terms_accepted_at=request.terms_accepted_at,  # Timestamp for drivers
+        nin=request.nin,
+        terms_accepted=request.terms_accepted,
+        terms_accepted_at=request.terms_accepted_at,
     )
-    await db.users.insert_one(user.dict())
+    await db.users.insert_one(user)
+    user.pop("_id", None)
     
-    wallet = Wallet(user_id=user.id)
-    await db.wallets.insert_one(wallet.dict())
+    wallet = create_wallet_dict(user["id"])
+    await db.wallets.insert_one(wallet)
     
     if request.role == "driver":
-        driver_profile = DriverProfile(user_id=user.id)
-        await db.driver_profiles.insert_one(driver_profile.dict())
+        driver_profile = create_driver_profile_dict(user["id"])
+        await db.driver_profiles.insert_one(driver_profile)
     
-    return {"message": "Registration successful", "user": user.dict()}
+    return {"message": "Registration successful", "user": user}
 
 @auth_router.post("/auth/logout")
 async def logout(request: Request, response: Response):
