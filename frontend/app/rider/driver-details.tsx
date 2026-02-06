@@ -40,23 +40,11 @@ export default function DriverDetailsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
 
-  // Sample driver data (will come from API)
-  const [driver] = useState<DriverDetails>({
-    id: params.driverId as string || 'drv-001',
-    name: 'John Doe',
-    rating: 4.95,
-    totalTrips: 1248,
-    yearsActive: 3,
-    vehicle: 'Toyota Camry 2020',
-    plate: 'ABC-123XY',
-    color: 'Silver',
-    ninVerified: true,
-    licenseVerified: true,
-    vehicleVerified: true,
-    backgroundCheck: true,
-    trustScore: 98,
-    phoneNumber: '+234XXXXXXXXXX',
-  });
+  // Real driver data from route params or show empty state
+  const driverId = params.driverId as string;
+  const driverData = params.driver ? JSON.parse(params.driver as string) : null;
+  
+  const [driver] = useState<DriverDetails | null>(driverData);
 
   const allVerified = driver.ninVerified && driver.licenseVerified && driver.vehicleVerified && driver.backgroundCheck;
 
