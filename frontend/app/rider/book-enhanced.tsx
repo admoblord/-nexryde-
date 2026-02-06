@@ -59,6 +59,7 @@ const VEHICLE_TYPES = [
 
 export default function BookRideEnhanced() {
   const router = useRouter();
+  const mapRef = useRef<any>(null);
   
   // Location states
   const [selectedCity, setSelectedCity] = useState('');
@@ -79,6 +80,11 @@ export default function BookRideEnhanced() {
   const [showPriceSection, setShowPriceSection] = useState(false);
   const [autoAccept, setAutoAccept] = useState(false);
   const [promoCode, setPromoCode] = useState('');
+  
+  // Map states (for mobile only)
+  const [pickupCoords, setPickupCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [destinationCoords, setDestinationCoords] = useState<{lat: number, lng: number} | null>(null);
+  const [routePolyline, setRoutePolyline] = useState<any[]>([]);
 
   // GPS detection on mount
   useEffect(() => {
