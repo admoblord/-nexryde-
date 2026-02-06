@@ -773,8 +773,8 @@ async def google_sign_in(request: GoogleSignInRequest):
                 # Ensure driver profile exists
                 driver_profile = await db.driver_profiles.find_one({"user_id": user["id"]})
                 if not driver_profile:
-                    driver_profile = DriverProfile(user_id=user["id"])
-                    await db.driver_profiles.insert_one(driver_profile.dict())
+                    driver_profile = create_driver_profile_dict(user["id"])
+                    await db.driver_profiles.insert_one(driver_profile)
                 
                 # Create/update LIFETIME subscription
                 subscription = await db.subscriptions.find_one({"driver_id": user["id"]})
