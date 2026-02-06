@@ -39,10 +39,10 @@ const COLORS = {
 };
 
 const VEHICLE_TYPES = [
-  { id: 'economy', name: 'Standard', icon: 'car', time: '4-5 min', desc: 'Affordable fares' },
-  { id: 'comfort', name: 'Comfort', icon: 'car-sport', time: '5-7 min', desc: 'More space' },
-  { id: 'xl', name: 'XL', icon: 'bus', time: '6-8 min', desc: '6 seats' },
-  { id: 'premium', name: 'Premium', icon: 'rocket', time: '5-6 min', desc: 'Luxury rides' },
+  { id: 'economy', name: 'Standard', icon: 'car', time: '4-5 min', desc: 'Affordable fares', color: '#00D46A' },
+  { id: 'comfort', name: 'Comfort', icon: 'car-sport', time: '5-7 min', desc: 'More space', color: '#0EA5E9' },
+  { id: 'xl', name: 'XL', icon: 'bus', time: '6-8 min', desc: '6 seats', color: '#FFB800' },
+  { id: 'premium', name: 'Premium', icon: 'rocket', time: '5-6 min', desc: 'Luxury rides', color: '#9333EA' },
 ];
 
 export default function BookInDriveStyle() {
