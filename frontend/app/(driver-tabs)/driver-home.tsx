@@ -19,6 +19,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
 import ActiveTripBar from '@/src/components/ActiveTripBar';
+import { useLanguage } from '@/src/i18n/LanguageContext';
+import { SupportedLanguage } from '@/src/i18n/translations';
 
 const { width } = Dimensions.get('window');
 
