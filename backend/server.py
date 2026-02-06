@@ -2423,10 +2423,14 @@ async def get_driver_onboarding_status(driver_id: str):
 @app.post("/api/drivers/complete-profile")
 async def complete_driver_profile(request: dict):
     """
-    Complete driver profile and activate 24-hour trial
+    Complete driver profile and activate 24-hour trial.
+    This is the final step of the onboarding flow.
     """
     try:
         driver_id = request.get("driver_id")
+        
+        if not driver_id:
+            raise HTTPException(status_code=400, detail="driver_id is required")
         
         # Update driver profile with personal details AND vehicle information
         profile_update = {
@@ -2450,6 +2454,8 @@ async def complete_driver_profile(request: dict):
             "vehicle_color": request.get("vehicle_color"),
             "vehicle_registered": True,
             "profile_completed": True,
+            "onboarding_step": "approved",
+            "verification_status": "approved",
             "profile_completed_at": datetime.utcnow().isoformat(),
         }
         
@@ -2460,6 +2466,16 @@ async def complete_driver_profile(request: dict):
             {"user_id": driver_id},
             {"$set": profile_update},
             upsert=True
+        )
+        
+        # Also update the users collection with key fields
+        await db.users.update_one(
+            {"id": driver_id},
+            {"$set": {
+                "is_verified": True,
+                "profile_completed": True,
+                "onboarding_complete": True,
+            }}
         )
         
         # Activate 24-hour FREE trial
@@ -2478,27 +2494,28 @@ async def complete_driver_profile(request: dict):
             "created_at": trial_start.isoformat(),
         }
         
-        # Insert trial subscription
-        await db.subscriptions.insert_one(trial_subscription)
+        # Insert trial subscription (check for existing first)
+        existing_trial = await db.subscriptions.find_one({"driver_id": driver_id, "is_trial": True})
+        if not existing_trial:
+            await db.subscriptions.insert_one(trial_subscription)
         
-        # Get updated driver profile
-        driver = await db.driver_profiles.find_one({"user_id": driver_id})
-        driver["_id"] = str(driver["_id"])
-        
-        # Also get user data
+        # Get the user data to return to frontend for login
         user = await db.users.find_one({"id": driver_id})
         if user:
             user["_id"] = str(user["_id"])
-            driver["user"] = user
+            user["onboarding_complete"] = True
+            user["is_verified"] = True
         
         return {
             "success": True,
-            "driver": driver,
+            "user": user,
             "trial_activated": True,
             "trial_expires_at": trial_end.isoformat(),
             "message": "Profile completed! 24-hour trial activated. You can accept 3 trips."
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Profile completion error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Profile completion failed: {str(e)}")
