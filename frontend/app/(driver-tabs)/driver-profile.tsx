@@ -211,7 +211,7 @@ export default function DriverProfileScreen() {
           </View>
           <View style={styles.subscriptionBanner}>
             <Text style={styles.subscriptionBannerText}>
-              {CURRENCY}25,000/month • Zero commission • 100% earnings
+              From ₦18,000/month • City Rider or Road Warrior • 100% earnings
             </Text>
           </View>
         </TouchableOpacity>
