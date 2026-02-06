@@ -96,19 +96,16 @@ export default function DriverDocumentsScreen() {
       } as any);
 
       // Submit to backend for AI verification
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/verify-documents`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/drivers/verify-documents`, {
         method: 'POST',
         body: formData,
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
       });
 
       const data = await response.json();
 
       if (response.ok && data.verification_status === 'approved') {
         Alert.alert(
-          '✅ Documents Verified!',
+          'Documents Verified!',
           'Your documents have been approved by our AI verification system. Please complete your profile.',
           [
             {
@@ -117,8 +114,10 @@ export default function DriverDocumentsScreen() {
                 router.push({
                   pathname: '/(auth)/driver-profile',
                   params: {
-                    ...params,
-                    driver_id: data.driver_id,
+                    driver_id: params.driver_id || data.driver_id,
+                    phone: params.phone,
+                    name: params.name,
+                    email: params.email,
                   },
                 });
               },
@@ -127,7 +126,7 @@ export default function DriverDocumentsScreen() {
         );
       } else if (data.verification_status === 'pending') {
         Alert.alert(
-          '⏳ Manual Review Required',
+          'Manual Review Required',
           'Your documents are under review. We\'ll notify you within 24 hours.',
           [
             {
@@ -138,7 +137,7 @@ export default function DriverDocumentsScreen() {
         );
       } else {
         Alert.alert(
-          '❌ Verification Failed',
+          'Verification Failed',
           data.reason || 'Documents could not be verified. Please check and try again.',
           [{ text: 'OK' }]
         );
