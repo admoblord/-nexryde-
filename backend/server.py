@@ -2542,62 +2542,7 @@ async def get_driver_certification(user_id: str):
         }
     }
 
-# ==================== WOMEN-ONLY MODE ====================
-
-@api_router.post("/users/{user_id}/women-only-mode")
-async def toggle_women_only_mode(user_id: str, enabled: bool):
-    """Enable/disable women-only mode for female riders"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if user.get("gender") != "female" and enabled:
-        raise HTTPException(status_code=400, detail="Women-only mode is only available for verified female riders")
-    
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"women_only_mode": enabled}}
-    )
-    
-    return {"message": f"Women-only mode {'enabled' if enabled else 'disabled'}", "women_only_mode": enabled}
-
-@api_router.post("/users/{user_id}/verify-gender")
-async def verify_gender(user_id: str, gender: str):
-    """Verify user gender for women-only mode"""
-    if gender not in ["male", "female", "other"]:
-        raise HTTPException(status_code=400, detail="Invalid gender")
-    
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"gender": gender}}
-    )
-    
-    return {"message": "Gender verified", "gender": gender}
-
-@api_router.get("/drivers/available-female")
-async def get_available_female_drivers(lat: float, lng: float, radius_km: float = 5.0):
-    """Get available female drivers for women-only rides"""
-    # In production, this would use geospatial queries
-    female_drivers = await db.users.find({
-        "role": "driver",
-        "gender": "female",
-        "is_verified": True
-    }).to_list(20)
-    
-    available = []
-    for driver in female_drivers:
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
-        if profile and profile.get("is_online"):
-            available.append({
-                "driver_id": driver["id"],
-                "name": driver.get("name", "Driver"),
-                "rating": driver.get("rating", 5.0),
-                "total_trips": driver.get("total_trips", 0),
-                "vehicle": profile.get("vehicle_model"),
-                "plate": profile.get("plate_number")
-            })
-    
-    return {"female_drivers": available, "count": len(available)}
+# ==================== WOMEN-ONLY MODE (REFACTORED TO routers/users.py) ====================
 
 
 # ==================== EARNINGS PREDICTOR AI (REFACTORED TO routers/ai_features.py) ====================
