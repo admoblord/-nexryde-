@@ -5377,8 +5377,8 @@ async def ai_chat(request: AIChatRequest):
             role = "User" if msg["role"] == "user" else "AI"
             conversation_context += f"\n{role}: {msg['message']}"
         
-        if OPENAI_API_KEY or EMERGENT_LLM_KEY:
-            api_key_to_use = OPENAI_API_KEY if OPENAI_API_KEY else EMERGENT_LLM_KEY
+        if EMERGENT_LLM_KEY or OPENAI_API_KEY:
+            api_key_to_use = EMERGENT_LLM_KEY if EMERGENT_LLM_KEY else OPENAI_API_KEY
             
             chat = LlmChat(
                 api_key=api_key_to_use,
