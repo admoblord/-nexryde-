@@ -281,7 +281,15 @@ class TestInTripCall:
     """Test call feature during trip"""
     
     def test_01_rider_calls_driver(self):
-        """POST /api/trip/{trip_id}/call - Rider initiates call"""
+        """POST /api/trip/{trip_id}/call - Rider initiates call
+        
+        Note: This test may skip if:
+        - Trip has no phone numbers (users created without full registration)
+        - Rate limit reached
+        - Trip not in active status
+        
+        For full call testing, use pre-seeded test data with phone numbers
+        """
         assert created_trip_id is not None, "Trip must be created first"
         
         payload = {
@@ -291,11 +299,17 @@ class TestInTripCall:
         
         response = requests.post(f"{BASE_URL}/api/trip/{created_trip_id}/call", json=payload)
         
-        # Handle various error cases
+        # Handle various error cases - all are valid API behaviors
         if response.status_code == 404:
             data = response.json()
-            print(f"INFO: Call rejected - {data.get('detail', '')}")
-            pytest.skip("Trip or driver not found for call")
+            detail = data.get('detail', '')
+            if "Phone number not available" in detail:
+                print("INFO: Phone numbers not set up for test users (expected for dynamic test data)")
+                print("  - Call endpoint requires users.phone_number to be set")
+                print("  - For full testing, use pre-seeded users with phone numbers")
+            else:
+                print(f"INFO: Call rejected - {detail}")
+            pytest.skip("Phone number not available - need pre-seeded test data")
         
         if response.status_code == 403:
             data = response.json()
@@ -314,6 +328,46 @@ class TestInTripCall:
         assert "calls_remaining" in data, "Response should contain calls_remaining"
         
         print(f"PASS: Got driver phone: {data['phone_number']}, {data['calls_remaining']} calls remaining")
+    
+    def test_01b_call_using_preseeded_test_data(self):
+        """POST /api/trip/{trip_id}/call - Using pre-seeded test data with phone numbers
+        
+        Uses test-call-trip which has proper user phone numbers
+        """
+        # Pre-seeded test data from iteration 3
+        PRESEEDED_TRIP_ID = "test-call-trip"
+        PRESEEDED_DRIVER_ID = "test_driver_call"
+        
+        payload = {
+            "caller_id": PRESEEDED_DRIVER_ID,
+            "caller_role": "driver"
+        }
+        
+        response = requests.post(f"{BASE_URL}/api/trip/{PRESEEDED_TRIP_ID}/call", json=payload)
+        
+        if response.status_code == 404:
+            pytest.skip("Pre-seeded test-call-trip not found")
+        
+        if response.status_code == 429:
+            # Rate limited - this proves the rate limiting works
+            data = response.json()
+            assert "Maximum 5 calls" in data.get("detail", "")
+            print("PASS: Rate limiting verified (5 calls max per trip per caller)")
+            return
+        
+        if response.status_code == 403:
+            data = response.json()
+            print(f"INFO: {data.get('detail', '')}")
+            pytest.skip("Trip not in active status")
+        
+        assert response.status_code == 200, f"Expected 200, got {response.status_code}: {response.text}"
+        
+        data = response.json()
+        assert data.get("success") == True, "Call should succeed"
+        assert "phone_number" in data, "Response should contain phone_number"
+        assert data["phone_number"].startswith("+234"), "Should be Nigerian phone number"
+        
+        print(f"PASS: Got rider phone: {data['phone_number']}, {data['calls_remaining']} calls remaining")
     
     def test_02_call_nonexistent_trip(self):
         """POST /api/trip/{trip_id}/call - Should reject non-existent trip"""
