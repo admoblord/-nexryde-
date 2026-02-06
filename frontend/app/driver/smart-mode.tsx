@@ -61,17 +61,73 @@ export default function SmartModeScreen() {
   }, []);
 
   const loadSettings = async () => {
-    // TODO: Load from backend
-    // const response = await getSmartModeSettings(user?.id);
-    // setSettings(response.data);
+    try {
+      if (!user?.id) return;
+      
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/ai/smart-mode/get-settings?driver_id=${user.id}`
+      );
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.settings) {
+          // Map backend settings to frontend format
+          setSettings({
+            enabled: data.settings.enabled,
+            minDistance: 1,
+            maxDistance: data.settings.max_distance,
+            minRating: data.settings.min_rating,
+            acceptSurge: true,
+            minSurgeMultiplier: data.settings.surge_threshold,
+            avoidLowRated: data.settings.min_rating > 3.0,
+            lowRatingThreshold: data.settings.min_rating,
+            preferredAreas: data.settings.preferred_areas || [],
+            autoRejectAfterHours: false,
+            maxWaitTime: 10,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load Smart Mode settings:', error);
+    }
   };
 
   const saveSettings = async () => {
     try {
-      // TODO: Save to backend
-      // await updateSmartModeSettings(user?.id, settings);
-      Alert.alert('Settings Saved!', 'Smart Mode preferences updated successfully.');
+      if (!user?.id) {
+        Alert.alert('Error', 'User not found');
+        return;
+      }
+      
+      // Map frontend settings to backend format
+      const backendSettings = {
+        enabled: settings.enabled,
+        max_distance: settings.maxDistance,
+        min_rating: settings.minRating,
+        surge_threshold: settings.minSurgeMultiplier,
+        auto_accept: settings.enabled,
+        preferred_areas: settings.preferredAreas,
+      };
+      
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_BACKEND_URL}/api/ai/smart-mode/save-settings`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            driver_id: user.id,
+            settings: backendSettings,
+          }),
+        }
+      );
+      
+      if (response.ok) {
+        Alert.alert('✅ Settings Saved!', 'Smart Mode preferences updated successfully.');
+      } else {
+        Alert.alert('Error', 'Failed to save settings. Please try again.');
+      }
     } catch (error) {
+      console.error('Save settings error:', error);
       Alert.alert('Error', 'Failed to save settings. Please try again.');
     }
   };
