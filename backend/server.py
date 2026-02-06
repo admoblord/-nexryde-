@@ -5014,19 +5014,18 @@ CONSIDER:
 Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
 """
 
-        # Call ChatGPT
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a safety AI expert specializing in accident prediction and prevention for ride-hailing drivers in Lagos, Nigeria. You analyze risk factors and provide life-saving recommendations."},
-                {"role": "user", "content": context}
-            ],
-            temperature=0.3,
-            max_tokens=600,
-        )
+        # Call AI via Emergent LLM
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
-        # Parse AI response
-        ai_text = response.choices[0].message.content.strip()
+        chat = LlmChat(
+            api_key=emergent_key,
+            session_id=f"accident-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
+            system_message="You are a safety AI expert specializing in accident prediction and prevention for ride-hailing drivers in Lagos, Nigeria. You analyze risk factors and provide life-saving recommendations. Always respond with valid JSON only."
+        ).with_model("openai", "gpt-4o")
+        
+        user_msg = UserMessage(text=context)
+        ai_text = await chat.send_message(user_msg)
         
         # Extract JSON
         import re
