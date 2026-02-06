@@ -41,6 +41,9 @@ from map_service import map_router
 # Import Call Service (Privacy Protected)
 from call_service import call_router
 
+# Import Smart Mode AI (NEW)
+from smart_mode_ai import router as smart_mode_router
+
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
 load_dotenv(ROOT_DIR / '.env')
