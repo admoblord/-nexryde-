@@ -163,4 +163,15 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#059669',
   },
+  comingSoonBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  comingSoonText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: '#D97706',
+  },
 });
