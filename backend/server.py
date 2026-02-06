@@ -4951,12 +4951,15 @@ async def predict_accident_risk(
     Use ChatGPT to predict accident risk based on location, time, weather, historical data
     """
     try:
+        import googlemaps
+        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
+        
         if not openai_client:
-            raise HTTPException(status_code=503, detail="AI service not available")
+            raise Exception("AI service not available - using fallback")
         
         # Get location name from coordinates
         try:
-            reverse_result = gmaps.reverse_geocode((current_lat, current_lng))
+            reverse_result = gmaps_client.reverse_geocode((current_lat, current_lng))
             location_name = reverse_result[0]['formatted_address'] if reverse_result else "Unknown location"
         except:
             location_name = "Lagos, Nigeria"
