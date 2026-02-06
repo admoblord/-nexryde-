@@ -4414,6 +4414,200 @@ async def _driver_assistant_fallback(user_id: str, question: str, driver_stats, 
             "type": "help"
         }
 
+
+
+# ==================== SMART MODE AI ENDPOINTS ====================
+
+# Initialize OpenAI client
+openai_client = None
+if OPENAI_API_KEY:
+    openai_client = OpenAI(api_key=OPENAI_API_KEY)
+    logger.info("✅ OpenAI client initialized for Smart Mode")
+
+class SmartModeSettings(BaseModel):
+    enabled: bool = True
+    max_distance: float = 10.0  # km
+    min_rating: float = 4.0
+    surge_threshold: float = 1.5
+    auto_accept: bool = True
+    preferred_areas: List[str] = []
+
+@app.post("/api/ai/smart-mode/analyze-ride")
+async def analyze_ride_with_ai(ride: dict, driver_id: str, settings: SmartModeSettings):
+    """
+    Use ChatGPT to analyze if a ride is worth accepting based on driver's Smart Mode settings
+    Returns AI recommendation with reasoning
+    """
+    try:
+        if not openai_client:
+            raise HTTPException(status_code=503, detail="AI service not available")
+        
+        # Get driver's current stats
+        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
+        
+        # Build context for ChatGPT
+        ride_context = f"""
+Analyze this ride request for a NEXRYDE driver:
+
+RIDE DETAILS:
+- Pickup: {ride.get('pickup', 'Unknown')}
+- Destination: {ride.get('destination', 'Unknown')}
+- Distance: {ride.get('distance_km', 0):.1f} km
+- Estimated Duration: {ride.get('duration_min', 0)} minutes
+- Offered Fare: ₦{ride.get('fare', 0):,.0f}
+- Rider Rating: {ride.get('rider_rating', 'N/A')}
+- Time of Day: {datetime.utcnow().strftime('%H:%M')}
+
+DRIVER'S SMART MODE PREFERENCES:
+- Max Distance: {settings.max_distance} km
+- Minimum Rider Rating: {settings.min_rating}
+- Surge Threshold: {settings.surge_threshold}x
+- Preferred Areas: {', '.join(settings.preferred_areas) if settings.preferred_areas else 'None'}
+
+DRIVER'S CURRENT STATS:
+- Today's Earnings: ₦{driver_earnings.get('today', 0):,.0f}
+- Trips Today: {driver_earnings.get('trips_today', 0)}
+- Current Rating: {driver_profile.get('rating', 5.0) if driver_profile else 5.0}
+
+INSTRUCTIONS:
+Based on the ride details and driver preferences, should the driver ACCEPT or REJECT this ride?
+
+Provide your analysis in this exact JSON format:
+{{
+  "recommendation": "ACCEPT" or "REJECT",
+  "confidence": 0-100,
+  "reasoning": "Brief explanation (max 50 words)",
+  "score": 0-100 (overall ride quality score),
+  "factors": {{
+    "distance_ok": true/false,
+    "fare_good": true/false,
+    "rating_ok": true/false,
+    "timing_good": true/false
+  }}
+}}
+
+Be practical and consider Nigerian driver economics. A good ride is one that maximizes earnings per hour while maintaining safety.
+"""
+
+        # Call ChatGPT
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",  # Fast and cost-effective
+            messages=[
+                {"role": "system", "content": "You are an expert AI assistant for ride-hailing drivers in Nigeria. You analyze rides and provide smart recommendations to maximize driver earnings and safety."},
+                {"role": "user", "content": ride_context}
+            ],
+            temperature=0.3,  # More deterministic
+            max_tokens=300,
+        )
+        
+        # Parse AI response
+        ai_response_text = response.choices[0].message.content.strip()
+        
+        # Try to extract JSON from response
+        import re
+        json_match = re.search(r'\{.*\}', ai_response_text, re.DOTALL)
+        if json_match:
+            ai_analysis = json.loads(json_match.group())
+        else:
+            # Fallback if AI doesn't return JSON
+            ai_analysis = {
+                "recommendation": "ACCEPT" if "accept" in ai_response_text.lower() else "REJECT",
+                "confidence": 70,
+                "reasoning": ai_response_text[:100],
+                "score": 75,
+                "factors": {
+                    "distance_ok": ride.get('distance_km', 0) <= settings.max_distance,
+                    "fare_good": True,
+                    "rating_ok": True,
+                    "timing_good": True
+                }
+            }
+        
+        # Log for debugging
+        logger.info(f"Smart Mode AI Analysis: {ai_analysis['recommendation']} - {ai_analysis['reasoning']}")
+        
+        return {
+            "success": True,
+            "ai_analysis": ai_analysis,
+            "ride_id": ride.get('id'),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Smart Mode AI error: {str(e)}")
+        # Fallback to rule-based analysis
+        basic_score = 75
+        should_accept = (
+            ride.get('distance_km', 0) <= settings.max_distance and
+            ride.get('rider_rating', 5.0) >= settings.min_rating
+        )
+        
+        return {
+            "success": True,
+            "ai_analysis": {
+                "recommendation": "ACCEPT" if should_accept else "REJECT",
+                "confidence": 60,
+                "reasoning": "Basic rule-based analysis (AI unavailable)",
+                "score": basic_score,
+                "factors": {
+                    "distance_ok": ride.get('distance_km', 0) <= settings.max_distance,
+                    "fare_good": True,
+                    "rating_ok": ride.get('rider_rating', 5.0) >= settings.min_rating,
+                    "timing_good": True
+                }
+            },
+            "fallback": True
+        }
+
+@app.post("/api/ai/smart-mode/save-settings")
+async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
+    """Save driver's Smart Mode preferences"""
+    try:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {
+                "smart_mode_settings": settings.dict(),
+                "smart_mode_enabled": settings.enabled,
+                "updated_at": datetime.utcnow().isoformat()
+            }},
+            upsert=True
+        )
+        
+        return {
+            "success": True,
+            "message": "Smart Mode settings saved"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/ai/smart-mode/get-settings")
+async def get_smart_mode_settings(driver_id: str):
+    """Get driver's Smart Mode preferences"""
+    try:
+        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        
+        if driver_profile and "smart_mode_settings" in driver_profile:
+            return {
+                "success": True,
+                "settings": driver_profile["smart_mode_settings"]
+            }
+        
+        # Return defaults
+        return {
+            "success": True,
+            "settings": {
+                "enabled": False,
+                "max_distance": 10.0,
+                "min_rating": 4.0,
+                "surge_threshold": 1.5,
+                "auto_accept": True,
+                "preferred_areas": []
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==================== PIDGIN ENGLISH AI SUPPORT ====================
 
 PIDGIN_RIDER_PROMPT = """You be KODA AI assistant for riders wey dey Nigeria. 
