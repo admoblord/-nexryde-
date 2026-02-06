@@ -946,6 +946,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#0F172A',
   },
+  menuSubtext: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray500,
+    marginLeft: SPACING.md,
+    marginTop: 2,
+  },
   logoutButton: {
     flexDirection: 'row',
     alignItems: 'center',
