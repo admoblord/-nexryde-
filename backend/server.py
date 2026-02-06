@@ -9118,6 +9118,46 @@ async def create_trip_with_custom_price(request: CustomPriceRequest):
         raise HTTPException(status_code=500, detail=f"Failed to create custom price trip: {str(e)}")
 
 
+@app.get("/api/trips/{trip_id}/status")
+async def get_trip_status(trip_id: str):
+    """Get current trip status - used by rider to track their request"""
+    try:
+        trip = await db.trips.find_one({"id": trip_id})
+        if not trip:
+            return {"success": False, "error": "Trip not found"}
+        
+        trip["_id"] = str(trip["_id"])
+        
+        # Get driver info if trip is accepted
+        driver_info = None
+        if trip.get("driver_id") and trip.get("status") in ["accepted", "arrived", "in_progress"]:
+            driver = await db.driver_profiles.find_one({"user_id": trip["driver_id"]})
+            driver_user = await db.users.find_one({"id": trip["driver_id"]})
+            if driver:
+                driver_info = {
+                    "name": driver.get("full_name") or (driver_user.get("name") if driver_user else "Driver"),
+                    "phone": driver.get("phone", ""),
+                    "vehicle": f"{driver.get('vehicle_make', '')} {driver.get('vehicle_model', '')}".strip() or "Vehicle",
+                    "plate": driver.get("vehicle_plate_number", ""),
+                    "color": driver.get("vehicle_color", ""),
+                    "rating": driver.get("rating", 4.8),
+                }
+        
+        return {
+            "success": True,
+            "trip_id": trip_id,
+            "status": trip.get("status", "unknown"),
+            "offered_fare": trip.get("offered_fare"),
+            "pickup": trip.get("pickup_location"),
+            "destination": trip.get("destination"),
+            "driver_info": driver_info,
+            "created_at": str(trip.get("created_at", "")),
+        }
+    except Exception as e:
+        logger.error(f"Trip status error: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+
 # ========== VOICE BOOKING API (NIGERIAN ACCENT SUPPORT) ==========
 
 # Google Places Autocomplete Proxy Endpoint (to avoid CORS issues)
