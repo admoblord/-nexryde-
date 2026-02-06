@@ -6198,7 +6198,7 @@ async def get_active_trip(user_id: str):
         logger.error(f"Get active trip error: {e}")
         return {"active": False, "error": str(e)}
 
-@api_router.post("/ride/create-custom-price")
+@api_router.post("/rides/create-custom-price")
 async def create_custom_price_trip_alias(request: dict = Body(...)):
     """Alias for /trips/create-with-custom-price to work around proxy routing"""
     from routers.trips import CustomPriceRequest
