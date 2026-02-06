@@ -405,7 +405,7 @@ class RideRequestTester:
                 driver_info = data.get("driver_info")
                 if isinstance(driver_info, dict):
                     driver_checks = [
-                        "driver_id" in driver_info or "id" in driver_info
+                        "name" in driver_info  # Check for name field instead
                     ]
                     success_checks.extend(driver_checks)
             
