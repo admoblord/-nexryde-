@@ -47,6 +47,20 @@ export default function RiderWalletScreen() {
             <Text style={styles.paymentDesc}>Transfer to driver's account</Text>
           </View>
         </View>
+
+        {/* Crypto Payment - Coming Soon */}
+        <View style={[styles.paymentCard, { opacity: 0.6 }]}>
+          <View style={[styles.paymentIcon, { backgroundColor: '#FEF3C7' }]}>
+            <Ionicons name="logo-bitcoin" size={24} color="#F59E0B" />
+          </View>
+          <View style={styles.paymentContent}>
+            <Text style={styles.paymentTitle}>Crypto</Text>
+            <Text style={styles.paymentDesc}>Pay with Bitcoin, USDT & more</Text>
+          </View>
+          <View style={styles.comingSoonBadge}>
+            <Text style={styles.comingSoonText}>Coming Soon</Text>
+          </View>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
