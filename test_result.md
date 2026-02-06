@@ -705,12 +705,24 @@ frontend:
         - agent: "main"
         - comment: "✅ IMPLEMENTED: Complete 4-step driver verification form. Step 1: Personal info (name, phone, email, address, DOB). Step 2: Vehicle info (make, model, year, color, plate). Step 3: Document uploads (NIN, License, Passport Photo, Vehicle Registration, Insurance) with gallery/camera options via expo-image-picker. Step 4: Review and submit. Features progress bar, step indicators, animated transitions, and form validation. Connects to /api/drivers/verification/submit endpoint."
 
-  - task: "Rider Booking Screen"
+  - task: "Rider Booking Screen (NEW ENHANCED VERSION)"
+    implemented: true
+    working: true
+    file: "app/rider/book-enhanced.tsx"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "✅ FULLY FUNCTIONAL: New inDrive-style booking screen with polished UI. Features: 1) City selection required first (Lagos, Abuja, etc), 2) Google Places Autocomplete for pickup/destination with real-time suggestions, 3) GPS button for current location, 4) Add stops (up to 3), 5) Vehicle selection with big cards (Standard, Comfort, XL, Premium), 6) Calculate Fare button calls backend /api/fares/estimate-google, 7) HUGE price display (NGN4,890 style) with --- and +++ adjustment buttons, 8) Shows percentage difference from recommended (e.g., '6.1% above • Faster match!'), 9) Auto-accept toggle with switch, 10) Find Offers button sends custom price to drivers. Fixed react-native-maps crash by removing map component. All features tested and working correctly."
+
+  - task: "Rider Booking Screen (OLD VERSION)"
     implemented: true
     working: false
     file: "app/rider/book.tsx"
     stuck_count: 3
-    priority: "high"
+    priority: "low"
     needs_retesting: false
     status_history:
         - working: true
