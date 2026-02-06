@@ -4624,8 +4624,8 @@ async def get_ai_coach_suggestions(driver_id: str):
     Use ChatGPT to provide personalized coaching suggestions for driver
     """
     try:
-        if not openai_client:
-            raise HTTPException(status_code=503, detail="AI service not available")
+        from emergentintegrations.llm.chat import LlmChat, UserMessage
+        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
         # Get driver stats
         driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
@@ -4642,7 +4642,7 @@ async def get_ai_coach_suggestions(driver_id: str):
         avg_trip_time = sum([t.get("duration_min", 0) for t in recent_trips]) / max(total_trips, 1)
         avg_earnings_per_trip = driver_earnings.get("today", 0) / max(total_trips, 1) if total_trips > 0 else 0
         
-        # Build context for ChatGPT
+        # Build context for AI
         coaching_context = f"""
 You are an expert AI Coach for NEXRYDE drivers in Nigeria. Analyze this driver's performance and provide 4-5 personalized, actionable suggestions to increase earnings and improve service.
 
@@ -4686,19 +4686,15 @@ EXAMPLE GOOD SUGGESTIONS:
 - "Accept 90%+ of rides to qualify for incentives"
 """
 
-        # Call ChatGPT
-        response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are an expert AI driving coach for Nigerian ride-hailing drivers. You provide personalized, actionable advice to maximize earnings and service quality."},
-                {"role": "user", "content": coaching_context}
-            ],
-            temperature=0.7,  # More creative
-            max_tokens=800,
-        )
+        # Call AI via Emergent LLM
+        chat = LlmChat(
+            api_key=emergent_key,
+            session_id=f"coach-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
+            system_message="You are an expert AI driving coach for Nigerian ride-hailing drivers. You provide personalized, actionable advice to maximize earnings and service quality. Always respond with valid JSON only."
+        ).with_model("openai", "gpt-4o")
         
-        # Parse AI response
-        ai_response_text = response.choices[0].message.content.strip()
+        user_msg = UserMessage(text=coaching_context)
+        ai_response_text = await chat.send_message(user_msg)
         
         # Extract JSON
         import re
