@@ -55,9 +55,16 @@ export default function DriverTermsScreen() {
       const data = await response.json();
 
       if (response.ok) {
-        setUser(data.user);
-        setIsAuthenticated(true);
-        router.replace('/(driver-tabs)/driver-home');
+        // Don't log them in yet! Route to document verification
+        router.push({
+          pathname: '/(auth)/driver-documents',
+          params: {
+            driver_id: data.user.id,
+            phone: phone,
+            name: name,
+            email: email,
+          },
+        });
       } else {
         Alert.alert('Error', data.detail || 'Registration failed');
       }
