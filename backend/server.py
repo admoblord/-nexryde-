@@ -9406,10 +9406,13 @@ async def parse_voice_booking(request: VoiceBookingRequest):
 # ==================== DRIVER COMMUNITY / GROUP ENDPOINTS ====================
 
 @app.on_event("startup")
-async def seed_community_groups():
+async def seed_community_groups_v2():
     """Seed default community groups based on Bolt/inDrive active Nigerian cities"""
     count = await db.community_groups.count_documents({})
-    if count == 0:
+    if count < 15:
+        # Clear old groups and re-seed with full list
+        if count > 0:
+            await db.community_groups.drop()
         groups = [
             # Official Channel
             {"group_id": "announcements", "name": "NEXRYDE Announcements", "description": "Official updates from the NEXRYDE team", "icon": "megaphone", "color": "#0EA5E9", "members": 0, "is_official": True, "created_at": datetime.utcnow().isoformat()},
