@@ -106,6 +106,85 @@ export default function ModernDriverHome() {
     // Check onboarding status first — this is the verification gate
     checkOnboardingStatus();
   }, []);
+
+  // Poll for ride requests when online
+  useEffect(() => {
+    let pollInterval: ReturnType<typeof setInterval> | null = null;
+    
+    if (isOnline && !incomingRide) {
+      pollInterval = setInterval(async () => {
+        try {
+          // Default Lagos location
+          const lat = 6.5244;
+          const lng = 3.3792;
+          const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/trips/pending?driver_lat=${lat}&driver_lng=${lng}`);
+          const trips = await res.json();
+          
+          if (Array.isArray(trips) && trips.length > 0 && !incomingRide) {
+            setIncomingRide(trips[0]);
+            setRideCountdown(20);
+          }
+        } catch (e) {
+          console.error('Polling error:', e);
+        }
+      }, 6000); // Poll every 6 seconds
+    }
+    
+    return () => {
+      if (pollInterval) clearInterval(pollInterval);
+    };
+  }, [isOnline, incomingRide]);
+
+  // Countdown timer for ride request
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    
+    if (incomingRide && rideCountdown > 0) {
+      timer = setInterval(() => {
+        setRideCountdown(prev => {
+          if (prev <= 1) {
+            // Time's up — auto-decline
+            setIncomingRide(null);
+            return 20;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [incomingRide, rideCountdown]);
+
+  const handleAcceptRide = async () => {
+    if (!incomingRide) return;
+    setAcceptingRide(true);
+    try {
+      const tripId = incomingRide.id;
+      const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/trips/${tripId}/accept`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ driver_id: user?.id || 'demo-driver' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        Alert.alert('Ride Accepted!', `Navigate to pickup: ${incomingRide.pickup_location || 'Pickup location'}`, [{ text: 'Start Navigation' }]);
+        setIncomingRide(null);
+      } else {
+        Alert.alert('Error', data.detail || 'Could not accept ride');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Failed to accept ride');
+    } finally {
+      setAcceptingRide(false);
+    }
+  };
+
+  const handleDeclineRide = () => {
+    setIncomingRide(null);
+    setRideCountdown(20);
+  };
   
   const checkOnboardingStatus = async () => {
     try {
