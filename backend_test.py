@@ -16,7 +16,7 @@ import time
 from typing import Dict, Any
 
 # Backend URL from environment
-BACKEND_URL = "https://ride-hub-ng.preview.emergentagent.com"
+BACKEND_URL = "https://smart-mode-preview.preview.emergentagent.com"
 API_BASE = f"{BACKEND_URL}/api"
 
 # Test scenarios as specified in the review request
