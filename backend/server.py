@@ -3384,20 +3384,43 @@ async def accept_trip(trip_id: str, request: dict):
     if not driver_id:
         raise HTTPException(status_code=400, detail="driver_id is required")
     
-    # Check subscription - allow if active OR if driver profile exists (for testing/onboarding)
+    # Get trip first to check if it's inter-city
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    
+    # Check if trip is inter-city
+    is_intercity = trip.get("trip_type") == "inter"
+    
+    # Check subscription
     subscription = await db.subscriptions.find_one({
         "driver_id": driver_id,
         "status": {"$in": ["active", "grace_period"]}
     })
     
     if not subscription:
-        # Check if driver profile exists - allow for testing/onboarding
+        # Check if driver profile exists - allow for testing/onboarding ONLY for intra-city
         driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
         if not driver_profile:
             raise HTTPException(status_code=403, detail="Active subscription required")
+        
+        # For inter-city, subscription is MANDATORY
+        if is_intercity:
+            raise HTTPException(
+                status_code=403, 
+                detail="⚠️ Inter-City trips require Road Warrior subscription. Upgrade to access inter-city rides!"
+            )
+    else:
+        # Driver has subscription - check tier for inter-city access
+        subscription_tier = subscription.get("tier", "city_rider")
+        
+        if is_intercity and subscription_tier == "city_rider":
+            raise HTTPException(
+                status_code=403,
+                detail="🚫 Inter-City trips locked! Upgrade to Road Warrior (₦30,000) to unlock all routes nationwide."
+            )
     
-    # Get trip and check if rider blocked this driver
-    trip = await db.trips.find_one({"id": trip_id})
+    # Check if rider blocked this driver
     if trip:
         rider = await db.users.find_one({"id": trip["rider_id"]})
         if rider and driver_id in rider.get("blocked_drivers", []):
