@@ -5104,36 +5104,6 @@ async def get_high_risk_areas(city: str = "Lagos"):
         logger.error(f"Traffic alerts error: {str(e)}")
         return {"success": True, "alerts": [], "count": 0}
 
-            "driver_stats": {
-                "rating": driver_rating,
-                "today_earnings": driver_earnings.get("today", 0),
-                "trips_today": driver_earnings.get("trips_today", 0)
-            }
-        }
-        
-    except Exception as e:
-        logger.error(f"AI Coach error: {str(e)}")
-        # Fallback to basic suggestions
-        return {
-            "success": True,
-            "suggestions": [
-                {
-                    "title": "Drive Smart",
-                    "description": "Focus on peak hours and high-demand areas for better earnings.",
-                    "impact": "+₦10,000/week",
-                    "icon": "flash",
-                    "color": "#00D46A",
-                    "priority": "high",
-                    "category": "earnings"
-                }
-            ],
-            "fallback": True
-        }
-
-    """Save driver's Smart Mode preferences"""
-    try:
-        await db.driver_profiles.update_one(
-            {"user_id": driver_id},
             {"$set": {
                 "smart_mode_settings": settings.dict(),
                 "smart_mode_enabled": settings.enabled,
