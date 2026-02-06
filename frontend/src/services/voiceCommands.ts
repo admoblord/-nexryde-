@@ -270,3 +270,12 @@ export class VoiceCommandService {
  * NEXRYDE - The app wey understand you!
  * #TalkAm #NaijaPidgin #VoiceCommands
  */
+
+/** Process voice command through AI backend (Emergent LLM → GPT-4o) */
+export async function processCommandWithAI(userId: string, command: string): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/ai/driver-assistant?user_id=${userId}&question=${encodeURIComponent(command)}`);
+    return await res.json();
+  } catch { return null; }
+}
