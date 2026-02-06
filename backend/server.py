@@ -6177,6 +6177,25 @@ async def find_best_matched_driver(rider_id: str, pickup_lat: float, pickup_lng:
 
 # ==================== HEALTH CHECK ====================
 
+@api_router.get("/trips/active/{user_id}")
+async def get_active_trip(user_id: str):
+    """Get the user's current active trip (if any)"""
+    try:
+        trip = await db.trips.find_one(
+            {
+                "$or": [{"rider_id": user_id}, {"driver_id": user_id}],
+                "status": {"$in": ["accepted", "pickup", "ongoing", "pending"]}
+            },
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        if not trip:
+            return {"active": False}
+        return {"active": True, "trip": trip}
+    except Exception as e:
+        logger.error(f"Get active trip error: {e}")
+        return {"active": False, "error": str(e)}
+
 @api_router.get("/")
 async def root():
     return {"message": "KODA API is running", "version": "2.0.0"}
