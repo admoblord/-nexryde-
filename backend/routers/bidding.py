@@ -12,6 +12,27 @@ from database import db
 logger = logging.getLogger('server')
 bidding_router = APIRouter(prefix="/api", tags=["Bidding"])
 
+
+def calculate_surge_multiplier(lat: float, lng: float) -> dict:
+    """Calculate surge multiplier based on time and demand"""
+    import random
+    now = datetime.now(timezone.utc)
+    hour = now.hour
+    base = 1.0
+    reasons = []
+    peak_hours = {"morning": {"start": 7, "end": 9, "multiplier": 1.5}, "evening": {"start": 17, "end": 20, "multiplier": 1.8}}
+    for period, cfg in peak_hours.items():
+        if cfg["start"] <= hour < cfg["end"]:
+            base = max(base, cfg["multiplier"])
+            reasons.append(f"{period.title()} rush hour")
+    demand = random.uniform(0.3, 0.9)
+    if demand > 0.7:
+        ds = 1 + (demand - 0.7) * 2
+        if ds > base:
+            base = ds
+            reasons.append("High demand in area")
+    return {"multiplier": round(min(base, 3.0), 2), "is_surge": base > 1.0, "reasons": reasons or ["Normal pricing"], "expires_in_minutes": 5}
+
 class BidRequest(BaseModel):
     rider_offered_price: float
     pickup_lat: float
