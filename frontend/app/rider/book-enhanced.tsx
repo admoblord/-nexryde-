@@ -67,10 +67,6 @@ export default function BookRideEnhanced() {
   const [showPriceSection, setShowPriceSection] = useState(false);
   const [autoAccept, setAutoAccept] = useState(false);
   const [promoCode, setPromoCode] = useState('');
-  
-  // Map states
-  const [routeCoordinates, setRouteCoordinates] = useState<any[]>([]);
-  const [mapRegion, setMapRegion] = useState<any>(null);
 
   // GPS detection on mount
   useEffect(() => {
