@@ -133,9 +133,15 @@ export default function DriverProfileScreen() {
 
       const data = await response.json();
 
-      if (response.ok) {
-        // Success! Activate 24-hour trial and log them in
-        setUser(data.driver);
+      if (response.ok && data.success) {
+        // Success! Set user data and log them in
+        if (data.user) {
+          setUser({
+            ...data.user,
+            onboarding_complete: true,
+            is_verified: true,
+          });
+        }
         setIsAuthenticated(true);
         
         Alert.alert(
