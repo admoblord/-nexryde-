@@ -9465,117 +9465,19 @@ async def parse_voice_booking(request: VoiceBookingRequest):
         "recognized": True
     }
 
-# ==================== DRIVER COMMUNITY / GROUP ENDPOINTS ====================
+
+# ==================== COMMUNITY & SAFETY (REFACTORED TO ROUTERS) ====================
+# See: routers/community.py and routers/safety.py
 
 @app.on_event("startup")
-async def seed_community_groups_v2():
-    """Seed default community groups based on Bolt/inDrive active Nigerian cities"""
-    count = await db.community_groups.count_documents({})
-    if count < 15:
-        # Clear old groups and re-seed with full list
-        if count > 0:
-            await db.community_groups.drop()
-        groups = [
-            # Official Channel
-            {"group_id": "announcements", "name": "NEXRYDE Announcements", "description": "Official updates from the NEXRYDE team", "icon": "megaphone", "color": "#0EA5E9", "members": 0, "is_official": True, "created_at": datetime.utcnow().isoformat()},
-            # General / Topic Groups
-            {"group_id": "general", "name": "General Discussion", "description": "Chat about anything NEXRYDE related", "icon": "chatbubbles", "color": "#3B82F6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "tips-tricks", "name": "Tips & Tricks", "description": "Share driving tips, hacks and strategies", "icon": "bulb", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "safety-zone", "name": "Safety Zone", "description": "Report dangerous areas and safety concerns", "icon": "shield-checkmark", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "earnings-talk", "name": "Earnings Talk", "description": "Discuss fares, surge pricing and earning strategies", "icon": "cash", "color": "#10B981", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "vehicle-maintenance", "name": "Vehicle Maintenance", "description": "Car repair tips, mechanic recommendations, parts deals", "icon": "build", "color": "#6366F1", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "new-drivers", "name": "New Drivers Hub", "description": "Help and support for new NEXRYDE drivers", "icon": "school", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            # Major Cities (Bolt & inDrive active)
-            {"group_id": "lagos-drivers", "name": "Lagos Drivers", "description": "For drivers in Lagos - Nigeria's biggest market", "icon": "car", "color": "#22C55E", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "abuja-drivers", "name": "Abuja (FCT) Drivers", "description": "Federal Capital Territory drivers community", "icon": "car", "color": "#8B5CF6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "port-harcourt", "name": "Port Harcourt Drivers", "description": "Rivers State - Garden City drivers", "icon": "car", "color": "#F59E0B", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "ibadan-drivers", "name": "Ibadan Drivers", "description": "Oyo State capital drivers community", "icon": "car", "color": "#EC4899", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "kano-drivers", "name": "Kano Drivers", "description": "Northern Nigeria's commercial capital", "icon": "car", "color": "#EF4444", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "benin-drivers", "name": "Benin City Drivers", "description": "Edo State drivers community", "icon": "car", "color": "#14B8A6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "enugu-drivers", "name": "Enugu Drivers", "description": "Coal City drivers community", "icon": "car", "color": "#0EA5E9", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "owerri-drivers", "name": "Owerri Drivers", "description": "Imo State capital drivers", "icon": "car", "color": "#A855F7", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "warri-drivers", "name": "Warri Drivers", "description": "Delta State oil city drivers", "icon": "car", "color": "#F97316", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "abeokuta-drivers", "name": "Abeokuta Drivers", "description": "Ogun State capital drivers", "icon": "car", "color": "#84CC16", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "uyo-drivers", "name": "Uyo Drivers", "description": "Akwa Ibom State drivers", "icon": "car", "color": "#06B6D4", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "calabar-drivers", "name": "Calabar Drivers", "description": "Cross River State drivers", "icon": "car", "color": "#D946EF", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "kaduna-drivers", "name": "Kaduna Drivers", "description": "Kaduna State drivers community", "icon": "car", "color": "#FB923C", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "jos-drivers", "name": "Jos Drivers", "description": "Plateau State - Tin City drivers", "icon": "car", "color": "#4ADE80", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "ilorin-drivers", "name": "Ilorin Drivers", "description": "Kwara State capital drivers", "icon": "car", "color": "#818CF8", "members": 0, "created_at": datetime.utcnow().isoformat()},
-            {"group_id": "asaba-drivers", "name": "Asaba Drivers", "description": "Delta State capital drivers", "icon": "car", "color": "#F472B6", "members": 0, "created_at": datetime.utcnow().isoformat()},
-        ]
-        await db.community_groups.insert_many(groups)
-        logger.info(f"Seeded {len(groups)} community groups")
+async def seed_community_and_safety():
+    """Seed community groups, content, and danger zones via refactored modules"""
+    await seed_community_groups(db)
+    await seed_community_content(db)
+    await seed_danger_zones(db)
 
 
-@app.get("/api/community/groups")
-async def get_community_groups():
-    """Get all community groups"""
-    try:
-        groups = await db.community_groups.find({}).to_list(length=50)
-        for g in groups:
-            g["_id"] = str(g["_id"])
-            # Get recent message count
-            recent = await db.community_messages.count_documents({
-                "group_id": g["group_id"],
-                "created_at": {"$gte": (datetime.utcnow() - timedelta(hours=24)).isoformat()}
-            })
-            g["recent_messages"] = recent
-        return {"success": True, "groups": groups}
-    except Exception as e:
-        logger.error(f"Get groups error: {str(e)}")
-        return {"success": True, "groups": []}
-
-
-@app.get("/api/community/groups/{group_id}/messages")
-async def get_group_messages(group_id: str, limit: int = 50):
-    """Get messages for a specific group"""
-    try:
-        cursor = db.community_messages.find(
-            {"group_id": group_id}
-        ).sort("created_at", -1).limit(limit)
-        messages = await cursor.to_list(length=limit)
-        messages.reverse()  # Oldest first
-        for m in messages:
-            m["_id"] = str(m["_id"])
-        return {"success": True, "messages": messages, "group_id": group_id}
-    except Exception as e:
-        logger.error(f"Get messages error: {str(e)}")
-        return {"success": True, "messages": [], "group_id": group_id}
-
-
-@app.post("/api/community/groups/{group_id}/messages")
-async def post_group_message(group_id: str, request: dict):
-    """Post a message to a community group"""
-    try:
-        message = {
-            "group_id": group_id,
-            "user_id": request.get("user_id", "anonymous"),
-            "user_name": request.get("user_name", "Anonymous Driver"),
-            "user_role": request.get("user_role", "driver"),
-            "text": request.get("text", ""),
-            "likes": 0,
-            "replies": 0,
-            "created_at": datetime.utcnow().isoformat(),
-        }
-        
-        if not message["text"].strip():
-            raise HTTPException(status_code=400, detail="Message cannot be empty")
-        
-        result = await db.community_messages.insert_one(message)
-        message["_id"] = str(result.inserted_id)
-        
-        # Update group member count (track unique users)
-        await db.community_groups.update_one(
-            {"group_id": group_id},
-            {"$addToSet": {"member_ids": request.get("user_id")}}
-        )
-        
-        return {"success": True, "message": message}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Post message error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# ==================== DRIVER STORIES ENDPOINTS ====================
 
 
 @app.post("/api/community/messages/{message_id}/like")
