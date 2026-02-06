@@ -545,32 +545,34 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(0, 212, 106, 0.1)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    marginTop: 8,
-    marginBottom: 12,
-    borderWidth: 2,
+    borderRadius: 16, // BIGGER from 12
+    paddingVertical: 18, // BIGGER from 12
+    marginTop: 12, // More space
+    marginBottom: 16,
+    borderWidth: 3, // BIGGER from 2
     borderColor: COLORS.brandGreen,
     borderStyle: 'dashed',
+    minHeight: 65, // Added for bigger button
   },
   addStopText: {
-    fontSize: 14,
-    fontWeight: '700',
+    fontSize: 17, // BIGGER from 14
+    fontWeight: '800', // BOLDER from 700
     color: COLORS.brandGreen,
-    marginLeft: 8,
+    marginLeft: 10,
   },
   gpsButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 212, 106, 0.15)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
+    backgroundColor: 'rgba(0, 212, 106, 0.2)',
+    paddingHorizontal: 14, // BIGGER from 10
+    paddingVertical: 10, // BIGGER from 6
+    borderRadius: 12, // BIGGER from 8
+    gap: 6,
+    minHeight: 44, // Touch target
   },
   gpsButtonText: {
-    fontSize: 11,
-    fontWeight: '700',
+    fontSize: 14, // BIGGER from 11
+    fontWeight: '800', // BOLDER from 700
     color: COLORS.brandGreen,
   },
   tripTypeSection: {
