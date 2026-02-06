@@ -70,11 +70,11 @@ class GracePeriodRequest(BaseModel):
 
 # Tier config
 TIER_CONFIG = {
-    "basic": {"name": "Basic", "min_trips": 0, "commission": 0.15, "benefits": ["Standard rides"]},
-    "silver": {"name": "Silver", "min_trips": 50, "commission": 0.12, "benefits": ["Priority dispatch", "5% bonus"]},
-    "gold": {"name": "Gold", "min_trips": 200, "commission": 0.10, "benefits": ["Priority dispatch", "10% bonus", "Insurance"]},
-    "platinum": {"name": "Platinum", "min_trips": 500, "commission": 0.08, "benefits": ["VIP dispatch", "15% bonus", "Full Insurance", "Dedicated support"]},
-    "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "benefits": ["VIP everything", "20% bonus", "Full Insurance", "Priority support", "Free subscription"]},
+    "basic": {"name": "Basic", "min_trips": 0, "commission": 0.15, "monthly_fee": 25000, "benefits": ["Standard rides"]},
+    "silver": {"name": "Silver", "min_trips": 50, "commission": 0.12, "monthly_fee": 25000, "benefits": ["Priority dispatch", "5% bonus"]},
+    "gold": {"name": "Gold", "min_trips": 200, "commission": 0.10, "monthly_fee": 25000, "benefits": ["Priority dispatch", "10% bonus", "Insurance"]},
+    "platinum": {"name": "Platinum", "min_trips": 500, "commission": 0.08, "monthly_fee": 25000, "benefits": ["VIP dispatch", "15% bonus", "Full Insurance", "Dedicated support"]},
+    "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "monthly_fee": 25000, "benefits": ["VIP everything", "20% bonus", "Full Insurance", "Priority support", "Free subscription"]},
 }
 
 # Fare config
