@@ -147,10 +147,11 @@ export default function DriverWellnessScreen() {
   };
 
   const calculateWellnessScore = () => {
+    if (drivingTimeMinutes === 0) return 85; // Default good score when not driving
     // Based on breaks taken vs driving time
-    const breakRatio = breakHistory.length / (drivingTimeMinutes / 240); // breaks per 4 hours
+    const breakRatio = breakHistory.length / Math.max(1, drivingTimeMinutes / 240); // breaks per 4 hours
     const score = Math.min(100, Math.round(50 + (breakRatio * 50)));
-    return score;
+    return isNaN(score) ? 85 : score;
   };
 
   const getTotalDrivingTimeToday = () => {
