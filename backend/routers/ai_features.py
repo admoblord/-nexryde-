@@ -363,7 +363,7 @@ Be practical and consider Nigerian driver economics. A good ride is one that max
             "fallback": True
         }
 
-@ai_router.post("/api/ai/smart-mode/save-settings")
+@ai_router.post("/ai/smart-mode/save-settings")
 async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
     """Save driver's Smart Mode preferences"""
     try:
@@ -387,7 +387,7 @@ async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
 
 # ==================== AI COACH ENDPOINTS ====================
 
-@ai_router.post("/api/ai/coach/get-suggestions")
+@ai_router.post("/ai/coach/get-suggestions")
 async def get_ai_coach_suggestions(driver_id: str):
     """
     Use ChatGPT to provide personalized coaching suggestions for driver
@@ -517,7 +517,7 @@ EXAMPLE GOOD SUGGESTIONS:
 
 # ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
 
-@ai_router.post("/api/ai/traffic/predict")
+@ai_router.post("/ai/traffic/predict")
 async def predict_traffic_with_ai(
     origin_lat: float,
     origin_lng: float,
@@ -652,7 +652,7 @@ Be specific, practical, and focused on maximizing driver earnings while ensuring
             "fallback": True
         }
 
-@ai_router.get("/api/ai/traffic/alerts")
+@ai_router.get("/ai/traffic/alerts")
 async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
     """
     Get AI-generated traffic alerts for driver's current location
@@ -696,7 +696,7 @@ async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
 
 # ==================== ACCIDENT AI PREDICTION ENDPOINTS ====================
 
-@ai_router.post("/api/ai/accident/predict-risk")
+@ai_router.post("/ai/accident/predict-risk")
 async def predict_accident_risk(
     driver_id: str,
     current_lat: float,
@@ -846,7 +846,7 @@ Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
             "fallback": True
         }
 
-@ai_router.get("/api/ai/accident/high-risk-areas")
+@ai_router.get("/ai/accident/high-risk-areas")
 async def get_high_risk_areas(city: str = "Lagos"):
     """
     Get list of known high-risk accident areas in Nigerian cities
@@ -934,7 +934,7 @@ async def get_high_risk_areas(city: str = "Lagos"):
         return {"success": True, "alerts": [], "count": 0}
 
 
-@ai_router.get("/api/ai/smart-mode/get-settings")
+@ai_router.get("/ai/smart-mode/get-settings")
 async def get_smart_mode_settings(driver_id: str):
     """Get driver's Smart Mode preferences"""
     try:
@@ -1186,7 +1186,7 @@ async def update_drive_time(user_id: str, hours: float):
 
 # ==================== DRIVER AWARENESS AI ENDPOINT ====================
 
-@ai_router.get("/api/driver/awareness")
+@ai_router.get("/driver/awareness")
 async def get_driver_awareness(driver_id: str = "demo", lat: float = 6.5244, lng: float = 3.3792):
     """
     AI-powered driver awareness - provides safety, fatigue, weather, and road condition alerts
