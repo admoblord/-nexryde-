@@ -70,18 +70,8 @@ export default function DriverTermsScreen() {
       }
     } catch (error) {
       console.error('Registration error:', error);
-      // Fallback to local registration
-      setUser({
-        id: Date.now().toString(),
-        name: name || 'Driver',
-        phone: phone,
-        role: 'driver',
-        email: email,
-      });
-      setIsAuthenticated(true);
-      router.replace('/(driver-tabs)/driver-home');
-    } finally {
       setLoading(false);
+      Alert.alert('Connection Error', 'Could not connect to server. Please check your internet connection and try again.');
     }
   };
 
