@@ -4768,11 +4768,14 @@ async def predict_traffic_with_ai(
     Use ChatGPT + Google Maps to predict traffic and provide intelligent route recommendations
     """
     try:
+        import googlemaps
+        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
+        
         if not openai_client:
-            raise HTTPException(status_code=503, detail="AI service not available")
+            raise Exception("AI service not available - using fallback")
         
         # Get real-time traffic data from Google Maps
-        directions = gmaps.directions(
+        directions = gmaps_client.directions(
             origin=(origin_lat, origin_lng),
             destination=(destination_lat, destination_lng),
             mode="driving",
