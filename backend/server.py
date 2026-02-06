@@ -2247,27 +2247,7 @@ async def get_translations(lang: str):
     """Get translations"""
     return {"language": lang, "translations": TRANSLATIONS.get(lang, TRANSLATIONS["en"])}
 
-# ==================== USER PREFERENCES ====================
-
-@api_router.put("/users/{user_id}/theme")
-async def set_theme(user_id: str, theme: str):
-    """Set theme preference"""
-    if theme not in ["light", "dark", "auto"]:
-        raise HTTPException(status_code=400, detail="Invalid theme")
-    await db.users.update_one({"id": user_id}, {"$set": {"theme_preference": theme}})
-    return {"success": True, "theme": theme}
-
-@api_router.get("/users/{user_id}/preferences")
-async def get_preferences(user_id: str):
-    """Get user preferences"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        return {"theme": "auto", "language": "en"}
-    return {
-        "theme": user.get("theme_preference", "auto"),
-        "language": user.get("preferred_language", "en"),
-        "notifications_enabled": user.get("notifications_enabled", True)
-    }
+# ==================== USER PREFERENCES (REFACTORED TO routers/users.py) ====================
 
 
 # ==================== KODA FAMILY ====================
