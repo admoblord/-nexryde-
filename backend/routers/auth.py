@@ -71,6 +71,87 @@ class GoogleSignInRequest(BaseModel):
     profile_image: Optional[str] = None
 
 
+def create_user_dict(**kwargs):
+    """Create a User document dict"""
+    defaults = {
+        "id": str(uuid4()),
+        "phone": "",
+        "name": None,
+        "email": None,
+        "role": "rider",
+        "gender": None,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "is_verified": False,
+        "face_verified": False,
+        "face_image": None,
+        "profile_image": None,
+        "google_id": None,
+        "rating": 5.0,
+        "total_trips": 0,
+        "behavior_score": 100.0,
+        "emergency_contacts": [],
+        "favorite_drivers": [],
+        "blocked_drivers": [],
+        "blocked_riders": [],
+        "streaks": {"current": 0, "best": 0, "last_date": None},
+        "badges": [],
+        "family_id": None,
+        "family_role": None,
+        "trust_score": 100.0,
+        "women_only_mode": False,
+        "nin": None,
+        "terms_accepted": None,
+        "terms_accepted_at": None,
+    }
+    defaults.update(kwargs)
+    return defaults
+
+
+def create_wallet_dict(user_id):
+    return {
+        "id": str(uuid4()),
+        "user_id": user_id,
+        "balance": 0.0,
+        "currency": "NGN",
+        "transactions": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def create_driver_profile_dict(user_id):
+    return {
+        "id": str(uuid4()),
+        "user_id": user_id,
+        "nin_verified": False,
+        "license_uploaded": False,
+        "vehicle_docs_uploaded": False,
+        "selfie_verified": False,
+        "face_image": None,
+        "vehicle_type": None,
+        "vehicle_model": None,
+        "vehicle_plate": None,
+        "vehicle_color": None,
+        "is_online": False,
+        "current_location": None,
+        "completion_rate": 100.0,
+        "cancellation_count": 0,
+        "rank": "standard",
+        "bank_name": None,
+        "account_number": None,
+        "account_name": None,
+        "smoothness_rating": 5.0,
+        "politeness_rating": 5.0,
+        "cleanliness_rating": 5.0,
+        "safety_rating": 5.0,
+        "hours_driven_today": 0.0,
+        "last_break_at": None,
+        "fatigue_warning": False,
+        "weekly_trips": 0,
+        "weekly_earnings": 0.0,
+        "challenges_completed": [],
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
 def normalize_phone(phone: str) -> str:
     """Normalize Nigerian phone number to international format with + prefix"""
     import re
