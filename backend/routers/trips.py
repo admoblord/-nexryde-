@@ -32,6 +32,7 @@ class CustomPriceRequest(BaseModel):
     trip_type: str = "intra"
 
 
+@trips_router.post("/trips/custom-price")
 @trips_router.post("/trips/create-with-custom-price")
 async def create_trip_with_custom_price(request: CustomPriceRequest):
     """Create trip with user's custom price offer"""
