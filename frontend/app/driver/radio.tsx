@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,98 +6,317 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { Audio } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+
+// Real Nigerian Radio Station Streaming URLs
+const STATIONS = [
+  {
+    id: 'nexryde',
+    name: 'NEXRYDE FM',
+    description: 'Driver tips & traffic updates',
+    icon: 'car',
+    streamUrl: 'https://streams.radio.co/s8f06ad34c/listen', // Placeholder - replace with actual
+    frequency: '24/7',
+  },
+  {
+    id: 'coolfm',
+    name: 'Cool FM Lagos',
+    description: 'Lagos 96.9 FM',
+    icon: 'musical-notes',
+    streamUrl: 'http://s8.voscast.com:9526/stream', // Cool FM Lagos stream
+    frequency: '96.9 FM',
+  },
+  {
+    id: 'wazobia',
+    name: 'Wazobia FM',
+    description: 'Pidgin Radio 95.1 FM',
+    icon: 'radio',
+    streamUrl: 'http://s3.voscast.com:9444/stream', // Wazobia FM stream
+    frequency: '95.1 FM',
+  },
+  {
+    id: 'beatfm',
+    name: 'Beat FM',
+    description: '99.9 Lagos',
+    icon: 'pulse',
+    streamUrl: 'http://s8.voscast.com:8234/stream', // Beat FM stream
+    frequency: '99.9 FM',
+  },
+  {
+    id: 'rhythm',
+    name: 'Rhythm FM',
+    description: '93.7 Lagos',
+    icon: 'musical-note',
+    streamUrl: 'http://s8.voscast.com:8450/stream', // Rhythm FM stream
+    frequency: '93.7 FM',
+  },
+  {
+    id: 'lagos_talks',
+    name: 'Lagos Talks',
+    description: '91.3 FM',
+    icon: 'chatbubbles',
+    streamUrl: 'http://s8.voscast.com:8188/stream', // Lagos Talks stream
+    frequency: '91.3 FM',
+  },
+];
 
 export default function DriverRadioScreen() {
   const router = useRouter();
+  const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentStation, setCurrentStation] = useState('NEXRYDE FM');
+  const [isLoading, setIsLoading] = useState(false);
+  const [currentStation, setCurrentStation] = useState(STATIONS[0]);
+  const soundRef = useRef<Audio.Sound | null>(null);
 
-  const stations = [
-    { name: 'NEXRYDE FM', description: 'Traffic updates & driver tips', icon: 'car' },
-    { name: 'Cool FM', description: 'Lagos 96.9', icon: 'musical-notes' },
-    { name: 'Wazobia FM', description: 'Pidgin Radio', icon: 'radio' },
-    { name: 'Beat FM', description: '99.9 Lagos', icon: 'pulse' },
-  ];
+  useEffect(() => {
+    // Setup audio mode
+    setupAudio();
+    
+    return () => {
+      // Cleanup on unmount
+      if (soundRef.current) {
+        soundRef.current.unloadAsync();
+      }
+    };
+  }, []);
 
-  const handlePlay = (station: string) => {
-    setCurrentStation(station);
-    setIsPlaying(true);
-    Alert.alert('Coming Soon', 'Radio streaming will be available in the next update!');
+  const setupAudio = async () => {
+    try {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+        staysActiveInBackground: true,
+        playsInSilentModeIOS: true,
+        shouldDuckAndroid: true,
+        playThroughEarpieceAndroid: false,
+      });
+    } catch (error) {
+      console.error('Audio setup error:', error);
+    }
+  };
+
+  const playStation = async (station: typeof STATIONS[0]) => {
+    try {
+      setIsLoading(true);
+      
+      // Stop current stream if playing
+      if (soundRef.current) {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+      }
+
+      // Create and load new sound
+      const { sound: newSound } = await Audio.Sound.createAsync(
+        { uri: station.streamUrl },
+        { shouldPlay: true },
+        onPlaybackStatusUpdate
+      );
+
+      soundRef.current = newSound;
+      setSound(newSound);
+      setCurrentStation(station);
+      setIsPlaying(true);
+      setIsLoading(false);
+    } catch (error) {
+      setIsLoading(false);
+      console.error('Playback error:', error);
+      Alert.alert(
+        'Streaming Error',
+        `Could not connect to ${station.name}. Please check your internet connection and try again.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const onPlaybackStatusUpdate = (status: any) => {
+    if (status.isLoaded) {
+      if (status.didJustFinish) {
+        setIsPlaying(false);
+      }
+    } else if (status.error) {
+      console.error('Playback error:', status.error);
+      setIsPlaying(false);
+      setIsLoading(false);
+    }
+  };
+
+  const togglePlayPause = async () => {
+    if (!soundRef.current) {
+      // Start playing if no sound loaded
+      await playStation(currentStation);
+      return;
+    }
+
+    try {
+      if (isPlaying) {
+        await soundRef.current.pauseAsync();
+        setIsPlaying(false);
+      } else {
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+      }
+    } catch (error) {
+      console.error('Toggle error:', error);
+    }
+  };
+
+  const stopRadio = async () => {
+    if (soundRef.current) {
+      try {
+        await soundRef.current.stopAsync();
+        await soundRef.current.unloadAsync();
+        soundRef.current = null;
+        setIsPlaying(false);
+      } catch (error) {
+        console.error('Stop error:', error);
+      }
+    }
+  };
+
+  const nextStation = () => {
+    const currentIndex = STATIONS.findIndex(s => s.id === currentStation.id);
+    const nextIndex = (currentIndex + 1) % STATIONS.length;
+    playStation(STATIONS[nextIndex]);
+  };
+
+  const previousStation = () => {
+    const currentIndex = STATIONS.findIndex(s => s.id === currentStation.id);
+    const prevIndex = (currentIndex - 1 + STATIONS.length) % STATIONS.length;
+    playStation(STATIONS[prevIndex]);
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+          <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Driver Radio</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity onPress={stopRadio} style={styles.stopButton}>
+          <Ionicons name="close-circle" size={24} color={COLORS.lightTextSecondary} />
+        </TouchableOpacity>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Now Playing Card */}
         <View style={styles.nowPlayingCard}>
           <View style={styles.playerVisual}>
-            <Ionicons name="radio" size={48} color={COLORS.primary} />
+            {isLoading ? (
+              <ActivityIndicator size="large" color={COLORS.accentGreen} />
+            ) : (
+              <Ionicons 
+                name={isPlaying ? 'radio' : 'radio-outline'} 
+                size={64} 
+                color={isPlaying ? COLORS.accentGreen : COLORS.lightTextMuted} 
+              />
+            )}
           </View>
-          <Text style={styles.nowPlayingLabel}>Now Playing</Text>
-          <Text style={styles.nowPlayingStation}>{currentStation}</Text>
           
+          <Text style={styles.nowPlayingLabel}>Now Playing</Text>
+          <Text style={styles.nowPlayingStation}>{currentStation.name}</Text>
+          <Text style={styles.nowPlayingFreq}>{currentStation.frequency}</Text>
+
+          {isPlaying && (
+            <View style={styles.liveIndicator}>
+              <View style={styles.livePulse} />
+              <Text style={styles.liveText}>LIVE</Text>
+            </View>
+          )}
+
+          {/* Player Controls */}
           <View style={styles.controlsRow}>
-            <TouchableOpacity style={styles.controlButton}>
-              <Ionicons name="play-skip-back" size={24} color={COLORS.gray600} />
+            <TouchableOpacity 
+              style={styles.controlButton}
+              onPress={previousStation}
+              disabled={isLoading}
+            >
+              <Ionicons name="play-skip-back" size={28} color={COLORS.lightTextSecondary} />
             </TouchableOpacity>
+
             <TouchableOpacity 
               style={styles.playButton}
-              onPress={() => handlePlay(currentStation)}
+              onPress={togglePlayPause}
+              disabled={isLoading}
             >
-              <Ionicons 
-                name={isPlaying ? 'pause' : 'play'} 
-                size={32} 
-                color={COLORS.white} 
-              />
+              {isLoading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <Ionicons 
+                  name={isPlaying ? 'pause' : 'play'} 
+                  size={36} 
+                  color={COLORS.white} 
+                />
+              )}
             </TouchableOpacity>
-            <TouchableOpacity style={styles.controlButton}>
-              <Ionicons name="play-skip-forward" size={24} color={COLORS.gray600} />
+
+            <TouchableOpacity 
+              style={styles.controlButton}
+              onPress={nextStation}
+              disabled={isLoading}
+            >
+              <Ionicons name="play-skip-forward" size={28} color={COLORS.lightTextSecondary} />
             </TouchableOpacity>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Available Stations</Text>
+        {/* Station List */}
+        <Text style={styles.sectionTitle}>Available Stations ({STATIONS.length})</Text>
 
-        {stations.map((station, index) => (
+        {STATIONS.map((station) => (
           <TouchableOpacity 
-            key={index} 
+            key={station.id} 
             style={[
               styles.stationCard,
-              currentStation === station.name && styles.stationCardActive
+              currentStation.id === station.id && styles.stationCardActive
             ]}
-            onPress={() => handlePlay(station.name)}
+            onPress={() => playStation(station)}
+            disabled={isLoading}
           >
-            <View style={[styles.stationIcon, currentStation === station.name && styles.stationIconActive]}>
+            <View style={[
+              styles.stationIcon,
+              currentStation.id === station.id && styles.stationIconActive
+            ]}>
               <Ionicons 
                 name={station.icon as any} 
-                size={24} 
-                color={currentStation === station.name ? COLORS.white : COLORS.primary} 
+                size={28} 
+                color={currentStation.id === station.id ? COLORS.white : COLORS.accentGreen} 
               />
             </View>
+            
             <View style={styles.stationInfo}>
-              <Text style={styles.stationName}>{station.name}</Text>
-              <Text style={styles.stationDesc}>{station.description}</Text>
+              <Text style={[
+                styles.stationName,
+                currentStation.id === station.id && styles.stationNameActive
+              ]}>
+                {station.name}
+              </Text>
+              <Text style={styles.stationDesc}>
+                {station.description} • {station.frequency}
+              </Text>
             </View>
-            {currentStation === station.name && (
-              <View style={styles.liveIndicator}>
-                <View style={styles.liveDot} />
-                <Text style={styles.liveText}>LIVE</Text>
+
+            {currentStation.id === station.id && isPlaying && (
+              <View style={styles.playingBadge}>
+                <Ionicons name="volume-high" size={20} color={COLORS.accentGreen} />
               </View>
             )}
           </TouchableOpacity>
         ))}
+
+        {/* Info Card */}
+        <View style={styles.infoCard}>
+          <Ionicons name="information-circle" size={20} color={COLORS.accentBlue} />
+          <Text style={styles.infoText}>
+            Radio continues playing in the background while you drive. Use volume buttons to adjust.
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -106,132 +325,192 @@ export default function DriverRadioScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: COLORS.lightBackground,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
+    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
+    borderBottomColor: COLORS.lightBorder,
   },
   backButton: {
-    padding: SPACING.sm,
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: COLORS.lightTextPrimary,
+  },
+  stopButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   content: {
     padding: SPACING.lg,
+    paddingBottom: SPACING.xl * 2,
   },
   nowPlayingCard: {
     backgroundColor: COLORS.white,
-    padding: SPACING.xl,
     borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.xl,
     alignItems: 'center',
     marginBottom: SPACING.lg,
-    ...SHADOWS.md,
   },
   playerVisual: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.primarySoft,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: COLORS.lightBorder,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.lg,
   },
   nowPlayingLabel: {
-    fontSize: FONT_SIZE.sm,
+    fontSize: FONT_SIZE.xs,
     fontWeight: '600',
-    color: COLORS.gray500,
+    color: COLORS.lightTextSecondary,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: SPACING.xs,
   },
   nowPlayingStation: {
-    fontSize: FONT_SIZE.xl,
+    fontSize: 24,
     fontWeight: '900',
-    color: COLORS.gray800,
-    marginTop: SPACING.xs,
+    color: COLORS.lightTextPrimary,
+    marginBottom: 4,
+  },
+  nowPlayingFreq: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.accentGreen,
+    marginBottom: SPACING.md,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.accentGreenSoft,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.md,
+    marginBottom: SPACING.lg,
+    gap: 6,
+  },
+  livePulse: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.accentGreen,
+  },
+  liveText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.accentGreen,
+    letterSpacing: 0.5,
   },
   controlsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.lg,
-    gap: SPACING.lg,
+    justifyContent: 'center',
+    gap: SPACING.xl,
   },
   controlButton: {
-    padding: SPACING.md,
-  },
-  playButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: COLORS.primary,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.lightBorder,
     alignItems: 'center',
     justifyContent: 'center',
-    ...SHADOWS.md,
+  },
+  playButton: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.accentGreen,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   sectionTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '800',
-    color: COLORS.gray800,
+    color: COLORS.lightTextPrimary,
     marginBottom: SPACING.md,
   },
   stationCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.sm,
-    ...SHADOWS.sm,
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
   stationCardActive: {
-    borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderColor: COLORS.accentGreen,
   },
   stationIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.md,
-    backgroundColor: COLORS.primarySoft,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: SPACING.md,
   },
   stationIconActive: {
-    backgroundColor: COLORS.primary,
+    backgroundColor: COLORS.accentGreen,
   },
   stationInfo: {
     flex: 1,
-    marginLeft: SPACING.md,
   },
   stationName: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.gray800,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 2,
+  },
+  stationNameActive: {
+    color: COLORS.accentGreen,
   },
   stationDesc: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray500,
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextSecondary,
   },
-  liveIndicator: {
+  playingBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.accentGreenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginTop: SPACING.lg,
+    gap: SPACING.sm,
   },
-  liveDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.error,
-  },
-  liveText: {
+  infoText: {
+    flex: 1,
     fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    color: COLORS.error,
+    color: COLORS.lightTextSecondary,
+    lineHeight: 18,
   },
 });
