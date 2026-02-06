@@ -18,7 +18,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import * as Location from 'expo-location';
-import MapView, { Marker, Polyline } from 'react-native-maps';
 
 const { width } = Dimensions.get('window');
 const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
