@@ -3112,6 +3112,7 @@ async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
         "state": loc["state"],
         "zones": zones,
         "recommendation": f"Head to {top_zone} for best earnings in {city_name}"
+    }
 
 # PROMO CODES & REFERRALS - extracted to routers/
 
