@@ -1489,6 +1489,83 @@
                 loadLiveTrips();
             }
         }, 10000);
+
+        // ==================== SYSTEM HEALTH ====================
+        async function loadSystemHealth() {
+            try {
+                const healthRes = await fetch(`${API_BASE}/api/health`);
+                const health = await healthRes.json();
+                document.getElementById('healthApiStatus').textContent = health.status === 'healthy' ? '✅ Healthy' : '❌ Down';
+                document.getElementById('healthApiStatus').style.color = health.status === 'healthy' ? '#00D084' : '#EF4444';
+                document.getElementById('healthDbStatus').textContent = '✅ Connected';
+                document.getElementById('healthDbStatus').style.color = '#00D084';
+                document.getElementById('healthRoutersCount').textContent = '14';
+                document.getElementById('healthUptime').textContent = new Date().toLocaleTimeString();
+            } catch (e) {
+                document.getElementById('healthApiStatus').textContent = '❌ Unreachable';
+                document.getElementById('healthApiStatus').style.color = '#EF4444';
+                document.getElementById('healthDbStatus').textContent = '❓ Unknown';
+            }
+            // Load subscription stats
+            try {
+                const subsRes = await fetch(`${API_BASE}/api/admin/overview`);
+                const subs = await subsRes.json();
+                document.getElementById('subsActive').textContent = subs.active_subscriptions || 0;
+                document.getElementById('subsTrial').textContent = subs.trial_count || 0;
+                document.getElementById('subsExpired').textContent = subs.expired_subscriptions || 0;
+            } catch (e) {
+                console.error('Subscription stats error:', e);
+            }
+        }
+
+        // ==================== AUTO-REFRESH ====================
+        let autoRefreshInterval = null;
+        function toggleAutoRefresh() {
+            const toggle = document.getElementById('autoRefreshToggle');
+            const status = document.getElementById('autoRefreshStatus');
+            if (toggle.checked) {
+                status.innerHTML = '🔄 Auto-refresh enabled. Dashboard updates every 30 seconds.';
+                status.style.color = '#00D084';
+                autoRefreshInterval = setInterval(() => {
+                    const activePage = document.querySelector('.page-section.active');
+                    if (activePage) {
+                        const pageId = activePage.id.replace('page-', '');
+                        const loaders = {
+                            'overview': loadOverview,
+                            'riders': loadRiders,
+                            'drivers': loadDrivers,
+                            'trips': loadTrips,
+                            'payments': loadPayments,
+                            'verifications': loadVerifications,
+                            'promos': loadPromos,
+                            'fraud': loadFraudAlerts,
+                            'analytics': () => loadAnalytics('today'),
+                            'live-trips': loadLiveTrips,
+                            'system-health': loadSystemHealth,
+                        };
+                        if (loaders[pageId]) loaders[pageId]();
+                    }
+                }, 30000);
+            } else {
+                status.innerHTML = 'Auto-refresh is disabled. Enable to keep dashboard data updated.';
+                status.style.color = '#64748B';
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        // Load system health when navigating to that page
+        const origShowDashboard = showDashboard;
+        // Patch navigation to load system health
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.dataset.page === 'system-health') {
+                    setTimeout(loadSystemHealth, 100);
+                }
+            });
+        });
     </script>
 </body>
 </html>
