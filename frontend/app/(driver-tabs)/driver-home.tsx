@@ -119,6 +119,19 @@ export default function ModernDriverHome() {
     if (feature.id === 'documents' && verificationStatus === 'approved') {
       return false;
     }
+    
+    // Hide "Verification" if driver is already approved
+    if (feature.id === 'verification' && verificationStatus === 'approved') {
+      return false;
+    }
+    
+    // Hide "Vehicle" and "Register Car" if vehicle is already registered
+    // We'll check this from backend profile data
+    if ((feature.id === 'vehicle' || feature.id === 'vehicle-reg') && verificationStatus === 'approved') {
+      // Only hide if vehicle is registered (we'll add vehicle_registered check)
+      return false;
+    }
+    
     return true;
   });
 
