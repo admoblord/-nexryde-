@@ -46,6 +46,10 @@ from call_service import call_router
 # Import Smart Mode AI (NEW)
 from smart_mode_ai import router as smart_mode_router
 
+# Import Community & Safety Routers (REFACTORED)
+from routers.community import community_router, seed_community_groups, seed_community_content
+from routers.safety import safety_router, seed_danger_zones
+
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
 load_dotenv(ROOT_DIR / '.env')
