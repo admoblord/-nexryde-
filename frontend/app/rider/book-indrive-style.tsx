@@ -502,6 +502,9 @@ export default function BookInDriveStyle() {
             <Text style={styles.locationText} numberOfLines={1}>
               {pickup || 'Select pickup location'}
             </Text>
+            {currentLocation && (
+              <Ionicons name="navigate" size={16} color={COLORS.brandGreen} style={{ marginLeft: 4 }} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -516,6 +519,14 @@ export default function BookInDriveStyle() {
               <Ionicons name="add" size={20} color={COLORS.white} />
             </TouchableOpacity>
           </TouchableOpacity>
+          
+          {/* GPS Tracking Indicator */}
+          {currentLocation && (
+            <View style={styles.gpsIndicator}>
+              <Ionicons name="location" size={14} color={COLORS.brandGreen} />
+              <Text style={styles.gpsText}>GPS Tracking Active</Text>
+            </View>
+          )}
         </View>
 
         {/* Route Info Card (shows after calculation) */}
