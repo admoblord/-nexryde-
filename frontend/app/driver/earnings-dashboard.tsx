@@ -152,55 +152,6 @@ export default function EarningsDashboardScreen() {
             </View>
           </View>
 
-          {/* Crypto Payments - Coming Soon */}
-          <View style={styles.cryptoCard}>
-            <LinearGradient
-              colors={['rgba(247, 147, 26, 0.08)', 'rgba(139, 92, 246, 0.08)']}
-              style={styles.cryptoGradient}
-            >
-              <View style={styles.cryptoHeader}>
-                <Ionicons name="logo-bitcoin" size={32} color="#F7931A" />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={styles.cryptoTitle}>Crypto Payouts</Text>
-                  <View style={styles.cryptoBadge}>
-                    <Text style={styles.cryptoBadgeText}>COMING SOON</Text>
-                  </View>
-                </View>
-              </View>
-              <Text style={styles.cryptoDesc}>
-                Receive your ride earnings in USDT/USDC. Protect against Naira devaluation. First ride-hailing platform in Africa with crypto payouts!
-              </Text>
-              <View style={styles.cryptoCoins}>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>{'\u20BF'}</Text>
-                  <Text style={styles.cryptoCoinLabel}>BTC</Text>
-                </View>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>{'\u039E'}</Text>
-                  <Text style={styles.cryptoCoinLabel}>ETH</Text>
-                </View>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>{'\u20AE'}</Text>
-                  <Text style={styles.cryptoCoinLabel}>USDT</Text>
-                </View>
-              </View>
-              <View style={styles.cryptoFeatures}>
-                <View style={styles.cryptoFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                  <Text style={styles.cryptoFeatureText}>Stable value earnings</Text>
-                </View>
-                <View style={styles.cryptoFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                  <Text style={styles.cryptoFeatureText}>Lower withdrawal fees</Text>
-                </View>
-                <View style={styles.cryptoFeatureItem}>
-                  <Ionicons name="checkmark-circle" size={16} color="#10B981" />
-                  <Text style={styles.cryptoFeatureText}>Instant global transfers</Text>
-                </View>
-              </View>
-            </LinearGradient>
-          </View>
-
         </ScrollView>
       </SafeAreaView>
     </View>
