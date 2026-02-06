@@ -5104,20 +5104,6 @@ async def get_high_risk_areas(city: str = "Lagos"):
         logger.error(f"Traffic alerts error: {str(e)}")
         return {"success": True, "alerts": [], "count": 0}
 
-            {"$set": {
-                "smart_mode_settings": settings.dict(),
-                "smart_mode_enabled": settings.enabled,
-                "updated_at": datetime.utcnow().isoformat()
-            }},
-            upsert=True
-        )
-        
-        return {
-            "success": True,
-            "message": "Smart Mode settings saved"
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/ai/smart-mode/get-settings")
 async def get_smart_mode_settings(driver_id: str):
