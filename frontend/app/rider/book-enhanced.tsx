@@ -552,7 +552,8 @@ export default function BookRideEnhanced() {
 
                 {/* HUGE PRICE with +/- Buttons - inDrive Style */}
                 <View style={styles.priceCard}>
-                  <Text style={styles.priceTitle}>NGN{adjustedFare.toLocaleString()}</Text>
+                  <Text style={styles.priceLabel}>Your Offer</Text>
+                  <Text style={styles.priceTitle}>₦{adjustedFare.toLocaleString()}</Text>
                   
                   <View style={styles.priceControls}>
                     <TouchableOpacity 
@@ -570,15 +571,11 @@ export default function BookRideEnhanced() {
                     </TouchableOpacity>
                   </View>
                   
-                  <Text style={styles.recommendedText}>
-                    Recommended fare: NGN{calculatedFare.toLocaleString()}
-                  </Text>
-                  
                   {adjustedFare !== calculatedFare && (
-                    <Text style={styles.differenceText}>
+                    <Text style={styles.adjustmentText}>
                       {adjustedFare < calculatedFare 
-                        ? `${((calculatedFare - adjustedFare) / calculatedFare * 100).toFixed(1)}% below • May take longer`
-                        : `${((adjustedFare - calculatedFare) / calculatedFare * 100).toFixed(1)}% above • Faster match!`
+                        ? `Lower offer • May take longer to find drivers`
+                        : `Higher offer • Drivers will respond faster!`
                       }
                     </Text>
                   )}
