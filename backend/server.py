@@ -5006,9 +5006,6 @@ Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
 """
 
         # Call AI via Emergent LLM
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
-        
         chat = LlmChat(
             api_key=emergent_key,
             session_id=f"accident-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
