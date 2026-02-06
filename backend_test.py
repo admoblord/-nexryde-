@@ -186,7 +186,7 @@ def test_traffic_ai_apis():
     # Test 4.2: POST /api/ai/traffic/predict
     print("\n4.2 Testing POST /api/ai/traffic/predict")
     try:
-        form_data = {
+        params = {
             "origin_lat": 6.5244,
             "origin_lng": 3.3792,
             "destination_lat": 6.4541,
@@ -195,7 +195,7 @@ def test_traffic_ai_apis():
         }
         response = requests.post(
             f"{BACKEND_URL}/ai/traffic/predict",
-            data=form_data,
+            params=params,
             timeout=15  # Longer timeout for AI prediction
         )
         response_data = response.json()
