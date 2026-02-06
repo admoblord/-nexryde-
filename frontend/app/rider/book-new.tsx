@@ -476,7 +476,7 @@ export default function BookRideScreen() {
           )}
 
           {/* Book Button - Only show when city is selected */}
-          {selectedCity && (
+          {selectedCity && !showPriceAdjustment && (
             <TouchableOpacity
               style={styles.bookButton}
               onPress={handleConfirmBooking}
@@ -492,12 +492,97 @@ export default function BookRideScreen() {
                   <ActivityIndicator color={COLORS.white} />
                 ) : (
                   <>
-                    <Text style={styles.bookButtonText}>Confirm Booking</Text>
+                    <Text style={styles.bookButtonText}>Calculate Fare</Text>
                     <Ionicons name="arrow-forward-circle" size={24} color={COLORS.white} />
                   </>
                 )}
               </LinearGradient>
             </TouchableOpacity>
+          )}
+
+          {/* PRICE ADJUSTMENT UI - Shows after fare calculation */}
+          {showPriceAdjustment && (
+            <View style={styles.priceAdjustmentCard}>
+              <Text style={styles.priceAdjustmentTitle}>Adjust Your Offer</Text>
+              
+              <View style={styles.recommendedSection}>
+                <Text style={styles.recommendedLabel}>Recommended by NEXRYDE</Text>
+                <Text style={styles.recommendedPrice}>₦{recommendedFare.toLocaleString()}</Text>
+              </View>
+
+              <View style={styles.priceControlsSection}>
+                <Text style={styles.yourOfferLabel}>YOUR OFFER</Text>
+                <View style={styles.priceControls}>
+                  <TouchableOpacity 
+                    style={styles.priceButton}
+                    onPress={decreaseFare}
+                  >
+                    <Ionicons name="remove-circle" size={56} color="#EF4444" />
+                  </TouchableOpacity>
+                  
+                  <View style={styles.priceDisplay}>
+                    <Text style={styles.adjustedPrice}>₦{adjustedFare.toLocaleString()}</Text>
+                  </View>
+                  
+                  <TouchableOpacity 
+                    style={styles.priceButton}
+                    onPress={increaseFare}
+                  >
+                    <Ionicons name="add-circle" size={56} color={COLORS.brandGreen} />
+                  </TouchableOpacity>
+                </View>
+
+                {/* Price difference indicator */}
+                {adjustedFare !== recommendedFare && (
+                  <View style={styles.priceDifferenceBox}>
+                    {adjustedFare < recommendedFare ? (
+                      <>
+                        <Ionicons name="time-outline" size={18} color="#F59E0B" />
+                        <Text style={styles.priceDifferenceText}>
+                          {((recommendedFare - adjustedFare) / recommendedFare * 100).toFixed(1)}% below recommended - may take longer to find driver
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Ionicons name="flash" size={18} color={COLORS.brandGreen} />
+                        <Text style={styles.priceDifferenceText}>
+                          {((adjustedFare - recommendedFare) / recommendedFare * 100).toFixed(1)}% above recommended - faster match expected!
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={styles.findOffersButton}
+                onPress={findOffers}
+                disabled={isLoading}
+              >
+                <LinearGradient
+                  colors={['#F59E0B', '#EF4444']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={styles.findOffersGradient}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator color={COLORS.white} />
+                  ) : (
+                    <>
+                      <Ionicons name="search" size={24} color={COLORS.white} />
+                      <Text style={styles.findOffersText}>Find Offers</Text>
+                    </>
+                  )}
+                </LinearGradient>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={() => setShowPriceAdjustment(false)}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
           )}
         </KeyboardAvoidingView>
       </LinearGradient>
