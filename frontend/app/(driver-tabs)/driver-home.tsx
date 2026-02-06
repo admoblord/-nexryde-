@@ -399,6 +399,8 @@ export default function ModernDriverHome() {
         <View style={{ height: 100 }} />
       </ScrollView>
 
+      <ActiveTripBar />
+
       {/* INCOMING RIDE REQUEST POPUP */}
       <Modal visible={!!incomingRide} transparent animationType="slide">
         <View style={styles.rideOverlay}>
