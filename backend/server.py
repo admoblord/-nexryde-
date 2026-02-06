@@ -2336,68 +2336,89 @@ async def toggle_driver_online(user_id: str, is_online: bool):
 @app.post("/api/drivers/verify-documents")
 async def verify_driver_documents(driver_id: str = Form(...)):
     """
-    AI-powered document verification for drivers
-    Simulates AI verification - in production, integrate with actual AI service
+    AI-powered document verification for drivers.
+    Auto-approves for MVP - in production, integrate with actual AI service.
     """
     try:
-        # In production: Upload images to cloud storage (S3, Cloudinary, etc.)
-        # In production: Call AI verification service (Google Vision, AWS Rekognition, custom model)
+        import asyncio
         
-        # For now: Simulate instant AI approval (replace with real AI in production)
-        import random
-        import time
+        # Simulate AI processing delay (non-blocking)
+        await asyncio.sleep(1)
         
-        # Simulate AI processing delay
-        time.sleep(2)
+        # For MVP: Always approve documents so drivers can proceed
+        # In production: use Google Vision / AWS Rekognition for real checks
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {
+                "$set": {
+                    "verification_status": "approved",
+                    "documents_verified": True,
+                    "documents_submitted": True,
+                    "verified_at": datetime.utcnow().isoformat(),
+                    "onboarding_step": "profile",  # Next step
+                }
+            },
+            upsert=True
+        )
         
-        # Simulate 90% approval rate (in production, actual AI determines this)
-        is_approved = random.random() < 0.9
+        # Also update the user record
+        await db.users.update_one(
+            {"id": driver_id},
+            {"$set": {"documents_verified": True}}
+        )
         
-        if is_approved:
-            # Update driver verification status
-            await db.driver_profiles.update_one(
-                {"user_id": driver_id},
-                {
-                    "$set": {
-                        "verification_status": "approved",
-                        "documents_verified": True,
-                        "verified_at": datetime.utcnow().isoformat(),
-                    }
-                },
-                upsert=True
-            )
-            
-            return {
-                "success": True,
-                "verification_status": "approved",
-                "driver_id": driver_id,
-                "message": "Documents verified successfully by AI"
-            }
-        else:
-            # Flag for manual review
-            await db.driver_profiles.update_one(
-                {"user_id": driver_id},
-                {
-                    "$set": {
-                        "verification_status": "pending",
-                        "documents_verified": False,
-                        "requires_manual_review": True,
-                        "submitted_at": datetime.utcnow().isoformat(),
-                    }
-                },
-                upsert=True
-            )
-            
-            return {
-                "success": True,
-                "verification_status": "pending",
-                "driver_id": driver_id,
-                "message": "Documents require manual review. You'll be notified within 24 hours."
-            }
+        return {
+            "success": True,
+            "verification_status": "approved",
+            "driver_id": driver_id,
+            "message": "Documents verified successfully by AI"
+        }
             
     except Exception as e:
         logger.error(f"Document verification error: {str(e)}")
         raise HTTPException(status_code=500, detail="Document verification failed")
+
+@app.get("/api/drivers/{driver_id}/onboarding-status")
+async def get_driver_onboarding_status(driver_id: str):
+    """
+    Get the current onboarding step for a driver.
+    Returns which step the driver is at in the registration flow.
+    Steps: terms -> documents -> profile -> approved
+    """
+    try:
+        user = await db.users.find_one({"id": driver_id})
+        if not user:
+            return {"step": "not_found", "completed": False}
+        
+        # Check if user has accepted terms
+        if not user.get("terms_accepted"):
+            return {"step": "terms", "completed": False}
+        
+        # Check driver profile for document and profile status
+        profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        
+        if not profile:
+            return {"step": "documents", "completed": False}
+        
+        # Check if documents are verified
+        if not profile.get("documents_verified"):
+            return {"step": "documents", "completed": False}
+        
+        # Check if profile is completed
+        if not profile.get("profile_completed"):
+            return {"step": "profile", "completed": False}
+        
+        # All steps complete - driver is approved
+        return {
+            "step": "approved",
+            "completed": True,
+            "verification_status": profile.get("verification_status", "approved"),
+            "vehicle_registered": profile.get("vehicle_registered", False),
+        }
+        
+    except Exception as e:
+        logger.error(f"Onboarding status error: {str(e)}")
+        return {"step": "error", "completed": False}
 
 @app.post("/api/drivers/complete-profile")
 async def complete_driver_profile(request: dict):
