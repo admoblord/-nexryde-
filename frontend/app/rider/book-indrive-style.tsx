@@ -809,6 +809,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  gpsIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    backgroundColor: 'rgba(0, 212, 106, 0.2)',
+    borderRadius: 8,
+    marginTop: 4,
+    gap: 4,
+  },
+  gpsText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.brandGreen,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   routeInfoCard: {
     position: 'absolute',
     bottom: 16,
