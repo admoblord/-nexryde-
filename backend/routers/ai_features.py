@@ -239,7 +239,7 @@ class SmartModeSettings(BaseModel):
     auto_accept: bool = True
     preferred_areas: List[str] = []
 
-@ai_router.post("/api/ai/smart-mode/analyze-ride")
+@ai_router.post("/ai/smart-mode/analyze-ride")
 async def analyze_ride_with_ai(ride: dict, driver_id: str, settings: SmartModeSettings):
     """
     Use ChatGPT to analyze if a ride is worth accepting based on driver's Smart Mode settings
