@@ -104,7 +104,7 @@ export default function DriverTermsScreen() {
 
             <Text style={styles.sectionHeader}>2. Subscription Model</Text>
             <Text style={styles.paragraph}>
-              • Monthly subscription fee: ₦18,000 (Early Adopter pricing){'\n'}
+              • Monthly subscription fee: ₦18,000 (Introductory pricing){'\n'}
               • 24-hour free trial (3 trips) for new drivers{'\n'}
               • Zero commission on rides - keep 100% of your earnings{'\n'}
               • Subscription must be active to accept ride requests{'\n'}
