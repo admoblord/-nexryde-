@@ -84,3 +84,12 @@ export class PredictiveMaintenanceAI {
     return { health, alerts };
   }
 }
+
+/** Fetch AI driver awareness insights from backend (Emergent LLM → GPT-4o) */
+export async function fetchAIDriverAwareness(): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/driver/awareness`);
+    return await res.json();
+  } catch { return null; }
+}
