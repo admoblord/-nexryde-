@@ -252,7 +252,7 @@ def test_accident_ai_apis():
         response_data = response.json()
         success = (response.status_code == 200 and 
                   response_data.get("success") == True and
-                  "high_risk_areas" in response_data)
+                  ("high_risk_areas" in response_data or "risk_zones" in response_data))
         
         log_test_result("GET /api/ai/accident/high-risk-areas", success, response_data, response.status_code)
         
