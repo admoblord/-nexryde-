@@ -1,290 +1,282 @@
 #!/usr/bin/env python3
 """
-Backend API Test Suite for KODA Driver Onboarding Security Flow
-Tests the 3 main onboarding endpoints as specified in the review request.
+Comprehensive Backend API Testing for KODA Driver Features
+Tests all new driver-specific API endpoints as requested in the review
 """
 
 import requests
 import json
 import time
 from datetime import datetime
-from typing import Dict, Any
 
-# Backend URL Configuration
+# Backend URL from environment
 BACKEND_URL = "https://smart-mode-preview.preview.emergentagent.com/api"
 
-def print_test_header(test_name: str):
-    """Print formatted test header"""
-    print(f"\n{'='*60}")
-    print(f"🧪 {test_name}")
-    print(f"{'='*60}")
-
-def print_test_result(success: bool, message: str):
-    """Print formatted test result"""
+def log_test_result(test_name, success, response_data, status_code):
+    """Log test results with timestamp"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     status = "✅ PASS" if success else "❌ FAIL"
-    print(f"{status}: {message}")
+    print(f"\n[{timestamp}] {status} {test_name}")
+    print(f"Status Code: {status_code}")
+    print(f"Response: {json.dumps(response_data, indent=2)}")
+    print("-" * 80)
 
-def test_driver_registration():
-    """Test driver registration with terms acceptance"""
-    print_test_header("DRIVER REGISTRATION TEST")
+def test_driver_stories_api():
+    """Test Group 1: Driver Stories API"""
+    print("\n" + "="*80)
+    print("TEST GROUP 1: Driver Stories API")
+    print("="*80)
+    
+    story_id = None
+    
+    # Test 1.1: POST /api/driver/stories
+    print("\n1.1 Testing POST /api/driver/stories")
+    story_data = {
+        "driver_id": "test-driver-001",
+        "text": "Started at 5am today. Already done 8 trips! Lagos no dey sleep!",
+        "mood": "hustle",
+        "location": "Victoria Island"
+    }
     
     try:
-        # Generate unique test data
-        timestamp = int(time.time())
-        phone = f"+2348099990{timestamp % 1000:03d}"
-        name = f"Test Driver {timestamp}"
+        response = requests.post(
+            f"{BACKEND_URL}/driver/stories",
+            json=story_data,
+            headers={"Content-Type": "application/json"},
+            timeout=10
+        )
+        response_data = response.json()
+        success = response.status_code == 200 and response_data.get("success") == True
         
-        payload = {
-            "phone": phone,
-            "name": name,
-            "role": "driver",
-            "terms_accepted": True,
-            "terms_accepted_at": datetime.utcnow().isoformat()
-        }
-        
-        print(f"📞 Registering driver with phone: {phone}")
-        response = requests.post(f"{BACKEND_URL}/auth/register", json=payload)
-        
-        print(f"Response Status: {response.status_code}")
-        print(f"Response: {response.text}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            if "user" in data and "id" in data["user"]:
-                driver_id = data["user"]["id"]
-                print_test_result(True, f"Driver registered successfully. ID: {driver_id}")
-                return driver_id
-            else:
-                print_test_result(False, "Missing user ID in registration response")
-                return None
-        else:
-            print_test_result(False, f"Registration failed with status {response.status_code}")
-            return None
+        if success and response_data.get("story"):
+            story_id = response_data["story"]["_id"]
             
+        log_test_result("POST /api/driver/stories", success, response_data, response.status_code)
+        
     except Exception as e:
-        print_test_result(False, f"Registration error: {str(e)}")
-        return None
-
-def test_onboarding_status(driver_id: str, expected_step: str = None):
-    """Test GET /api/drivers/{driver_id}/onboarding-status endpoint"""
-    print_test_header("ONBOARDING STATUS TEST")
+        log_test_result("POST /api/driver/stories", False, {"error": str(e)}, 0)
     
+    # Test 1.2: GET /api/driver/stories?limit=20
+    print("\n1.2 Testing GET /api/driver/stories?limit=20")
     try:
-        print(f"🔍 Checking onboarding status for driver: {driver_id}")
-        response = requests.get(f"{BACKEND_URL}/drivers/{driver_id}/onboarding-status")
+        response = requests.get(
+            f"{BACKEND_URL}/driver/stories?limit=20",
+            timeout=10
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "stories" in response_data and
+                  len(response_data["stories"]) > 0)
         
-        print(f"Response Status: {response.status_code}")
-        print(f"Response: {response.text}")
+        log_test_result("GET /api/driver/stories", success, response_data, response.status_code)
         
-        if response.status_code == 200:
-            data = response.json()
-            step = data.get("step")
-            completed = data.get("completed")
-            
-            print(f"Current Step: {step}")
-            print(f"Completed: {completed}")
-            
-            if expected_step and step == expected_step:
-                print_test_result(True, f"Onboarding step matches expected: {step}")
-            else:
-                print_test_result(True, f"Onboarding status retrieved successfully. Step: {step}")
-            
-            return data
-        else:
-            print_test_result(False, f"Failed to get onboarding status: {response.status_code}")
-            return None
-            
     except Exception as e:
-        print_test_result(False, f"Onboarding status error: {str(e)}")
-        return None
-
-def test_nonexistent_driver_status():
-    """Test onboarding status with non-existent driver"""
-    print_test_header("NON-EXISTENT DRIVER STATUS TEST")
+        log_test_result("GET /api/driver/stories", False, {"error": str(e)}, 0)
     
-    try:
-        fake_driver_id = "test-driver-999"
-        print(f"🔍 Testing with non-existent driver: {fake_driver_id}")
-        
-        response = requests.get(f"{BACKEND_URL}/drivers/{fake_driver_id}/onboarding-status")
-        
-        print(f"Response Status: {response.status_code}")
-        print(f"Response: {response.text}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            step = data.get("step")
-            completed = data.get("completed")
+    # Test 1.3: POST /api/driver/stories/{story_id}/like
+    if story_id:
+        print(f"\n1.3 Testing POST /api/driver/stories/{story_id}/like")
+        try:
+            response = requests.post(
+                f"{BACKEND_URL}/driver/stories/{story_id}/like",
+                timeout=10
+            )
+            response_data = response.json()
+            success = response.status_code == 200 and response_data.get("success") == True
             
-            if step == "not_found" and completed == False:
-                print_test_result(True, "Correctly returned not_found for non-existent driver")
-            else:
-                print_test_result(False, f"Unexpected response for non-existent driver: {data}")
-        else:
-            print_test_result(False, f"Unexpected status code: {response.status_code}")
+            log_test_result("POST /api/driver/stories/{story_id}/like", success, response_data, response.status_code)
             
-    except Exception as e:
-        print_test_result(False, f"Non-existent driver test error: {str(e)}")
-
-def test_verify_documents(driver_id: str):
-    """Test POST /api/drivers/verify-documents endpoint"""
-    print_test_header("DOCUMENT VERIFICATION TEST")
-    
-    try:
-        print(f"📄 Verifying documents for driver: {driver_id}")
-        
-        # Use form data as the endpoint expects Form(...)
-        form_data = {"driver_id": driver_id}
-        
-        response = requests.post(f"{BACKEND_URL}/drivers/verify-documents", data=form_data)
-        
-        print(f"Response Status: {response.status_code}")
-        print(f"Response: {response.text}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            success = data.get("success")
-            verification_status = data.get("verification_status")
-            
-            if success and verification_status == "approved":
-                print_test_result(True, "Documents verified successfully (auto-approved for MVP)")
-                return True
-            else:
-                print_test_result(False, f"Unexpected verification response: {data}")
-                return False
-        else:
-            print_test_result(False, f"Document verification failed: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print_test_result(False, f"Document verification error: {str(e)}")
-        return False
-
-def test_complete_profile(driver_id: str):
-    """Test POST /api/drivers/complete-profile endpoint"""
-    print_test_header("PROFILE COMPLETION TEST")
-    
-    try:
-        print(f"👤 Completing profile for driver: {driver_id}")
-        
-        # Complete profile data as specified in review request
-        profile_data = {
-            "driver_id": driver_id,
-            "full_name": "John Adebayo",
-            "phone": "+2348099990001",
-            "email": "john.adebayo@example.com", 
-            "address": "123 Victoria Island",
-            "city": "Lagos",
-            "state": "Lagos",
-            "date_of_birth": "1990-01-15",
-            "emergency_contact": "+2348099990002",
-            "bank_name": "UBA",
-            "account_number": "1234567890", 
-            "account_name": "John Adebayo",
-            "vehicle_type": "economy",
-            "vehicle_make": "Toyota",
-            "vehicle_model": "Corolla",
-            "vehicle_year": "2018",
-            "vehicle_plate_number": "ABC123DE",
-            "vehicle_color": "Silver"
-        }
-        
-        response = requests.post(f"{BACKEND_URL}/drivers/complete-profile", json=profile_data)
-        
-        print(f"Response Status: {response.status_code}")
-        print(f"Response: {response.text}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            success = data.get("success")
-            user = data.get("user") 
-            trial_activated = data.get("trial_activated")
-            
-            if success and user and trial_activated:
-                print_test_result(True, "Profile completed successfully with trial activation")
-                return True
-            else:
-                print_test_result(False, f"Unexpected profile completion response: {data}")
-                return False
-        else:
-            print_test_result(False, f"Profile completion failed: {response.status_code}")
-            return False
-            
-    except Exception as e:
-        print_test_result(False, f"Profile completion error: {str(e)}")
-        return False
-
-def run_full_onboarding_flow():
-    """Run the complete driver onboarding flow test as specified"""
-    print_test_header("FULL ONBOARDING FLOW TEST")
-    
-    # Step 1: Register driver
-    driver_id = test_driver_registration()
-    if not driver_id:
-        print_test_result(False, "Full flow test aborted - registration failed")
-        return
-    
-    # Step 2: Check initial onboarding status (should be "documents")
-    time.sleep(1)  # Brief delay
-    status = test_onboarding_status(driver_id, expected_step="documents")
-    if not status or status.get("step") != "documents":
-        print_test_result(False, f"Expected 'documents' step, got: {status}")
-        return
-    
-    # Step 3: Verify documents
-    time.sleep(1)  # Brief delay
-    if not test_verify_documents(driver_id):
-        print_test_result(False, "Full flow test aborted - document verification failed")
-        return
-    
-    # Step 4: Check onboarding status after verification (should be "profile")
-    time.sleep(1)  # Brief delay
-    status = test_onboarding_status(driver_id, expected_step="profile")
-    if not status or status.get("step") != "profile":
-        print_test_result(False, f"Expected 'profile' step after verification, got: {status}")
-        return
-    
-    # Step 5: Complete profile
-    time.sleep(1)  # Brief delay
-    if not test_complete_profile(driver_id):
-        print_test_result(False, "Full flow test aborted - profile completion failed")
-        return
-    
-    # Step 6: Final check - should be "approved" and completed=true
-    time.sleep(1)  # Brief delay
-    final_status = test_onboarding_status(driver_id, expected_step="approved")
-    if final_status and final_status.get("step") == "approved" and final_status.get("completed") == True:
-        print_test_result(True, "🎉 FULL ONBOARDING FLOW COMPLETED SUCCESSFULLY!")
+        except Exception as e:
+            log_test_result("POST /api/driver/stories/{story_id}/like", False, {"error": str(e)}, 0)
     else:
-        print_test_result(False, f"Final status check failed: {final_status}")
+        print("\n1.3 SKIPPED: POST /api/driver/stories/{story_id}/like - No story_id from previous test")
+
+def test_fleet_tracker_api():
+    """Test Group 2: Fleet Tracker API"""
+    print("\n" + "="*80)
+    print("TEST GROUP 2: Fleet Tracker API")
+    print("="*80)
+    
+    # Test 2.1: GET /api/driver/fleet/nearby
+    print("\n2.1 Testing GET /api/driver/fleet/nearby?lat=6.5244&lng=3.3792&radius_km=5")
+    try:
+        params = {
+            "lat": 6.5244,
+            "lng": 3.3792,
+            "radius_km": 5
+        }
+        response = requests.get(
+            f"{BACKEND_URL}/driver/fleet/nearby",
+            params=params,
+            timeout=10
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "fleet" in response_data and
+                  "count" in response_data)
+        
+        log_test_result("GET /api/driver/fleet/nearby", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("GET /api/driver/fleet/nearby", False, {"error": str(e)}, 0)
+
+def test_driver_awareness_api():
+    """Test Group 3: Driver Awareness API"""
+    print("\n" + "="*80)
+    print("TEST GROUP 3: Driver Awareness API")
+    print("="*80)
+    
+    # Test 3.1: GET /api/driver/awareness
+    print("\n3.1 Testing GET /api/driver/awareness?driver_id=demo&lat=6.5244&lng=3.3792")
+    try:
+        params = {
+            "driver_id": "demo",
+            "lat": 6.5244,
+            "lng": 3.3792
+        }
+        response = requests.get(
+            f"{BACKEND_URL}/driver/awareness",
+            params=params,
+            timeout=10
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "alerts" in response_data and
+                  "driver_score" in response_data and
+                  "driving_hours_today" in response_data and
+                  "break_recommended" in response_data)
+        
+        log_test_result("GET /api/driver/awareness", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("GET /api/driver/awareness", False, {"error": str(e)}, 0)
+
+def test_traffic_ai_apis():
+    """Test Group 4: Traffic AI APIs"""
+    print("\n" + "="*80)
+    print("TEST GROUP 4: Traffic AI APIs")
+    print("="*80)
+    
+    # Test 4.1: GET /api/ai/traffic/alerts
+    print("\n4.1 Testing GET /api/ai/traffic/alerts?driver_id=demo&lat=6.5244&lng=3.3792")
+    try:
+        params = {
+            "driver_id": "demo",
+            "lat": 6.5244,
+            "lng": 3.3792
+        }
+        response = requests.get(
+            f"{BACKEND_URL}/ai/traffic/alerts",
+            params=params,
+            timeout=10
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "alerts" in response_data)
+        
+        log_test_result("GET /api/ai/traffic/alerts", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("GET /api/ai/traffic/alerts", False, {"error": str(e)}, 0)
+    
+    # Test 4.2: POST /api/ai/traffic/predict
+    print("\n4.2 Testing POST /api/ai/traffic/predict")
+    try:
+        form_data = {
+            "origin_lat": 6.5244,
+            "origin_lng": 3.3792,
+            "destination_lat": 6.4541,
+            "destination_lng": 3.3947,
+            "driver_id": "demo"
+        }
+        response = requests.post(
+            f"{BACKEND_URL}/ai/traffic/predict",
+            data=form_data,
+            timeout=15  # Longer timeout for AI prediction
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "ai_analysis" in response_data)
+        
+        log_test_result("POST /api/ai/traffic/predict", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("POST /api/ai/traffic/predict", False, {"error": str(e)}, 0)
+
+def test_accident_ai_apis():
+    """Test Group 5: Accident AI APIs"""
+    print("\n" + "="*80)
+    print("TEST GROUP 5: Accident AI APIs")
+    print("="*80)
+    
+    # Test 5.1: POST /api/ai/accident/predict-risk
+    print("\n5.1 Testing POST /api/ai/accident/predict-risk")
+    try:
+        form_data = {
+            "driver_id": "demo",
+            "current_lat": 6.5244,
+            "current_lng": 3.3792
+        }
+        response = requests.post(
+            f"{BACKEND_URL}/ai/accident/predict-risk",
+            data=form_data,
+            timeout=15  # Longer timeout for AI prediction
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "ai_analysis" in response_data)
+        
+        log_test_result("POST /api/ai/accident/predict-risk", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("POST /api/ai/accident/predict-risk", False, {"error": str(e)}, 0)
+    
+    # Test 5.2: GET /api/ai/accident/high-risk-areas
+    print("\n5.2 Testing GET /api/ai/accident/high-risk-areas?lat=6.5244&lng=3.3792")
+    try:
+        params = {
+            "lat": 6.5244,
+            "lng": 3.3792
+        }
+        response = requests.get(
+            f"{BACKEND_URL}/ai/accident/high-risk-areas",
+            params=params,
+            timeout=10
+        )
+        response_data = response.json()
+        success = (response.status_code == 200 and 
+                  response_data.get("success") == True and
+                  "high_risk_areas" in response_data)
+        
+        log_test_result("GET /api/ai/accident/high-risk-areas", success, response_data, response.status_code)
+        
+    except Exception as e:
+        log_test_result("GET /api/ai/accident/high-risk-areas", False, {"error": str(e)}, 0)
 
 def main():
-    """Run all driver onboarding security flow tests"""
-    print(f"🚀 Starting KODA Driver Onboarding Backend API Tests")
-    print(f"Backend URL: {BACKEND_URL}")
-    print(f"Test Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    """Run all backend API tests"""
+    print("NEXRYDE BACKEND API TESTING")
+    print("Testing Driver Features API Endpoints")
+    print("Backend URL:", BACKEND_URL)
+    print("Test Started at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     
-    # Test 1: Non-existent driver status check
-    test_nonexistent_driver_status()
+    # Run all test groups
+    test_driver_stories_api()
+    test_fleet_tracker_api()
+    test_driver_awareness_api()
+    test_traffic_ai_apis()
+    test_accident_ai_apis()
     
-    # Test 2: Individual endpoint tests
-    print_test_header("INDIVIDUAL ENDPOINT TESTS")
-    
-    # Register a test driver first
-    driver_id = test_driver_registration()
-    if driver_id:
-        # Test each endpoint individually  
-        test_onboarding_status(driver_id)
-        test_verify_documents(driver_id)
-        test_complete_profile(driver_id)
-        
-        # Check final status
-        test_onboarding_status(driver_id)
-    
-    # Test 3: Full flow test with a new driver
-    run_full_onboarding_flow()
-    
-    print(f"\n🏁 All tests completed at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("\n" + "="*80)
+    print("ALL BACKEND API TESTS COMPLETED")
+    print("Test Completed at:", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    print("="*80)
 
 if __name__ == "__main__":
     main()
