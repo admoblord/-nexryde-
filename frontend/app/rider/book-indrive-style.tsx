@@ -234,13 +234,11 @@ export default function BookInDriveStyle() {
   };
 
   const increaseFare = () => {
-    const maxFare = calculatedFare * 2;
-    setAdjustedFare(prev => Math.min(maxFare, prev + 100));
+    setCurrentFare(prev => prev + 100);
   };
 
   const decreaseFare = () => {
-    const minFare = calculatedFare * 0.5;
-    setAdjustedFare(prev => Math.max(minFare, prev - 100));
+    setCurrentFare(prev => Math.max(100, prev - 100));
   };
 
   const findOffers = async () => {
