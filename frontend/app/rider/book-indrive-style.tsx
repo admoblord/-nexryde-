@@ -61,8 +61,7 @@ export default function BookInDriveStyle() {
 
   // Booking states
   const [selectedVehicle, setSelectedVehicle] = useState('economy');
-  const [calculatedFare, setCalculatedFare] = useState(0);
-  const [adjustedFare, setAdjustedFare] = useState(0);
+  const [currentFare, setCurrentFare] = useState(0);
   const [fareDetails, setFareDetails] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [autoAccept, setAutoAccept] = useState(false);
