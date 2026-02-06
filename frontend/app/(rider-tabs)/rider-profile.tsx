@@ -295,6 +295,9 @@ export default function RiderProfileScreen() {
             <Ionicons name="person" size={14} color={COLORS.info} />
             <Text style={styles.riderBadgeText}>Rider Account</Text>
           </View>
+
+          {/* Member Since */}
+          <Text style={styles.memberSince}>Member since {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Recently'}</Text>
           
           {/* Stats */}
           <View style={styles.statsRow}>
