@@ -4127,7 +4127,7 @@ async def initiate_trip_call(trip_id: str, request: dict):
             "caller_id": caller_id,
             "caller_role": caller_role,
             "target_id": target_id,
-            "phone_number": target_user["phone_number"],
+            "phone_number": phone,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
         await db.call_logs.insert_one(call_log)
@@ -4141,7 +4141,7 @@ async def initiate_trip_call(trip_id: str, request: dict):
 
         return {
             "success": True,
-            "phone_number": target_user["phone_number"],
+            "phone_number": phone,
             "target_name": target_name,
             "calls_remaining": 5 - call_count - 1,
         }
