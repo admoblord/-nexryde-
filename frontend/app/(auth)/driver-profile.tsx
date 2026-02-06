@@ -105,7 +105,7 @@ export default function DriverProfileScreen() {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL}/api/drivers/complete-profile`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/drivers/complete-profile`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
