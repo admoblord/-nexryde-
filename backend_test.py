@@ -72,7 +72,7 @@ class BackendTester:
             # Prepare request data
             params = {"driver_id": "demo"}
             payload = {
-                **TEST_DATA["smart_mode"]["ride"],
+                "ride": TEST_DATA["smart_mode"]["ride"],
                 "settings": TEST_DATA["smart_mode"]["settings"]
             }
             
