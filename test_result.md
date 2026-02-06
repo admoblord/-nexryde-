@@ -1410,11 +1410,23 @@ agent_communication:
     file: "routers/community.py, routers/safety.py, database.py"
     stuck_count: 0
     priority: "medium"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Verified via testing agent 18/18 tests passed. All refactored endpoints working."
+
+  - task: "Chat HTTP Polling + Call Feature"
+    implemented: true
+    working: true
+    file: "server.py, chat.tsx"
+    stuck_count: 0
+    priority: "high"
     needs_retesting: true
     status_history:
         - working: true
         - agent: "main"
-        - comment: "Extracted community (groups, messages, polls, pinned, events) and safety (danger zones, reports, alerts) into separate router modules. All endpoints manually tested and working. Server.py reduced by ~640 lines."
+        - comment: "Replaced broken WebSocket chat with HTTP polling (3s interval). Added POST /api/trip/{trip_id}/call endpoint for rider-driver calling. Frontend chat.tsx updated with call button, HTTP polling, and native phone dialer integration. Manually tested: chat messages send/receive, call returns phone number correctly, rate limiting works (5 calls max per trip)."
 
   - task: "Community Polls System"
     implemented: true
