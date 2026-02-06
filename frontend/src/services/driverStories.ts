@@ -303,3 +303,12 @@ export const useDriverStories = (driverId?: string) => {
     loadStories,
   };
 };
+
+/** Fetch AI-powered driver profile insights (Emergent LLM → GPT-4o) */
+export async function fetchAIDriverInsights(driverId: string): Promise<any> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const res = await fetch(`${BACKEND_URL}/api/ai/driver-assistant?user_id=${driverId}&question=Give%20me%20a%20brief%20driver%20performance%20summary`);
+    return await res.json();
+  } catch { return null; }
+}
