@@ -19,50 +19,66 @@ const STATIONS = [
   {
     id: 'nexryde',
     name: 'NEXRYDE FM',
-    description: 'Driver tips & traffic updates',
+    description: 'Naija Hits & Driver Vibes',
     icon: 'car',
-    streamUrl: 'https://streams.radio.co/s8f06ad34c/listen', // Placeholder - replace with actual
+    streamUrl: 'https://stream.zeno.fm/thbqnu2wvmzuv',
     frequency: '24/7',
   },
   {
-    id: 'coolfm',
-    name: 'Cool FM Lagos',
-    description: 'Lagos 96.9 FM',
+    id: 'smooth',
+    name: 'Smooth 98.1 FM',
+    description: 'Soul, Jazz & Classics - Lagos',
     icon: 'musical-notes',
-    streamUrl: 'http://s8.voscast.com:9526/stream', // Cool FM Lagos stream
-    frequency: '96.9 FM',
+    streamUrl: 'https://stream.zeno.fm/04dyxm2rqy5tv',
+    frequency: '98.1 FM',
   },
   {
-    id: 'wazobia',
-    name: 'Wazobia FM',
-    description: 'Pidgin Radio 95.1 FM',
+    id: 'fresh',
+    name: 'Fresh 105.3 FM',
+    description: 'Fresh Music - Lagos',
     icon: 'radio',
-    streamUrl: 'http://s3.voscast.com:9444/stream', // Wazobia FM stream
-    frequency: '95.1 FM',
+    streamUrl: 'https://stream.zeno.fm/fgcaapesa78uv',
+    frequency: '105.3 FM',
   },
   {
-    id: 'beatfm',
-    name: 'Beat FM',
-    description: '99.9 Lagos',
+    id: 'kennis',
+    name: 'Kennis 104.1 FM',
+    description: 'Afrobeats & Entertainment',
     icon: 'pulse',
-    streamUrl: 'http://s8.voscast.com:8234/stream', // Beat FM stream
-    frequency: '99.9 FM',
-  },
-  {
-    id: 'rhythm',
-    name: 'Rhythm FM',
-    description: '93.7 Lagos',
-    icon: 'musical-note',
-    streamUrl: 'http://s8.voscast.com:8450/stream', // Rhythm FM stream
-    frequency: '93.7 FM',
+    streamUrl: 'https://stream.zeno.fm/cszax8ea7bruv',
+    frequency: '104.1 FM',
   },
   {
     id: 'lagos_talks',
     name: 'Lagos Talks',
-    description: '91.3 FM',
+    description: 'News & Current Affairs',
     icon: 'chatbubbles',
-    streamUrl: 'http://s8.voscast.com:8188/stream', // Lagos Talks stream
+    streamUrl: 'https://stream.zeno.fm/s32my50ywd0uv',
     frequency: '91.3 FM',
+  },
+  {
+    id: 'inspiration',
+    name: 'Inspiration FM',
+    description: 'Uplifting Music & Talk',
+    icon: 'sunny',
+    streamUrl: 'https://stream.zeno.fm/bd69qqfg64zuv',
+    frequency: '92.3 FM',
+  },
+  {
+    id: 'ekofm',
+    name: 'Eko FM',
+    description: 'The Voice of Lagos',
+    icon: 'mic',
+    streamUrl: 'https://stream.zeno.fm/k5ijvlwyuszvv',
+    frequency: '89.75 FM',
+  },
+  {
+    id: 'radiolagos',
+    name: 'Radio Lagos',
+    description: 'Lagos State Broadcasting',
+    icon: 'radio-outline',
+    streamUrl: 'https://stream.zeno.fm/yqy6w4e82hhvv',
+    frequency: '107.5 FM',
   },
 ];
 
