@@ -76,6 +76,7 @@ class RideRequestTester:
                 data.get("trip", {}).get("rider_id") == "rider-test-001",
                 data.get("trip", {}).get("pickup") == "Victoria Island, Lagos",
                 data.get("trip", {}).get("destination") == "Ikeja GRA, Lagos",
+                data.get("trip", {}).get("recommended_fare") == 4000.0,
                 data.get("trip", {}).get("offered_fare") == 4500,
                 data.get("trip", {}).get("vehicle_type") == "economy",
                 data.get("trip", {}).get("trip_type") == "intra"
