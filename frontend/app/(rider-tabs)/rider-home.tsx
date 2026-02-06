@@ -9,12 +9,15 @@ import {
   Animated,
   StatusBar,
   Image,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import ActiveTripBar from '@/src/components/ActiveTripBar';
+import { useLanguage } from '@/src/i18n/LanguageContext';
+import { SupportedLanguage } from '@/src/i18n/translations';
 
 const { width } = Dimensions.get('window');
 
