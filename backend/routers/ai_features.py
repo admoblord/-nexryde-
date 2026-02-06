@@ -130,7 +130,7 @@ async def rider_assistant(user_id: str, question: str, lat: float = None, lng: f
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"rider-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
                 system_message=prompt + context
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=question)
             response_text = await chat.send_message(user_message)
@@ -219,7 +219,7 @@ async def driver_assistant(user_id: str, question: str, lat: float = None, lng: 
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"driver-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
                 system_message=prompt + context
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=question)
             response_text = await chat.send_message(user_message)
@@ -356,7 +356,7 @@ Be practical and consider Nigerian driver economics. A good ride is one that max
             api_key=emergent_key,
             session_id=f"smart-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
             system_message="You are an expert AI assistant for ride-hailing drivers in Nigeria. You analyze rides and provide smart recommendations to maximize driver earnings and safety. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", "gpt-4o-mini")
         
         user_msg = UserMessage(text=ride_context)
         ai_response_text = await chat.send_message(user_msg)
@@ -519,7 +519,7 @@ EXAMPLE GOOD SUGGESTIONS (adapt to driver's city):
             api_key=emergent_key,
             session_id=f"coach-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
             system_message="You are an expert AI driving coach for Nigerian ride-hailing drivers. You provide personalized, actionable advice to maximize earnings and service quality. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", "gpt-4o-mini")
         
         user_msg = UserMessage(text=coaching_context)
         ai_response_text = await chat.send_message(user_msg)
@@ -658,7 +658,7 @@ Be specific, practical, and focused on maximizing driver earnings while ensuring
             api_key=emergent_key,
             session_id=f"traffic-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
             system_message=f"You are a traffic analysis AI for NEXRYDE drivers in {detect_city(origin_lat, origin_lng)['city']}, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", "gpt-4o-mini")
         
         user_msg = UserMessage(text=context)
         ai_text = await chat.send_message(user_msg)
@@ -839,7 +839,7 @@ Provide ACTIONABLE safety advice specific to Nigerian driving conditions.
             api_key=emergent_key,
             session_id=f"accident-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
             system_message="You are a safety AI expert specializing in accident prediction and prevention for ride-hailing drivers in Lagos, Nigeria. You analyze risk factors and provide life-saving recommendations. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", "gpt-4o-mini")
         
         user_msg = UserMessage(text=context)
         ai_text = await chat.send_message(user_msg)
@@ -1069,7 +1069,7 @@ async def rider_assistant_pidgin(user_id: str, question: str):
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"rider-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
                 system_message=PIDGIN_RIDER_PROMPT + context
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=question)
             response_text = await chat.send_message(user_message)
@@ -1099,7 +1099,7 @@ async def driver_assistant_pidgin(user_id: str, question: str):
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"driver-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
                 system_message=PIDGIN_DRIVER_PROMPT + context
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=question)
             response_text = await chat.send_message(user_message)
@@ -1177,7 +1177,7 @@ async def predict_earnings(user_id: str, hours_to_drive: int = 8):
                 api_key=EMERGENT_LLM_KEY,
                 session_id=f"predictor-{user_id}",
                 system_message="You are NEXRYDE's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
-            ).with_model("openai", "gpt-4o")
+            ).with_model("openai", "gpt-4o-mini")
             
             user_message = UserMessage(text=f"Driver average fare: ₦{avg_fare:.0f}, planning to drive {hours_to_drive} hours. One tip?")
             ai_tip = await chat.send_message(user_message)

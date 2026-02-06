@@ -88,7 +88,7 @@ async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id:
             api_key=EMERGENT_LLM_KEY,
             session_id=f"safety-{driver_id}",
             system_message="You are a safety AI for ride-hailing drivers in Lagos, Nigeria. Generate concise safety alerts based on known danger zones. Respond with JSON array of alerts."
-        ).with_model("openai", "gpt-4o")
+        ).with_model("openai", "gpt-4o-mini")
         prompt = f"""Based on these danger zones near coordinates ({lat}, {lng}):
 {chr(10).join(zone_summaries)}
 
