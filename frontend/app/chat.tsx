@@ -38,6 +38,8 @@ export default function ChatScreen() {
   const tripId = params.tripId as string;
   const driverName = (params.driverName as string) || 'Driver';
   const flatListRef = useRef<FlatList>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const [activeTab, setActiveTab] = useState<ChatTab>('driver');
