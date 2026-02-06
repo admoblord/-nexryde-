@@ -148,36 +148,6 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* 🔥 CRYPTO PAYMENTS - COMING SOON */}
-          <View style={styles.comingSoonCard}>
-            <View style={styles.comingSoonHeader}>
-              <View style={styles.comingSoonBadge}>
-                <Text style={styles.comingSoonBadgeText}>COMING SOON</Text>
-              </View>
-            </View>
-            <View style={styles.comingSoonIcon}>
-              <Ionicons name="logo-bitcoin" size={32} color="#F7931A" />
-            </View>
-            <Text style={styles.comingSoonTitle}>💰 Crypto Payments</Text>
-            <Text style={styles.comingSoonDesc}>
-              Pay and receive in USDT/USDC • Protect against Naira devaluation • First in Africa!
-            </Text>
-            <View style={styles.comingSoonFeatures}>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Stable value</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Lower fees</Text>
-              </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Instant transfers</Text>
-              </View>
-            </View>
-          </View>
-
           {/* Referral Card */}
           <View style={styles.referralCard}>
             <View style={styles.referralHeader}>
