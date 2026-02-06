@@ -228,10 +228,10 @@ export default function ModernDriverHome() {
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>All Features</Text>
-            <Text style={styles.featureCount}>{ALL_FEATURES.length} features</Text>
+            <Text style={styles.featureCount}>{filteredFeatures.length} features</Text>
           </View>
           <View style={styles.allFeaturesGrid}>
-            {ALL_FEATURES.map((feature) => (
+            {filteredFeatures.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
                 style={styles.featureCard}
