@@ -4562,6 +4562,24 @@ Be practical and consider Nigerian driver economics. A good ride is one that max
 
 @app.post("/api/ai/smart-mode/save-settings")
 async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
+    """Save driver's Smart Mode preferences"""
+    try:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {
+                "smart_mode_settings": settings.dict(),
+                "smart_mode_enabled": settings.enabled,
+                "updated_at": datetime.utcnow().isoformat()
+            }},
+            upsert=True
+        )
+        
+        return {
+            "success": True,
+            "message": "Smart Mode settings saved"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== AI COACH ENDPOINTS ====================
