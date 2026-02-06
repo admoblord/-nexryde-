@@ -650,6 +650,41 @@ export default function SubscriptionScreen() {
             </View>
           </Animated.View>
 
+          {/* Crypto Payment Coming Soon */}
+          <Animated.View style={[styles.cryptoCard, { opacity: fadeAnim }]}>
+            <View style={styles.cryptoHeader}>
+              <View style={styles.cryptoIconBg}>
+                <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
+              </View>
+              <View style={styles.cryptoHeaderText}>
+                <Text style={styles.cryptoTitle}>Crypto Payments</Text>
+                <View style={styles.cryptoBadge}>
+                  <Text style={styles.cryptoBadgeText}>COMING SOON</Text>
+                </View>
+              </View>
+            </View>
+            <Text style={styles.cryptoDesc}>
+              Pay your subscription with Bitcoin, USDT, and other cryptocurrencies. Lower fees, instant processing.
+            </Text>
+            <View style={styles.cryptoCoins}>
+              {[
+                { symbol: '₿', label: 'BTC' },
+                { symbol: 'Ξ', label: 'ETH' },
+                { symbol: '$', label: 'USDT' },
+                { symbol: '◎', label: 'SOL' },
+              ].map((coin) => (
+                <View key={coin.label} style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinSymbol}>{coin.symbol}</Text>
+                  <Text style={styles.cryptoCoinLabel}>{coin.label}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.cryptoNotifyBtn}>
+              <Ionicons name="notifications-outline" size={18} color="#F7931A" />
+              <Text style={styles.cryptoNotifyText}>Notify me when available</Text>
+            </View>
+          </Animated.View>
+
           <View style={{ height: 40 }} />
         </ScrollView>
 
