@@ -2987,7 +2987,7 @@ class ConnectionManager:
 # Global connection manager
 chat_manager = ConnectionManager()
 
-@app.websocket("/ws/chat/{trip_id}/{user_id}")
+@app.websocket("/api/ws/chat/{trip_id}/{user_id}")
 async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
     """WebSocket endpoint for real-time driver-rider chat"""
     await chat_manager.connect(websocket, trip_id, user_id)
@@ -3008,20 +3008,24 @@ async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
         ).sort("timestamp", 1).to_list(100)
         
         if messages:
+            # Serialize datetime objects
+            serialized = []
+            for msg in messages:
+                m = dict(msg)
+                if "created_at" in m and hasattr(m["created_at"], "isoformat"):
+                    m["timestamp"] = m.pop("created_at").isoformat()
+                serialized.append(m)
             await websocket.send_json({
                 "type": "history",
-                "messages": messages
+                "messages": serialized
             })
         
         while True:
-            # Wait for messages from this client
             data = await websocket.receive_json()
             
             if data.get("type") == "message":
-                # Get user info
                 user = await db.users.find_one({"id": user_id}, {"name": 1, "role": 1, "_id": 0})
                 
-                # Create message document
                 message_doc = {
                     "id": str(uuid.uuid4()),
                     "trip_id": trip_id,
@@ -3030,21 +3034,18 @@ async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
                     "sender_role": data.get("sender_role", user.get("role", "rider") if user else "rider"),
                     "message": data.get("message", ""),
                     "message_type": data.get("message_type", "text"),
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     "is_read": False
                 }
                 
-                # Save to database
                 await db.trip_messages.insert_one(message_doc)
                 
-                # Broadcast to all users in trip
                 await chat_manager.broadcast_to_trip({
                     "type": "new_message",
-                    **message_doc
+                    **{k: v for k, v in message_doc.items() if k != "_id"}
                 }, trip_id)
                 
             elif data.get("type") == "typing":
-                # Broadcast typing indicator
                 await chat_manager.broadcast_to_trip({
                     "type": "typing",
                     "user_id": user_id,
@@ -3052,7 +3053,6 @@ async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
                 }, trip_id, exclude_user=user_id)
                 
             elif data.get("type") == "read":
-                # Mark messages as read
                 await db.trip_messages.update_many(
                     {"trip_id": trip_id, "sender_id": {"$ne": user_id}},
                     {"$set": {"is_read": True}}
