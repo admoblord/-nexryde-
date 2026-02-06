@@ -4562,6 +4562,152 @@ Be practical and consider Nigerian driver economics. A good ride is one that max
 
 @app.post("/api/ai/smart-mode/save-settings")
 async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
+
+
+# ==================== AI COACH ENDPOINTS ====================
+
+@app.post("/api/ai/coach/get-suggestions")
+async def get_ai_coach_suggestions(driver_id: str):
+    """
+    Use ChatGPT to provide personalized coaching suggestions for driver
+    """
+    try:
+        if not openai_client:
+            raise HTTPException(status_code=503, detail="AI service not available")
+        
+        # Get driver stats
+        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
+        driver_rating = driver_profile.get("rating", 5.0) if driver_profile else 5.0
+        
+        # Get recent trips
+        recent_trips = await db.trips.find(
+            {"driver_id": driver_id}
+        ).sort("created_at", -1).limit(10).to_list(10)
+        
+        # Calculate stats
+        total_trips = len(recent_trips)
+        avg_trip_time = sum([t.get("duration_min", 0) for t in recent_trips]) / max(total_trips, 1)
+        avg_earnings_per_trip = driver_earnings.get("today", 0) / max(total_trips, 1) if total_trips > 0 else 0
+        
+        # Build context for ChatGPT
+        coaching_context = f"""
+You are an expert AI Coach for NEXRYDE drivers in Nigeria. Analyze this driver's performance and provide 4-5 personalized, actionable suggestions to increase earnings and improve service.
+
+DRIVER STATISTICS:
+- Current Rating: {driver_rating}/5.0
+- Today's Earnings: ₦{driver_earnings.get('today', 0):,.0f}
+- This Week's Earnings: ₦{driver_earnings.get('week', 0):,.0f}
+- Trips Today: {driver_earnings.get('trips_today', 0)}
+- Recent Trips: {total_trips}
+- Average Trip Duration: {avg_trip_time:.0f} minutes
+- Average Earnings/Trip: ₦{avg_earnings_per_trip:,.0f}
+- City: Lagos
+- Time Now: {datetime.utcnow().strftime('%H:%M')} UTC
+
+PROVIDE COACHING IN THIS JSON FORMAT:
+[
+  {{
+    "title": "Short action title (max 5 words)",
+    "description": "Brief actionable advice (max 50 words)",
+    "impact": "Estimated earnings impact (e.g., '+₦5,000/week')",
+    "icon": "time" or "location" or "flash" or "car" or "star" or "trending-up",
+    "color": "#FF6B6B" or "#4ECDC4" or "#FFD93D" or "#6C5CE7" or "#00D46A",
+    "priority": "high" or "medium" or "low",
+    "category": "earnings" or "service" or "efficiency" or "safety"
+  }}
+]
+
+GUIDELINES:
+- Be specific to Nigerian driving context (Lagos traffic, peak hours, etc.)
+- Focus on ACTIONABLE advice (not generic tips)
+- Include realistic earnings impact estimates
+- Consider time of day for time-sensitive suggestions
+- Provide 4-5 suggestions
+- Prioritize high-impact advice first
+- Be encouraging and supportive in tone
+
+EXAMPLE GOOD SUGGESTIONS:
+- "Drive during morning rush (7-9 AM) when demand is highest"
+- "Focus on Victoria Island-Lekki corridor for premium fares"
+- "Maintain 4.8+ rating to unlock bonuses"
+- "Accept 90%+ of rides to qualify for incentives"
+"""
+
+        # Call ChatGPT
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert AI driving coach for Nigerian ride-hailing drivers. You provide personalized, actionable advice to maximize earnings and service quality."},
+                {"role": "user", "content": coaching_context}
+            ],
+            temperature=0.7,  # More creative
+            max_tokens=800,
+        )
+        
+        # Parse AI response
+        ai_response_text = response.choices[0].message.content.strip()
+        
+        # Extract JSON
+        import re
+        json_match = re.search(r'\[.*\]', ai_response_text, re.DOTALL)
+        if json_match:
+            suggestions = json.loads(json_match.group())
+        else:
+            # Fallback suggestions
+            suggestions = [
+                {
+                    "title": "Drive Peak Hours",
+                    "description": "7-9 AM and 5-7 PM have highest demand. Start early to maximize earnings.",
+                    "impact": "+₦12,000/week",
+                    "icon": "time",
+                    "color": "#FF6B6B",
+                    "priority": "high",
+                    "category": "earnings"
+                },
+                {
+                    "title": "Improve Accept Rate",
+                    "description": f"Your current rating is {driver_rating}/5.0. Maintain above 4.5 for premium rides.",
+                    "impact": "+₦8,000/week",
+                    "icon": "star",
+                    "color": "#FFD93D",
+                    "priority": "medium",
+                    "category": "service"
+                }
+            ]
+        
+        logger.info(f"AI Coach generated {len(suggestions)} suggestions for driver {driver_id}")
+        
+        return {
+            "success": True,
+            "suggestions": suggestions,
+            "generated_at": datetime.utcnow().isoformat(),
+            "driver_stats": {
+                "rating": driver_rating,
+                "today_earnings": driver_earnings.get("today", 0),
+                "trips_today": driver_earnings.get("trips_today", 0)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"AI Coach error: {str(e)}")
+        # Fallback to basic suggestions
+        return {
+            "success": True,
+            "suggestions": [
+                {
+                    "title": "Drive Smart",
+                    "description": "Focus on peak hours and high-demand areas for better earnings.",
+                    "impact": "+₦10,000/week",
+                    "icon": "flash",
+                    "color": "#00D46A",
+                    "priority": "high",
+                    "category": "earnings"
+                }
+            ],
+            "fallback": True
+        }
+
     """Save driver's Smart Mode preferences"""
     try:
         await db.driver_profiles.update_one(
