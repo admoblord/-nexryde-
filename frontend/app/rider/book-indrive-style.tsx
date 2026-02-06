@@ -71,7 +71,7 @@ export default function BookInDriveStyle() {
   const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'city'>('pickup');
   const [showVehicleModal, setShowVehicleModal] = useState(false);
 
-  // Get current location on mount
+  // Get current location on mount and AUTO-SET pickup
   useEffect(() => {
     getCurrentLocationProactive();
   }, []);
@@ -79,7 +79,13 @@ export default function BookInDriveStyle() {
   const getCurrentLocationProactive = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+      if (status !== 'granted') {
+        Alert.alert(
+          'GPS Required',
+          'Please enable location services to automatically detect your pickup location and prevent fraud.'
+        );
+        return;
+      }
       
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
@@ -90,14 +96,29 @@ export default function BookInDriveStyle() {
       
       setCurrentLocation({ lat: latitude, lng: longitude, address });
       
-      // Auto-detect city
+      // AUTO-SET pickup location with GPS (PREVENTS THEFT/FRAUD)
+      setPickup(address);
+      setPickupCoords({ lat: latitude, lng: longitude });
+      
+      // Auto-detect city and state
+      const detectedState = detectStateFromLocation(address);
       if (address.toLowerCase().includes('lagos')) {
         setSelectedCity('Lagos, Nigeria');
       } else if (address.toLowerCase().includes('abuja')) {
         setSelectedCity('Abuja, Nigeria');
+      } else if (detectedState) {
+        setSelectedCity(`${detectedState}, Nigeria`);
       }
+      
+      // Show confirmation to user
+      Alert.alert(
+        '📍 GPS Location Detected',
+        `Your current location: ${address}\n\nThis helps prevent theft and fraud.`,
+        [{ text: 'OK' }]
+      );
     } catch (error) {
       console.error('GPS Error:', error);
+      Alert.alert('GPS Error', 'Could not detect your location. Please enter manually.');
     }
   };
 
