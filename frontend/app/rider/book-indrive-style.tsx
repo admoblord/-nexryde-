@@ -724,12 +724,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: COLORS.white,
   },
-  priceFeedback: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.brandGreen,
-    marginTop: 4,
-  },
   autoAcceptRow: {
     flexDirection: 'row',
     alignItems: 'center',
