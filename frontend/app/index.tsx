@@ -99,6 +99,28 @@ export default function SplashScreen() {
         const isLoggedIn = await isUserLoggedIn();
         
         if (isLoggedIn) {
+          // Import biometric functions
+          const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } = await import('@/utils/authStorage');
+          
+          // Check if biometric login is enabled
+          const biometricEnabled = await isBiometricEnabled();
+          const biometricSupported = await isBiometricSupported();
+          
+          if (biometricEnabled && biometricSupported) {
+            console.log('🔐 Biometric login enabled - requesting authentication...');
+            
+            // Request biometric authentication
+            const authResult = await authenticateWithBiometrics();
+            
+            if (!authResult.success) {
+              console.log('⚠️ Biometric authentication failed or cancelled');
+              setChecking(false);
+              return;
+            }
+            
+            console.log('✅ Biometric authentication successful!');
+          }
+          
           const userData = await getUserSession();
           
           if (userData) {
