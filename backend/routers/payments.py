@@ -14,6 +14,38 @@ from database import db
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
 
+# Import shared functions (set at startup)
+_get_directions_fn = None
+_calculate_fare_fn = None
+_calculate_distance_fn = None
+
+def set_payments_shared_functions(get_directions, calc_fare, calc_distance):
+    global _get_directions_fn, _calculate_fare_fn, _calculate_distance_fn
+    _get_directions_fn = get_directions
+    _calculate_fare_fn = calc_fare
+    _calculate_distance_fn = calc_distance
+
+async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng):
+    if _get_directions_fn:
+        return await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
+    return None
+
+def calculate_fare(dist, dur, traffic, svc="economy"):
+    if _calculate_fare_fn:
+        return _calculate_fare_fn(dist, dur, traffic, svc)
+    base = max(700, dist * 150)
+    return {"base_fare": 300, "distance_fee": dist * 100, "time_fee": dur * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
+
+def calculate_distance_haversine(lat1, lon1, lat2, lon2):
+    if _calculate_distance_fn:
+        return _calculate_distance_fn(lat1, lon1, lat2, lon2)
+    from math import radians, sin, cos, sqrt, atan2
+    R = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
+
 # Subscription config
 SUBSCRIPTION_CONFIG = {
     "monthly_fee": 25000,
