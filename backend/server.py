@@ -51,7 +51,7 @@ from routers.community import community_router, seed_community_groups, seed_comm
 from routers.safety import safety_router, seed_danger_zones
 from routers.ai_features import ai_router
 from routers.admin import admin_router
-from routers.trips import trips_router, set_fare_estimate_store
+from routers.trips import trips_router, set_fare_estimate_store, set_shared_functions
 
 ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR.parent / 'admin'
