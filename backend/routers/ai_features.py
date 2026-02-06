@@ -11,7 +11,7 @@ import logging
 from database import db, EMERGENT_LLM_KEY, GOOGLE_MAPS_API_KEY
 
 logger = logging.getLogger('server')
-ai_router = APIRouter(tags=["AI Features"])
+ai_router = APIRouter(prefix="/api", tags=["AI Features"])
 
 # Import LLM classes
 try:
