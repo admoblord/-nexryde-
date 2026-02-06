@@ -8498,3 +8498,45 @@ async def get_nearby_fleet(lat: float = 6.5244, lng: float = 3.3792, radius_km: 
         return {"success": True, "fleet": [], "count": 0}
 
 
+
+# ==================== ADMIN PANEL STATIC FILES ====================
+
+@app.get("/admin/")
+async def serve_admin():
+    """Serve admin panel"""
+    admin_file = ADMIN_DIR / "index.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Admin panel not found")
+
+@app.get("/admin/subscription-management.html")
+@app.get("/admin/subscription-management")
+async def serve_subscription_admin():
+    """Serve subscription management admin panel"""
+    admin_file = ADMIN_DIR / "subscription-management.html"
+    if admin_file.exists():
+        return FileResponse(admin_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Subscription management panel not found")
+
+# Direct auth routes WITHOUT /api prefix (for compatibility)
+@app.post("/auth/request-otp")
+@app.post("/auth/send-otp")
+async def direct_send_otp(request: OTPRequest):
+    """Direct OTP endpoint without /api prefix"""
+    return await send_otp(request)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_credentials=True,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Mount admin static files
+app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    client.close()
+
