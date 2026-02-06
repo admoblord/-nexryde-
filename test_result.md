@@ -877,11 +877,7 @@ metadata:
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "Driver Onboarding Security Flow - Backend APIs"
-    - "Driver Onboarding Status Endpoint"
-    - "Driver Document Verification Endpoint"
-    - "Driver Profile Completion Endpoint"
+  current_focus: []
   stuck_tasks: []
   test_all: false
   test_priority: "high_first"
