@@ -251,8 +251,7 @@ export default function BookInDriveStyle() {
           rider_id: 'user_123',
           pickup: pickup,
           destination: destination,
-          recommended_fare: calculatedFare,
-          offered_fare: adjustedFare,
+          offered_fare: currentFare,
           vehicle_type: selectedVehicle,
           trip_type: detectTripType(),
         }),
@@ -264,7 +263,7 @@ export default function BookInDriveStyle() {
         setIsLoading(false);
         Alert.alert(
           '🎯 Finding Drivers!',
-          `Your offer of ₦${adjustedFare.toLocaleString()} has been sent to nearby drivers!`,
+          `Your offer of ₦${currentFare.toLocaleString()} has been sent to nearby drivers!`,
           [{ text: 'OK', onPress: () => router.back() }]
         );
       } else {
