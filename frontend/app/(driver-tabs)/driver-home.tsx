@@ -99,6 +99,8 @@ export default function ModernDriverHome() {
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const [rideCountdown, setRideCountdown] = useState(20);
   const [acceptingRide, setAcceptingRide] = useState(false);
+  const [showLangPicker, setShowLangPicker] = useState(false);
+  const { language, setLanguage, availableLanguages } = useLanguage();
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
