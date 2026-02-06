@@ -192,8 +192,7 @@ export default function BookInDriveStyle() {
       const fareData = await response.json();
       
       if (response.ok && fareData.total_fare) {
-        setCalculatedFare(fareData.total_fare);
-        setAdjustedFare(fareData.total_fare);
+        setCurrentFare(fareData.total_fare);
         setFareDetails(fareData);
         
         // Decode polyline and set map coords
