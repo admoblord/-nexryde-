@@ -84,58 +84,42 @@ const STATIONS = [
 
 export default function DriverRadioScreen() {
   const router = useRouter();
-  const [sound, setSound] = useState<Audio.Sound | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStation, setCurrentStation] = useState(STATIONS[0]);
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
 
   useEffect(() => {
-    // Setup audio mode
-    setupAudio();
-    
     return () => {
-      // Cleanup on unmount
-      if (soundRef.current) {
-        soundRef.current.unloadAsync();
+      if (playerRef.current) {
+        playerRef.current.release();
       }
     };
   }, []);
-
-  const setupAudio = async () => {
-    try {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
-        staysActiveInBackground: true,
-        playsInSilentModeIOS: true,
-        shouldDuckAndroid: true,
-        playThroughEarpieceAndroid: false,
-      });
-    } catch (error) {
-      console.error('Audio setup error:', error);
-    }
-  };
 
   const playStation = async (station: typeof STATIONS[0]) => {
     try {
       setIsLoading(true);
       
-      // Stop current stream if playing
-      if (soundRef.current) {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
+      // Release current player
+      if (playerRef.current) {
+        playerRef.current.pause();
+        playerRef.current.release();
+        playerRef.current = null;
       }
 
-      // Create and load new sound
-      const { sound: newSound } = await Audio.Sound.createAsync(
-        { uri: station.streamUrl },
-        { shouldPlay: true },
-        onPlaybackStatusUpdate
-      );
+      // Use HTML5 Audio for web, expo-audio for native
+      const { createAudioPlayer, setAudioModeAsync } = await import('expo-audio');
 
-      soundRef.current = newSound;
-      setSound(newSound);
+      await setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldPlayInBackground: true,
+      });
+
+      const player = createAudioPlayer(station.streamUrl);
+      playerRef.current = player;
+      player.play();
+      
       setCurrentStation(station);
       setIsPlaying(true);
       setIsLoading(false);
@@ -150,31 +134,18 @@ export default function DriverRadioScreen() {
     }
   };
 
-  const onPlaybackStatusUpdate = (status: any) => {
-    if (status.isLoaded) {
-      if (status.didJustFinish) {
-        setIsPlaying(false);
-      }
-    } else if (status.error) {
-      console.error('Playback error:', status.error);
-      setIsPlaying(false);
-      setIsLoading(false);
-    }
-  };
-
   const togglePlayPause = async () => {
-    if (!soundRef.current) {
-      // Start playing if no sound loaded
+    if (!playerRef.current) {
       await playStation(currentStation);
       return;
     }
 
     try {
       if (isPlaying) {
-        await soundRef.current.pauseAsync();
+        playerRef.current.pause();
         setIsPlaying(false);
       } else {
-        await soundRef.current.playAsync();
+        playerRef.current.play();
         setIsPlaying(true);
       }
     } catch (error) {
@@ -183,11 +154,11 @@ export default function DriverRadioScreen() {
   };
 
   const stopRadio = async () => {
-    if (soundRef.current) {
+    if (playerRef.current) {
       try {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-        soundRef.current = null;
+        playerRef.current.pause();
+        playerRef.current.release();
+        playerRef.current = null;
         setIsPlaying(false);
       } catch (error) {
         console.error('Stop error:', error);
