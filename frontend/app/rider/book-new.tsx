@@ -55,6 +55,12 @@ export default function BookRideScreen() {
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number; address: string } | null>(null);
   const [isGettingLocation, setIsGettingLocation] = useState(false);
   
+  // Price adjustment states
+  const [showPriceAdjustment, setShowPriceAdjustment] = useState(false);
+  const [recommendedFare, setRecommendedFare] = useState(0);
+  const [adjustedFare, setAdjustedFare] = useState(0);
+  const [fareDetails, setFareDetails] = useState<any>(null);
+  
   // PROACTIVE GPS: Auto-detect location when screen loads
   useEffect(() => {
     getCurrentLocationProactive();
