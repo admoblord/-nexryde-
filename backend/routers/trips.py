@@ -200,32 +200,43 @@ async def request_trip(rider_id: str, request: TripRequest):
         
         fare = calculate_fare(distance_km, duration_min, traffic_duration_min, request.service_type)
     
-    trip = Trip(
-        rider_id=rider_id,
-        pickup_location={"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        dropoff_location={"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        distance_km=round(distance_km, 2),
-        duration_mins=duration_min,
-        base_fare=fare["base_fare"],
-        distance_fee=fare["distance_fee"],
-        time_fee=fare["time_fee"],
-        traffic_fee=fare["traffic_fee"],
-        fare=fare["total_fare"],
-        surge_multiplier=fare["surge_multiplier"],
-        service_type=request.service_type,
-        payment_method=request.payment_method,
-        polyline=polyline,
-        recording_enabled=request.enable_recording,
-        fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
-        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}",
-        security_code=str(random.randint(1000, 9999)),  # Generate 4-digit security code
-        security_code_verified=False,
-        security_code_attempts=0
-    )
+    final_fare = request.offered_fare if request.offered_fare else fare["total_fare"]
+    trip_status = "pending_driver_offers" if request.offered_fare else "pending"
     
-    await db.trips.insert_one(trip.dict())
+    trip_dict = {
+        "id": str(uuid4()),
+        "rider_id": rider_id,
+        "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
+        "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        "distance_km": round(distance_km, 2),
+        "duration_mins": duration_min,
+        "base_fare": fare["base_fare"],
+        "distance_fee": fare["distance_fee"],
+        "time_fee": fare["time_fee"],
+        "traffic_fee": fare["traffic_fee"],
+        "fare": final_fare,
+        "offered_fare": request.offered_fare,
+        "recommended_fare": request.recommended_fare or fare["total_fare"],
+        "surge_multiplier": fare.get("surge_multiplier", 1.0),
+        "service_type": request.service_type,
+        "status": trip_status,
+        "payment_method": request.payment_method,
+        "polyline": polyline,
+        "recording_enabled": request.enable_recording,
+        "fare_locked_until": (datetime.now(timezone.utc) + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
+        "insurance_id": f"INS_{uuid4().hex[:8].upper()}",
+        "security_code": str(random.randint(1000, 9999)),
+        "security_code_verified": False,
+        "security_code_attempts": 0,
+        "is_monitored": True,
+        "is_insured": True,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
     
-    return {"message": "Trip requested", "trip": trip.dict()}
+    await db.trips.insert_one(trip_dict)
+    trip_dict.pop("_id", None)
+    
+    return {"message": "Trip requested", "trip": trip_dict}
 
 @trips_router.post("/trips/book-for-other")
 async def book_for_other(booker_id: str, request: BookForOtherRequest):
