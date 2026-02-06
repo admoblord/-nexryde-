@@ -196,7 +196,7 @@ export default function ModernDriverHome() {
         <View style={styles.headerTop}>
           <View>
             <Text style={styles.greeting}>Good Morning</Text>
-            <Text style={styles.driverName}>Driver</Text>
+            <Text style={styles.driverName}>{user?.name || 'Driver'}</Text>
           </View>
           <TouchableOpacity style={styles.profileButton}>
             <Ionicons name="person-circle" size={40} color="#FFF" />
