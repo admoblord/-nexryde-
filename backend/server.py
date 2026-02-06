@@ -3922,6 +3922,9 @@ app.include_router(payments_router)
 from routers.chat import chat_router
 app.include_router(chat_router)
 
+from routers.users import users_router
+app.include_router(users_router)
+
 # ==================== SEED ON STARTUP ====================
 @app.on_event("startup")
 async def seed_promo_codes():
