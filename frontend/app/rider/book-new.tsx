@@ -475,7 +475,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 26, // BIGGER from 20
     fontWeight: '800',
     color: COLORS.white,
   },
@@ -489,35 +489,46 @@ const styles = StyleSheet.create({
   locationCard: {
     flexDirection: 'row',
     backgroundColor: COLORS.cardBg,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 20, // BIGGER from 16
+    padding: 22, // BIGGER from 16
     marginBottom: 0,
+    minHeight: 95, // Added for bigger cards
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 10,
   },
   locationIconContainer: {
     alignItems: 'center',
-    marginRight: 16,
+    marginRight: 18,
   },
   iconCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 52, // BIGGER from 40
+    height: 52, // BIGGER from 40
+    borderRadius: 26,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 5,
+    elevation: 6,
   },
   verticalLine: {
-    width: 2,
+    width: 3, // BIGGER from 2
     height: 30,
     backgroundColor: COLORS.textSecondary,
-    marginTop: 4,
+    marginTop: 6,
   },
   locationInput: {
     flex: 1,
   },
   locationLabel: {
-    fontSize: 11,
-    fontWeight: '800',
+    fontSize: 15, // BIGGER from 11
+    fontWeight: '900', // BOLDER from 800
     color: COLORS.textSecondary,
-    marginBottom: 8,
+    marginBottom: 12, // More space from 8
     letterSpacing: 1,
   },
   autocompleteContainer: {
