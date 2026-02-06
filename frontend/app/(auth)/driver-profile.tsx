@@ -32,7 +32,23 @@ export default function DriverProfileScreen() {
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
+  
+  // Vehicle Information
+  const [vehicleType, setVehicleType] = useState('economy');
+  const [vehicleMake, setVehicleMake] = useState('');
+  const [vehicleModel, setVehicleModel] = useState('');
+  const [vehicleYear, setVehicleYear] = useState('');
+  const [vehiclePlateNumber, setVehiclePlateNumber] = useState('');
+  const [vehicleColor, setVehicleColor] = useState('');
+  
   const [submitting, setSubmitting] = useState(false);
+
+  const VEHICLE_TYPES = [
+    { id: 'economy', label: 'Economy', icon: 'car', desc: 'Standard vehicles' },
+    { id: 'comfort', label: 'Comfort', icon: 'car-sport', desc: 'Premium comfort' },
+    { id: 'xl', label: 'XL', icon: 'bus', desc: '6+ passengers' },
+    { id: 'premium', label: 'Premium', icon: 'rocket', desc: 'Luxury vehicles' },
+  ];
 
   const handleSubmit = async () => {
     // Validation
