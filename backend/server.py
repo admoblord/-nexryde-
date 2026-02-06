@@ -9481,38 +9481,9 @@ async def seed_community_and_safety():
 
 # ==================== DRIVER STORIES ENDPOINTS ====================
 
+# (Community & Safety endpoints moved to routers/community.py and routers/safety.py)
 
-# ==================== COMMUNITY POLLS ====================
-
-@app.post("/api/community/groups/{group_id}/polls")
-async def create_poll(group_id: str, request: dict):
-    """Create a poll in a community group"""
-    try:
-        options = request.get("options", [])
-        if len(options) < 2 or len(options) > 6:
-            raise HTTPException(status_code=400, detail="Poll needs 2-6 options")
-        poll = {
-            "poll_id": str(uuid.uuid4()),
-            "group_id": group_id,
-            "user_id": request.get("user_id", "anonymous"),
-            "user_name": request.get("user_name", "Anonymous"),
-            "question": request.get("question", ""),
-            "options": [{"text": o, "votes": 0, "voter_ids": []} for o in options],
-            "total_votes": 0,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "expires_at": (datetime.now(timezone.utc) + timedelta(hours=int(request.get("duration_hours", 24)))).isoformat(),
-            "is_active": True,
-        }
-        if not poll["question"].strip():
-            raise HTTPException(status_code=400, detail="Question cannot be empty")
-        await db.community_polls.insert_one(poll)
-        poll.pop("_id", None)
-        return {"success": True, "poll": poll}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Create poll error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# ==================== DRIVER STORIES ENDPOINTS ====================
 
 
 @app.get("/api/community/groups/{group_id}/polls")
