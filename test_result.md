@@ -1500,8 +1500,20 @@ agent_communication:
         - agent: "main"
         - comment: "Created reusable ActiveTripBar component with call and chat buttons. Added to both rider-home.tsx and driver-home.tsx. Component polls /api/trips/active/{user_id} every 8s, shows floating bar with call and chat when active trip exists."
 
+  - task: "Rider Preferences _id Fix"
+    implemented: true
+    working: true
+    file: "server.py"
+    stuck_count: 0
+    priority: "high"
+    needs_retesting: false
+    status_history:
+        - working: true
+        - agent: "main"
+        - comment: "Fixed 500 error on GET /api/rider/preferences/{user_id}. Root cause: Missing _id:0 exclusion in MongoDB query. Also fixed datetime.utcnow() to datetime.now(timezone.utc).isoformat()"
+
 agent_communication:
     - agent: "main"
-    - message: "NEW TASK: P0 - Added call button to rider home and driver home screens via new ActiveTripBar component. Backend: New endpoint GET /api/trips/active/{user_id} returns active trip info. Frontend: Reusable ActiveTripBar.tsx component polls for active trips, shows floating bar with Call (green) and Chat (indigo) buttons. Added to both rider-home.tsx and driver-home.tsx. Call uses existing POST /api/trip/{tripId}/call endpoint. Need testing: 1) GET /api/trips/active/{user_id} returns correct data, 2) POST /api/trip/{trip_id}/call works correctly, 3) Frontend component renders on both home screens."
+    - message: "COMPREHENSIVE VERIFICATION: Tested 58+ backend endpoints across rider and driver features. Found and fixed 1 bug (rider preferences _id serialization 500 error). All other endpoints working correctly. Key areas verified: Auth, Trips, Bidding, Chat, AI Features, Safety, Community, Wallet, Subscriptions, Earnings, Tiers, Challenges, Family, Loyalty, Emergency Contacts. The only parameter mismatches were in curl test format, not actual bugs."
 
         - comment: "Seeded 5 polls across groups (general, lagos-drivers, earnings-talk, vehicle-maintenance, safety-zone), 5 events (meetups, promotions, training), and 15+ engaging messages with Nigerian context. Pinned important first messages in key groups."
