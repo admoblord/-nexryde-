@@ -6,6 +6,9 @@ from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 import logging
 import time
+import math
+import uuid
+import random
 
 from database import db
 
@@ -14,10 +17,43 @@ trips_router = APIRouter(prefix="/api", tags=["Trips"])
 
 # Import shared state from server (will be set at inclusion time)
 fare_estimate_store = {}
+FARE_LOCK_MINUTES = 3
+
+# Import shared functions from server (set at init time)
+_get_directions_fn = None
+_calculate_fare_fn = None
+_calculate_distance_fn = None
 
 def set_fare_estimate_store(store):
     global fare_estimate_store
     fare_estimate_store = store
+
+def set_shared_functions(get_directions, calc_fare, calc_distance):
+    global _get_directions_fn, _calculate_fare_fn, _calculate_distance_fn
+    _get_directions_fn = get_directions
+    _calculate_fare_fn = calc_fare
+    _calculate_distance_fn = calc_distance
+
+async def get_directions_from_google(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng):
+    if _get_directions_fn:
+        return await _get_directions_fn(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    return None
+
+def calculate_fare(distance_km, duration_min, traffic_duration_min, service_type="economy"):
+    if _calculate_fare_fn:
+        return _calculate_fare_fn(distance_km, duration_min, traffic_duration_min, service_type)
+    base = max(700, distance_km * 150)
+    return {"base_fare": 300, "distance_fee": distance_km * 100, "time_fee": duration_min * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
+
+def calculate_distance_haversine(lat1, lon1, lat2, lon2):
+    if _calculate_distance_fn:
+        return _calculate_distance_fn(lat1, lon1, lat2, lon2)
+    from math import radians, sin, cos, sqrt, atan2
+    R = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+    return R * 2 * atan2(sqrt(a), sqrt(1-a))
 
 
 # ==================== CUSTOM PRICE TRIP ====================
