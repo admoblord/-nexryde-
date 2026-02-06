@@ -359,6 +359,26 @@ export default function RiderProfileScreen() {
 
         <View style={styles.menuSection}>
           <Text style={styles.menuSectionTitle}>Preferences</Text>
+          
+          {/* Biometric Login Toggle - HIGHLY VISIBLE */}
+          {biometricSupported && (
+            <View style={styles.menuItem}>
+              <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
+                <Ionicons name="finger-print" size={20} color={COLORS.success} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.menuText}>Biometric Login</Text>
+                <Text style={styles.menuSubtext}>Use fingerprint or face to login</Text>
+              </View>
+              <Switch
+                value={biometricEnabled}
+                onValueChange={toggleBiometric}
+                trackColor={{ false: '#E2E8F0', true: COLORS.success + '50' }}
+                thumbColor={biometricEnabled ? COLORS.success : '#F1F5F9'}
+              />
+            </View>
+          )}
+
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/notifications')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
               <Ionicons name="notifications-outline" size={20} color={COLORS.warning} />
