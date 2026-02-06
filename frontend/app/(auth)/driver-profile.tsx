@@ -330,6 +330,105 @@ export default function DriverProfileScreen() {
               />
             </View>
           </View>
+
+          {/* Vehicle Information */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Vehicle Information *</Text>
+            <Text style={styles.sectionSubtitle}>Select your vehicle category and provide details</Text>
+
+            {/* Vehicle Type Selector */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Vehicle Category *</Text>
+              <View style={styles.vehicleTypeGrid}>
+                {VEHICLE_TYPES.map((type) => (
+                  <TouchableOpacity
+                    key={type.id}
+                    style={[
+                      styles.vehicleTypeCard,
+                      vehicleType === type.id && styles.vehicleTypeCardSelected
+                    ]}
+                    onPress={() => setVehicleType(type.id)}
+                  >
+                    <Ionicons 
+                      name={type.icon as any} 
+                      size={28} 
+                      color={vehicleType === type.id ? COLORS.accentGreen : COLORS.lightTextSecondary} 
+                    />
+                    <Text style={[
+                      styles.vehicleTypeName,
+                      vehicleType === type.id && styles.vehicleTypeNameSelected
+                    ]}>
+                      {type.label}
+                    </Text>
+                    <Text style={styles.vehicleTypeDesc}>{type.desc}</Text>
+                    {vehicleType === type.id && (
+                      <View style={styles.selectedBadge}>
+                        <Ionicons name="checkmark" size={16} color={COLORS.white} />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Vehicle Make *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Toyota, Honda, Lexus"
+                value={vehicleMake}
+                onChangeText={setVehicleMake}
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Vehicle Model *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Camry, Corolla, Accord"
+                value={vehicleModel}
+                onChangeText={setVehicleModel}
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Vehicle Year *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 2020"
+                value={vehicleYear}
+                onChangeText={setVehicleYear}
+                keyboardType="number-pad"
+                maxLength={4}
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Plate Number *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., ABC-123-XY"
+                value={vehiclePlateNumber}
+                onChangeText={setVehiclePlateNumber}
+                autoCapitalize="characters"
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Vehicle Color *</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., Black, White, Silver"
+                value={vehicleColor}
+                onChangeText={setVehicleColor}
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+            </View>
+          </View>
         </ScrollView>
 
         {/* Submit Button */}
