@@ -3637,7 +3637,7 @@ async def accept_trip(trip_id: str, request: dict):
             raise HTTPException(status_code=403, detail="You cannot accept this ride")
     
     result = await db.trips.update_one(
-        {"id": trip_id, "status": "pending"},
+        {"id": trip_id, "status": {"$in": ["pending", "pending_driver_offers"]}},
         {"$set": {"driver_id": driver_id, "status": "accepted", "accepted_at": datetime.utcnow()}}
     )
     
