@@ -320,7 +320,7 @@ export default function DriverCommunityScreen() {
               ))}
 
             {/* City Groups */}
-            <Text style={styles.sectionTitle}>City Groups</Text>
+            <Text style={styles.sectionTitle}>City Groups (16 Cities)</Text>
             {groups
               .filter((g) => g.group_id.includes('drivers') || g.group_id.includes('harcourt'))
               .map((group) => (
