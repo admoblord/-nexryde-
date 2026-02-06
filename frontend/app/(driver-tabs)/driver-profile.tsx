@@ -279,6 +279,14 @@ export default function DriverProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/language')}>
+            <View style={[styles.menuIcon, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="globe-outline" size={20} color="#7C3AED" />
+            </View>
+            <Text style={styles.menuText}>Language</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
