@@ -5438,6 +5438,8 @@ app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(trips_router)
 app.include_router(auth_router)
+app.include_router(bidding_router)
+app.include_router(payments_router)
 
 # ==================== SEED ON STARTUP ====================
 @app.on_event("startup")
