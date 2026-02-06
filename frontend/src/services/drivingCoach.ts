@@ -88,3 +88,30 @@ export class DrivingCoachAI {
     };
   }
 }
+
+/**
+ * Fetch AI-powered coaching from backend (uses Emergent LLM Key → GPT-4o)
+ */
+export async function fetchAICoachingSuggestions(driverId: string, tripData: {
+  avgSpeed: number; suddenBrakes: number; customerRating: number; tripDuration: number;
+}): Promise<{ suggestions: string[]; powered_by: string } | null> {
+  try {
+    const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+    const response = await fetch(`${BACKEND_URL}/api/ai/coach/get-suggestions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        driver_id: driverId,
+        avg_speed: tripData.avgSpeed,
+        sudden_brakes: tripData.suddenBrakes,
+        customer_rating: tripData.customerRating,
+        trip_duration: tripData.tripDuration,
+      }),
+    });
+    const data = await response.json();
+    return data.success ? { suggestions: data.suggestions || [], powered_by: data.powered_by || 'gpt-4o' } : null;
+  } catch (error) {
+    console.error('AI coaching fetch failed:', error);
+    return null;
+  }
+}
