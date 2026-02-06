@@ -847,6 +847,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#2563EB',
   },
+  memberSince: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.gray400,
+    marginTop: 4,
+  },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
