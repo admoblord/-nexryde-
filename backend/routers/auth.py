@@ -532,10 +532,10 @@ async def verify_otp(request: OTPVerify):
             except Exception:
                 pass
         if isinstance(expiry, datetime) and datetime.now(timezone.utc) > expiry:
-        await delete_otp_record(normalized_phone)
-        if normalized_phone in otp_store:
-            del otp_store[normalized_phone]
-        raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
+            await delete_otp_record(normalized_phone)
+            if normalized_phone in otp_store:
+                del otp_store[normalized_phone]
+            raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
     
     # Check attempt limit
     current_attempts = stored.get("attempts", 0)
