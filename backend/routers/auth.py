@@ -523,7 +523,15 @@ async def verify_otp(request: OTPVerify):
     
     # Check expiry
     expiry = stored.get("expires_at") or stored.get("expires")
-    if expiry and datetime.now(timezone.utc) > expiry:
+    if expiry:
+        if hasattr(expiry, 'tzinfo') and expiry.tzinfo is None:
+            expiry = expiry.replace(tzinfo=timezone.utc)
+        if isinstance(expiry, str):
+            try:
+                expiry = datetime.fromisoformat(expiry.replace('Z', '+00:00'))
+            except Exception:
+                pass
+        if isinstance(expiry, datetime) and datetime.now(timezone.utc) > expiry:
         await delete_otp_record(normalized_phone)
         if normalized_phone in otp_store:
             del otp_store[normalized_phone]
