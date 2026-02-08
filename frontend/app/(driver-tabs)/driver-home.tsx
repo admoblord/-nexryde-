@@ -66,7 +66,7 @@ const ALL_FEATURES = [
   { id: 'data-insights', label: 'Insights', icon: 'bar-chart', route: '/driver/data-insights', color: COLORS.primary },
   
   // AI & Smart Features
-  { id: 'smart-mode', label: 'Smart Mode', icon: 'bulb', route: '/driver/smart-mode', color: COLORS.success },
+  { id: 'heatmap', label: 'Demand Map', icon: 'flame', route: '/driver/heatmap', color: COLORS.danger },
   { id: 'ai-coach', label: 'AI Coach', icon: 'chatbubbles', route: '/driver/ai-suggestions', color: COLORS.primary },
   { id: 'heatmap', label: 'Heatmap', icon: 'map', route: '/driver/heatmap', color: COLORS.warning },
   { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.danger },
