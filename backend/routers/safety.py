@@ -74,28 +74,6 @@ async def report_danger_zone(request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@safety_router.get("/alerts")
-async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id: str = "unknown"):
-    """Rule-based safety alerts — NO LLM, zero credit cost."""
-    try:
-        zones = await db.danger_zones.find({}, {"_id": 0}).to_list(length=20)
-        alerts = []
-        for z in zones[:5]:
-            alerts.append({
-                "type": "warning" if z.get("type") in ["area_boys", "robbery"] else "info",
-                "priority": "high" if z.get("type") in ["area_boys", "robbery"] else "medium",
-                "title": f"{z.get('type', 'Alert').replace('_', ' ').title()} Zone",
-                "message": z.get("description", "Stay alert in this area")[:100],
-                "zone_type": z.get("type", "general")
-            })
-        if not alerts:
-            alerts = [{"type": "info", "priority": "low", "title": "All Clear", "message": "No safety concerns in your area. Drive safely!", "zone_type": "general"}]
-        return {"success": True, "alerts": alerts, "location": {"lat": lat, "lng": lng}, "powered_by": "rule-based"}
-    except Exception as e:
-        logger.error(f"Safety alerts error: {str(e)}")
-        return {"success": True, "alerts": [{"type": "info", "priority": "low", "title": "Stay Safe", "message": "No specific alerts for this area.", "zone_type": "general"}], "location": {"lat": lat, "lng": lng}}
-
-
 # ==================== SEED FUNCTIONS ====================
 
 async def seed_danger_zones(db_ref):
