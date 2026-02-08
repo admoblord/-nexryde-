@@ -444,9 +444,20 @@ async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
 @ai_router.post("/ai/coach/get-suggestions")
 async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float = None, city: str = None):
     """
-    Use ChatGPT to provide personalized coaching suggestions for driver
+    Use ChatGPT to provide personalized coaching suggestions for driver.
+    Cached for 2 hours per driver to save credits.
     """
     try:
+        # Check cache first
+        cache_key = f"coach_{driver_id}"
+        cached = await db.ai_cache.find_one({"key": cache_key})
+        if cached:
+            created = cached.get("created_at", datetime.min)
+            if hasattr(created, 'tzinfo') and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created).total_seconds() < 7200:  # 2 hour cache
+                return cached["data"]
+
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
         
