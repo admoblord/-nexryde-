@@ -109,14 +109,18 @@ export default function RiderProfileScreen() {
     );
   };
 
-  const handleBecomeDriver = async () => {
-    setShowSwitchModal(true);
-    setVerificationStep(0);
-    setOtp('');
-    setOtpSent(false);
-    
-    // Auto-send OTP when modal opens
-    await handleSendOTP();
+  const handleBecomeDriver = () => {
+    Alert.alert(
+      '🚗 Become a NEXRYDE Driver',
+      'Earn money on your own terms. Keep 100% of your fares!\n\n• ₦18,000/month flat fee\n• Zero commission\n• Flexible schedule',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { 
+          text: 'Start Registration', 
+          onPress: () => router.push('/driver/verification')
+        }
+      ]
+    );
   };
 
   const handleSendOTP = async () => {
