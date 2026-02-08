@@ -1156,14 +1156,19 @@ async def send_otp(request: OTPRequest):
                             message_id=message_id
                         )
                         
-                        logger.info(f"Termii SMS sent successfully to {normalized_phone}")
-                        return {
-                            "success": True,
-                            "message": "OTP sent successfully via SMS",
-                            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                            "provider": "termii"
-                        }
+                        logger.info(f"✅ Termii SMS sent successfully to {normalized_phone}")
+                        
+                        # CRITICAL: Return explicit JSONResponse for consistency
+                        return JSONResponse(
+                            status_code=200,
+                            content={
+                                "success": True,
+                                "message": "OTP sent successfully via SMS",
+                                "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                                "provider": "termii"
+                            }
+                        )
                     else:
                         logger.error(f"Termii API error: {response.status_code} - {response.text}")
                         raise Exception(f"Termii API failed: {response.text}")
@@ -1185,15 +1190,20 @@ async def send_otp(request: OTPRequest):
             "provider": "mock"
         }
         
-        logger.info(f"Mock OTP for {normalized_phone}: {otp_code}")
-        return {
-            "success": True,
-            "message": "OTP sent successfully (test mode)",
-            "otp": otp_code,  # Only shown in mock mode for testing
-            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-            "provider": "mock"
-        }
+        logger.info(f"📱 Mock OTP for {normalized_phone}: {otp_code}")
+        
+        # CRITICAL: Return explicit JSONResponse for consistency
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "OTP sent successfully (test mode)",
+                "otp": otp_code,  # Only shown in mock mode for testing
+                "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                "provider": "mock"
+            }
+        )
         
     except HTTPException as http_err:
         # Re-raise HTTPException as proper JSON
