@@ -585,9 +585,20 @@ async def predict_traffic_with_ai(
     driver_id: str
 ):
     """
-    Use ChatGPT + Google Maps to predict traffic and provide intelligent route recommendations
+    Use ChatGPT + Google Maps to predict traffic and provide intelligent route recommendations.
+    Cached for 30 minutes per route to save credits.
     """
     try:
+        # Cache key based on rounded coordinates
+        cache_key = f"traffic_{round(origin_lat,2)}_{round(origin_lng,2)}_{round(destination_lat,2)}_{round(destination_lng,2)}"
+        cached = await db.ai_cache.find_one({"key": cache_key})
+        if cached:
+            from datetime import timezone
+            created = cached.get("created_at", datetime.min)
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created).total_seconds() < 1800:  # 30 min cache
+                return cached["data"]
         import googlemaps
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         
