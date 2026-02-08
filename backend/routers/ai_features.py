@@ -293,29 +293,6 @@ class SmartModeSettings(BaseModel):
     auto_accept: bool = True
     preferred_areas: List[str] = []
 
-@ai_router.post("/ai/smart-mode/analyze-ride")
-async def analyze_ride_with_ai(ride: dict, driver_id: str, settings: SmartModeSettings):
-    """Rule-based ride analysis — NO LLM, zero credit cost."""
-    try:
-        distance = ride.get('distance_km', 0)
-        fare = ride.get('fare', 0)
-        rider_rating = ride.get('rider_rating', 5.0)
-        duration = ride.get('duration_min', 0)
-        
-        score = 75
-        factors = {"distance_ok": distance <= settings.max_distance, "fare_good": fare > 0, "rating_ok": rider_rating >= settings.min_rating, "timing_good": True}
-        
-        if distance > settings.max_distance: score -= 20
-        if rider_rating < settings.min_rating: score -= 15
-        if fare > 0 and duration > 0 and (fare / max(duration, 1)) > 50: score += 15
-        if distance > 0 and (fare / max(distance, 1)) > 200: score += 10
-        
-        should_accept = all(factors.values()) and score >= 60
-        
-        return {"success": True, "ai_analysis": {"recommendation": "ACCEPT" if should_accept else "REJECT", "confidence": min(score, 95), "reasoning": f"{'Good' if should_accept else 'Poor'} ride: ₦{fare:,.0f} for {distance:.1f}km ({duration}min)", "score": score, "factors": factors}, "powered_by": "rule-based"}
-    except Exception as e:
-        return {"success": True, "ai_analysis": {"recommendation": "ACCEPT", "confidence": 60, "reasoning": "Default accept", "score": 75, "factors": {}}, "fallback": True}
-
 @ai_router.post("/ai/smart-mode/save-settings")
 async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
     """Save driver's Smart Mode preferences"""
@@ -339,103 +316,6 @@ async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
 
 
 # ==================== AI COACH ENDPOINTS ====================
-
-@ai_router.post("/ai/coach/get-suggestions")
-async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float = None, city: str = None):
-    """Smart coaching suggestions based on driver stats — NO LLM, zero credit cost."""
-    try:
-        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-        driver_rating = driver_profile.get("rating", 5.0) if driver_profile else 5.0
-        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
-        loc = detect_city(lat, lng, city)
-        zones = loc.get("zones", ["Victoria Island", "Lekki", "Ikeja"])[:3]
-        
-        suggestions = [
-            {"title": "Drive Peak Hours", "description": f"7-9 AM and 5-7 PM have highest demand in {loc['city']}. Start early!", "impact": "+₦12,000/week", "icon": "time", "color": "#FF6B6B", "priority": "high", "category": "earnings"},
-            {"title": f"Head to {zones[0]}", "description": f"{zones[0]} area has high demand right now. Position yourself there.", "impact": "+₦8,000/week", "icon": "location", "color": "#4ECDC4", "priority": "high", "category": "earnings"},
-            {"title": "Keep Rating Above 4.5", "description": f"Your rating is {driver_rating}/5.0. High ratings unlock premium ride requests.", "impact": "+₦5,000/week", "icon": "star", "color": "#FFD93D", "priority": "medium", "category": "service"},
-            {"title": "Accept More Rides", "description": "Accepting 90%+ of requests improves your visibility to riders nearby.", "impact": "+₦3,000/week", "icon": "flash", "color": "#6C5CE7", "priority": "medium", "category": "efficiency"},
-            {"title": "Stay Near Hotspots", "description": f"After drop-off, head to {zones[1]} or {zones[2]} instead of going home.", "impact": "+₦6,000/week", "icon": "trending-up", "color": "#00D46A", "priority": "medium", "category": "earnings"},
-        ]
-        
-        return {"success": True, "suggestions": suggestions, "generated_at": datetime.utcnow().isoformat(), "driver_stats": {"rating": driver_rating, "today_earnings": driver_earnings.get("today", 0), "trips_today": driver_earnings.get("trips_today", 0)}}
-    except Exception as e:
-        logger.error(f"Coach error: {str(e)}")
-        return {"success": True, "suggestions": [], "fallback": True}
-
-
-# ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
-
-@ai_router.post("/ai/traffic/predict")
-async def predict_traffic(
-    origin_lat: float, origin_lng: float,
-    destination_lat: float = None, destination_lng: float = None,
-    driver_id: str = "unknown"
-):
-    """Rule-based traffic prediction — NO LLM, zero credit cost."""
-    hour = datetime.utcnow().hour
-    is_rush = (7 <= hour <= 9) or (17 <= hour <= 19)
-    is_night = hour >= 21 or hour <= 5
-    traffic_level = "heavy" if is_rush else "light" if is_night else "moderate"
-    loc = detect_city(origin_lat, origin_lng)
-    return {
-        "success": True,
-        "prediction": {
-            "recommended_route_index": 0,
-            "traffic_level": traffic_level,
-            "recommendation": f"{'Expect delays, use alternative routes' if is_rush else 'Roads are clear, good time to drive'} in {loc['city']}",
-            "confidence": 75,
-            "factors": ["time_of_day", "rush_hour" if is_rush else "off_peak"],
-            "best_time": "10 AM - 4 PM" if is_rush else "Current time is good",
-        },
-        "powered_by": "rule-based"
-    }
-
-@ai_router.get("/ai/traffic/alerts")
-async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
-    """Rule-based traffic alerts — NO LLM, zero credit cost."""
-    hour = datetime.utcnow().hour
-    loc = detect_city(lat, lng)
-    alerts = []
-    if 7 <= hour <= 9:
-        alerts.append({"type": "warning", "title": "Morning Rush Hour", "message": f"Heavy traffic expected in {loc['city']}. Avoid major highways.", "severity": "medium"})
-    if 17 <= hour <= 19:
-        alerts.append({"type": "warning", "title": "Evening Rush Hour", "message": "Peak congestion period. Consider alternative routes.", "severity": "medium"})
-    if hour >= 22 or hour <= 5:
-        alerts.append({"type": "info", "title": "Night Driving", "message": "Roads are clear but drive carefully. Use headlights.", "severity": "low"})
-    if not alerts:
-        alerts.append({"type": "info", "title": "Normal Traffic", "message": f"Traffic is flowing normally in {loc['city']}.", "severity": "low"})
-    return {"success": True, "alerts": alerts, "count": len(alerts), "powered_by": "rule-based"}
-
-@ai_router.get("/ai/earnings-predictor/{user_id}")
-async def predict_earnings(user_id: str, hours_to_drive: int = 8):
-    """Rule-based earnings prediction — NO LLM, zero credit cost."""
-    stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {"_id": None, "total": {"$sum": "$fare"}, "count": {"$sum": 1}}}
-    ]).to_list(1)
-    if stats:
-        avg_per_trip = stats[0]["total"] / max(stats[0]["count"], 1)
-        trips_per_hour = 2.5
-    else:
-        avg_per_trip = 2500
-        trips_per_hour = 2
-    predicted_daily = avg_per_trip * trips_per_hour * hours_to_drive
-    return {
-        "success": True,
-        "predictions": {
-            "daily": round(predicted_daily),
-            "weekly": round(predicted_daily * 6),
-            "monthly": round(predicted_daily * 24),
-        },
-        "avg_per_trip": round(avg_per_trip),
-        "recommendations": [
-            "Drive during peak hours (7-9 AM, 5-7 PM) for higher fares",
-            "Stay near Victoria Island and Lekki for premium rides",
-            "Maintain 4.5+ rating for priority matching",
-        ],
-        "powered_by": "rule-based"
-    }
 
 @ai_router.get("/drivers/{user_id}/fatigue-status")
 async def get_fatigue_status(user_id: str):
