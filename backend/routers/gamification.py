@@ -71,12 +71,15 @@ async def get_driver_leaderboard(city: str = "lagos", period: str = "weekly"):
         {"$limit": 20}
     ]
     earnings_leaders = await db.trips.aggregate(pipeline).to_list(20)
+    # Batch fetch all users in one query
+    leader_ids = [l["_id"] for l in earnings_leaders if l["_id"]]
+    users_list = await db.users.find({"id": {"$in": leader_ids}}, {"_id": 0, "id": 1, "name": 1}).to_list(100)
+    users_map = {u["id"]: u for u in users_list}
     leaderboard = []
     for rank, leader in enumerate(earnings_leaders, 1):
-        if leader["_id"]:
-            user = await db.users.find_one({"id": leader["_id"]})
-            if user:
-                leaderboard.append({"rank": rank, "driver_id": leader["_id"], "name": user.get("name", "Anonymous")[:10] + "..." if user.get("name") else "Anonymous", "earnings": leader["total_earnings"], "trips": leader["trip_count"], "rating": round(leader["avg_rating"] or 5.0, 1)})
+        if leader["_id"] and leader["_id"] in users_map:
+            user = users_map[leader["_id"]]
+            leaderboard.append({"rank": rank, "driver_id": leader["_id"], "name": user.get("name", "Anonymous")[:10] + "..." if user.get("name") else "Anonymous", "earnings": leader["total_earnings"], "trips": leader["trip_count"], "rating": round(leader["avg_rating"] or 5.0, 1)})
     return {"period": period, "city": city, "leaderboard": leaderboard}
 
 @gamification_router.get("/leaderboard/top-rated")
@@ -87,9 +90,13 @@ async def get_top_rated_drivers(limit: int = 20):
         {"$limit": limit}
     ]
     top_drivers = await db.users.aggregate(pipeline).to_list(limit)
+    # Batch fetch all profiles in one query
+    driver_ids = [d["id"] for d in top_drivers]
+    profiles_list = await db.driver_profiles.find({"user_id": {"$in": driver_ids}}, {"_id": 0}).to_list(100)
+    profiles_map = {p["user_id"]: p for p in profiles_list}
     result = []
     for rank, driver in enumerate(top_drivers, 1):
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
+        profile = profiles_map.get(driver["id"])
         result.append({"rank": rank, "driver_id": driver["id"], "name": (driver.get("name", "Anonymous")[:10] + "...") if driver.get("name") else "Anonymous", "rating": driver.get("rating", 5.0), "total_trips": driver.get("total_trips", 0), "comfort_scores": {"smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0, "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0, "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0, "safety": profile.get("safety_rating", 5.0) if profile else 5.0}})
     return {"top_rated_drivers": result}
 
