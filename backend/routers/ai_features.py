@@ -776,66 +776,13 @@ Keep response under 100 words."""
 
 @ai_router.get("/ai/rider-assistant-pidgin")
 async def rider_assistant_pidgin(user_id: str, question: str):
-    """AI Ride Assistant in Pidgin English"""
-    try:
-        current_trip = await db.trips.find_one({
-            "rider_id": user_id,
-            "status": {"$in": ["pending", "accepted", "ongoing"]}
-        })
-        
-        context = ""
-        if current_trip:
-            context = f"\nRider trip wey dey ground: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
-        else:
-            context = "\nRider no get active trip now."
-        
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"rider-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=PIDGIN_RIDER_PROMPT + context
-            ).with_model("openai", "gpt-4o-mini")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
-        else:
-            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
-            
-    except Exception as e:
-        logger.error(f"Pidgin AI error: {e}")
-        return {"response": "E get wahala. Abeg try again.", "type": "error"}
+    """Pidgin assistant — redirects to main rider assistant (no separate LLM call)"""
+    return {"response": "Abeg use the main AI chat for questions. E go help you well well!", "type": "redirect", "language": "pidgin"}
 
 @ai_router.get("/ai/driver-assistant-pidgin")
 async def driver_assistant_pidgin(user_id: str, question: str):
-    """AI Driver Assistant in Pidgin English"""
-    try:
-        stats = await db.trips.aggregate([
-            {"$match": {"driver_id": user_id, "status": "completed"}},
-            {"$group": {"_id": None, "total_earnings": {"$sum": "$fare"}, "total_trips": {"$sum": 1}}}
-        ]).to_list(1)
-        
-        driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0}
-        context = f"\nDriver stats: Total earnings=₦{driver_stats['total_earnings']:,.0f}, Total trips={driver_stats['total_trips']}"
-        
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"driver-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=PIDGIN_DRIVER_PROMPT + context
-            ).with_model("openai", "gpt-4o-mini")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
-        else:
-            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
-            
-    except Exception as e:
-        logger.error(f"Pidgin AI error: {e}")
-        return {"response": "E get wahala. Abeg try again.", "type": "error"}
+    """Pidgin assistant — redirects to main driver assistant (no separate LLM call)"""
+    return {"response": "Oga driver, use the main AI chat. E go answer your question sharp sharp!", "type": "redirect", "language": "pidgin"}
 
 
 
