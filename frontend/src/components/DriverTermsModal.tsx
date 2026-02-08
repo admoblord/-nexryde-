@@ -251,9 +251,9 @@ export default function DriverTermsModal({ visible, onAccept, onDecline }: Drive
             <Text style={styles.sectionTitle}>15. CONTACT</Text>
             <Text style={styles.text}>
               For questions or concerns:{'\n'}
-              Email: support@nexryde.com{'\n'}
-              Phone: +234 800 NEXRYDE{'\n'}
-              Address: Lagos, Nigeria
+              Email: admoblordgroup@gmail.com{'\n'}
+              Phone: +234 810 889 9392{'\n'}
+              Website: www.admoblordgroup.com
             </Text>
           </View>
 
