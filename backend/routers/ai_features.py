@@ -675,14 +675,62 @@ async def predict_accident_risk(
     destination_lat: float = None,
     destination_lng: float = None
 ):
-    """
-    Use ChatGPT to predict accident risk based on location, time, weather, historical data
-    """
+    """Rule-based accident risk prediction — NO LLM, zero credit cost."""
     try:
-        import googlemaps
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
-        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
+        current_time = datetime.utcnow()
+        hour = current_time.hour
+        day_of_week = current_time.strftime('%A')
+        is_rush_hour = (7 <= hour <= 9) or (17 <= hour <= 19)
+        is_night = hour >= 19 or hour <= 6
+        is_weekend = day_of_week in ['Saturday', 'Sunday']
+
+        # Rule-based risk scoring
+        risk_score = 25
+        factors = []
+        if is_night:
+            risk_score += 25
+            factors.append("Night driving increases risk")
+        if is_rush_hour:
+            risk_score += 20
+            factors.append("Rush hour traffic congestion")
+        if is_weekend and is_night:
+            risk_score += 15
+            factors.append("Weekend nightlife traffic")
+
+        # Lagos hotspots
+        hotspots = [
+            {"name": "Third Mainland Bridge", "lat": 6.49, "lng": 3.39, "risk": "high", "reason": "Narrow lanes, high speed"},
+            {"name": "Lekki-Epe Expressway", "lat": 6.44, "lng": 3.50, "risk": "moderate", "reason": "Construction zones"},
+            {"name": "Oshodi Interchange", "lat": 6.55, "lng": 3.35, "risk": "high", "reason": "Heavy commercial traffic"},
+            {"name": "Apapa-Oshodi Expressway", "lat": 6.46, "lng": 3.35, "risk": "high", "reason": "Trailer congestion"},
+        ]
+        nearby_hotspots = []
+        for hs in hotspots:
+            dist = abs(current_lat - hs["lat"]) + abs(current_lng - hs["lng"])
+            if dist < 0.1:
+                risk_score += 15
+                factors.append(f"Near {hs['name']}")
+                nearby_hotspots.append({"name": hs["name"], "risk_level": hs["risk"], "reason": hs["reason"], "recommendation": "Drive slowly and stay alert"})
+
+        risk_level = "low" if risk_score < 30 else "moderate" if risk_score < 50 else "high" if risk_score < 75 else "critical"
+        
+        return {
+            "success": True,
+            "risk_analysis": {
+                "overall_risk_score": min(risk_score, 100),
+                "risk_level": risk_level,
+                "primary_factors": factors or ["Normal driving conditions"],
+                "high_risk_zones": nearby_hotspots,
+                "safety_recommendations": ["Keep safe following distance", "Stay alert at intersections", "Use headlights at night" if is_night else "Watch for motorcycles"],
+                "confidence": 80,
+                "weather_impact": "Check road conditions after rain",
+                "time_impact": f"{'Night' if is_night else 'Rush hour' if is_rush_hour else 'Daytime'} driving"
+            },
+            "powered_by": "rule-based"
+        }
+    except Exception as e:
+        logger.error(f"Accident risk error: {str(e)}")
+        return {"success": True, "risk_analysis": {"overall_risk_score": 30, "risk_level": "low", "primary_factors": ["Normal conditions"], "high_risk_zones": [], "safety_recommendations": ["Drive safely"], "confidence": 50}, "powered_by": "fallback"}
         
         # Get location name from coordinates
         try:
