@@ -17,13 +17,18 @@ async def get_community_groups():
     """Get all community groups"""
     try:
         groups = await db.community_groups.find({}).to_list(length=50)
+        # Batch count recent messages for all groups in one aggregation
+        cutoff = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+        group_ids = [g["group_id"] for g in groups]
+        counts_pipeline = [
+            {"$match": {"group_id": {"$in": group_ids}, "created_at": {"$gte": cutoff}}},
+            {"$group": {"_id": "$group_id", "count": {"$sum": 1}}}
+        ]
+        counts = await db.community_messages.aggregate(counts_pipeline).to_list(100)
+        counts_map = {c["_id"]: c["count"] for c in counts}
         for g in groups:
             g["_id"] = str(g["_id"])
-            recent = await db.community_messages.count_documents({
-                "group_id": g["group_id"],
-                "created_at": {"$gte": (datetime.utcnow() - timedelta(hours=24)).isoformat()}
-            })
-            g["recent_messages"] = recent
+            g["recent_messages"] = counts_map.get(g["group_id"], 0)
         return {"success": True, "groups": groups}
     except Exception as e:
         logger.error(f"Get groups error: {str(e)}")
