@@ -70,7 +70,7 @@ const ALL_FEATURES = [
   { id: 'ai-coach', label: 'AI Coach', icon: 'chatbubbles', route: '/driver/ai-suggestions', color: COLORS.primary },
   { id: 'heatmap', label: 'Heatmap', icon: 'map', route: '/driver/heatmap', color: COLORS.warning },
   { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.danger },
-  { id: 'traffic-predict', label: 'Traffic AI', icon: 'analytics', route: '/driver/traffic-prediction', color: COLORS.secondary },
+  { id: 'community', label: 'Community', icon: 'people', route: '/driver/community', color: COLORS.secondary },
   { id: 'accident-predict', label: 'Accident AI', icon: 'warning', route: '/driver/accident-prediction', color: COLORS.danger },
   
   // Wellness & Lifestyle
