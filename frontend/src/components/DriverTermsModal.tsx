@@ -70,7 +70,7 @@ export default function DriverTermsModal({ visible, onAccept, onDecline }: Drive
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>1. DRIVER PARTNERSHIP AGREEMENT</Text>
             <Text style={styles.text}>
-              By registering as a driver-partner with NEXRYDE, you enter into an independent contractor agreement. You are NOT an employee of NEXRYDE. You maintain full control over your schedule, vehicle, and business operations.
+              By registering as a driver-partner with NEXRYDE, you enter into a working agreement with NEXRYDE. As a NEXRYDE worker, you maintain control over your schedule, vehicle, and work operations while being supported by the platform.
             </Text>
           </View>
 
