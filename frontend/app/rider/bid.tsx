@@ -76,7 +76,7 @@ export default function RideBidScreen() {
 
   useEffect(() => {
     if (bidId) {
-      const interval = setInterval(fetchOffers, 3000);
+      const interval = setInterval(fetchOffers, 30000); // Refresh every 30 seconds (was 3 sec - too aggressive!)
       return () => clearInterval(interval);
     }
   }, [bidId]);

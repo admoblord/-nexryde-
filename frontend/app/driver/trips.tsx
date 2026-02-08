@@ -27,7 +27,7 @@ export default function DriverTripsScreen() {
 
   useEffect(() => {
     loadPendingTrips();
-    const interval = setInterval(loadPendingTrips, 10000); // Refresh every 10 seconds
+    const interval = setInterval(loadPendingTrips, 60000); // Refresh every 60 seconds (was 10 sec)
     return () => clearInterval(interval);
   }, []);
 

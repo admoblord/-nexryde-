@@ -30,7 +30,7 @@ export default function DriverHeatmapScreen() {
 
   useEffect(() => {
     loadHeatmap();
-    const interval = setInterval(loadHeatmap, 60000); // Refresh every minute
+    const interval = setInterval(loadHeatmap, 5 * 60 * 1000); // Refresh every 5 minutes (was 1 min)
     return () => clearInterval(interval);
   }, []);
 
