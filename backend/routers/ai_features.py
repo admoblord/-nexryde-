@@ -295,29 +295,26 @@ class SmartModeSettings(BaseModel):
 
 @ai_router.post("/ai/smart-mode/analyze-ride")
 async def analyze_ride_with_ai(ride: dict, driver_id: str, settings: SmartModeSettings):
-    """
-    Use ChatGPT to analyze if a ride is worth accepting based on driver's Smart Mode settings
-    Returns AI recommendation with reasoning
-    """
+    """Rule-based ride analysis — NO LLM, zero credit cost."""
     try:
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
+        distance = ride.get('distance_km', 0)
+        fare = ride.get('fare', 0)
+        rider_rating = ride.get('rider_rating', 5.0)
+        duration = ride.get('duration_min', 0)
         
-        # Get driver's current stats
-        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
+        score = 75
+        factors = {"distance_ok": distance <= settings.max_distance, "fare_good": fare > 0, "rating_ok": rider_rating >= settings.min_rating, "timing_good": True}
         
-        # Build context for AI
-        ride_context = f"""
-Analyze this ride request for a NEXRYDE driver:
-
-RIDE DETAILS:
-- Pickup: {ride.get('pickup', 'Unknown')}
-- Destination: {ride.get('destination', 'Unknown')}
-- Distance: {ride.get('distance_km', 0):.1f} km
-- Estimated Duration: {ride.get('duration_min', 0)} minutes
-- Offered Fare: ₦{ride.get('fare', 0):,.0f}
-- Rider Rating: {ride.get('rider_rating', 'N/A')}
+        if distance > settings.max_distance: score -= 20
+        if rider_rating < settings.min_rating: score -= 15
+        if fare > 0 and duration > 0 and (fare / max(duration, 1)) > 50: score += 15
+        if distance > 0 and (fare / max(distance, 1)) > 200: score += 10
+        
+        should_accept = all(factors.values()) and score >= 60
+        
+        return {"success": True, "ai_analysis": {"recommendation": "ACCEPT" if should_accept else "REJECT", "confidence": min(score, 95), "reasoning": f"{'Good' if should_accept else 'Poor'} ride: ₦{fare:,.0f} for {distance:.1f}km ({duration}min)", "score": score, "factors": factors}, "powered_by": "rule-based"}
+    except Exception as e:
+        return {"success": True, "ai_analysis": {"recommendation": "ACCEPT", "confidence": 60, "reasoning": "Default accept", "score": 75, "factors": {}}, "fallback": True}
 - Time of Day: {datetime.utcnow().strftime('%H:%M')}
 
 DRIVER'S SMART MODE PREFERENCES:
