@@ -9,7 +9,6 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": false,
     "extra": {
-      "BACKEND_URL": "https://nexryde-ui.emergent.host/api",
       "router": {},
       "eas": {
         "projectId": "342aff56-5e09-4363-b8b6-12ab1cdec11f"
