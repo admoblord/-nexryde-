@@ -99,7 +99,7 @@ export default function DriverTermsScreen() {
 
             <Text style={styles.sectionHeader}>1. Driver Partnership Agreement</Text>
             <Text style={styles.paragraph}>
-              By registering as a NEXRYDE driver, you enter into an independent contractor agreement with NEXRYDE. You are not an employee but an independent service provider using our platform to connect with riders.
+              By registering as a NEXRYDE driver, you enter into a working agreement with NEXRYDE. You are a valued NEXRYDE worker using our platform to connect with riders and earn income.
             </Text>
 
             <Text style={styles.sectionHeader}>2. Subscription Model</Text>
