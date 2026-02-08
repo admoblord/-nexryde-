@@ -367,503 +367,74 @@ async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float
 # ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
 
 @ai_router.post("/ai/traffic/predict")
-async def predict_traffic_with_ai(
-    origin_lat: float,
-    origin_lng: float,
-    destination_lat: float,
-    destination_lng: float,
-    driver_id: str
+async def predict_traffic(
+    origin_lat: float, origin_lng: float,
+    destination_lat: float = None, destination_lng: float = None,
+    driver_id: str = "unknown"
 ):
-    """
-    Use ChatGPT + Google Maps to predict traffic and provide intelligent route recommendations.
-    Cached for 30 minutes per route to save credits.
-    """
-    try:
-        # Cache key based on rounded coordinates
-        cache_key = f"traffic_{round(origin_lat,2)}_{round(origin_lng,2)}_{round(destination_lat,2)}_{round(destination_lng,2)}"
-        cached = await db.ai_cache.find_one({"key": cache_key})
-        if cached:
-            from datetime import timezone
-            created = cached.get("created_at", datetime.min)
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - created).total_seconds() < 1800:  # 30 min cache
-                return cached["data"]
-        import googlemaps
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        
-        gmaps_client = googlemaps.Client(key=os.getenv('GOOGLE_MAPS_API_KEY', ''))
-        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
-        
-        # Get real-time traffic data from Google Maps
-        directions = gmaps_client.directions(
-            origin=(origin_lat, origin_lng),
-            destination=(destination_lat, destination_lng),
-            mode="driving",
-            departure_time="now",  # Real-time traffic
-            alternatives=True,  # Get alternative routes
-        )
-        
-        if not directions:
-            raise HTTPException(status_code=404, detail="No routes found")
-        
-        # Extract traffic info from Google Maps
-        routes_data = []
-        for route in directions[:3]:  # Analyze top 3 routes
-            leg = route['legs'][0]
-            routes_data.append({
-                "distance": leg['distance']['text'],
-                "duration_no_traffic": leg['duration']['text'],
-                "duration_with_traffic": leg.get('duration_in_traffic', {}).get('text', leg['duration']['text']),
-                "summary": route.get('summary', 'Main route'),
-                "traffic_delay": leg.get('duration_in_traffic', {}).get('value', 0) - leg['duration']['value'],
-            })
-        
-        # Build context for ChatGPT
-        current_time = datetime.utcnow()
-        context = f"""
-Analyze this traffic situation in Lagos, Nigeria and provide actionable advice for a NEXRYDE driver:
-
-CURRENT TIME: {current_time.strftime('%A, %H:%M')} UTC
-
-ROUTES FROM GOOGLE MAPS (REAL-TIME DATA):
-{json.dumps(routes_data, indent=2)}
-
-INSTRUCTIONS:
-Analyze the traffic data and provide your response in this JSON format:
-{{
-  "recommended_route_index": 0 or 1 or 2,
-  "traffic_level": "light" or "moderate" or "heavy" or "severe",
-  "recommendation": "Brief actionable advice (max 50 words)",
-  "estimated_earnings_impact": "How traffic affects earnings (e.g., '+₦500 if you take Route 2')",
-  "alternative_suggestion": "Any alternative timing/route suggestion",
-  "confidence": 0-100,
-  "factors": ["list", "of", "traffic", "factors"],
-  "avoid_areas": ["list", "of", "areas", "to", "avoid"],
-  "best_time": "Suggested best time to drive this route"
-}}
-
-Consider:
-- Traffic patterns specific to this city and region
-- Time of day (rush hour 7-9 AM, 5-7 PM)
-- Earnings optimization (faster route = more trips = more money)
-- Fuel efficiency vs. time saved
-- Driver safety and stress levels
-
-Be specific, practical, and focused on maximizing driver earnings while ensuring safety.
-- Local road conditions and construction zones
-"""
-
-        # Call AI via Emergent LLM
-        chat = LlmChat(
-            api_key=emergent_key,
-            session_id=f"traffic-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H')}",
-            system_message=f"You are a traffic analysis AI for NEXRYDE drivers in {detect_city(origin_lat, origin_lng)['city']}, Nigeria. You analyze real-time traffic data and provide smart recommendations to optimize driver earnings and reduce stress. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o-mini")
-        
-        user_msg = UserMessage(text=context)
-        ai_text = await chat.send_message(user_msg)
-        
-        # Extract JSON
-        import re
-        json_match = re.search(r'\{.*\}', ai_text, re.DOTALL)
-        if json_match:
-            ai_analysis = json.loads(json_match.group())
-        else:
-            # Fallback
-            ai_analysis = {
-                "recommended_route_index": 0,
-                "traffic_level": "moderate",
-                "recommendation": "Take the fastest route based on current traffic conditions.",
-                "estimated_earnings_impact": "Standard earnings",
-                "alternative_suggestion": "Monitor traffic updates",
-                "confidence": 70,
-                "factors": ["real-time data analyzed"],
-                "avoid_areas": [],
-                "best_time": "Current time is acceptable"
-            }
-        
-        logger.info(f"Traffic AI prediction: {ai_analysis['traffic_level']} - {ai_analysis['recommendation']}")
-        
-        return {
-            "success": True,
-            "routes": routes_data,
-            "ai_analysis": ai_analysis,
-            "timestamp": datetime.utcnow().isoformat(),
-            "source": "Google Maps + ChatGPT"
-        }
-        
-    except Exception as e:
-        logger.error(f"Traffic prediction error: {str(e)}")
-        # Fallback to basic analysis
-        return {
-            "success": True,
-            "routes": [],
-            "ai_analysis": {
-                "recommended_route_index": 0,
-                "traffic_level": "moderate",
-                "recommendation": "Use Google Maps for best route",
-                "estimated_earnings_impact": "Standard",
-                "alternative_suggestion": "None",
-                "confidence": 50,
-                "factors": ["API unavailable"],
-                "avoid_areas": [],
-                "best_time": "Now"
-            },
-            "fallback": True
-        }
+    """Rule-based traffic prediction — NO LLM, zero credit cost."""
+    hour = datetime.utcnow().hour
+    is_rush = (7 <= hour <= 9) or (17 <= hour <= 19)
+    is_night = hour >= 21 or hour <= 5
+    traffic_level = "heavy" if is_rush else "light" if is_night else "moderate"
+    loc = detect_city(origin_lat, origin_lng)
+    return {
+        "success": True,
+        "prediction": {
+            "recommended_route_index": 0,
+            "traffic_level": traffic_level,
+            "recommendation": f"{'Expect delays, use alternative routes' if is_rush else 'Roads are clear, good time to drive'} in {loc['city']}",
+            "confidence": 75,
+            "factors": ["time_of_day", "rush_hour" if is_rush else "off_peak"],
+            "best_time": "10 AM - 4 PM" if is_rush else "Current time is good",
+        },
+        "powered_by": "rule-based"
+    }
 
 @ai_router.get("/ai/traffic/alerts")
 async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
-    """
-    Get AI-generated traffic alerts for driver's current location.
-    Cached for 30 minutes per location to save credits.
-    """
-    try:
-        cache_key = f"traffic_alerts_{round(lat,2)}_{round(lng,2)}"
-        cached = await db.ai_cache.find_one({"key": cache_key})
-        if cached:
-            created = cached.get("created_at", datetime.min)
-            if hasattr(created, 'tzinfo') and created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - created).total_seconds() < 1800:
-                return cached["data"]
-        # Get traffic incidents from Google Maps
-        # (Note: This would require Google Maps Incidents API or similar)
-        
-        # For now, generate smart alerts based on time and location
-        current_hour = datetime.utcnow().hour
-        alerts = []
-        
-        # Lagos-specific alerts
-        if 7 <= current_hour <= 9:
-            alerts.append({
-                "type": "warning",
-                "priority": "high",
-                "title": "⚠️ Morning Rush Hour",
-                "message": "Heavy traffic expected on major routes. Consider alternative streets.",
-                "location": "Lagos Mainland",
-            })
-        elif 17 <= current_hour <= 19:
-            alerts.append({
-                "type": "warning",
-                "priority": "high",
-                "title": "⚠️ Evening Rush Hour",
-                "message": "Traffic building up. Third Mainland Bridge is congested.",
-                "location": "Island routes",
-            })
-        
-        return {
-            "success": True,
-            "alerts": alerts,
-            "count": len(alerts)
-        }
-        
-    except Exception as e:
-        logger.error(f"Traffic alerts error: {str(e)}")
-        return {"success": True, "alerts": [], "count": 0}
-
-
-# ==================== ACCIDENT AI PREDICTION ENDPOINTS ====================
-
-@ai_router.post("/ai/accident/predict-risk")
-async def predict_accident_risk(
-    driver_id: str,
-    current_lat: float,
-    current_lng: float,
-    destination_lat: float = None,
-    destination_lng: float = None
-):
-    """Rule-based accident risk prediction — NO LLM, zero credit cost."""
-    try:
-        current_time = datetime.utcnow()
-        hour = current_time.hour
-        day_of_week = current_time.strftime('%A')
-        is_rush_hour = (7 <= hour <= 9) or (17 <= hour <= 19)
-        is_night = hour >= 19 or hour <= 6
-        is_weekend = day_of_week in ['Saturday', 'Sunday']
-
-        # Rule-based risk scoring
-        risk_score = 25
-        factors = []
-        if is_night:
-            risk_score += 25
-            factors.append("Night driving increases risk")
-        if is_rush_hour:
-            risk_score += 20
-            factors.append("Rush hour traffic congestion")
-        if is_weekend and is_night:
-            risk_score += 15
-            factors.append("Weekend nightlife traffic")
-
-        # Lagos hotspots
-        hotspots = [
-            {"name": "Third Mainland Bridge", "lat": 6.49, "lng": 3.39, "risk": "high", "reason": "Narrow lanes, high speed"},
-            {"name": "Lekki-Epe Expressway", "lat": 6.44, "lng": 3.50, "risk": "moderate", "reason": "Construction zones"},
-            {"name": "Oshodi Interchange", "lat": 6.55, "lng": 3.35, "risk": "high", "reason": "Heavy commercial traffic"},
-            {"name": "Apapa-Oshodi Expressway", "lat": 6.46, "lng": 3.35, "risk": "high", "reason": "Trailer congestion"},
-        ]
-        nearby_hotspots = []
-        for hs in hotspots:
-            dist = abs(current_lat - hs["lat"]) + abs(current_lng - hs["lng"])
-            if dist < 0.1:
-                risk_score += 15
-                factors.append(f"Near {hs['name']}")
-                nearby_hotspots.append({"name": hs["name"], "risk_level": hs["risk"], "reason": hs["reason"], "recommendation": "Drive slowly and stay alert"})
-
-        risk_level = "low" if risk_score < 30 else "moderate" if risk_score < 50 else "high" if risk_score < 75 else "critical"
-        
-        return {
-            "success": True,
-            "risk_analysis": {
-                "overall_risk_score": min(risk_score, 100),
-                "risk_level": risk_level,
-                "primary_factors": factors or ["Normal driving conditions"],
-                "high_risk_zones": nearby_hotspots,
-                "safety_recommendations": ["Keep safe following distance", "Stay alert at intersections", "Use headlights at night" if is_night else "Watch for motorcycles"],
-                "confidence": 80,
-                "weather_impact": "Check road conditions after rain",
-                "time_impact": f"{'Night' if is_night else 'Rush hour' if is_rush_hour else 'Daytime'} driving"
-            },
-            "powered_by": "rule-based"
-        }
-    except Exception as e:
-        logger.error(f"Accident risk error: {str(e)}")
-        return {"success": True, "risk_analysis": {"overall_risk_score": 30, "risk_level": "low", "primary_factors": ["Normal conditions"], "high_risk_zones": [], "safety_recommendations": ["Drive safely"], "confidence": 50}, "powered_by": "fallback"}
-
-@ai_router.get("/ai/accident/high-risk-areas")
-async def get_high_risk_areas(city: str = "Lagos", lat: float = None, lng: float = None):
-    """
-    Get list of known high-risk accident areas in Nigerian cities
-    """
-    try:
-        # Lagos high-risk zones (based on known accident hotspots)
-        lagos_zones = [
-            {
-                "name": "Third Mainland Bridge",
-                "risk_level": "high",
-                "lat": 6.4698,
-                "lng": 3.3852,
-                "accidents_last_month": 12,
-                "primary_cause": "High speed + poor visibility"
-            },
-            {
-                "name": "Lekki-Epe Expressway",
-                "risk_level": "high",
-                "lat": 6.4423,
-                "lng": 3.4647,
-                "accidents_last_month": 8,
-                "primary_cause": "Construction zones + speeding"
-            },
-            {
-                "name": "Oshodi Underbridge",
-                "risk_level": "moderate",
-                "lat": 6.5447,
-                "lng": 3.3369,
-                "accidents_last_month": 5,
-                "primary_cause": "Heavy traffic + reckless driving"
-            },
-            {
-                "name": "Apapa-Oshodi Expressway",
-                "risk_level": "moderate",
-                "lat": 6.4489,
-                "lng": 3.3597,
-                "accidents_last_month": 6,
-                "primary_cause": "Truck congestion + potholes"
-            },
-        ]
-        
-        return {
-            "success": True,
-            "city": city,
-            "risk_zones": lagos_zones,
-            "count": len(lagos_zones)
-        }
-        
-    except Exception as e:
-        logger.error(f"High risk areas error: {str(e)}")
-        return {"success": True, "risk_zones": [], "count": 0}
-
-        # (Note: This would require Google Maps Incidents API or similar)
-        
-        # For now, generate smart alerts based on time and location
-        current_hour = datetime.utcnow().hour
-        alerts = []
-        
-        # Lagos-specific alerts
-        if 7 <= current_hour <= 9:
-            alerts.append({
-                "type": "warning",
-                "priority": "high",
-                "title": "⚠️ Morning Rush Hour",
-                "message": "Heavy traffic expected on major routes. Consider alternative streets.",
-                "location": "Lagos Mainland",
-            })
-        elif 17 <= current_hour <= 19:
-            alerts.append({
-                "type": "warning",
-                "priority": "high",
-                "title": "⚠️ Evening Rush Hour",
-                "message": "Traffic building up. Third Mainland Bridge is congested.",
-                "location": "Island routes",
-            })
-        
-        return {
-            "success": True,
-            "alerts": alerts,
-            "count": len(alerts)
-        }
-        
-    except Exception as e:
-        logger.error(f"Traffic alerts error: {str(e)}")
-        return {"success": True, "alerts": [], "count": 0}
-
-
-@ai_router.get("/ai/smart-mode/get-settings")
-async def get_smart_mode_settings(driver_id: str):
-    """Get driver's Smart Mode preferences"""
-    try:
-        driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-        
-        if driver_profile and "smart_mode_settings" in driver_profile:
-            return {
-                "success": True,
-                "settings": driver_profile["smart_mode_settings"]
-            }
-        
-        # Return defaults
-        return {
-            "success": True,
-            "settings": {
-                "enabled": False,
-                "max_distance": 10.0,
-                "min_rating": 4.0,
-                "surge_threshold": 1.5,
-                "auto_accept": True,
-                "preferred_areas": []
-            }
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-# ==================== PIDGIN ENGLISH AI SUPPORT ====================
-
-PIDGIN_RIDER_PROMPT = """You be NEXRYDE AI assistant for riders wey dey Nigeria. 
-You go help riders with their trip wahala, price matter, driver info, and safety concern.
-
-Wetin NEXRYDE be:
-- NEXRYDE na driver-first ride app for Naija
-- Drivers dey pay flat monthly sub (₦25,000) instead of per-trip commission
-- Riders dey pay drivers direct via cash or bank transfer (person to person)
-- All drivers don verify with NIN and documents
-- Safety features include: SOS button, trip sharing, driver face verification, route monitoring
-
-Make you dey friendly and helpful. Use pidgin well well.
-Keep response under 100 words."""
-
-PIDGIN_DRIVER_PROMPT = """You be NEXRYDE AI assistant for drivers wey dey Naija.
-You go help drivers maximize their earnings, find high-demand areas, and improve their ratings.
-
-Wetin NEXRYDE be:
-- Drivers keep 100% of their money - NEXRYDE no take commission
-- Monthly subscription na ₦25,000 for unlimited trips  
-- Riders dey pay drivers direct via cash or bank transfer
-- Peak hours: 7-9 AM and 5-8 PM for weekdays
-- Hot areas for Lagos: Victoria Island, Lekki, Ikeja, Airport
-
-Make you dey encouraging and practical. Na Naija context you go use.
-Keep response under 100 words."""
-
-@ai_router.get("/ai/rider-assistant-pidgin")
-async def rider_assistant_pidgin(user_id: str, question: str):
-    """Pidgin assistant — redirects to main rider assistant (no separate LLM call)"""
-    return {"response": "Abeg use the main AI chat for questions. E go help you well well!", "type": "redirect", "language": "pidgin"}
-
-@ai_router.get("/ai/driver-assistant-pidgin")
-async def driver_assistant_pidgin(user_id: str, question: str):
-    """Pidgin assistant — redirects to main driver assistant (no separate LLM call)"""
-    return {"response": "Oga driver, use the main AI chat. E go answer your question sharp sharp!", "type": "redirect", "language": "pidgin"}
-
-
-
-# ==================== EARNINGS PREDICTOR AI ====================
+    """Rule-based traffic alerts — NO LLM, zero credit cost."""
+    hour = datetime.utcnow().hour
+    loc = detect_city(lat, lng)
+    alerts = []
+    if 7 <= hour <= 9:
+        alerts.append({"type": "warning", "title": "Morning Rush Hour", "message": f"Heavy traffic expected in {loc['city']}. Avoid major highways.", "severity": "medium"})
+    if 17 <= hour <= 19:
+        alerts.append({"type": "warning", "title": "Evening Rush Hour", "message": "Peak congestion period. Consider alternative routes.", "severity": "medium"})
+    if hour >= 22 or hour <= 5:
+        alerts.append({"type": "info", "title": "Night Driving", "message": "Roads are clear but drive carefully. Use headlights.", "severity": "low"})
+    if not alerts:
+        alerts.append({"type": "info", "title": "Normal Traffic", "message": f"Traffic is flowing normally in {loc['city']}.", "severity": "low"})
+    return {"success": True, "alerts": alerts, "count": len(alerts), "powered_by": "rule-based"}
 
 @ai_router.get("/ai/earnings-predictor/{user_id}")
 async def predict_earnings(user_id: str, hours_to_drive: int = 8):
-    """AI-powered earnings prediction for drivers"""
-    # Get historical data
+    """Rule-based earnings prediction — NO LLM, zero credit cost."""
     stats = await db.trips.aggregate([
         {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {
-            "_id": None,
-            "total_earnings": {"$sum": "$fare"},
-            "total_trips": {"$sum": 1},
-            "avg_fare": {"$avg": "$fare"},
-            "avg_duration": {"$avg": "$duration_mins"}
-        }}
+        {"$group": {"_id": None, "total": {"$sum": "$fare"}, "count": {"$sum": 1}}}
     ]).to_list(1)
-    
-    driver_stats = stats[0] if stats else None
-    
-    # Get hourly pattern
-    hourly_stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {
-            "_id": {"$hour": "$created_at"},
-            "avg_fare": {"$avg": "$fare"},
-            "count": {"$sum": 1}
-        }},
-        {"$sort": {"avg_fare": -1}}
-    ]).to_list(24)
-    
-    # Calculate predictions
-    if driver_stats and driver_stats["total_trips"] > 0:
-        avg_trips_per_hour = driver_stats["total_trips"] / max(1, driver_stats["total_trips"] / 8)  # Assuming 8hr average day
-        avg_fare = driver_stats["avg_fare"]
-        
-        # Base prediction
-        predicted_trips = int(hours_to_drive * 2.5)  # Average 2.5 trips/hour in Lagos
-        predicted_earnings = predicted_trips * avg_fare
-        
-        # Find best hours
-        best_hours = [h["_id"] for h in hourly_stats[:3]] if hourly_stats else [7, 8, 17, 18]
+    if stats:
+        avg_per_trip = stats[0]["total"] / max(stats[0]["count"], 1)
+        trips_per_hour = 2.5
     else:
-        # Default for new drivers (Lagos averages)
-        avg_fare = 2500
-        predicted_trips = int(hours_to_drive * 2)
-        predicted_earnings = predicted_trips * avg_fare
-        best_hours = [7, 8, 17, 18]
-    
-    # Conservative, realistic, optimistic
-    predictions = {
-        "conservative": int(predicted_earnings * 0.7),
-        "realistic": int(predicted_earnings),
-        "optimistic": int(predicted_earnings * 1.3)
-    }
-    
-    # Use AI for personalized tips
-    ai_tip = "Focus on peak hours and high-demand areas for best results."
-    if EMERGENT_LLM_KEY:
-        try:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"predictor-{user_id}",
-                system_message="You are NEXRYDE's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
-            ).with_model("openai", "gpt-4o-mini")
-            
-            user_message = UserMessage(text=f"Driver average fare: ₦{avg_fare:.0f}, planning to drive {hours_to_drive} hours. One tip?")
-            ai_tip = await chat.send_message(user_message)
-        except:
-            pass
-    
+        avg_per_trip = 2500
+        trips_per_hour = 2
+    predicted_daily = avg_per_trip * trips_per_hour * hours_to_drive
     return {
-        "predicted_earnings": predictions,
-        "predicted_trips": predicted_trips,
-        "hours_planned": hours_to_drive,
-        "best_hours": best_hours,
-        "avg_fare": avg_fare,
-        "tip": ai_tip,
-        "disclaimer": "Predictions based on historical data. Actual earnings may vary."
+        "success": True,
+        "predictions": {
+            "daily": round(predicted_daily),
+            "weekly": round(predicted_daily * 6),
+            "monthly": round(predicted_daily * 24),
+        },
+        "avg_per_trip": round(avg_per_trip),
+        "recommendations": [
+            "Drive during peak hours (7-9 AM, 5-7 PM) for higher fares",
+            "Stay near Victoria Island and Lekki for premium rides",
+            "Maintain 4.5+ rating for priority matching",
+        ],
+        "powered_by": "rule-based"
     }
 
 @ai_router.get("/drivers/{user_id}/fatigue-status")
