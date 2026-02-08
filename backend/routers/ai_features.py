@@ -443,146 +443,26 @@ async def save_smart_mode_settings(driver_id: str, settings: SmartModeSettings):
 
 @ai_router.post("/ai/coach/get-suggestions")
 async def get_ai_coach_suggestions(driver_id: str, lat: float = None, lng: float = None, city: str = None):
-    """
-    Use ChatGPT to provide personalized coaching suggestions for driver.
-    Cached for 2 hours per driver to save credits.
-    """
+    """Smart coaching suggestions based on driver stats — NO LLM, zero credit cost."""
     try:
-        # Check cache first
-        cache_key = f"coach_{driver_id}"
-        cached = await db.ai_cache.find_one({"key": cache_key})
-        if cached:
-            created = cached.get("created_at", datetime.min)
-            if hasattr(created, 'tzinfo') and created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            if (datetime.now(timezone.utc) - created).total_seconds() < 7200:  # 2 hour cache
-                return cached["data"]
-
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        emergent_key = os.getenv('EMERGENT_LLM_KEY', '')
-        
-        # Get driver stats
         driver_profile = await db.driver_profiles.find_one({"user_id": driver_id})
-        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
         driver_rating = driver_profile.get("rating", 5.0) if driver_profile else 5.0
-        
-        # Get recent trips
-        recent_trips = await db.trips.find(
-            {"driver_id": driver_id}
-        ).sort("created_at", -1).limit(10).to_list(10)
-        
-        # Calculate stats
-        total_trips = len(recent_trips)
-        avg_trip_time = sum([t.get("duration_min", 0) for t in recent_trips]) / max(total_trips, 1)
-        avg_earnings_per_trip = driver_earnings.get("today", 0) / max(total_trips, 1) if total_trips > 0 else 0
-        
-        # Detect driver's city
+        driver_earnings = driver_profile.get("earnings", {}) if driver_profile else {}
         loc = detect_city(lat, lng, city)
+        zones = loc.get("zones", ["Victoria Island", "Lekki", "Ikeja"])[:3]
         
-        # Build context for AI
-        coaching_context = f"""
-You are an expert AI Coach for NEXRYDE drivers in {loc["city"]}, {loc["state"]} State, Nigeria. Analyze this driver's performance and provide 4-5 personalized, actionable suggestions to increase earnings and improve service.
-
-DRIVER STATISTICS:
-- Current Rating: {driver_rating}/5.0
-- Today's Earnings: ₦{driver_earnings.get('today', 0):,.0f}
-- This Week's Earnings: ₦{driver_earnings.get('week', 0):,.0f}
-- Trips Today: {driver_earnings.get('trips_today', 0)}
-- Recent Trips: {total_trips}
-- Average Trip Duration: {avg_trip_time:.0f} minutes
-- Average Earnings/Trip: ₦{avg_earnings_per_trip:,.0f}
-- City: {loc["city"]}, {loc["state"]} State
-- High Demand Zones: {', '.join(loc["zones"])}
-- Time Now: {datetime.utcnow().strftime('%H:%M')} UTC
-
-PROVIDE COACHING IN THIS JSON FORMAT:
-[
-  {{
-    "title": "Short action title (max 5 words)",
-    "description": "Brief actionable advice (max 50 words)",
-    "impact": "Estimated earnings impact (e.g., '+₦5,000/week')",
-    "icon": "time" or "location" or "flash" or "car" or "star" or "trending-up",
-    "color": "#FF6B6B" or "#4ECDC4" or "#FFD93D" or "#6C5CE7" or "#00D46A",
-    "priority": "high" or "medium" or "low",
-    "category": "earnings" or "service" or "efficiency" or "safety"
-  }}
-]
-
-GUIDELINES:
-- Be specific to the driver's city ({loc["city"]}) - use local landmarks, roads, and areas
-- Focus on ACTIONABLE advice (not generic tips)
-- Include realistic earnings impact estimates
-- Consider time of day for time-sensitive suggestions
-- Provide 4-5 suggestions
-- Prioritize high-impact advice first
-- Be encouraging and supportive in tone
-- Reference specific areas in {loc["city"]} for hot zones and routes
-
-EXAMPLE GOOD SUGGESTIONS (adapt to driver's city):
-- "Drive during morning rush (7-9 AM) when demand is highest"
-- "Focus on high-demand areas: {', '.join(loc['zones'][:3])}"
-- "Maintain 4.8+ rating to unlock bonuses"
-- "Accept 90%+ of rides to qualify for incentives"
-"""
-
-        # Call AI via Emergent LLM
-        chat = LlmChat(
-            api_key=emergent_key,
-            session_id=f"coach-{driver_id}-{datetime.utcnow().strftime('%Y%m%d%H%M')}",
-            system_message="You are an expert AI driving coach for Nigerian ride-hailing drivers. You provide personalized, actionable advice to maximize earnings and service quality. Always respond with valid JSON only."
-        ).with_model("openai", "gpt-4o-mini")
+        suggestions = [
+            {"title": "Drive Peak Hours", "description": f"7-9 AM and 5-7 PM have highest demand in {loc['city']}. Start early!", "impact": "+₦12,000/week", "icon": "time", "color": "#FF6B6B", "priority": "high", "category": "earnings"},
+            {"title": f"Head to {zones[0]}", "description": f"{zones[0]} area has high demand right now. Position yourself there.", "impact": "+₦8,000/week", "icon": "location", "color": "#4ECDC4", "priority": "high", "category": "earnings"},
+            {"title": "Keep Rating Above 4.5", "description": f"Your rating is {driver_rating}/5.0. High ratings unlock premium ride requests.", "impact": "+₦5,000/week", "icon": "star", "color": "#FFD93D", "priority": "medium", "category": "service"},
+            {"title": "Accept More Rides", "description": "Accepting 90%+ of requests improves your visibility to riders nearby.", "impact": "+₦3,000/week", "icon": "flash", "color": "#6C5CE7", "priority": "medium", "category": "efficiency"},
+            {"title": "Stay Near Hotspots", "description": f"After drop-off, head to {zones[1]} or {zones[2]} instead of going home.", "impact": "+₦6,000/week", "icon": "trending-up", "color": "#00D46A", "priority": "medium", "category": "earnings"},
+        ]
         
-        user_msg = UserMessage(text=coaching_context)
-        ai_response_text = await chat.send_message(user_msg)
-        
-        # Extract JSON
-        import re
-        json_match = re.search(r'\[.*\]', ai_response_text, re.DOTALL)
-        if json_match:
-            suggestions = json.loads(json_match.group())
-        else:
-            # Fallback suggestions
-            suggestions = [
-                {
-                    "title": "Drive Peak Hours",
-                    "description": "7-9 AM and 5-7 PM have highest demand. Start early to maximize earnings.",
-                    "impact": "+₦12,000/week",
-                    "icon": "time",
-                    "color": "#FF6B6B",
-                    "priority": "high",
-                    "category": "earnings"
-                },
-                {
-                    "title": "Improve Accept Rate",
-                    "description": f"Your current rating is {driver_rating}/5.0. Maintain above 4.5 for premium rides.",
-                    "impact": "+₦8,000/week",
-                    "icon": "star",
-                    "color": "#FFD93D",
-                    "priority": "medium",
-                    "category": "service"
-                }
-            ]
-        
-        logger.info(f"AI Coach generated {len(suggestions)} suggestions for driver {driver_id}")
-        
-        return {
-            "success": True,
-            "suggestions": suggestions,
-            "generated_at": datetime.utcnow().isoformat(),
-            "driver_stats": {
-                "rating": driver_rating,
-                "today_earnings": driver_earnings.get("today", 0),
-                "trips_today": driver_earnings.get("trips_today", 0)
-            }
-        }
-        
+        return {"success": True, "suggestions": suggestions, "generated_at": datetime.utcnow().isoformat(), "driver_stats": {"rating": driver_rating, "today_earnings": driver_earnings.get("today", 0), "trips_today": driver_earnings.get("trips_today", 0)}}
     except Exception as e:
-        logger.error(f"AI Coach error: {str(e)}")
-        return {
-            "success": True,
-            "suggestions": [],
-            "fallback": True
-        }
+        logger.error(f"Coach error: {str(e)}")
+        return {"success": True, "suggestions": [], "fallback": True}
 
 
 # ==================== TRAFFIC PREDICTION AI ENDPOINTS ====================
