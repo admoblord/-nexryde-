@@ -76,8 +76,18 @@ async def report_danger_zone(request: dict):
 
 @safety_router.get("/alerts")
 async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id: str = "unknown"):
-    """Get AI-enhanced safety alerts for a driver's location"""
+    """Get AI-enhanced safety alerts for a driver's location - CACHED to save credits"""
     try:
+        # Cache key based on rounded location (same area = same alerts)
+        cache_key = f"safety_{round(lat,2)}_{round(lng,2)}"
+        
+        # Check cache first (1 hour TTL)
+        cached = await db.ai_cache.find_one({"key": cache_key})
+        if cached:
+            cache_age = (datetime.now(timezone.utc) - cached.get("created_at", datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
+            if cache_age < 3600:  # 1 hour cache
+                return {"success": True, "alerts": cached["data"], "location": {"lat": lat, "lng": lng}, "cached": True}
+
         zones = await db.danger_zones.find({}, {"_id": 0}).to_list(length=20)
         zone_summaries = []
         for z in zones[:5]:
@@ -86,7 +96,7 @@ async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id:
         from emergentintegrations.llm.chat import LlmChat, UserMessage
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
-            session_id=f"safety-{driver_id}",
+            session_id=f"safety-{cache_key}",
             system_message="You are a safety AI for ride-hailing drivers in Lagos, Nigeria. Generate concise safety alerts based on known danger zones. Respond with JSON array of alerts."
         ).with_model("openai", "gpt-4o-mini")
         prompt = f"""Based on these danger zones near coordinates ({lat}, {lng}):
@@ -106,7 +116,14 @@ Generate 3-4 safety alerts as a JSON array. Each alert should have:
         else:
             alerts = [{"type": "info", "priority": "medium", "title": "Stay Alert", "message": "Drive carefully in this area.", "zone_type": "general"}]
 
-        return {"success": True, "alerts": alerts, "location": {"lat": lat, "lng": lng}}
+        # Save to cache
+        await db.ai_cache.update_one(
+            {"key": cache_key},
+            {"$set": {"key": cache_key, "data": alerts, "created_at": datetime.now(timezone.utc)}},
+            upsert=True
+        )
+
+        return {"success": True, "alerts": alerts, "location": {"lat": lat, "lng": lng}, "cached": False}
     except Exception as e:
         logger.error(f"Safety alerts error: {str(e)}")
         return {"success": True, "alerts": [{"type": "info", "priority": "low", "title": "Stay Safe", "message": "No specific alerts for this area.", "zone_type": "general"}], "location": {"lat": lat, "lng": lng}}
