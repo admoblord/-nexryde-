@@ -84,7 +84,7 @@ const ALL_FEATURES = [
   { id: 'safety-alerts', label: 'Safety Alerts', icon: 'notifications', route: '/driver/safety-alerts', color: COLORS.danger },
   { id: 'community', label: 'Community', icon: 'people', route: '/driver/community', color: '#7C3AED' },
   { id: 'fleet-tracker', label: 'Fleet Tracker', icon: 'locate', route: '/driver/fleet-tracker', color: '#0E7490' },
-  { id: 'awareness', label: 'Awareness', icon: 'eye', route: '/driver/driver-awareness', color: '#1E3A5F' },
+  { id: 'radio', label: 'Radio', icon: 'radio', route: '/driver/radio', color: '#1E3A5F' },
   { id: 'support', label: 'Support', icon: 'help-circle', route: '/support', color: COLORS.secondary },
   { id: 'settings', label: 'Settings', icon: 'settings', route: '/settings', color: COLORS.primary },
 ];
