@@ -737,9 +737,18 @@ Be specific, practical, and focused on maximizing driver earnings while ensuring
 @ai_router.get("/ai/traffic/alerts")
 async def get_traffic_alerts(driver_id: str, lat: float, lng: float):
     """
-    Get AI-generated traffic alerts for driver's current location
+    Get AI-generated traffic alerts for driver's current location.
+    Cached for 30 minutes per location to save credits.
     """
     try:
+        cache_key = f"traffic_alerts_{round(lat,2)}_{round(lng,2)}"
+        cached = await db.ai_cache.find_one({"key": cache_key})
+        if cached:
+            created = cached.get("created_at", datetime.min)
+            if hasattr(created, 'tzinfo') and created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+            if (datetime.now(timezone.utc) - created).total_seconds() < 1800:
+                return cached["data"]
         # Get traffic incidents from Google Maps
         # (Note: This would require Google Maps Incidents API or similar)
         
