@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from typing import Set
@@ -1094,10 +1094,21 @@ async def send_otp(request: OTPRequest):
         cooldown_check = await check_resend_cooldown(request.phone)
         if not cooldown_check["can_resend"]:
             if cooldown_check.get("error"):
-                raise HTTPException(status_code=429, detail=cooldown_check["error"])
-            raise HTTPException(
-                status_code=429, 
-                detail=f"Please wait {cooldown_check['wait_seconds']} seconds before requesting a new code."
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "success": False,
+                        "message": cooldown_check["error"],
+                        "error": cooldown_check["error"]
+                    }
+                )
+            return JSONResponse(
+                status_code=429,
+                content={
+                    "success": False,
+                    "message": f"Please wait {cooldown_check['wait_seconds']} seconds before requesting a new code.",
+                    "wait_seconds": cooldown_check["wait_seconds"]
+                }
             )
         
         # Generate OTP
@@ -1184,11 +1195,19 @@ async def send_otp(request: OTPRequest):
             "provider": "mock"
         }
         
-    except HTTPException:
-        raise
+    except HTTPException as http_err:
+        # Re-raise HTTPException as proper JSON
+        return JSONResponse(
+            status_code=http_err.status_code,
+            content={
+                "success": False,
+                "message": str(http_err.detail),
+                "error": str(http_err.detail)
+            }
+        )
     except Exception as e:
         logger.error(f"Error sending OTP: {str(e)}")
-        # Final fallback
+        # Final fallback - ALWAYS return JSON
         otp = generate_otp()
         await save_otp_record(phone=request.phone, otp=otp, provider="mock")
         otp_store[request.phone] = {
@@ -1196,14 +1215,18 @@ async def send_otp(request: OTPRequest):
             "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
             "provider": "mock"
         }
-        return {
-            "success": True,
-            "message": "OTP sent successfully (test mode)",
-            "otp": otp,
-            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-            "provider": "mock"
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "OTP sent successfully (test mode - error fallback)",
+                "otp": otp,
+                "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                "provider": "mock",
+                "note": "Using fallback due to error"
+            }
+        )
 
 @api_router.post("/auth/request-otp-whatsapp")
 async def send_otp_whatsapp(request: OTPRequest):
@@ -1277,14 +1300,25 @@ async def send_otp_whatsapp(request: OTPRequest):
                 }
         
         # Termii not configured
-        return {
-            "success": False,
-            "message": "WhatsApp service not configured. Please use SMS instead."
-        }
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": False,
+                "message": "WhatsApp service not configured. Please use SMS instead.",
+                "error": "whatsapp_not_configured"
+            }
+        )
         
     except Exception as e:
         logger.error(f"WhatsApp OTP error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to send WhatsApp OTP")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": "Failed to send WhatsApp OTP. Please use SMS instead.",
+                "error": str(e)
+            }
+        )
 
 @api_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify):
@@ -1527,20 +1561,51 @@ async def exchange_google_session(request: SessionExchangeRequest, response: Res
                 "session_token": session_data.session_token
             }
             
-    except HTTPException:
-        raise
+    except HTTPException as http_err:
+        # Ensure HTTPException returns proper JSON
+        logger.error(f"HTTPException in Google auth: {http_err.detail}")
+        return JSONResponse(
+            status_code=http_err.status_code,
+            content={
+                "success": False,
+                "message": str(http_err.detail),
+                "error": str(http_err.detail),
+                "is_new_user": False
+            }
+        )
     except httpx.TimeoutException:
         logger.error("⏱️ Timeout connecting to Emergent Auth")
-        raise HTTPException(status_code=504, detail="Authentication service timeout. Please try again.")
+        return JSONResponse(
+            status_code=504,
+            content={
+                "success": False,
+                "message": "Authentication service timeout. Please try again.",
+                "error": "timeout"
+            }
+        )
     except httpx.NetworkError as e:
         logger.error(f"🌐 Network error connecting to Emergent Auth: {str(e)}")
-        raise HTTPException(status_code=503, detail="Cannot reach authentication service. Please check your connection.")
+        return JSONResponse(
+            status_code=503,
+            content={
+                "success": False,
+                "message": "Cannot reach authentication service. Please check your connection.",
+                "error": "network_error"
+            }
+        )
     except Exception as e:
         logger.error(f"❌ Google session exchange error: {str(e)}")
         logger.error(f"Error type: {type(e).__name__}")
         import traceback
         logger.error(f"Traceback: {traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Failed to process Google sign-in: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"Failed to process Google sign-in: {str(e)}",
+                "error": str(e)
+            }
+        )
 
 # Legacy Google Sign-In endpoint (for backwards compatibility)
 class GoogleSignInRequest(BaseModel):
@@ -1590,41 +1655,93 @@ async def google_sign_in(request: GoogleSignInRequest):
 
 @api_router.post("/auth/register")
 async def register(request: RegisterRequest):
-    # Check for existing user by phone or email
-    if request.phone:
-        existing = await db.users.find_one({"phone": request.phone})
-        if existing:
-            raise HTTPException(status_code=400, detail="User with this phone already exists")
+    """Register new user with comprehensive error handling"""
+    try:
+        # Check for existing user by phone or email
+        if request.phone:
+            existing = await db.users.find_one({"phone": request.phone})
+            if existing:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": "User with this phone already exists",
+                        "error": "phone_exists"
+                    }
+                )
+        
+        if request.email:
+            existing = await db.users.find_one({"email": request.email})
+            if existing:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": "User with this email already exists",
+                        "error": "email_exists"
+                    }
+                )
+        
+        if request.google_id:
+            existing = await db.users.find_one({"google_id": request.google_id})
+            if existing:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "success": False,
+                        "message": "User with this Google account already exists",
+                        "error": "google_id_exists"
+                    }
+                )
+        
+        user = User(
+            phone=request.phone or "",
+            name=request.name, 
+            email=request.email, 
+            role=request.role, 
+            is_verified=True,
+            google_id=request.google_id,
+            profile_image=request.profile_image
+        )
+        await db.users.insert_one(user.dict())
+        
+        wallet = Wallet(user_id=user.id)
+        await db.wallets.insert_one(wallet.dict())
+        
+        if request.role == "driver":
+            driver_profile = DriverProfile(user_id=user.id)
+            await db.driver_profiles.insert_one(driver_profile.dict())
+        
+        logger.info(f"✅ User registered successfully: {user.name} ({user.role})")
+        
+        return JSONResponse(
+            status_code=200,
+            content={
+                "success": True,
+                "message": "Registration successful",
+                "user": user.dict()
+            }
+        )
     
-    if request.email:
-        existing = await db.users.find_one({"email": request.email})
-        if existing:
-            raise HTTPException(status_code=400, detail="User with this email already exists")
-    
-    if request.google_id:
-        existing = await db.users.find_one({"google_id": request.google_id})
-        if existing:
-            raise HTTPException(status_code=400, detail="User with this Google account already exists")
-    
-    user = User(
-        phone=request.phone or "",
-        name=request.name, 
-        email=request.email, 
-        role=request.role, 
-        is_verified=True,
-        google_id=request.google_id,
-        profile_image=request.profile_image
-    )
-    await db.users.insert_one(user.dict())
-    
-    wallet = Wallet(user_id=user.id)
-    await db.wallets.insert_one(wallet.dict())
-    
-    if request.role == "driver":
-        driver_profile = DriverProfile(user_id=user.id)
-        await db.driver_profiles.insert_one(driver_profile.dict())
-    
-    return {"message": "Registration successful", "user": user.dict()}
+    except HTTPException as http_err:
+        return JSONResponse(
+            status_code=http_err.status_code,
+            content={
+                "success": False,
+                "message": str(http_err.detail),
+                "error": str(http_err.detail)
+            }
+        )
+    except Exception as e:
+        logger.error(f"Registration error: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "message": f"Registration failed: {str(e)}",
+                "error": str(e)
+            }
+        )
 
 @api_router.post("/auth/logout")
 async def logout(request: Request, response: Response):

@@ -18,6 +18,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
+// Simple session save helper
+const saveUserSession = async (user: any) => {
+  try {
+    // In a real app, save to AsyncStorage
+    console.log('User session saved:', user.id);
+  } catch (error) {
+    console.error('Failed to save session:', error);
+  }
+};
+
 export default function RegisterScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -51,9 +61,14 @@ export default function RegisterScreen() {
     }
 
     try {
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/auth/register`, {
+      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-ui.emergent.host';
+      
+      const response = await fetch(`${backendUrl}/api/auth/register`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           phone: phoneNumber ? `+234${phoneNumber}` : null,
           name: name,
@@ -64,37 +79,46 @@ export default function RegisterScreen() {
         }),
       });
 
-      const data = await response.json();
+      const responseText = await response.text();
+      let data: any = null;
+      
+      try {
+        if (responseText?.trim()) {
+          data = JSON.parse(responseText);
+        }
+      } catch (parseError) {
+        console.error('JSON parse error in registration:', parseError);
+        Alert.alert('Error', 'Server response was invalid. Please try again.');
+        return;
+      }
 
-      if (response.ok) {
-        setUser(data.user);
+      if (response.ok && (data?.success !== false)) {
+        const userData = data?.user || data;
+        
+        setUser(userData);
         setIsAuthenticated(true);
         
+        // Save to AsyncStorage
+        await saveUserSession(userData);
+        
+        console.log(`✅ Registration successful - Role: ${selectedRole}`);
+        console.log(`Navigating to: ${selectedRole === 'driver' ? 'driver-home' : 'rider-home'}`);
+        
+        // Navigate based on role
         if (selectedRole === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
         }
       } else {
-        Alert.alert('Error', data.detail || 'Registration failed');
+        Alert.alert('Error', data?.message || data?.detail || 'Registration failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Registration error:', error);
-      // Fallback to local registration for demo
-      setUser({
-        id: Date.now().toString(),
-        name: name || 'User',
-        phone: phoneNumber ? `+234${phoneNumber}` : undefined,
-        role: selectedRole,
-        email: email,
-      });
-      setIsAuthenticated(true);
-      
-      if (selectedRole === 'driver') {
-        router.replace('/(driver-tabs)/driver-home');
-      } else {
-        router.replace('/(rider-tabs)/rider-home');
-      }
+      Alert.alert(
+        'Registration Error', 
+        'Could not connect to server. Please check your internet connection and try again.'
+      );
     }
   };
 

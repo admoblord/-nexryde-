@@ -291,10 +291,12 @@ export default function SplashScreen() {
 
         {/* Secondary Options */}
         <View style={styles.secondaryOptions}>
-          <TouchableOpacity style={styles.secondaryButton}>
-            <Ionicons name="car" size={18} color={COLORS.textSecondary} />
-            <Text style={styles.secondaryText}>Become a Driver</Text>
-          </TouchableOpacity>
+          <Link href="/(auth)/login" asChild>
+            <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.8}>
+              <Ionicons name="car" size={18} color={COLORS.textSecondary} />
+              <Text style={styles.secondaryText}>Become a Driver</Text>
+            </TouchableOpacity>
+          </Link>
         </View>
       </Animated.View>
 

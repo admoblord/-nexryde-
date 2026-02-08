@@ -97,14 +97,19 @@ export default function LoginScreen() {
       });
 
       const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch {}
+      let data: Record<string, any> | null = null;
+      try {
+        if (text?.trim()) data = JSON.parse(text);
+      } catch {
+        Alert.alert("OTP Error", "Server response was invalid. Please check your connection and try again.");
+        return;
+      }
 
       if (!res.ok) {
         if (res.status === 429 && data?.detail) {
           Alert.alert("Please Wait", data.detail);
         } else {
-          Alert.alert("OTP failed", data?.detail || data?.message || text || "Unknown error. Please try again.");
+          Alert.alert("OTP failed", data?.detail || data?.message || "Could not send code. Please try again.");
         }
         return;
       }
@@ -162,9 +167,14 @@ export default function LoginScreen() {
       });
       
       const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch {}
-      
+      let data: Record<string, any> | null = null;
+      try {
+        if (text?.trim()) data = JSON.parse(text);
+      } catch {
+        Alert.alert('WhatsApp OTP Error', 'Server response was invalid. Try SMS instead.');
+        return;
+      }
+
       if (!res.ok) {
         if (res.status === 429 && data?.detail) {
           Alert.alert("Please Wait", data.detail);
@@ -271,40 +281,28 @@ export default function LoginScreen() {
       
       console.log('Backend response status:', response.status);
       
-      // Check if response is ok before parsing
-      const contentType = response.headers.get('content-type');
-      console.log('Response content-type:', contentType);
-      
-      if (!contentType || !contentType.includes('application/json')) {
-        console.error('Response is not JSON. Content-Type:', contentType);
-        const textResponse = await response.text();
-        console.error('Raw response:', textResponse.substring(0, 200));
-        Alert.alert('Error', 'Server returned an unexpected response. Please try again.');
-        return false;
-      }
-      
-      let data;
+      const responseText = await response.text();
+      console.log('Response text length:', responseText?.length ?? 0);
+
+      let data: Record<string, any> | null = null;
       try {
-        const responseText = await response.text();
-        console.log('Response text length:', responseText.length);
-        
-        if (!responseText || responseText.trim() === '') {
-          console.error('Empty response from server');
-          Alert.alert('Error', 'Server returned empty response. Please try again.');
-          return false;
+        if (responseText?.trim()) {
+          data = JSON.parse(responseText);
         }
-        
-        data = JSON.parse(responseText);
       } catch (parseError) {
         console.error('JSON parse error:', parseError);
-        Alert.alert('Error', 'Could not process server response. Please try again.');
+        Alert.alert('Sign In Error', 'Server response was invalid. Please try again or use phone sign-in.');
         return false;
       }
-      
+
       if (!response.ok) {
-        const errorMessage = data.detail || data.message || 'Authentication failed';
-        console.error('Auth error:', errorMessage);
-        Alert.alert('Sign In Failed', errorMessage);
+        const errorMessage = data?.detail || data?.message || (typeof data?.error === 'string' ? data.error : null) || 'Unable to sign in. Try again or use phone sign-in.';
+        Alert.alert('Sign In Failed', typeof errorMessage === 'string' ? errorMessage : 'Unable to sign in. Please try again.');
+        return false;
+      }
+
+      if (!data) {
+        Alert.alert('Sign In Error', 'Empty response from server. Please try again.');
         return false;
       }
       

@@ -126,24 +126,24 @@ export default function RiderProfileScreen() {
   };
 
   const handleCompleteSwitch = () => {
-    // Update user role
     if (user) {
       setUser({ ...user, role: 'driver' });
     }
     setShowSwitchModal(false);
     setVerificationStep(0);
     setOtp('');
-    
+
     Alert.alert(
       'Welcome, Driver!',
       'Your account has been upgraded to Driver. You can now earn with NEXRYDE!',
-      [{ 
-        text: 'Start Earning', 
-        onPress: () => {
-          // Navigate to driver verification/onboarding first
-          router.replace('/driver/verification');
-        }
-      }]
+      [
+        {
+          text: 'Start Earning',
+          onPress: () => {
+            router.replace('/(driver-tabs)/driver-home');
+          },
+        },
+      ]
     );
   };
 

@@ -62,25 +62,35 @@ export default function VerifyScreen() {
         }),
       });
 
-      const data = await response.json();
-      
-      if (!response.ok) {
-        throw new Error(data.detail || 'Verification failed');
+      const text = await response.text();
+      let data: Record<string, any> | null = null;
+      try {
+        data = text ? JSON.parse(text) : null;
+      } catch {
+        Alert.alert('Verification Failed', 'Server returned an invalid response. Please try again.');
+        return;
       }
-      
+
+      if (!data) {
+        Alert.alert('Verification Failed', 'Invalid response from server. Please try again.');
+        return;
+      }
+
+      if (!response.ok) {
+        const msg = data.detail || data.message || 'Verification failed';
+        throw new Error(typeof msg === 'string' ? msg : 'Verification failed');
+      }
+
       if (data.is_new_user) {
-        // New user - go to registration
         router.push({
           pathname: '/(auth)/register',
           params: { phone }
         });
       } else {
-        // Existing user - log them in
         setUser(data.user);
         setIsAuthenticated(true);
-        
-        // Route to appropriate app based on role
-        if (data.user.role === 'driver') {
+
+        if (data.user?.role === 'driver') {
           router.replace('/(driver-tabs)/driver-home');
         } else {
           router.replace('/(rider-tabs)/rider-home');
