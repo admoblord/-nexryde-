@@ -76,54 +76,21 @@ async def report_danger_zone(request: dict):
 
 @safety_router.get("/alerts")
 async def get_safety_alerts(lat: float = 6.5244, lng: float = 3.3792, driver_id: str = "unknown"):
-    """Get AI-enhanced safety alerts for a driver's location - CACHED to save credits"""
+    """Rule-based safety alerts — NO LLM, zero credit cost."""
     try:
-        # Cache key based on rounded location (same area = same alerts)
-        cache_key = f"safety_{round(lat,2)}_{round(lng,2)}"
-        
-        # Check cache first (1 hour TTL)
-        cached = await db.ai_cache.find_one({"key": cache_key})
-        if cached:
-            cache_age = (datetime.now(timezone.utc) - cached.get("created_at", datetime.min.replace(tzinfo=timezone.utc))).total_seconds()
-            if cache_age < 3600:  # 1 hour cache
-                return {"success": True, "alerts": cached["data"], "location": {"lat": lat, "lng": lng}, "cached": True}
-
         zones = await db.danger_zones.find({}, {"_id": 0}).to_list(length=20)
-        zone_summaries = []
+        alerts = []
         for z in zones[:5]:
-            zone_summaries.append(f"{z.get('location', {}).get('address', 'Unknown')}: {z.get('type', 'general')} - {z.get('description', '')[:80]}")
-
-        from emergentintegrations.llm.chat import LlmChat, UserMessage
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"safety-{cache_key}",
-            system_message="You are a safety AI for ride-hailing drivers in Lagos, Nigeria. Generate concise safety alerts based on known danger zones. Respond with JSON array of alerts."
-        ).with_model("openai", "gpt-4o-mini")
-        prompt = f"""Based on these danger zones near coordinates ({lat}, {lng}):
-{chr(10).join(zone_summaries)}
-
-Generate 3-4 safety alerts as a JSON array. Each alert should have:
-- type: "danger", "warning", or "info"
-- priority: "critical", "high", "medium", or "low"
-- title: short alert title
-- message: brief safety message
-- zone_type: area_boys, checkpoint, robbery, flooding, or general"""
-
-        response = await chat.send_message(UserMessage(text=prompt))
-        json_match = re.search(r'\[.*\]', response, re.DOTALL)
-        if json_match:
-            alerts = json.loads(json_match.group())
-        else:
-            alerts = [{"type": "info", "priority": "medium", "title": "Stay Alert", "message": "Drive carefully in this area.", "zone_type": "general"}]
-
-        # Save to cache
-        await db.ai_cache.update_one(
-            {"key": cache_key},
-            {"$set": {"key": cache_key, "data": alerts, "created_at": datetime.now(timezone.utc)}},
-            upsert=True
-        )
-
-        return {"success": True, "alerts": alerts, "location": {"lat": lat, "lng": lng}, "cached": False}
+            alerts.append({
+                "type": "warning" if z.get("type") in ["area_boys", "robbery"] else "info",
+                "priority": "high" if z.get("type") in ["area_boys", "robbery"] else "medium",
+                "title": f"{z.get('type', 'Alert').replace('_', ' ').title()} Zone",
+                "message": z.get("description", "Stay alert in this area")[:100],
+                "zone_type": z.get("type", "general")
+            })
+        if not alerts:
+            alerts = [{"type": "info", "priority": "low", "title": "All Clear", "message": "No safety concerns in your area. Drive safely!", "zone_type": "general"}]
+        return {"success": True, "alerts": alerts, "location": {"lat": lat, "lng": lng}, "powered_by": "rule-based"}
     except Exception as e:
         logger.error(f"Safety alerts error: {str(e)}")
         return {"success": True, "alerts": [{"type": "info", "priority": "low", "title": "Stay Safe", "message": "No specific alerts for this area.", "zone_type": "general"}], "location": {"lat": lat, "lng": lng}}
