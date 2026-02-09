@@ -503,14 +503,6 @@ export default function RiderProfileScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/ai-buddy')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="chatbubbles-outline" size={20} color={COLORS.success} />
-            </View>
-            <Text style={styles.menuText}>AI Buddy</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/chat')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.primarySoft }]}>
               <Ionicons name="chatbox-outline" size={20} color={COLORS.primary} />
