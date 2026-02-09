@@ -99,7 +99,7 @@ const ALL_FEATURES = [
   { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/rider/traffic-status', color: COLORS.warning },
   
   // Support & Tools
-  { id: 'assistant', label: 'AI Buddy', icon: 'chatbubbles', route: '/ai-buddy', color: COLORS.primary },
+  { id: 'support', label: 'Support', icon: 'headset', route: '/support', color: COLORS.primary },
   { id: 'chat', label: 'Messages', icon: 'chatbox', route: '/chat', color: COLORS.secondary },
   { id: 'support', label: 'Support', icon: 'help-circle', route: '/support', color: COLORS.warning },
   { id: 'lost-found', label: 'Lost Items', icon: 'search', route: '/lost-found', color: COLORS.danger },
