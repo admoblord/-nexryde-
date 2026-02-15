@@ -19,7 +19,7 @@ auth_router = APIRouter(prefix="/api", tags=["Auth"])
 # Config
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
 TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
-TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'OEAlert')
+TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', 'https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data')
 
 # OTP Configuration
