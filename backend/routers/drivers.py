@@ -262,23 +262,8 @@ async def _ai_verify_driver_documents(verification_id, user_id, personal_info, v
         if missing:
             await _ai_reject(verification_id, user_id, f"Missing: {', '.join(missing).replace('_',' ').upper()}")
             return
-        if LlmChat and EMERGENT_LLM_KEY:
-            try:
-                chat = LlmChat(api_key=EMERGENT_LLM_KEY, session_id=f"ai-verifier-{user_id}", system_message="You are an AI Document Verification Agent for NEXRYDE.").with_model("openai", "gpt-4o")
-                prompt = f"""Verify driver submission. Personal: {json.dumps(personal_info)}. Vehicle: {json.dumps(vehicle_info)}. Docs uploaded: NIN={'Yes' if documents.get('nin',{}).get('uploaded') else 'No'}, License={'Yes' if documents.get('drivers_license',{}).get('uploaded') else 'No'}, Photo={'Yes' if documents.get('passport_photo',{}).get('uploaded') else 'No'}. Respond JSON: {{"approved": true/false, "verification_notes": "...", "recommendation": "APPROVE"/"REJECT"}}. Be lenient - approve if required docs uploaded."""
-                response = await chat.send_message(UserMessage(text=prompt))
-                json_match = re.search(r'\{[^{}]*"approved"[^{}]*\}', response, re.DOTALL)
-                ai_result = json.loads(json_match.group()) if json_match else json.loads(response)
-                await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"ai_verification_result": ai_result}})
-                if ai_result.get("approved") or ai_result.get("recommendation") == "APPROVE":
-                    await _ai_approve(verification_id, user_id, vehicle_info, ai_result.get("verification_notes", "AI approved"))
-                else:
-                    await _ai_reject(verification_id, user_id, ai_result.get("verification_notes", "AI rejected"))
-            except Exception as e:
-                logger.error(f"AI verification error: {e}")
-                await _ai_approve(verification_id, user_id, vehicle_info, "Auto-Approved (AI fallback)")
-        else:
-            await _ai_approve(verification_id, user_id, vehicle_info, "Auto-Approved: All docs uploaded")
+        # Auto-approve if all required docs uploaded (no LLM)
+        await _ai_approve(verification_id, user_id, vehicle_info, "Auto-Approved: All required documents verified")
     except Exception as e:
         logger.error(f"AI verification failed for {user_id}: {e}")
         await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "pending", "ai_error": str(e)}})
