@@ -8,7 +8,7 @@ import json
 import re
 import logging
 
-from database import db, EMERGENT_LLM_KEY, GOOGLE_MAPS_API_KEY
+from database import db
 
 logger = logging.getLogger('server')
 ai_router = APIRouter(prefix="/api", tags=["AI Features"])
