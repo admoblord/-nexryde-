@@ -13,11 +13,6 @@ from database import db
 logger = logging.getLogger('server')
 ai_router = APIRouter(prefix="/api", tags=["AI Features"])
 
-# Import LLM classes
-try:
-except ImportError:
-
-
 # ==================== LOCATION HELPER ====================
 
 # Nigerian city data - coordinates and common info for location detection
