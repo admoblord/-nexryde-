@@ -22,7 +22,6 @@ import time
 from openai import OpenAI
 
 # Import LLM Chat for AI Assistants
-from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # Import Subscription Management System
 from subscription_manager import subscription_router
@@ -69,8 +68,6 @@ db = client[os.environ.get('DB_NAME', 'nexryde_db')]
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 # Emergent LLM Key for AI Assistants
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # Termii SMS OTP Configuration
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')

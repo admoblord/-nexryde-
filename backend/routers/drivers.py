@@ -14,10 +14,7 @@ import asyncio
 from database import db
 
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
 except ImportError:
-    LlmChat = None
-    UserMessage = None
 
 try:
     from routers.auth import send_driver_verification_notification
@@ -28,7 +25,6 @@ except ImportError:
 logger = logging.getLogger('server')
 drivers_router = APIRouter(prefix="/api", tags=["Drivers"])
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
 TIER_CONFIG = {
     "basic": {"name": "KODA Basic", "monthly_fee": 25000, "earning_per_ride": {"min": 200, "max": 300}},

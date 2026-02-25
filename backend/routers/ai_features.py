@@ -15,11 +15,7 @@ ai_router = APIRouter(prefix="/api", tags=["AI Features"])
 
 # Import LLM classes
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
 except ImportError:
-    logger.warning("emergentintegrations not available")
-    LlmChat = None
-    UserMessage = None
 
 
 # ==================== LOCATION HELPER ====================

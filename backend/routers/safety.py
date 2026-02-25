@@ -6,7 +6,7 @@ import json
 import re
 import logging
 
-from database import db, EMERGENT_LLM_KEY
+from database import db
 
 logger = logging.getLogger('server')
 safety_router = APIRouter(prefix="/api/safety", tags=["Safety"])

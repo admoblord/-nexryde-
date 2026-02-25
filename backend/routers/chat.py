@@ -10,16 +10,11 @@ import uuid
 from database import db
 
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
 except ImportError:
-    LlmChat = None
-    UserMessage = None
 
 logger = logging.getLogger('server')
 chat_router = APIRouter(prefix="/api", tags=["Chat"])
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # ==================== MODELS ====================
 
