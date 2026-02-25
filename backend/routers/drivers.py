@@ -14,9 +14,6 @@ import asyncio
 from database import db
 
 try:
-except ImportError:
-
-try:
     from routers.auth import send_driver_verification_notification
 except ImportError:
     async def send_driver_verification_notification(user_id, status, reason=None):
