@@ -453,7 +453,7 @@ async def send_otp_whatsapp(request: OTPRequest):
                 payload = {
                     "api_key": TERMII_API_KEY,
                     "to": normalized_phone,
-                    "from": TERMII_FROM_ID,
+                    "from": "NEXRYDE",
                     "channel": "whatsapp",
                     "type": "plain",
                     "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
