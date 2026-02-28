@@ -9,9 +9,6 @@ import uuid
 
 from database import db
 
-try:
-except ImportError:
-
 logger = logging.getLogger('server')
 chat_router = APIRouter(prefix="/api", tags=["Chat"])
 
