@@ -359,7 +359,7 @@ async def send_otp(request: OTPRequest):
         try:
             async with httpx.AsyncClient() as http_client:
                 termii_phone = normalized_phone.lstrip('+')
-                sender_id = TERMII_FROM_ID or "OE Alert"
+                sender_id = "NEXRYDE"
                 
                 payload = {
                     "api_key": TERMII_API_KEY,
