@@ -9,7 +9,7 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-ui.emergent.host",
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY"
       }
     },
@@ -19,7 +19,7 @@
         "buildType": "app-bundle"
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-ui.emergent.host",
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
         "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY"
       }
     }
