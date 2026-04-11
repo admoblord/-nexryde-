@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,347 +7,391 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { deleteUserAccount, updateUser } from '@/src/services/api';
 import * as ImagePicker from 'expo-image-picker';
+import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMergedPreferences';
+import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
+import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
+import { ProfileWalletRewardsCard } from '@/src/components/profile/ProfileWalletRewardsCard';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, logout, setUser, subscription } = useAppStore();
+  const { colors } = useThemeColors();
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [profileImage, setProfileImage] = useState(user?.profile_image || null);
+  const isDriverVerified = useMemo(() => Boolean(user?.is_verified), [user?.is_verified]);
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
-          style: 'destructive',
-          onPress: () => {
-            logout();
-            // Clear all navigation state and go to login
-            router.dismissAll();
-            router.replace('/(auth)/login');
-          }
-        }
-      ]
-    );
+  const saveProfileImage = async (uri: string) => {
+    setProfileImage(uri);
+    if (user) {
+      setUser({ ...user, profile_image: uri });
+      try {
+        await updateUser(user.id, { profile_image: uri });
+      } catch {
+        console.log('Failed to save profile image to server');
+      }
+    }
   };
 
-  const handleSwitchToRider = () => {
-    setShowSwitchModal(true);
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.dismissAll();
+          router.replace('/(auth)/login');
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
+    Alert.alert(
+      'Delete Account',
+      'This will deactivate your driver account and remove access to NEXRYDE. This action cannot be undone easily.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (user?.id) await deleteUserAccount(user.id);
+              await logout();
+              router.replace('/(auth)/login');
+            } catch {
+              Alert.alert('Error', 'Could not delete account right now.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const confirmSwitchToRider = () => {
-    if (user) {
-      setUser({ ...user, role: 'rider' });
-    }
+    if (user) setUser({ ...user, role: 'rider' });
     setShowSwitchModal(false);
-    
-    Alert.alert(
-      'Switched to Rider',
-      'You can switch back to Driver mode anytime from your profile.',
-      [{ text: 'OK', onPress: () => router.replace('/(rider-tabs)/rider-home') }]
-    );
+    Alert.alert('Switched to Rider', 'You can switch back to Driver mode anytime from your profile.', [
+      { text: 'OK', onPress: () => router.replace('/(rider-tabs)/rider-home') },
+    ]);
   };
 
-  // 📸 PROFILE PICTURE UPLOAD
   const handleProfilePictureUpload = async () => {
-    Alert.alert(
-      'Update Profile Picture',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please allow camera access to take a photo.');
-              return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets[0]) {
-              setProfileImage(result.assets[0].uri);
-              if (user) {
-                setUser({ ...user, profile_image: result.assets[0].uri });
-              }
-              Alert.alert('Success', 'Profile picture updated!');
-            }
+    Alert.alert('Update Profile Picture', 'Choose an option', [
+      {
+        text: 'Take Photo',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow camera access to take a photo.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await saveProfileImage(result.assets[0].uri);
+            Alert.alert('Success', 'Profile picture updated!');
           }
         },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            const { status} = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please allow access to your photos.');
-              return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets[0]) {
-              setProfileImage(result.assets[0].uri);
-              if (user) {
-                setUser({ ...user, profile_image: result.assets[0].uri });
-              }
-              Alert.alert('Success', 'Profile picture updated!');
-            }
+      },
+      {
+        text: 'Choose from Gallery',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow access to your photos.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await saveProfileImage(result.assets[0].uri);
+            Alert.alert('Success', 'Profile picture updated!');
           }
         },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
   };
+
+  const initial = (user?.name && user.name.length > 0 ? user.name.charAt(0) : 'D').toUpperCase();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
-        <View style={styles.profileHeader}>
-          <TouchableOpacity style={styles.avatarContainer} onPress={handleProfilePictureUpload} activeOpacity={0.7}>
-            <View style={styles.avatar}>
-              {profileImage ? (
-                <Image source={{ uri: profileImage }} style={styles.avatarImage} />
-              ) : (
-                <Text style={styles.avatarText}>
-                  {(user?.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : 'D'}
-                </Text>
-              )}
-            </View>
-            <View style={styles.verifiedBadge}>
-              <Ionicons name="checkmark" size={12} color={COLORS.white} />
-            </View>
-            <View style={styles.cameraIcon}>
-              <Ionicons name="camera" size={16} color={COLORS.white} />
-            </View>
-          </TouchableOpacity>
-          <Text style={styles.userName}>{user?.name || 'Driver'}</Text>
-          <Text style={styles.userPhone}>{user?.phone || '+234'}</Text>
-          
-          <View style={styles.driverBadge}>
-            <Ionicons name="car" size={14} color={COLORS.success} />
-            <Text style={styles.driverBadgeText}>Verified Driver</Text>
-          </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: SPACING.lg }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <ProfileHeroCard
+          user={user}
+          profileImage={profileImage}
+          fallbackInitial={initial}
+          roleLabel={isDriverVerified ? 'Driver · Verified' : 'Driver'}
+          roleIcon="car-sport"
+          roleTint="#059669"
+          roleBg={COLORS.successSoft}
+          colors={colors}
+          onAvatarPress={handleProfilePictureUpload}
+        />
 
-          {/* Member Since */}
-          <Text style={styles.memberSince}>Driving since {user?.created_at ? new Date(user.created_at).toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : 'Recently'}</Text>
-          
-          {/* Driver Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <View style={styles.statIconWrap}>
-                <Ionicons name="star" size={18} color={COLORS.accent} />
-              </View>
-              <Text style={styles.statValue}>
-                {user?.trips_completed > 0 ? (user?.rating?.toFixed(1) || 'N/A') : 'New Driver'}
-              </Text>
-              <Text style={styles.statLabel}>Rating</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <View style={styles.statIconWrap}>
-                <Ionicons name="car" size={18} color={COLORS.info} />
-              </View>
-              <Text style={styles.statValue}>{user?.total_trips || 0}</Text>
-              <Text style={styles.statLabel}>Trips</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <View style={styles.statIconWrap}>
-                <Ionicons name="trending-up" size={18} color={COLORS.success} />
-              </View>
-              <Text style={styles.statValue}>98%</Text>
-              <Text style={styles.statLabel}>Completion</Text>
-            </View>
-          </View>
+        <ProfileQuickActions
+          title="Quick actions"
+          colors={colors}
+          actions={[
+            {
+              key: 'edit',
+              label: 'Edit Profile',
+              icon: 'create-outline',
+              iconColor: COLORS.gray700,
+              iconBg: COLORS.gray100,
+              onPress: () => router.push('/edit-profile'),
+            },
+            {
+              key: 'trips',
+              label: 'Trip History',
+              icon: 'list-outline',
+              iconColor: COLORS.info,
+              iconBg: COLORS.infoSoft,
+              onPress: () => router.push('/(driver-tabs)/driver-trips' as any),
+            },
+            {
+              key: 'vehicle',
+              label: 'Vehicle',
+              icon: 'car-outline',
+              iconColor: COLORS.accent,
+              iconBg: COLORS.accentSoft,
+              onPress: () => router.push('/driver/vehicle'),
+            },
+            {
+              key: 'bank',
+              label: 'Bank & payouts',
+              icon: 'wallet-outline',
+              iconColor: COLORS.success,
+              iconBg: COLORS.successSoft,
+              onPress: () => router.push('/driver/bank'),
+            },
+            {
+              key: 'docs',
+              label: 'Documents',
+              icon: 'document-text-outline',
+              iconColor: COLORS.warning,
+              iconBg: COLORS.warningSoft,
+              onPress: () => router.push('/driver/documents'),
+            },
+          ]}
+        />
+
+        <ProfileWalletRewardsCard userId={user?.id} colors={colors} />
+
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Preferences</Text>
+          <ProfileMergedPreferences variant="driver" />
         </View>
 
-        {/* Subscription Status */}
-        <TouchableOpacity 
-          style={styles.subscriptionCard}
-          onPress={() => router.push('/driver/subscription')}
-          activeOpacity={0.8}
-        >
-          <View style={styles.subscriptionHeader}>
-            <View style={[
-              styles.subscriptionIcon,
-              { backgroundColor: subscription?.status === 'active' ? COLORS.successSoft : COLORS.warningSoft }
-            ]}>
-              <Ionicons 
-                name={subscription?.status === 'active' ? 'checkmark-circle' : 'alert-circle'} 
-                size={24} 
-                color={subscription?.status === 'active' ? COLORS.success : COLORS.warning} 
-              />
-            </View>
-            <View style={styles.subscriptionInfo}>
-              <Text style={styles.subscriptionTitle}>
-                {subscription?.status === 'active' ? 'Premium Driver' : 'No Subscription'}
-              </Text>
-              <Text style={styles.subscriptionSubtext}>
-                {subscription?.status === 'active' 
-                  ? `Expires ${new Date(subscription.end_date).toLocaleDateString()}`
-                  : 'Subscribe to go online'
-                }
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </View>
-          <View style={styles.subscriptionBanner}>
-            <Text style={styles.subscriptionBannerText}>
-              From ₦18,000/month • City Rider or Road Warrior • 100% earnings
-            </Text>
-          </View>
-        </TouchableOpacity>
-
-        {/* Switch to Rider */}
-        <TouchableOpacity style={styles.switchRiderCard} onPress={handleSwitchToRider} activeOpacity={0.8}>
-          <View style={styles.switchRiderIcon}>
-            <Ionicons name="swap-horizontal" size={24} color={COLORS.info} />
-          </View>
-          <View style={styles.switchRiderContent}>
-            <Text style={styles.switchRiderTitle}>Switch to Rider Mode</Text>
-            <Text style={styles.switchRiderText}>Book rides as a passenger</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-        </TouchableOpacity>
-
-        {/* Menu Sections */}
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Driver Settings</Text>
-          
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/vehicle')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
-              <Ionicons name="car-outline" size={20} color={COLORS.accent} />
-            </View>
-            <Text style={styles.menuText}>Vehicle Information</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/bank')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="wallet-outline" size={20} color={COLORS.success} />
-            </View>
-            <Text style={styles.menuText}>Bank Account</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/documents')}>
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety & trust</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/tracking')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="document-text-outline" size={20} color={COLORS.info} />
+              <Ionicons name="navigate-outline" size={20} color={COLORS.info} />
             </View>
-            <Text style={styles.menuText}>Documents</Text>
+            <Text style={[styles.menuText, { color: colors.text }]}>Live Tracking</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/share-trip')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
+              <Ionicons name="share-social-outline" size={20} color={COLORS.accent} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Share Trip</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/security-code')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="lock-closed-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Security Code</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/safety-alerts')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.success} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Safety Center</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/shield-disputes')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(13, 148, 136, 0.15)' }]}>
+              <Ionicons name="ribbon-outline" size={20} color="#0D9488" />
+            </View>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Nexryde Shield</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Disputes</Text>
+            </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
         </View>
 
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Account</Text>
-          
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/edit-profile')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="person-outline" size={20} color={COLORS.gray600} />
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Grow & stay active</Text>
+          <TouchableOpacity
+            style={[styles.subscriptionCard, { borderColor: colors.border }]}
+            onPress={() => router.push('/driver/subscription')}
+            activeOpacity={0.85}
+          >
+            <View style={styles.subscriptionHeader}>
+              <View
+                style={[
+                  styles.subscriptionIcon,
+                  { backgroundColor: subscription?.status === 'active' ? COLORS.successSoft : COLORS.warningSoft },
+                ]}
+              >
+                <Ionicons
+                  name={subscription?.status === 'active' ? 'checkmark-circle' : 'alert-circle'}
+                  size={24}
+                  color={subscription?.status === 'active' ? COLORS.success : COLORS.warning}
+                />
+              </View>
+              <View style={styles.subscriptionInfo}>
+                <Text style={[styles.subscriptionTitle, { color: colors.text }]}>
+                  {subscription?.status === 'active' ? 'Driver subscription' : 'Subscription required'}
+                </Text>
+                <Text style={[styles.subscriptionSubtext, { color: colors.textSecondary }]}>
+                  {subscription?.status === 'active'
+                    ? `Active · renews ${new Date(subscription.end_date).toLocaleDateString()}`
+                    : 'Subscribe to go online and accept rides'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
             </View>
-            <Text style={styles.menuText}>Edit Profile</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/wallet')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+              <Ionicons name="people-outline" size={20} color={COLORS.warning} />
+            </View>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Invite & Earn</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Referrals & rewards</Text>
+            </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/notifications')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="notifications-outline" size={20} color={COLORS.gray600} />
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => setShowSwitchModal(true)}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="swap-horizontal" size={20} color={COLORS.info} />
             </View>
-            <Text style={styles.menuText}>Notifications</Text>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Switch to Rider Mode</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Book rides as a passenger</Text>
+            </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
+        </View>
 
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/language')}>
-            <View style={[styles.menuIcon, { backgroundColor: '#EDE9FE' }]}>
-              <Ionicons name="globe-outline" size={20} color="#7C3AED" />
-            </View>
-            <Text style={styles.menuText}>Language</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.linkRow, { backgroundColor: colors.card }]}
+          onPress={() => router.push('/driver/performance')}
+        >
+          <Ionicons name="analytics-outline" size={18} color={COLORS.accent} />
+          <Text style={[styles.linkRowText, { color: colors.text }]}>Performance & ratings</Text>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.gray400} />
+        </TouchableOpacity>
 
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & legal</Text>
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
             </View>
-            <Text style={styles.menuText}>Help & Support</Text>
+            <Text style={[styles.menuText, { color: colors.text }]}>Help & Support</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="document-text-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/terms-of-service')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="reader-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Terms of Service</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
         </View>
 
-        {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Account actions</Text>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast, styles.deleteRow]} onPress={handleDeleteAccount}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.errorSoft }]}>
+              <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+            </View>
+            <Text style={[styles.menuText, { color: COLORS.error }]}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.versionText}>NEXRYDE Driver v1.0.0</Text>
       </ScrollView>
 
-      {/* Switch to Rider Modal */}
-      <Modal
-        visible={showSwitchModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSwitchModal(false)}
+      <View
+        style={[
+          styles.logoutBar,
+          {
+            backgroundColor: colors.background,
+            borderTopColor: colors.border,
+            paddingBottom: Math.max(insets.bottom, SPACING.md),
+          },
+        ]}
       >
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={showSwitchModal} animationType="slide" transparent onRequestClose={() => setShowSwitchModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <TouchableOpacity 
-              style={styles.modalClose}
-              onPress={() => setShowSwitchModal(false)}
-            >
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowSwitchModal(false)}>
               <Ionicons name="close" size={24} color={COLORS.gray500} />
             </TouchableOpacity>
-
             <View style={styles.modalIconWrap}>
               <Ionicons name="person" size={40} color={COLORS.info} />
             </View>
-            <Text style={styles.modalTitle}>Switch to Rider?</Text>
-            <Text style={styles.modalSubtitle}>
-              You'll be able to book rides as a passenger. Your driver account will remain active and you can switch back anytime.
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Switch to Rider?</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+              Book rides as a passenger. Your driver account stays active; switch back anytime from profile.
             </Text>
-
             <View style={styles.modalNote}>
               <Ionicons name="information-circle" size={20} color={COLORS.info} />
-              <Text style={styles.modalNoteText}>
-                Your subscription and earnings are safe. Switch back to Driver mode from your Rider profile.
-              </Text>
+              <Text style={styles.modalNoteText}>Subscription and earnings are unchanged.</Text>
             </View>
-
-            <TouchableOpacity
-              style={styles.modalButton}
-              onPress={confirmSwitchToRider}
-            >
+            <TouchableOpacity style={styles.modalButton} onPress={confirmSwitchToRider}>
               <Text style={styles.modalButtonText}>Switch to Rider</Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.modalSecondaryButton}
-              onPress={() => setShowSwitchModal(false)}
-            >
-              <Text style={styles.modalSecondaryText}>Stay as Driver</Text>
+            <TouchableOpacity style={styles.modalSecondaryButton} onPress={() => setShowSwitchModal(false)}>
+              <Text style={[styles.modalSecondaryText, { color: colors.textSecondary }]}>Stay as Driver</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -357,223 +401,10 @@ export default function DriverProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-  },
-  content: {
-    padding: SPACING.lg,
-  },
-  profileHeader: {
-    alignItems: 'center',
-    paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xxl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.sm,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: SPACING.md,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.lg,
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 50,
-  },
-  avatarText: {
-    fontSize: FONT_SIZE.display,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.white,
-  },
-  cameraIcon: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.white,
-  },
-  userName: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  userPhone: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginTop: SPACING.xs,
-  },
-  driverBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.successSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    marginTop: SPACING.md,
-    gap: SPACING.xs,
-  },
-  driverBadgeText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#059669',
-  },
-  memberSince: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.gray400,
-    marginTop: 4,
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-    paddingTop: SPACING.lg,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.gray100,
-    width: '90%',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: COLORS.gray50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.xs,
-  },
-  statValue: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-  },
-  statLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: '#475569',
-    marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statDivider: {
-    width: 1,
-    height: 50,
-    backgroundColor: COLORS.gray200,
-  },
-  subscriptionCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.md,
-    ...SHADOWS.sm,
-  },
-  subscriptionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  subscriptionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  subscriptionInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  subscriptionTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  subscriptionSubtext: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#475569',
-  },
-  subscriptionBanner: {
-    backgroundColor: COLORS.accentSoft,
-    padding: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    marginTop: SPACING.md,
-    alignItems: 'center',
-  },
-  subscriptionBannerText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    color: '#059669',
-  },
-  switchRiderCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.info,
-    borderStyle: 'dashed',
-  },
-  switchRiderIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.infoSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  switchRiderContent: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  switchRiderTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  switchRiderText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#475569',
-  },
+  container: { flex: 1 },
+  scroll: { flex: 1 },
+  content: { padding: SPACING.lg },
   menuSection: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
@@ -582,13 +413,30 @@ const styles = StyleSheet.create({
   menuSectionTitle: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '800',
-    color: '#64748B',
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.sm,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  subscriptionCard: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+  },
+  subscriptionHeader: { flexDirection: 'row', alignItems: 'center' },
+  subscriptionIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subscriptionInfo: { flex: 1, marginLeft: SPACING.md },
+  subscriptionTitle: { fontSize: FONT_SIZE.md, fontWeight: '800' },
+  subscriptionSubtext: { fontSize: FONT_SIZE.sm, fontWeight: '600', marginTop: 4 },
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -596,6 +444,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray100,
   },
+  menuItemLast: { borderBottomWidth: 0 },
+  deleteRow: { backgroundColor: COLORS.errorSoft },
   menuIcon: {
     width: 40,
     height: 40,
@@ -608,7 +458,22 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.md,
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: '#0F172A',
+  },
+  menuSubtext: { fontSize: FONT_SIZE.sm, marginTop: 2 },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
+    ...SHADOWS.sm,
+  },
+  linkRowText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700' },
+  logoutBar: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.sm,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -618,38 +483,22 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.sm,
-    marginBottom: SPACING.md,
   },
-  logoutText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.error,
-  },
-  versionText: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
-    textAlign: 'center',
-  },
-  // Modal Styles
+  logoutText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.error },
+  versionText: { fontSize: FONT_SIZE.xs, color: COLORS.gray400, textAlign: 'center', marginBottom: SPACING.sm },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.6)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
     borderTopLeftRadius: BORDER_RADIUS.xxxl,
     borderTopRightRadius: BORDER_RADIUS.xxxl,
     padding: SPACING.xl,
-    paddingTop: SPACING.lg,
+    paddingTop: SPACING.xl + 8,
     alignItems: 'center',
   },
-  modalClose: {
-    position: 'absolute',
-    top: SPACING.md,
-    right: SPACING.md,
-    padding: SPACING.sm,
-  },
+  modalClose: { position: 'absolute', top: SPACING.md, right: SPACING.md, padding: SPACING.sm },
   modalIconWrap: {
     width: 80,
     height: 80,
@@ -659,17 +508,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: SPACING.lg,
   },
-  modalTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
-  },
+  modalTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '800', marginBottom: SPACING.sm },
   modalSubtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
     textAlign: 'center',
-    marginBottom: SPACING.lg,
+    marginBottom: SPACING.md,
     lineHeight: 22,
   },
   modalNote: {
@@ -682,36 +525,15 @@ const styles = StyleSheet.create({
     gap: SPACING.sm,
     width: '100%',
   },
-  modalNoteText: {
-    flex: 1,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.info,
-    lineHeight: 20,
-  },
+  modalNoteText: { flex: 1, fontSize: FONT_SIZE.sm, color: COLORS.info, lineHeight: 20 },
   modalButton: {
     backgroundColor: COLORS.info,
     paddingVertical: SPACING.lg,
-    paddingHorizontal: SPACING.xl,
     borderRadius: BORDER_RADIUS.xl,
     width: '100%',
     alignItems: 'center',
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    elevation: 4,
   },
-  modalButtonText: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.white,
-  },
-  modalSecondaryButton: {
-    marginTop: SPACING.md,
-    padding: SPACING.md,
-  },
-  modalSecondaryText: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
-  },
+  modalButtonText: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.white },
+  modalSecondaryButton: { marginTop: SPACING.md, padding: SPACING.md },
+  modalSecondaryText: { fontSize: FONT_SIZE.md },
 });

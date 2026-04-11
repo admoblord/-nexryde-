@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,23 +12,30 @@ import {
   Alert,
   Modal,
   Vibration,
+  Linking,
+  Platform,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
-import ActiveTripBar from '@/src/components/ActiveTripBar';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SupportedLanguage } from '@/src/i18n/translations';
+import { BACKEND_URL, getAuthHeaders, getDriverSubscriptionStatus } from '@/src/services/api';
+import DriverRideRequestModal, {
+  DRIVER_OFFER_TIMER_SECONDS,
+} from '@/src/components/DriverRideRequestModal';
 
 const { width } = Dimensions.get('window');
 
-// NEXRYDE BRAND COLORS - ASIAN DESIGN
 const COLORS = {
-  primary: '#22E180', // NEXRYDE Green
+  primary: '#22E180',
   primaryDark: '#1BC770',
-  secondary: '#6366F1', // Indigo
+  accentGreen: '#22E180',
+  secondary: '#6366F1',
   secondaryDark: '#4F46E5',
   background: '#F8FAFC',
   surface: '#FFFFFF',
@@ -41,66 +48,94 @@ const COLORS = {
   cardShadow: 'rgba(0, 0, 0, 0.04)',
 };
 
-// PRIORITY FEATURES - SHOWN UPFRONT
-const PRIORITY_FEATURES = [
-  { id: 'earnings', label: 'Earnings', icon: 'cash-outline', route: '/driver/earnings-dashboard', color: COLORS.primary },
-  { id: 'trips', label: 'My Trips', icon: 'list-outline', route: '/(driver-tabs)/driver-trips', color: COLORS.secondary },
-  { id: 'subscription', label: 'Subscription', icon: 'card-outline', route: '/driver/subscription', color: COLORS.warning },
-  { id: 'performance', label: 'Performance', icon: 'analytics-outline', route: '/driver/performance', color: COLORS.success },
-];
-
-// ALL FEATURES GRID - COMPREHENSIVE ACCESS  
-const ALL_FEATURES = [
-  // Verification & Setup
-  { id: 'verification', label: 'Verification', icon: 'shield-checkmark', route: '/driver/verification', color: COLORS.success },
-  { id: 'vehicle', label: 'Vehicle', icon: 'car-sport', route: '/driver/vehicle', color: COLORS.primary },
-  { id: 'vehicle-reg', label: 'Register Car', icon: 'create', route: '/driver/vehicle-registration', color: COLORS.secondary },
-  { id: 'documents', label: 'Documents', icon: 'document-text', route: '/driver/documents', color: COLORS.warning },
-  { id: 'bank', label: 'Bank Details', icon: 'wallet', route: '/driver/bank', color: COLORS.primary },
-  
-  // Business & Earnings
-  { id: 'challenges', label: 'Challenges', icon: 'trophy', route: '/driver/challenges', color: COLORS.warning },
-  { id: 'badges', label: 'Badges', icon: 'medal', route: '/driver/badges', color: COLORS.success },
-  { id: 'tiers', label: 'Tiers', icon: 'ribbon', route: '/driver/tiers', color: COLORS.primary },
-  { id: 'leaderboard', label: 'Leaderboard', icon: 'podium', route: '/driver/leaderboard', color: COLORS.secondary },
-  { id: 'data-insights', label: 'Insights', icon: 'bar-chart', route: '/driver/data-insights', color: COLORS.primary },
-  
-  // AI & Smart Features
-  { id: 'heatmap', label: 'Demand Map', icon: 'flame', route: '/driver/heatmap', color: COLORS.danger },
-  { id: 'ai-coach', label: 'AI Coach', icon: 'chatbubbles', route: '/driver/ai-suggestions', color: COLORS.primary },
-  { id: 'heatmap', label: 'Heatmap', icon: 'map', route: '/driver/heatmap', color: COLORS.warning },
-  { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.danger },
-  { id: 'community', label: 'Community', icon: 'people', route: '/driver/community', color: COLORS.secondary },
-  { id: 'accident-predict', label: 'Accident AI', icon: 'warning', route: '/driver/accident-prediction', color: COLORS.danger },
-  
-  // Wellness & Lifestyle
-  { id: 'wellness', label: 'Wellness', icon: 'fitness', route: '/driver/wellness', color: COLORS.success },
-  { id: 'prayer', label: 'Prayer Times', icon: 'moon', route: '/driver/prayer-times', color: COLORS.primary },
-  { id: 'story', label: 'Story Mode', icon: 'book', route: '/driver/story-mode', color: COLORS.secondary },
-  { id: 'radio', label: 'Radio', icon: 'radio', route: '/driver/radio', color: COLORS.warning },
-  
-  // Operations & Tools
-  { id: 'fuel', label: 'Fuel Tracker', icon: 'water', route: '/driver/fuel-tracker', color: COLORS.primary },
-  { id: 'safety-alerts', label: 'Safety Alerts', icon: 'notifications', route: '/driver/safety-alerts', color: COLORS.danger },
-  { id: 'community', label: 'Community', icon: 'people', route: '/driver/community', color: '#7C3AED' },
-  { id: 'fleet-tracker', label: 'Fleet Tracker', icon: 'locate', route: '/driver/fleet-tracker', color: '#0E7490' },
-  { id: 'radio', label: 'Radio', icon: 'radio', route: '/driver/radio', color: '#1E3A5F' },
-  { id: 'support', label: 'Support', icon: 'help-circle', route: '/support', color: COLORS.secondary },
-  { id: 'settings', label: 'Settings', icon: 'settings', route: '/settings', color: COLORS.primary },
-];
+// Feature arrays built inside component to use translations
 
 export default function ModernDriverHome() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, setCurrentTrip } = useAppStore();
+  const { language, setLanguage, availableLanguages, t } = useLanguage();
   const [isOnline, setIsOnline] = useState(false);
+
+  const PRIORITY_FEATURES = [
+    { id: 'earnings', label: t.driver.earnings, icon: 'cash-outline', route: '/(driver-tabs)/driver-earnings', color: COLORS.primary },
+    { id: 'trips', label: t.home.myTrips, icon: 'list-outline', route: '/(driver-tabs)/driver-trips', color: COLORS.secondary },
+    { id: 'subscription', label: t.wallet.payment, icon: 'card-outline', route: '/driver/subscription', color: COLORS.warning },
+    { id: 'support', label: t.home.support, icon: 'help-circle-outline', route: '/support', color: COLORS.success },
+  ];
+
+  const ALL_FEATURES = [
+    { id: 'vehicle', label: t.verification.vehicleVerified.split(' ')[0] || 'Vehicle', icon: 'car-sport', route: '/driver/vehicle', color: COLORS.primary },
+    { id: 'documents', label: t.verification.uploadDocuments.split(' ')[0] || 'Documents', icon: 'document-text', route: '/driver/documents', color: COLORS.warning },
+    { id: 'bank', label: t.wallet.withdraw.split(' ')[0] || 'Bank', icon: 'wallet', route: '/driver/bank', color: COLORS.primary },
+    { id: 'fleet-tracker', label: 'Fleet', icon: 'locate', route: '/driver/fleet-tracker', color: '#0E7490' },
+    { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.danger },
+    { id: 'safety-alerts', label: t.safety.safetyTips.split(' ')[0] || 'Alerts', icon: 'notifications', route: '/driver/safety-alerts', color: COLORS.danger },
+    { id: 'performance', label: t.driver.rating, icon: 'analytics', route: '/driver/performance', color: COLORS.secondary },
+    { id: 'community', label: 'Community', icon: 'people', route: '/driver/community', color: '#7C3AED' },
+    { id: 'shield', label: 'NEXRYDE Shield', icon: 'shield-checkmark', route: '/shield-disputes', color: '#0D9488' },
+  ];
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
+
+  // Load real earnings from backend
+  useEffect(() => {
+    if (!user?.id) return;
+    let mounted = true;
+    const fetchEarnings = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (mounted && data) {
+          setEarnings({
+            today: data.today_earnings || data.projections?.daily || 0,
+            week: data.week_earnings || data.projections?.weekly || 0,
+            trips: data.today_trips || data.total_trips || 0,
+          });
+        }
+      } catch { /* keep defaults */ }
+    };
+    fetchEarnings();
+    const interval = setInterval(fetchEarnings, 60000);
+    return () => { mounted = false; clearInterval(interval); };
+  }, [user?.id]);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const [incomingRide, setIncomingRide] = useState<any>(null);
-  const [rideCountdown, setRideCountdown] = useState(20);
+  const [rideCountdown, setRideCountdown] = useState(DRIVER_OFFER_TIMER_SECONDS);
+  const [counterFareInput, setCounterFareInput] = useState('');
   const [acceptingRide, setAcceptingRide] = useState(false);
   const [showLangPicker, setShowLangPicker] = useState(false);
-  const { language, setLanguage, availableLanguages } = useLanguage();
+  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const hydrateOnlineState = async () => {
+    if (!user?.id) return;
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/profile`, {
+        headers: getAuthHeaders(),
+      });
+      if (!response.ok) return;
+      const profile = await response.json();
+      const serverOnline = Boolean(profile?.is_online);
+      setIsOnline(serverOnline);
+    } catch {}
+  };
+  const fetchIncomingRide = async () => {
+    if (!user?.id) return;
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/trips/offers/${user.id}`,
+        { headers: getAuthHeaders() }
+      );
+      const trips = await res.json();
+      if (Array.isArray(trips) && trips.length > 0) {
+        setIncomingRide((prev: any) => prev || trips[0]);
+        setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+      }
+    } catch (e) {
+      console.error('Offer polling error:', e);
+    }
+  };
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -113,74 +148,228 @@ export default function ModernDriverHome() {
     
     // Check onboarding status first — this is the verification gate
     checkOnboardingStatus();
+    hydrateOnlineState();
   }, []);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        hydrateOnlineState();
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    let locationSub: Location.LocationSubscription | null = null;
+
+    const bootstrapLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+
+        const lastKnown = await Location.getLastKnownPositionAsync();
+        if (mounted && lastKnown) {
+          setDriverCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude });
+        }
+
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+        if (mounted) {
+          setDriverCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+        }
+
+        locationSub = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.High,
+            timeInterval: 5000,
+            distanceInterval: 10,
+          },
+          (update) => {
+            if (mounted) {
+              setDriverCoords({ lat: update.coords.latitude, lng: update.coords.longitude });
+            }
+          }
+        );
+      } catch (e) {
+        console.log('Driver location bootstrap failed:', e);
+      }
+    };
+    bootstrapLocation();
+    return () => {
+      mounted = false;
+      if (locationSub) locationSub.remove();
+    };
+  }, []);
+
+  // Push live location to backend for dispatch accuracy and rider tracking
+  useEffect(() => {
+    if (!isOnline || !user?.id || !driverCoords) return;
+    const pushLocation = async () => {
+      try {
+        await fetch(`${BACKEND_URL}/api/drivers/${user.id}/location`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ latitude: driverCoords.lat, longitude: driverCoords.lng }),
+        });
+      } catch {}
+    };
+    pushLocation();
+  }, [isOnline, user?.id, driverCoords?.lat, driverCoords?.lng]);
 
   // Poll for ride requests when online
   useEffect(() => {
     let pollInterval: ReturnType<typeof setInterval> | null = null;
     
     if (isOnline && !incomingRide) {
+      fetchIncomingRide();
       pollInterval = setInterval(async () => {
-        try {
-          // Default Lagos location
-          const lat = 6.5244;
-          const lng = 3.3792;
-          const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/trips/pending?driver_lat=${lat}&driver_lng=${lng}`);
-          const trips = await res.json();
-          
-          if (Array.isArray(trips) && trips.length > 0 && !incomingRide) {
-            setIncomingRide(trips[0]);
-            setRideCountdown(20);
-          }
-        } catch (e) {
-          console.error('Polling error:', e);
-        }
+        await fetchIncomingRide();
       }, 6000); // Poll every 6 seconds
     }
     
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [isOnline, incomingRide]);
+  }, [isOnline, incomingRide, driverCoords?.lat, driverCoords?.lng, user?.id]);
 
-  // Countdown timer for ride request
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    
-    if (incomingRide && rideCountdown > 0) {
-      timer = setInterval(() => {
-        setRideCountdown(prev => {
-          if (prev <= 1) {
-            // Time's up — auto-decline
-            setIncomingRide(null);
-            return 20;
-          }
-          return prev - 1;
+    if (!incomingRide?.id) return;
+    const r = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+    setCounterFareInput(r > 0 ? String(r) : '');
+  }, [incomingRide?.id]);
+
+  const declineHandlerRef = useRef<() => Promise<void>>(async () => {});
+  const offerTimerExpiredRef = useRef(false);
+
+  const handleDeclineRide = useCallback(async () => {
+    const ride = incomingRide;
+    if (!ride) return;
+    try {
+      if (ride.offer_id && user?.id) {
+        await fetch(`${BACKEND_URL}/api/trips/offers/${ride.offer_id}/decline`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ driver_id: user.id }),
         });
-      }, 1000);
+      }
+    } catch {}
+    setIncomingRide(null);
+    setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+  }, [incomingRide, user?.id]);
+
+  useEffect(() => {
+    declineHandlerRef.current = handleDeclineRide;
+  }, [handleDeclineRide]);
+
+  useEffect(() => {
+    if (!incomingRide?.id) {
+      offerTimerExpiredRef.current = false;
+      return;
     }
-    
-    return () => {
-      if (timer) clearInterval(timer);
-    };
-  }, [incomingRide, rideCountdown]);
+    offerTimerExpiredRef.current = false;
+    setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+    const id = setInterval(() => {
+      setRideCountdown((p) => {
+        if (p <= 1) {
+          if (!offerTimerExpiredRef.current) {
+            offerTimerExpiredRef.current = true;
+            clearInterval(id);
+            void declineHandlerRef.current();
+          }
+          return 0;
+        }
+        return p - 1;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [incomingRide?.id]);
 
   const handleAcceptRide = async () => {
     if (!incomingRide) return;
+    if (!user?.id) {
+      Alert.alert('Profile Required', 'Please login again to accept rides.');
+      return;
+    }
     setAcceptingRide(true);
     try {
       const tripId = incomingRide.id;
-      const res = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/trips/${tripId}/accept`, {
+      const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+      const maxP = incomingRide.max_price != null ? Math.round(Number(incomingRide.max_price)) : null;
+      const proposed = Math.round(Number(String(counterFareInput).replace(/,/g, '').trim()) || riderOffer);
+      if (!Number.isFinite(proposed) || proposed < 1) {
+        Alert.alert('Fare', 'Enter a valid fare.');
+        setAcceptingRide(false);
+        return;
+      }
+      if (riderOffer > 0 && proposed < riderOffer) {
+        Alert.alert('Fare', 'Your counter cannot be below the rider’s offer.');
+        setAcceptingRide(false);
+        return;
+      }
+      if (maxP != null && maxP > 0 && proposed > maxP) {
+        Alert.alert('Maximum fare', `Maximum allowed price is ₦${maxP.toLocaleString()}`);
+        setAcceptingRide(false);
+        return;
+      }
+      const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/accept`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ driver_id: user?.id || 'demo-driver' }),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          driver_id: user.id,
+          offer_id: incomingRide?.offer_id,
+          proposed_fare: proposed,
+        }),
       });
       const data = await res.json();
       if (res.ok) {
-        Alert.alert('Ride Accepted!', `Navigate to pickup: ${incomingRide.pickup_location || 'Pickup location'}`, [{ text: 'Start Navigation' }]);
+        setCurrentTrip(data);
+        const pickup = incomingRide?.pickup_location;
+        const pickupAddress =
+          typeof pickup === 'string'
+            ? pickup
+            : pickup?.address || 'Pickup location';
+        const pickupLat = typeof pickup === 'object' ? pickup?.lat : null;
+        const pickupLng = typeof pickup === 'object' ? pickup?.lng : null;
+
+        const openNavigation = () => {
+          if (pickupLat && pickupLng) {
+            const url = Platform.select({
+              ios: `maps:0,0?q=${pickupLat},${pickupLng}`,
+              android: `google.navigation:q=${pickupLat},${pickupLng}`,
+            }) || `https://www.google.com/maps/dir/?api=1&destination=${pickupLat},${pickupLng}`;
+            Linking.openURL(url).catch(() => {
+              Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${pickupLat},${pickupLng}`);
+            });
+          } else if (pickupAddress && pickupAddress !== 'Pickup location') {
+            const encoded = encodeURIComponent(pickupAddress);
+            Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`);
+          }
+        };
+
+        Alert.alert(
+          'Ride Accepted!',
+          `Navigate to pickup:\n${pickupAddress}`,
+          [
+            {
+              text: 'Open Trip',
+              onPress: () => router.push('/driver/trips'),
+              style: 'default',
+            },
+            { text: 'Navigate', onPress: openNavigation, style: 'default' },
+            {
+              text: 'Later',
+              style: 'cancel',
+              onPress: () => router.push('/driver/trips'),
+            },
+          ]
+        );
         setIncomingRide(null);
       } else {
-        Alert.alert('Error', data.detail || 'Could not accept ride');
+        const msg = typeof data?.detail === 'string' ? data.detail : 'Could not accept ride';
+        Alert.alert('Error', msg);
       }
     } catch (e) {
       Alert.alert('Error', 'Failed to accept ride');
@@ -189,9 +378,32 @@ export default function ModernDriverHome() {
     }
   };
 
-  const handleDeclineRide = () => {
-    setIncomingRide(null);
-    setRideCountdown(20);
+  const handleToggleOnline = async () => {
+    if (!user?.id) {
+      Alert.alert('Profile Required', 'Please login again to continue.');
+      return;
+    }
+
+    const nextStatus = !isOnline;
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/drivers/${user.id}/online?is_online=${nextStatus}`,
+        { method: 'PUT', headers: getAuthHeaders() }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert('Status Update Failed', data?.detail || 'Unable to update online status.');
+        return;
+      }
+      setIsOnline(nextStatus);
+      if (nextStatus) {
+        fetchIncomingRide();
+      } else {
+        setIncomingRide(null);
+      }
+    } catch {
+      Alert.alert('Network Error', 'Could not update online status.');
+    }
   };
   
   const checkOnboardingStatus = async () => {
@@ -202,7 +414,9 @@ export default function ModernDriverHome() {
       }
       
       // Check if driver has completed onboarding
-      const response = await fetch(`${process.env.EXPO_PUBLIC_BACKEND_URL || ''}/api/drivers/${user.id}/onboarding-status`);
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/onboarding-status`, {
+        headers: getAuthHeaders(),
+      });
       if (response.ok) {
         const status = await response.json();
         
@@ -231,6 +445,18 @@ export default function ModernDriverHome() {
         
         // Driver is approved — set verification status and show dashboard
         setVerificationStatus(status.verification_status || 'approved');
+        try {
+          const subRes = await getDriverSubscriptionStatus();
+          const sub = subRes.data || {};
+          setSubscriptionStatus(sub.status || 'none');
+          if (!['trial', 'active', 'grace_period'].includes(sub.status || 'none')) {
+            router.replace('/driver/subscription');
+            return;
+          }
+        } catch {
+          router.replace('/driver/subscription');
+          return;
+        }
       }
     } catch (error) {
       console.error('Error checking onboarding status:', error);
@@ -253,25 +479,12 @@ export default function ModernDriverHome() {
     );
   }
   
-  // Filter features based on verification status
+  // Keep compliance and setup tools visible even after approval so drivers can
+  // review/update documents, vehicle info, and bank details like major ride apps.
   const filteredFeatures = ALL_FEATURES.filter(feature => {
-    // Hide "Documents" if driver is already approved
-    if (feature.id === 'documents' && verificationStatus === 'approved') {
-      return false;
+    if (feature.id === 'verification') {
+      return verificationStatus !== 'approved';
     }
-    
-    // Hide "Verification" if driver is already approved
-    if (feature.id === 'verification' && verificationStatus === 'approved') {
-      return false;
-    }
-    
-    // Hide "Vehicle" and "Register Car" if vehicle is already registered
-    // We'll check this from backend profile data
-    if ((feature.id === 'vehicle' || feature.id === 'vehicle-reg') && verificationStatus === 'approved') {
-      // Only hide if vehicle is registered (we'll add vehicle_registered check)
-      return false;
-    }
-    
     return true;
   });
 
@@ -288,7 +501,7 @@ export default function ModernDriverHome() {
       >
         <View style={styles.headerTop}>
           <View>
-            <Text style={styles.greeting}>Good Morning</Text>
+            <Text style={styles.greeting}>{(() => { const h = new Date().getHours(); return h < 12 ? t.home.goodMorning : h < 17 ? t.home.goodAfternoon : t.home.goodEvening; })()}</Text>
             <Text style={styles.driverName}>{user?.name || 'Driver'}</Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -298,7 +511,7 @@ export default function ModernDriverHome() {
             >
               <Text style={{ fontSize: 18 }}>{availableLanguages.find(l => l.code === language)?.flag || '🌐'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.profileButton}>
+            <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/(driver-tabs)/driver-profile')}>
               <Ionicons name="person-circle" size={40} color="#FFF" />
             </TouchableOpacity>
           </View>
@@ -313,15 +526,15 @@ export default function ModernDriverHome() {
               color={isOnline ? COLORS.success : COLORS.danger} 
             />
             <View style={styles.statusText}>
-              <Text style={styles.statusTitle}>{isOnline ? "You're Online" : "You're Offline"}</Text>
+              <Text style={styles.statusTitle}>{isOnline ? t.driver.goOffline.replace(/Go |Fita |Jáde |Pụọ |Go /i, '') + ' ✓' : t.driver.goOnline}</Text>
               <Text style={styles.statusSubtitle}>
-                {isOnline ? "Ready to accept rides" : "Go online to start earning"}
+                {isOnline ? t.driver.acceptRide : t.driver.earnings}
               </Text>
             </View>
           </View>
           <TouchableOpacity 
             style={[styles.toggleButton, isOnline && styles.toggleButtonActive]}
-            onPress={() => setIsOnline(!isOnline)}
+            onPress={handleToggleOnline}
             activeOpacity={0.8}
           >
             <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
@@ -332,7 +545,7 @@ export default function ModernDriverHome() {
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* EARNINGS CARDS - PRIORITY */}
         <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <Text style={styles.sectionTitle}>Today's Performance</Text>
+          <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
           <View style={styles.earningsGrid}>
             <View style={[styles.earningCard, { backgroundColor: '#FEF3C7' }]}>
               <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
@@ -362,7 +575,7 @@ export default function ModernDriverHome() {
 
         {/* PRIORITY FEATURES - BIG CARDS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>Quick Actions</Text>
+          <Text style={styles.sectionTitle}>Core Actions</Text>
           <View style={styles.priorityGrid}>
             {PRIORITY_FEATURES.map((feature, index) => (
               <TouchableOpacity
@@ -388,8 +601,8 @@ export default function ModernDriverHome() {
         {/* ALL FEATURES GRID - COMPLETE ACCESS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>All Features</Text>
-            <Text style={styles.featureCount}>{filteredFeatures.length} features</Text>
+            <Text style={styles.sectionTitle}>Tools</Text>
+            <Text style={styles.featureCount}>{filteredFeatures.length} items</Text>
           </View>
           <View style={styles.allFeaturesGrid}>
             {filteredFeatures.map((feature) => (
@@ -410,106 +623,17 @@ export default function ModernDriverHome() {
 
         <View style={{ height: 100 }} />
       </ScrollView>
-
-      <ActiveTripBar />
-
-      {/* INCOMING RIDE REQUEST POPUP */}
-      <Modal visible={!!incomingRide} transparent animationType="slide">
-        <View style={styles.rideOverlay}>
-          <View style={styles.ridePopup}>
-            {/* Countdown Timer */}
-            <View style={styles.rideCountdownBar}>
-              <View style={[styles.rideCountdownFill, { width: `${(rideCountdown / 20) * 100}%` }]} />
-            </View>
-            <Text style={styles.rideCountdownText}>{rideCountdown}s to respond</Text>
-
-            {/* New Ride Header */}
-            <View style={styles.rideHeader}>
-              <Ionicons name="car-sport" size={32} color={COLORS.primary} />
-              <Text style={styles.rideHeaderText}>New Ride Request!</Text>
-            </View>
-
-            {/* Fare */}
-            <View style={styles.rideFareBox}>
-              <Text style={styles.rideFareLabel}>Offered Fare</Text>
-              <Text style={styles.rideFareAmount}>
-                {'\u20A6'}{(incomingRide?.offered_fare || incomingRide?.fare || 0).toLocaleString()}
-              </Text>
-            </View>
-
-            {/* Route Info */}
-            <View style={styles.rideRouteBox}>
-              <View style={styles.rideRouteItem}>
-                <View style={[styles.rideRouteDot, { backgroundColor: COLORS.accentGreen }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rideRouteLabel}>PICKUP</Text>
-                  <Text style={styles.rideRouteText} numberOfLines={2}>
-                    {typeof incomingRide?.pickup_location === 'string' 
-                      ? incomingRide.pickup_location 
-                      : incomingRide?.pickup_location?.address || 'Pickup location'}
-                  </Text>
-                </View>
-              </View>
-              <View style={styles.rideRouteLine} />
-              <View style={styles.rideRouteItem}>
-                <View style={[styles.rideRouteDot, { backgroundColor: '#EF4444' }]} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.rideRouteLabel}>DESTINATION</Text>
-                  <Text style={styles.rideRouteText} numberOfLines={2}>
-                    {typeof incomingRide?.destination === 'string'
-                      ? incomingRide.destination
-                      : incomingRide?.destination?.address || 'Destination'}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            {/* Trip Details */}
-            <View style={styles.rideDetailsRow}>
-              <View style={styles.rideDetail}>
-                <Ionicons name="navigate" size={18} color="#64748B" />
-                <Text style={styles.rideDetailText}>
-                  {incomingRide?.distance_to_pickup ? `${incomingRide.distance_to_pickup}km away` : 'Nearby'}
-                </Text>
-              </View>
-              <View style={styles.rideDetail}>
-                <Ionicons name="car" size={18} color="#64748B" />
-                <Text style={styles.rideDetailText}>
-                  {incomingRide?.vehicle_type || 'Standard'}
-                </Text>
-              </View>
-              <View style={styles.rideDetail}>
-                <Ionicons name="swap-horizontal" size={18} color="#64748B" />
-                <Text style={styles.rideDetailText}>
-                  {incomingRide?.trip_type === 'inter' ? 'Interstate' : 'City'}
-                </Text>
-              </View>
-            </View>
-
-            {/* Accept / Decline Buttons */}
-            <View style={styles.rideActions}>
-              <TouchableOpacity style={styles.rideDeclineBtn} onPress={handleDeclineRide}>
-                <Ionicons name="close" size={28} color="#EF4444" />
-                <Text style={styles.rideDeclineText}>Decline</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.rideAcceptBtn} 
-                onPress={handleAcceptRide}
-                disabled={acceptingRide}
-              >
-                {acceptingRide ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark" size={28} color="#FFF" />
-                    <Text style={styles.rideAcceptText}>Accept</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <DriverRideRequestModal
+        visible={!!incomingRide}
+        trip={incomingRide}
+        countdownSeconds={rideCountdown}
+        countdownTotal={DRIVER_OFFER_TIMER_SECONDS}
+        fareInput={counterFareInput}
+        onFareInputChange={setCounterFareInput}
+        accepting={acceptingRide}
+        onAccept={handleAcceptRide}
+        onIgnore={handleDeclineRide}
+      />
 
       {/* Language Picker Modal */}
       <Modal visible={showLangPicker} transparent animationType="fade">
@@ -574,82 +698,6 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#FFF',
     letterSpacing: 0.5,
-  },
-  // Ride Request Popup Styles
-  rideOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end',
-  },
-  ridePopup: {
-    backgroundColor: '#FFF', borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    padding: 20, paddingBottom: 40,
-  },
-  rideCountdownBar: {
-    height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, marginBottom: 6, overflow: 'hidden',
-  },
-  rideCountdownFill: {
-    height: 4, backgroundColor: COLORS.primary, borderRadius: 2,
-  },
-  rideCountdownText: {
-    fontSize: 12, fontWeight: '700', color: '#94A3B8', textAlign: 'center', marginBottom: 12,
-  },
-  rideHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 16,
-  },
-  rideHeaderText: {
-    fontSize: 22, fontWeight: '900', color: '#0F172A',
-  },
-  rideFareBox: {
-    backgroundColor: '#F0FDF4', borderRadius: 16, padding: 16, alignItems: 'center', marginBottom: 16,
-  },
-  rideFareLabel: {
-    fontSize: 13, fontWeight: '600', color: '#64748B',
-  },
-  rideFareAmount: {
-    fontSize: 32, fontWeight: '900', color: COLORS.accentGreen, marginTop: 4,
-  },
-  rideRouteBox: {
-    backgroundColor: '#F8FAFC', borderRadius: 16, padding: 16, marginBottom: 16,
-  },
-  rideRouteItem: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
-  },
-  rideRouteDot: {
-    width: 12, height: 12, borderRadius: 6, marginTop: 4,
-  },
-  rideRouteLabel: {
-    fontSize: 10, fontWeight: '800', color: '#94A3B8', letterSpacing: 1,
-  },
-  rideRouteText: {
-    fontSize: 15, fontWeight: '700', color: '#0F172A', marginTop: 2,
-  },
-  rideRouteLine: {
-    width: 2, height: 20, backgroundColor: '#CBD5E1', marginLeft: 5, marginVertical: 4,
-  },
-  rideDetailsRow: {
-    flexDirection: 'row', justifyContent: 'space-around', marginBottom: 20,
-  },
-  rideDetail: {
-    alignItems: 'center', gap: 4,
-  },
-  rideDetailText: {
-    fontSize: 12, fontWeight: '700', color: '#64748B',
-  },
-  rideActions: {
-    flexDirection: 'row', gap: 12,
-  },
-  rideDeclineBtn: {
-    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: '#FEF2F2', paddingVertical: 16, borderRadius: 16, borderWidth: 2, borderColor: '#FECACA',
-  },
-  rideDeclineText: {
-    fontSize: 17, fontWeight: '800', color: '#EF4444',
-  },
-  rideAcceptBtn: {
-    flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    backgroundColor: COLORS.accentGreen, paddingVertical: 16, borderRadius: 16,
-  },
-  rideAcceptText: {
-    fontSize: 17, fontWeight: '900', color: '#FFF',
   },
   profileButton: {
     width: 48,

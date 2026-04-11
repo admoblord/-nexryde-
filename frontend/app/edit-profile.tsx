@@ -1,21 +1,101 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { updateUser } from '@/src/services/api';
+import { saveUserSession } from '@/utils/authStorage';
 
 export default function EditProfileScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, setUser } = useAppStore();
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
+  const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const handleSave = () => {
-    Alert.alert('Success', 'Profile updated successfully!');
-    router.back();
+  const pickImage = () => {
+    Alert.alert('Change Photo', 'Choose photo source', [
+      { text: 'Camera', onPress: openCamera },
+      { text: 'Gallery', onPress: openGallery },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const openCamera = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow camera access to take a profile photo.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        quality: 0.7,
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        const imageData = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+        setProfileImage(imageData);
+      }
+    } catch {
+      Alert.alert('Error', 'Could not open camera.');
+    }
+  };
+
+  const openGallery = async () => {
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow gallery access to choose a profile photo.');
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+        base64: true,
+      });
+      if (!result.canceled && result.assets?.[0]) {
+        const asset = result.assets[0];
+        const imageData = asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri;
+        setProfileImage(imageData);
+      }
+    } catch {
+      Alert.alert('Error', 'Could not open gallery.');
+    }
+  };
+
+  const handleSave = async () => {
+    if (!user?.id) {
+      Alert.alert('Error', 'No user session found. Please login again.');
+      return;
+    }
+    setIsSaving(true);
+    try {
+      const payload = {
+        name: name.trim() || undefined,
+        email: email.trim() || undefined,
+        phone: phone.trim() || undefined,
+        profile_image: profileImage || undefined,
+      };
+      const response = await updateUser(user.id, payload);
+      const updatedUser = response?.data || { ...user, ...payload };
+      setUser(updatedUser);
+      await saveUserSession(updatedUser);
+      Alert.alert('Success', 'Profile updated successfully!');
+      router.back();
+    } catch (error: any) {
+      const message = error?.response?.data?.detail || 'Could not save profile. Please try again.';
+      Alert.alert('Update failed', message);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   return (
@@ -32,9 +112,13 @@ export default function EditProfileScreen() {
         <ScrollView style={styles.content}>
           <View style={styles.avatarSection}>
             <View style={styles.avatar}>
-              <Ionicons name="person" size={48} color={COLORS.gray400} />
+              {profileImage ? (
+                <Image source={{ uri: profileImage }} style={styles.avatarImage} />
+              ) : (
+                <Ionicons name="person" size={48} color={COLORS.gray400} />
+              )}
             </View>
-            <TouchableOpacity style={styles.changePhotoButton}>
+            <TouchableOpacity style={styles.changePhotoButton} onPress={pickImage}>
               <Ionicons name="camera" size={20} color={COLORS.accentGreen} />
               <Text style={styles.changePhotoText}>Change Photo</Text>
             </TouchableOpacity>
@@ -81,8 +165,8 @@ export default function EditProfileScreen() {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
-            <Text style={styles.saveButtonText}>Save Changes</Text>
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={isSaving}>
+            {isSaving ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.saveButtonText}>Save Changes</Text>}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>
@@ -121,6 +205,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: 50,
   },
   changePhotoButton: {
     flexDirection: 'row',

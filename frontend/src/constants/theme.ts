@@ -2,6 +2,8 @@
 // Sharper, Brighter, Clearer, More Visible
 // Updated for maximum visual impact and clarity
 
+import { useColorScheme } from 'react-native';
+
 export const COLORS = {
   // Primary - Deep Navy (Professional, Trust)
   primary: '#0F172A',           // Deep rich navy
@@ -61,7 +63,9 @@ export const COLORS = {
   textMuted: '#94A3B8',         // More visible muted
   textTertiary: '#64748B',
   
-  // Legacy support
+  // Legacy support (grids / home cards)
+  secondary: '#64748B',
+  secondaryDark: '#475569',
   accent: '#22C55E',
   accentLight: '#4ADE80',
   accentDark: '#16A34A',
@@ -72,6 +76,8 @@ export const COLORS = {
   successSoft: 'rgba(34, 197, 94, 0.15)',
   successBright: '#4ADE80',
   error: '#EF4444',             // Bright red
+  /** Alias for error — semantic “danger” in UI copy (offline, reject, SOS). */
+  danger: '#EF4444',
   errorSoft: 'rgba(239, 68, 68, 0.15)',
   errorBright: '#F87171',
   warning: '#F59E0B',           // Bright amber
@@ -109,10 +115,11 @@ export const COLORS = {
   overlayLight: 'rgba(2, 6, 23, 0.7)',
   overlayMedium: 'rgba(2, 6, 23, 0.85)',
   
-  // Gold - RICHER
+  // Gold / Yellow - RICHER
   gold: '#F59E0B',
   goldLight: '#FBBF24',
   goldDark: '#D97706',
+  accentYellow: '#F59E0B',
   goldSoft: 'rgba(245, 158, 11, 0.15)',
   
   // Premium Colors
@@ -256,7 +263,7 @@ export const LINE_HEIGHT = {
 };
 
 export const CURRENCY = '₦';
-export const SUBSCRIPTION_PRICE = 25000;
+export const SUBSCRIPTION_PRICE = 18000;
 
 export default {
   COLORS,
@@ -269,3 +276,34 @@ export default {
   CURRENCY,
   SUBSCRIPTION_PRICE,
 };
+
+export const DARK_COLORS = {
+  background: '#020617',
+  surface: '#0F172A',
+  card: '#1E293B',
+  text: '#F8FAFC',
+  textSecondary: '#CBD5E1',
+  textMuted: '#94A3B8',
+  border: '#334155',
+  icon: '#CBD5E1',
+};
+
+export const LIGHT_COLORS = {
+  background: '#FFFFFF',
+  surface: '#F8FAFC',
+  card: '#FFFFFF',
+  text: '#0F172A',
+  textSecondary: '#334155',
+  textMuted: '#64748B',
+  border: '#E2E8F0',
+  icon: '#64748B',
+};
+
+export function useThemeColors() {
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  return {
+    colors: isDark ? DARK_COLORS : LIGHT_COLORS,
+    isDark,
+  };
+}
