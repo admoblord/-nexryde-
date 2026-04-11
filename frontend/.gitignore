@@ -12,6 +12,8 @@ expo-env.d.ts
 # Native
 .kotlin/
 *.orig.*
+# Release signing (never commit)
+android/keystore.properties
 *.jks
 *.p8
 *.p12

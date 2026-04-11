@@ -11,8 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { BACKEND_URL } from '@/src/services/api';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface HeatZone {
@@ -30,7 +30,7 @@ export default function DriverHeatmapScreen() {
 
   useEffect(() => {
     loadHeatmap();
-    const interval = setInterval(loadHeatmap, 5 * 60 * 1000); // Refresh every 5 minutes (was 1 min)
+    const interval = setInterval(loadHeatmap, 60000); // Refresh every minute
     return () => clearInterval(interval);
   }, []);
 
@@ -147,9 +147,12 @@ export default function DriverHeatmapScreen() {
               <View style={styles.zoneFooter}>
                 <View style={styles.zoneStats}>
                   <Ionicons name="car" size={14} color="#64748B" />
-                  <Text style={styles.zoneStat}>{Math.floor(zone.intensity * 20)} drivers nearby</Text>
+                  <Text style={styles.zoneStat}>{zone.demand_level === 'high' ? 'High demand' : zone.demand_level === 'medium' ? 'Medium demand' : 'Low demand'}</Text>
                 </View>
-                <TouchableOpacity style={styles.navigateBtn}>
+                <TouchableOpacity style={styles.navigateBtn} onPress={() => {
+                  const { Linking } = require('react-native');
+                  Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${zone.lat},${zone.lng}`);
+                }}>
                   <Text style={styles.navigateBtnText}>Navigate</Text>
                   <Ionicons name="navigate" size={14} color="#6366F1" />
                 </TouchableOpacity>

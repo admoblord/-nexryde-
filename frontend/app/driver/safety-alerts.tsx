@@ -30,13 +30,19 @@ export default function DriverSafetyAlertsScreen() {
   const [reportDescription, setReportDescription] = useState('');
   const [reportSeverity, setReportSeverity] = useState<DangerZone['severity']>('moderate');
 
-  // Simulated current location (Lagos)
-  const currentLocation = {
-    latitude: 6.5244,
-    longitude: 3.3792,
-  };
+  const [currentLocation, setCurrentLocation] = useState({ latitude: 6.5244, longitude: 3.3792 });
 
   useEffect(() => {
+    (async () => {
+      try {
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setCurrentLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        }
+      } catch { /* use default */ }
+    })();
     loadSafetyData();
     
     // Auto-refresh every 5 minutes

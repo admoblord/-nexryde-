@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform, ActivityIndicator } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL } from '@/src/services/api';
 
 const { width, height } = Dimensions.get('window');
 
@@ -25,16 +27,18 @@ const COLORS = {
 
 export default function SplashScreen() {
   const router = useRouter();
-  const [checking, setChecking] = useState(true);
+  // Start with checking = false for web compatibility (SecureStore doesn't work on web)
+  const [checking, setChecking] = useState(Platform.OS === 'web' ? false : true);
   
   // ✅ SAFE STORE ACCESS WITH ERROR HANDLING
   const [storeError, setStoreError] = useState<Error | null>(null);
-  let setUser, setIsAuthenticated;
+  let setUser, setIsAuthenticated, setToken;
   
   try {
     const store = useAppStore();
     setUser = store.setUser;
     setIsAuthenticated = store.setIsAuthenticated;
+    setToken = store.setToken;
   } catch (error) {
     console.error('🚨 STORE ACCESS ERROR:', error);
     setStoreError(error as Error);
@@ -71,7 +75,22 @@ export default function SplashScreen() {
 
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
+    // On web, immediately show splash (SecureStore doesn't work reliably)
+    if (Platform.OS === 'web') {
+      console.log('ℹ️ Web environment detected - showing splash screen.');
+      setChecking(false);
+      return;
+    }
+    
     checkSavedLogin();
+    
+    // Safety timeout - if checking takes too long, show splash screen anyway
+    const timeout = setTimeout(() => {
+      console.log('⏰ Timeout reached - showing splash screen.');
+      setChecking(false);
+    }, 3000);
+    
+    return () => clearTimeout(timeout);
   }, []); // ✅ FIX: Added empty dependency array (runs once on mount)
 
   const checkSavedLogin = async () => {
@@ -83,6 +102,28 @@ export default function SplashScreen() {
         const isLoggedIn = await isUserLoggedIn();
         
         if (isLoggedIn) {
+          // Import biometric functions
+          const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } = await import('@/utils/authStorage');
+          
+          // Check if biometric login is enabled
+          const biometricEnabled = await isBiometricEnabled();
+          const biometricSupported = await isBiometricSupported();
+          
+          if (biometricEnabled && biometricSupported) {
+            console.log('🔐 Biometric login enabled - requesting authentication...');
+            
+            // Request biometric authentication
+            const authResult = await authenticateWithBiometrics();
+            
+            if (!authResult.success) {
+              console.log('⚠️ Biometric authentication failed or cancelled');
+              setChecking(false);
+              return;
+            }
+            
+            console.log('✅ Biometric authentication successful!');
+          }
+          
           const userData = await getUserSession();
           
           if (userData) {
@@ -90,15 +131,38 @@ export default function SplashScreen() {
             console.log('User:', userData.name, '| Role:', userData.role);
             
             // Restore user state
-            setUser(userData);
-            setIsAuthenticated(true);
+            if (setUser) setUser(userData);
+            if (setToken) setToken(userData.token || null);
+            if (setIsAuthenticated) setIsAuthenticated(true);
             
-            // Navigate to appropriate home screen
-            setTimeout(() => {
-              if (userData.role === 'driver') {
-                router.replace('/(driver-tabs)/driver-home');
-              } else {
+            // Enforce full verification on restore (no shortcut access).
+            const authHeaders = userData.token ? { Authorization: `Bearer ${userData.token}` } : {};
+            setTimeout(async () => {
+              try {
+                if (userData.role === 'driver') {
+                  const st = await fetch(`${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`, { headers: authHeaders });
+                  const data = await st.json();
+                  if (!st.ok || !data?.completed) {
+                    const step = data?.step;
+                    if (step === 'terms') router.replace('/(auth)/driver-terms');
+                    else if (step === 'profile') router.replace('/(auth)/driver-profile');
+                    else router.replace('/(auth)/driver-documents');
+                    return;
+                  }
+                  router.replace('/(driver-tabs)/driver-home');
+                  return;
+                }
+
+                const riderStatusRes = await fetch(`${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`, { headers: authHeaders });
+                const riderStatus = await riderStatusRes.json();
+                if (!riderStatusRes.ok || !riderStatus?.completed) {
+                  router.replace('/(auth)/rider-verification');
+                  return;
+                }
                 router.replace('/(rider-tabs)/rider-home');
+              } catch (routeError) {
+                console.log('⚠️ Verification route check failed, forcing login:', routeError);
+                router.replace('/(auth)/login');
               }
             }, 1000); // Small delay for smooth transition
             
@@ -107,6 +171,12 @@ export default function SplashScreen() {
         }
       } catch (storageError) {
         console.log('⚠️ Storage not available (first install?), skipping auto-login');
+      }
+      
+      const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
+      if (!onboardingDone) {
+        router.replace('/onboarding');
+        return;
       }
       
       console.log('ℹ️ No saved login found. Showing splash screen.');
@@ -248,7 +318,7 @@ export default function SplashScreen() {
             <View style={[styles.featureIcon, { backgroundColor: COLORS.green + '30' }]}>
               <Ionicons name="shield-checkmark" size={20} color={COLORS.green} />
             </View>
-            <Text style={styles.featureText}>Verified{'\n'}Drivers</Text>
+            <Text style={styles.featureText}>Driver{'\n'}Checks</Text>
           </View>
           
           <View style={styles.featureDivider} />
@@ -272,32 +342,34 @@ export default function SplashScreen() {
 
         {/* CTA Button - Premium Design */}
         <View style={styles.buttonContainer}>
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity activeOpacity={0.9} style={styles.buttonWrapper}>
-              <LinearGradient
-                colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
-                style={styles.ctaButton}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 0 }}
-              >
-                <Text style={styles.ctaText}>Begin Your Journey</Text>
-                <View style={styles.arrowCircle}>
-                  <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
-                </View>
-              </LinearGradient>
-            </TouchableOpacity>
-          </Link>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            style={styles.buttonWrapper}
+            onPress={async () => {
+              const done = await AsyncStorage.getItem('onboarding_complete');
+              if (!done) {
+                router.push('/onboarding');
+              } else {
+                router.push('/(auth)/login');
+              }
+            }}
+            accessibilityLabel="Begin your journey, go to login"
+            accessibilityRole="button"
+          >
+            <LinearGradient
+              colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
+              style={styles.ctaButton}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              <Text style={styles.ctaText}>Begin Your Journey</Text>
+              <View style={styles.arrowCircle}>
+                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
         </View>
 
-        {/* Secondary Options */}
-        <View style={styles.secondaryOptions}>
-          <Link href="/(auth)/login" asChild>
-            <TouchableOpacity style={styles.secondaryButton} activeOpacity={0.8}>
-              <Ionicons name="car" size={18} color={COLORS.textSecondary} />
-              <Text style={styles.secondaryText}>Become a Driver</Text>
-            </TouchableOpacity>
-          </Link>
-        </View>
       </Animated.View>
 
       {/* Bottom Branding */}
@@ -516,25 +588,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15, 23, 42, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  secondaryOptions: {
-    marginTop: 24,
-  },
-  secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  secondaryText: {
-    color: COLORS.textSecondary,
-    fontSize: 14,
-    fontWeight: '600',
   },
   bottomContainer: {
     position: 'absolute',

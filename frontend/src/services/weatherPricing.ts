@@ -2,6 +2,7 @@
  * NEXRYDE Weather-Based Dynamic Pricing
  * "Fair pricing for tough conditions!" 🌤️💰
  */
+import { BACKEND_URL } from '@/src/services/api';
 
 export type WeatherCondition = 'clear' | 'rain' | 'heavy_rain' | 'storm' | 'fog';
 
@@ -67,4 +68,15 @@ export class WeatherPricingAI {
       estimatedFare,
     };
   }
+}
+
+/** Fetch AI traffic prediction with weather impact from backend (Emergent LLM → GPT-4o) */
+export async function fetchAITrafficWeatherPrediction(lat: number, lng: number): Promise<any> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ai/traffic/predict`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ lat, lng, include_weather: true }),
+    });
+    return await res.json();
+  } catch { return null; }
 }

@@ -55,10 +55,10 @@ export default function DriverWellnessScreen() {
   
   // Stats
   const [weeklyStats, setWeeklyStats] = useState({
-    totalDrivingTime: 1420, // minutes
-    averageSessionTime: 180,
-    breaksTaken: 12,
-    wellnessScore: 85,
+    totalDrivingTime: 0,
+    averageSessionTime: 0,
+    breaksTaken: 0,
+    wellnessScore: 0,
   });
 
   // Show rest modal
@@ -87,8 +87,20 @@ export default function DriverWellnessScreen() {
   }, [drivingTimeMinutes]);
 
   const loadWellnessData = async () => {
-    // TODO: Load from backend
-    // const response = await getDriverWellnessData(user?.id);
+    if (!user?.id) return;
+    try {
+      const { BACKEND_URL } = require('@/src/services/api');
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`);
+      const data = await res.json();
+      const hours = data?.hours_worked || data?.online_hours || 0;
+      const trips = data?.total_trips || 0;
+      setWeeklyStats({
+        totalDrivingTime: Math.round(hours * 60),
+        averageSessionTime: trips > 0 ? Math.round((hours * 60) / Math.max(trips, 1)) : 0,
+        breaksTaken: Math.max(0, Math.floor(hours / 2)),
+        wellnessScore: Math.min(100, Math.max(0, hours < 50 ? 90 : hours < 80 ? 70 : 50)),
+      });
+    } catch { /* keep defaults */ }
   };
 
   const startDrivingTimer = () => {
@@ -147,10 +159,11 @@ export default function DriverWellnessScreen() {
   };
 
   const calculateWellnessScore = () => {
+    if (drivingTimeMinutes === 0) return 85; // Default good score when not driving
     // Based on breaks taken vs driving time
-    const breakRatio = breakHistory.length / (drivingTimeMinutes / 240); // breaks per 4 hours
+    const breakRatio = breakHistory.length / Math.max(1, drivingTimeMinutes / 240); // breaks per 4 hours
     const score = Math.min(100, Math.round(50 + (breakRatio * 50)));
-    return score;
+    return isNaN(score) ? 85 : score;
   };
 
   const getTotalDrivingTimeToday = () => {

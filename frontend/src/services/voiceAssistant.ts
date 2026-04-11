@@ -5,10 +5,9 @@
  * "Talk am, we go hear you!" 🎤
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import { Audio } from 'expo-av';
+import { useState, useCallback } from 'react';
 import * as Haptics from 'expo-haptics';
-import { Alert } from 'react-native';
+import { BACKEND_URL } from '@/src/services/api';
 
 // Voice Assistant Types
 export type VoiceLanguage = 'en' | 'pcm' | 'yo' | 'ig' | 'ha';
@@ -388,11 +387,11 @@ export class VoiceAssistantAI {
         ha: 'An soke tafiyar. Kuna son ku yi ajiyar wata?',
       },
       check_fare: {
-        en: 'The estimated fare for this trip is ₦1,500 to ₦2,000.',
-        pcm: 'The price for this trip na between ₦1,500 and ₦2,000.',
-        yo: 'Owó ọkọ̀ fún ìrìn-àjò yìí jẹ́ ₦1,500 sí ₦2,000.',
-        ig: 'Ụgwọ njem a bụ ₦1,500 ruo ₦2,000.',
-        ha: 'Kudin tafiyar nan tsakanin ₦1,500 zuwa ₦2,000.',
+        en: 'Tap "Calculate Fare" on the booking screen to see the current fare for your trip.',
+        pcm: 'Press "Calculate Fare" for the booking screen to see the current price.',
+        yo: 'Tẹ "Calculate Fare" lórí ìbẹ̀rẹ̀ ìrìn-àjò rẹ láti rí owó.',
+        ig: 'Pịa "Calculate Fare" na screen ịhụ ego njem gị.',
+        ha: 'Danna "Calculate Fare" a shafin don ganin kudin tafiyar.',
       },
       check_eta: {
         en: 'Your driver will arrive in approximately 8 minutes.',
@@ -437,11 +436,11 @@ export class VoiceAssistantAI {
         ha: 'Tafiya ta ƙare. Ka yi kyau! Kuna shirya don wata?',
       },
       check_earnings: {
-        en: 'You have earned ₦12,500 today from 8 completed trips.',
-        pcm: 'You don make ₦12,500 today from 8 trips wey you finish.',
-        yo: 'O ti jèrè ₦12,500 lónìí láti inú ìrìn-àjò mẹ́jọ.',
-        ig: 'Ị nwetala ₦12,500 taa site na njem asatọ ị mechara.',
-        ha: 'Kun samu ₦12,500 yau daga tafiyoyi 8 da kuka kammala.',
+        en: 'Check your earnings on the Earnings tab for real-time totals.',
+        pcm: 'Check your Earnings tab to see how much you don make today.',
+        yo: 'Ṣàyẹ̀wò owó rẹ nínú àtẹ Earnings fún owó gidi.',
+        ig: 'Lee ego gị na tab Earnings maka ego n\'oge a.',
+        ha: 'Duba kudin ku a shafin Earnings don ganin jimlar yau.',
       },
       take_break: {
         en: 'Good idea. Starting your break now. Rest well!',
@@ -465,11 +464,11 @@ export class VoiceAssistantAI {
         ha: 'Muna raba inda kuke yanzu da mutanenku.',
       },
       check_balance: {
-        en: 'Your wallet balance is ₦8,750.',
-        pcm: 'Money wey dey your wallet na ₦8,750.',
-        yo: 'Owó tó kù nínú àpamọ́wọ́ rẹ jẹ́ ₦8,750.',
-        ig: 'Ego dị n\'akpa ego gị bụ ₦8,750.',
-        ha: 'Kudin da ke cikin walat ɗinku ₦8,750 ne.',
+        en: 'Open your Wallet tab to see your current balance.',
+        pcm: 'Check your Wallet tab to see your balance.',
+        yo: 'Ṣí àtẹ Wallet rẹ láti rí owó tó kù.',
+        ig: 'Mepee tab Wallet gị ịhụ ego dị.',
+        ha: 'Buɗe shafin Wallet ɗinku don ganin sauran kuɗi.',
       },
       unknown: {
         en: 'Sorry, I didn\'t understand that. Can you say it again?',
@@ -505,20 +504,10 @@ export const useVoiceAssistant = () => {
    */
   const startListening = useCallback(async () => {
     try {
-      setIsListening(true);
+      setIsListening(false);
       setError(null);
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      
-      // TODO: Integrate with actual speech recognition API
-      // For now, simulate with mock data
-      console.log('🎤 Voice Assistant: Listening...');
-      
-      // In production, use:
-      // - Expo Speech (expo-speech)
-      // - Google Cloud Speech-to-Text
-      // - Azure Speech Services
-      // - Custom WebRTC solution
-      
+      setError('Voice recognition is not configured on this build.');
     } catch (err) {
       console.error('Voice listening error:', err);
       setError('Failed to start listening');
@@ -565,20 +554,7 @@ export const useVoiceAssistant = () => {
   const speakResponse = useCallback(async (text: string) => {
     try {
       setIsSpeaking(true);
-      
-      // TODO: Integrate with actual TTS API
-      // For now, just log
       console.log('🗣️ Voice Assistant says:', text);
-      
-      // In production, use:
-      // - Expo Speech (expo-speech)
-      // - Google Cloud Text-to-Speech (with Nigerian accent)
-      // - Azure Speech Services
-      // - Custom audio playback
-      
-      // Simulate speaking duration
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
       setIsSpeaking(false);
     } catch (err) {
       console.error('Voice speaking error:', err);
@@ -609,3 +585,12 @@ export const useVoiceAssistant = () => {
     setPreferredLanguage,
   };
 };
+
+/** Process voice command through AI backend (Emergent LLM → GPT-4o) */
+export async function processVoiceWithAI(userId: string, voiceText: string, role: string = 'driver'): Promise<any> {
+  try {
+    const endpoint = role === 'driver' ? 'driver-assistant' : 'rider-assistant';
+    const res = await fetch(`${BACKEND_URL}/api/ai/${endpoint}?user_id=${userId}&question=${encodeURIComponent(voiceText)}`);
+    return await res.json();
+  } catch { return null; }
+}

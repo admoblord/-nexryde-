@@ -5,8 +5,10 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -19,7 +21,16 @@ export default function DriverSafetyScreen() {
       </View>
       <ScrollView contentContainerStyle={styles.content}>
         {/* Risk Alert Button */}
-        <TouchableOpacity style={styles.riskButton} activeOpacity={0.8}>
+        <TouchableOpacity style={styles.riskButton} activeOpacity={0.8}
+          onPress={() => Alert.alert(
+            'Report Risk',
+            'Report an unsafe situation or passenger behavior?',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Report Now', style: 'destructive', onPress: () => Alert.alert('Reported', 'Safety team has been notified. Stay safe.') },
+            ]
+          )}
+        >
           <Ionicons name="warning" size={32} color={COLORS.white} />
           <Text style={styles.riskText}>Risk Alert</Text>
           <Text style={styles.riskSubtext}>Report unsafe passenger</Text>
@@ -34,7 +45,7 @@ export default function DriverSafetyScreen() {
             </View>
             <View style={styles.featureContent}>
               <Text style={styles.featureTitle}>Rider Verification</Text>
-              <Text style={styles.featureDesc}>All riders are verified</Text>
+              <Text style={styles.featureDesc}>Rider identity and trip activity checks help keep trips safer</Text>
             </View>
           </View>
           <View style={styles.featureCard}>

@@ -10,9 +10,9 @@ from pydantic import BaseModel
 
 class SubscriptionPhase(str, Enum):
     LAUNCH = "launch"  # ₦15,000 - First 500 drivers
-    EARLY = "early"    # ₦18,000 - Months 4-6
-    GROWTH = "growth"  # ₦20,000 - Months 7-12
-    PREMIUM = "premium" # ₦25,000 - Year 2+
+    EARLY = "early"    # ₦18,000 standard
+    GROWTH = "growth"  # ₦18,000 standard
+    PREMIUM = "premium" # ₦18,000 standard
 
 class SubscriptionStatus(str, Enum):
     TRIAL = "trial"
@@ -30,8 +30,8 @@ class PaymentMethod(str, Enum):
 SUBSCRIPTION_PRICES = {
     SubscriptionPhase.LAUNCH: 15000,
     SubscriptionPhase.EARLY: 18000,
-    SubscriptionPhase.GROWTH: 20000,
-    SubscriptionPhase.PREMIUM: 25000,
+    SubscriptionPhase.GROWTH: 18000,
+    SubscriptionPhase.PREMIUM: 18000,
 }
 
 # System Configuration

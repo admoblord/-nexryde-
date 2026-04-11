@@ -2,6 +2,8 @@
  * NEXRYDE "Area Boy" & Community Safety Alert System
  * Nigeria-specific safety feature for dangerous areas, checkpoints, and harassment zones
  */
+import React from 'react';
+import { BACKEND_URL } from '@/src/services/api';
 
 export interface DangerZone {
   id: string;
@@ -111,12 +113,38 @@ export class AreaBoySafety {
     radius: number = 10000 // 10km default
   ): Promise<DangerZone[]> {
     try {
-      // In production, call backend API
-      // const response = await fetch(`/api/safety/danger-zones?lat=${latitude}&lng=${longitude}&radius=${radius}`);
-      // return response.json();
-
-      // For now, return simulated Lagos danger zones
-      return this.simulateLagosDangerZones(latitude, longitude);
+      const response = await fetch(`${BACKEND_URL}/api/safety/danger-zones?lat=${latitude}&lng=${longitude}&radius=${radius}`);
+      const data = await response.json();
+      
+      if (data.success && data.zones?.length > 0) {
+        // Map backend format to frontend DangerZone format
+        return data.zones.map((z: any) => ({
+          id: z.zone_id || z._id,
+          location: {
+            latitude: z.location?.latitude || 0,
+            longitude: z.location?.longitude || 0,
+            address: z.location?.address || 'Unknown',
+            landmark: z.location?.landmark,
+          },
+          type: z.type || 'area_boys',
+          severity: z.severity || 'moderate',
+          activeTime: {
+            start: z.active_time?.start || 0,
+            end: z.active_time?.end || 23,
+            allDay: z.active_time?.all_day || false,
+          },
+          description: z.description || '',
+          reports: [],
+          verifiedReports: z.verified_reports || 0,
+          lastReportTime: new Date(z.last_report_time || Date.now()),
+          aiConfidence: z.ai_confidence || 70,
+          communityRating: z.community_rating || 3.0,
+          affectedRadius: z.affected_radius || 300,
+          safeAlternatives: z.safe_alternatives || [],
+        }));
+      }
+      
+      return [];
     } catch (error) {
       console.error('Failed to get danger zones:', error);
       return [];
@@ -188,15 +216,27 @@ export class AreaBoySafety {
    */
   static async reportDangerZone(report: Omit<DangerReport, 'id' | 'timestamp'>): Promise<boolean> {
     try {
-      // In production, call backend API
-      // const response = await fetch('/api/safety/report', {
-      //   method: 'POST',
-      //   body: JSON.stringify(report),
-      // });
-      // return response.ok;
-
-      console.log('Danger zone reported:', report);
-      return true;
+      const reportAny = report as any;
+      if (typeof reportAny.latitude !== 'number' || typeof reportAny.longitude !== 'number') {
+        return false;
+      }
+      const response = await fetch(`${BACKEND_URL}/api/safety/report`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: report.userId,
+          user_name: report.userName,
+          role: report.userRole,
+          type: report.incidentType,
+          severity: report.severity,
+          description: report.description,
+          latitude: reportAny.latitude,
+          longitude: reportAny.longitude,
+          address: reportAny.address || 'Reported Location',
+        }),
+      });
+      const data = await response.json();
+      return data.success === true;
     } catch (error) {
       console.error('Failed to report danger zone:', error);
       return false;
@@ -213,8 +253,20 @@ export class AreaBoySafety {
     try {
       const dangerZones = await this.getDangerZones(origin.latitude, origin.longitude, 15000);
       
-      // Simulate 3 routes with varying safety scores
-      return this.simulateSafeRoutes(origin, destination, dangerZones);
+      const response = await fetch(`${BACKEND_URL}/api/safety/safe-routes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin,
+          destination,
+          danger_zones: dangerZones,
+        }),
+      });
+      if (!response.ok) {
+        return [];
+      }
+      const data = await response.json();
+      return Array.isArray(data?.routes) ? data.routes : [];
     } catch (error) {
       console.error('Failed to get safe routes:', error);
       return [];
@@ -316,111 +368,6 @@ export class AreaBoySafety {
   // ============================================
   // PRIVATE HELPER METHODS
   // ============================================
-
-  private static simulateLagosDangerZones(lat: number, lng: number): DangerZone[] {
-    const currentHour = new Date().getHours();
-    
-    return [
-      {
-        id: 'dz-1',
-        location: {
-          latitude: 6.5244,
-          longitude: 3.3792,
-          address: 'Oshodi Under Bridge',
-          landmark: 'Oshodi Bus Stop',
-        },
-        type: 'area_boys',
-        severity: 'critical',
-        activeTime: { start: 6, end: 22, allDay: false },
-        description: 'Heavy area boy presence, especially at traffic lights. Reports of window smashing and phone snatching.',
-        reports: [],
-        verifiedReports: 156,
-        lastReportTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
-        aiConfidence: 95,
-        communityRating: 4.5,
-        affectedRadius: 500,
-        safeAlternatives: ['Use Agege Motor Road', 'Pass through Isolo'],
-      },
-      {
-        id: 'dz-2',
-        location: {
-          latitude: 6.4541,
-          longitude: 3.3947,
-          address: 'Obalende Junction',
-          landmark: 'Obalende Bus Terminal',
-        },
-        type: 'checkpoint',
-        severity: 'moderate',
-        activeTime: { start: 0, end: 23, allDay: true },
-        description: 'Police checkpoint, usual delay 10-15 minutes. Evening hours worse.',
-        reports: [],
-        verifiedReports: 87,
-        lastReportTime: new Date(Date.now() - 30 * 60 * 1000),
-        aiConfidence: 88,
-        communityRating: 3.8,
-        affectedRadius: 300,
-      },
-      {
-        id: 'dz-3',
-        location: {
-          latitude: 6.4968,
-          longitude: 3.3731,
-          address: 'CMS Under Bridge',
-          landmark: 'CMS Bus Stop',
-        },
-        type: 'harassment',
-        severity: 'high',
-        activeTime: { start: 18, end: 6, allDay: false },
-        description: 'Area boys active at night. Harassment of drivers, especially taxis and ride-hailing.',
-        reports: [],
-        verifiedReports: 92,
-        lastReportTime: new Date(Date.now() - 4 * 60 * 60 * 1000),
-        aiConfidence: 92,
-        communityRating: 4.2,
-        affectedRadius: 400,
-        safeAlternatives: ['Use Eko Bridge', 'Pass Marina during day'],
-      },
-      {
-        id: 'dz-4',
-        location: {
-          latitude: 6.4281,
-          longitude: 3.4219,
-          address: 'Lekki Toll Gate',
-          landmark: 'Lekki Toll Plaza',
-        },
-        type: 'toll_delay',
-        severity: 'moderate',
-        activeTime: { start: 7, end: 10, allDay: false },
-        description: 'Long toll queue during morning rush. 20-30 minutes delay typical.',
-        reports: [],
-        verifiedReports: 134,
-        lastReportTime: new Date(Date.now() - 1 * 60 * 60 * 1000),
-        aiConfidence: 90,
-        communityRating: 4.0,
-        affectedRadius: 1000,
-      },
-      {
-        id: 'dz-5',
-        location: {
-          latitude: 6.5027,
-          longitude: 3.3748,
-          address: 'Ojuelegba Junction',
-          landmark: 'Ojuelegba Bus Stop',
-        },
-        type: 'robbery',
-        severity: 'critical',
-        activeTime: { start: 22, end: 6, allDay: false },
-        description: 'High robbery risk at night. Multiple reports of phone and cash theft at traffic lights.',
-        reports: [],
-        verifiedReports: 78,
-        lastReportTime: new Date(Date.now() - 12 * 60 * 60 * 1000),
-        aiConfidence: 85,
-        communityRating: 4.8,
-        affectedRadius: 600,
-        safeAlternatives: ['Avoid at night', 'Use Ikorodu Road', 'Take Ojota route'],
-      },
-    ];
-  }
 
   private static generateAlertsFromZones(
     zones: DangerZone[],
@@ -525,42 +472,6 @@ export class AreaBoySafety {
     return undefined;
   }
 
-  private static simulateSafeRoutes(
-    origin: { latitude: number; longitude: number },
-    destination: { latitude: number; longitude: number },
-    dangerZones: DangerZone[]
-  ): SafeRoute[] {
-    return [
-      {
-        id: 'safe-route-1',
-        name: 'Safest Route',
-        safetyScore: 95,
-        distanceIncrease: 2000, // 2km extra
-        timeIncrease: 300, // 5 mins extra
-        dangerZonesAvoided: dangerZones.filter(z => z.severity === 'critical').length,
-        landmarks: ['Pass through VI', 'Use Lekki-Ikoyi Link'],
-      },
-      {
-        id: 'safe-route-2',
-        name: 'Balanced Route',
-        safetyScore: 75,
-        distanceIncrease: 500,
-        timeIncrease: 120,
-        dangerZonesAvoided: dangerZones.filter(z => z.severity === 'high' || z.severity === 'critical').length,
-        landmarks: ['Through Adeniji Adele', 'Avoid Oshodi'],
-      },
-      {
-        id: 'safe-route-3',
-        name: 'Fastest Route',
-        safetyScore: 60,
-        distanceIncrease: 0,
-        timeIncrease: 0,
-        dangerZonesAvoided: 0,
-        landmarks: ['Direct route', 'Some danger zones'],
-      },
-    ];
-  }
-
   private static calculateDistance(
     point1: { latitude: number; longitude: number },
     point2: { latitude: number; longitude: number }
@@ -656,5 +567,3 @@ export const useAreaBoySafety = () => {
   };
 };
 
-// Fix import
-import React from 'react';

@@ -10,6 +10,7 @@ import {
   Platform,
   Alert,
   Image,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -17,16 +18,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-
-// Simple session save helper
-const saveUserSession = async (user: any) => {
-  try {
-    // In a real app, save to AsyncStorage
-    console.log('User session saved:', user.id);
-  } catch (error) {
-    console.error('Failed to save session:', error);
-  }
-};
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -46,79 +37,54 @@ export default function RegisterScreen() {
   const [name, setName] = useState(googleName || '');
   const [email, setEmail] = useState(googleEmail || '');
   const [phoneNumber, setPhoneNumber] = useState(phone || '');
+  const openLegal = async (path: string) => {
+    try {
+      const { BACKEND_URL } = await import('@/src/services/api');
+      await Linking.openURL(`${BACKEND_URL}${path}`);
+    } catch {
+      Alert.alert('Unable to open link', 'Please try again later.');
+    }
+  };
 
   const isGoogleAuth = authType === 'google';
 
-  const handleContinue = async () => {
+  const handleContinue = () => {
     if (!name.trim()) {
       Alert.alert('Error', 'Please enter your name');
       return;
     }
     
-    if (!isGoogleAuth && !phoneNumber.trim()) {
+    const isEmailAuth = authType === 'email';
+    if (!isGoogleAuth && !isEmailAuth && !phoneNumber.trim()) {
       Alert.alert('Error', 'Please enter your phone number');
       return;
     }
 
-    try {
-      const backendUrl = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://nexryde-ui.emergent.host';
-      
-      const response = await fetch(`${backendUrl}/api/auth/register`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: phoneNumber ? `+234${phoneNumber}` : null,
+    // Navigate to appropriate verification screen based on role
+    if (selectedRole === 'driver') {
+      // Drivers must accept Terms & Conditions
+      router.push({
+        pathname: '/(auth)/driver-terms',
+        params: {
+          phone: phoneNumber ? `+234${phoneNumber}` : '',
           name: name,
-          email: email || null,
-          role: selectedRole,
-          google_id: googleId || null,
-          profile_image: googlePicture || null,
-        }),
+          email: email || '',
+          google_id: googleId || '',
+          picture: googlePicture || '',
+        },
       });
-
-      const responseText = await response.text();
-      let data: any = null;
-      
-      try {
-        if (responseText?.trim()) {
-          data = JSON.parse(responseText);
-        }
-      } catch (parseError) {
-        console.error('JSON parse error in registration:', parseError);
-        Alert.alert('Error', 'Server response was invalid. Please try again.');
-        return;
-      }
-
-      if (response.ok && (data?.success !== false)) {
-        const userData = data?.user || data;
-        
-        setUser(userData);
-        setIsAuthenticated(true);
-        
-        // Save to AsyncStorage
-        await saveUserSession(userData);
-        
-        console.log(`✅ Registration successful - Role: ${selectedRole}`);
-        console.log(`Navigating to: ${selectedRole === 'driver' ? 'driver-home' : 'rider-home'}`);
-        
-        // Navigate based on role
-        if (selectedRole === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
-        } else {
-          router.replace('/(rider-tabs)/rider-home');
-        }
-      } else {
-        Alert.alert('Error', data?.message || data?.detail || 'Registration failed');
-      }
-    } catch (error: any) {
-      console.error('Registration error:', error);
-      Alert.alert(
-        'Registration Error', 
-        'Could not connect to server. Please check your internet connection and try again.'
-      );
+    } else {
+      // Riders must provide NIN
+      router.push({
+        pathname: '/(auth)/rider-nin',
+        params: {
+          phone: phoneNumber ? `+234${phoneNumber}` : '',
+          name: name,
+          email: email || '',
+          google_id: googleId || '',
+          picture: googlePicture || '',
+        },
+      });
     }
   };
 
@@ -187,19 +153,19 @@ export default function RegisterScreen() {
                 onPress={() => setSelectedRole('driver')}
               >
                 <View style={styles.premiumBadge}>
-                  <Text style={styles.premiumText}>PREMIUM</Text>
+                  <Text style={styles.premiumText}>EARN</Text>
                 </View>
                 <View style={[styles.radioOuter, selectedRole === 'driver' && styles.radioOuterDriver]}>
                   {selectedRole === 'driver' && <View style={[styles.radioInner, styles.radioInnerDriver]} />}
                 </View>
                 <View style={styles.roleInfo}>
                   <Text style={[styles.roleTitle, selectedRole === 'driver' && styles.roleTitleDriver]}>Driver</Text>
-                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceDriver]}>From {CURRENCY}18K/month</Text>
+                  <Text style={[styles.rolePrice, selectedRole === 'driver' && styles.rolePriceDriver]}>Start Earning</Text>
                 </View>
                 <View style={styles.roleFeatures}>
                   <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Keep 100% earnings</Text>
                   <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Zero commission</Text>
-                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Two subscription tiers</Text>
+                  <Text style={[styles.roleFeature, selectedRole === 'driver' && styles.roleFeatureDriver]}>Free trial included</Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -286,8 +252,8 @@ export default function RegisterScreen() {
             </TouchableOpacity>
             <Text style={styles.termsText}>
               By continuing, you agree to our{' '}
-              <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-              <Text style={styles.termsLink}>Privacy Policy</Text>
+              <Text style={styles.termsLink} onPress={() => openLegal('/terms-of-service')}>Terms of Service</Text> and{' '}
+              <Text style={styles.termsLink} onPress={() => openLegal('/privacy-policy')}>Privacy Policy</Text>
             </Text>
           </View>
         </KeyboardAvoidingView>

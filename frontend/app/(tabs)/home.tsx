@@ -329,7 +329,7 @@ export default function HomeScreen() {
                     <Text style={styles.subscriptionDays}>
                       {driverStats?.subscription_days_left 
                         ? `${driverStats.subscription_days_left} days remaining`
-                        : 'From ₦18,000/month • Two tiers'}
+                        : 'From ₦15,000/month • Unlimited earnings'}
                     </Text>
                   </View>
                 </View>
@@ -358,7 +358,7 @@ export default function HomeScreen() {
               
               <TouchableOpacity 
                 style={styles.quickActionCard}
-                onPress={() => router.push('/driver/earnings-dashboard')}
+                onPress={() => router.push('/(driver-tabs)/driver-earnings')}
               >
                 <LinearGradient
                   colors={['#10B981', '#059669']}
@@ -499,12 +499,12 @@ export default function HomeScreen() {
                 <Text style={styles.serviceDesc}>Affordable rides</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={styles.serviceCard} onPress={() => router.push('/rider/bid')}>
+              <TouchableOpacity style={styles.serviceCard} onPress={handleBookRide}>
                 <View style={[styles.serviceIcon, { backgroundColor: '#F59E0B20' }]}>
-                  <Ionicons name="pricetag" size={28} color="#F59E0B" />
+                  <Ionicons name="car" size={28} color="#F59E0B" />
                 </View>
-                <Text style={styles.serviceTitle}>Bid Ride</Text>
-                <Text style={styles.serviceDesc}>Name your price</Text>
+                <Text style={styles.serviceTitle}>Quick Ride</Text>
+                <Text style={styles.serviceDesc}>Fast matching</Text>
               </TouchableOpacity>
             </View>
 
@@ -567,8 +567,8 @@ export default function HomeScreen() {
                 >
                   <Ionicons name="shield-checkmark" size={26} color="#FFFFFF" />
                 </LinearGradient>
-                <Text style={styles.featureTitle}>Verified Drivers</Text>
-                <Text style={styles.featureDesc}>All drivers verified</Text>
+                <Text style={styles.featureTitle}>Driver Checks</Text>
+                <Text style={styles.featureDesc}>Approved drivers show verification badges</Text>
               </View>
               
               <View style={styles.featureCard}>

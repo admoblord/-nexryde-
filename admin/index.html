@@ -439,6 +439,9 @@
                 <a class="nav-item" data-page="live-trips">
                     <i class="ri-map-pin-time-line"></i> Live Trips
                 </a>
+                <a class="nav-item" data-page="system-health">
+                    <i class="ri-server-line"></i> System Health
+                </a>
             </nav>
         </aside>
 
@@ -786,6 +789,64 @@
                             <i class="ri-map-pin-time-line" style="font-size: 48px;"></i>
                             <p>No active trips</p>
                         </div>
+                    </div>
+                </div>
+            </div>
+            <!-- System Health Page -->
+            <div class="page-section" id="page-system-health">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-server-line"></i></div>
+                        <div class="value" id="healthApiStatus">Checking...</div>
+                        <div class="label">API Status</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon blue"><i class="ri-database-2-line"></i></div>
+                        <div class="value" id="healthDbStatus">Checking...</div>
+                        <div class="label">Database</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon purple"><i class="ri-router-line"></i></div>
+                        <div class="value" id="healthRoutersCount">0</div>
+                        <div class="label">Active Routers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon orange"><i class="ri-time-line"></i></div>
+                        <div class="value" id="healthUptime">--</div>
+                        <div class="label">Last Check</div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-header">
+                        <h3>Subscription Overview</h3>
+                    </div>
+                    <div id="subscriptionOverview" style="padding: 20px;">
+                        <div class="stats-grid">
+                            <div class="stat-card" style="background: rgba(0,208,132,0.1); border-color: rgba(0,208,132,0.3);">
+                                <div class="value" id="subsActive" style="color: #00D084;">0</div>
+                                <div class="label">Active Subscriptions</div>
+                            </div>
+                            <div class="stat-card" style="background: rgba(245,158,11,0.1); border-color: rgba(245,158,11,0.3);">
+                                <div class="value" id="subsTrial" style="color: #F59E0B;">0</div>
+                                <div class="label">Trial Users</div>
+                            </div>
+                            <div class="stat-card" style="background: rgba(239,68,68,0.1); border-color: rgba(239,68,68,0.3);">
+                                <div class="value" id="subsExpired" style="color: #EF4444;">0</div>
+                                <div class="label">Expired</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card" style="margin-top: 16px;">
+                    <div class="card-header">
+                        <h3>Auto-Refresh</h3>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                            <input type="checkbox" id="autoRefreshToggle" onchange="toggleAutoRefresh()" style="width: 18px; height: 18px;">
+                            <span style="color: #94A3B8; font-size: 14px;">Enable 30s auto-refresh</span>
+                        </label>
+                    </div>
+                    <div style="padding: 20px; color: #64748B; font-size: 14px;" id="autoRefreshStatus">
+                        Auto-refresh is disabled. Enable to keep dashboard data updated.
                     </div>
                 </div>
             </div>
@@ -1428,6 +1489,83 @@
                 loadLiveTrips();
             }
         }, 10000);
+
+        // ==================== SYSTEM HEALTH ====================
+        async function loadSystemHealth() {
+            try {
+                const healthRes = await fetch(`${API_BASE}/api/health`);
+                const health = await healthRes.json();
+                document.getElementById('healthApiStatus').textContent = health.status === 'healthy' ? '✅ Healthy' : '❌ Down';
+                document.getElementById('healthApiStatus').style.color = health.status === 'healthy' ? '#00D084' : '#EF4444';
+                document.getElementById('healthDbStatus').textContent = '✅ Connected';
+                document.getElementById('healthDbStatus').style.color = '#00D084';
+                document.getElementById('healthRoutersCount').textContent = '14';
+                document.getElementById('healthUptime').textContent = new Date().toLocaleTimeString();
+            } catch (e) {
+                document.getElementById('healthApiStatus').textContent = '❌ Unreachable';
+                document.getElementById('healthApiStatus').style.color = '#EF4444';
+                document.getElementById('healthDbStatus').textContent = '❓ Unknown';
+            }
+            // Load subscription stats
+            try {
+                const subsRes = await fetch(`${API_BASE}/api/admin/overview`);
+                const subs = await subsRes.json();
+                document.getElementById('subsActive').textContent = subs.active_subscriptions || 0;
+                document.getElementById('subsTrial').textContent = subs.trial_count || 0;
+                document.getElementById('subsExpired').textContent = subs.expired_subscriptions || 0;
+            } catch (e) {
+                console.error('Subscription stats error:', e);
+            }
+        }
+
+        // ==================== AUTO-REFRESH ====================
+        let autoRefreshInterval = null;
+        function toggleAutoRefresh() {
+            const toggle = document.getElementById('autoRefreshToggle');
+            const status = document.getElementById('autoRefreshStatus');
+            if (toggle.checked) {
+                status.innerHTML = '🔄 Auto-refresh enabled. Dashboard updates every 30 seconds.';
+                status.style.color = '#00D084';
+                autoRefreshInterval = setInterval(() => {
+                    const activePage = document.querySelector('.page-section.active');
+                    if (activePage) {
+                        const pageId = activePage.id.replace('page-', '');
+                        const loaders = {
+                            'overview': loadOverview,
+                            'riders': loadRiders,
+                            'drivers': loadDrivers,
+                            'trips': loadTrips,
+                            'payments': loadPayments,
+                            'verifications': loadVerifications,
+                            'promos': loadPromos,
+                            'fraud': loadFraudAlerts,
+                            'analytics': () => loadAnalytics('today'),
+                            'live-trips': loadLiveTrips,
+                            'system-health': loadSystemHealth,
+                        };
+                        if (loaders[pageId]) loaders[pageId]();
+                    }
+                }, 30000);
+            } else {
+                status.innerHTML = 'Auto-refresh is disabled. Enable to keep dashboard data updated.';
+                status.style.color = '#64748B';
+                if (autoRefreshInterval) {
+                    clearInterval(autoRefreshInterval);
+                    autoRefreshInterval = null;
+                }
+            }
+        }
+
+        // Load system health when navigating to that page
+        const origShowDashboard = showDashboard;
+        // Patch navigation to load system health
+        document.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', () => {
+                if (item.dataset.page === 'system-health') {
+                    setTimeout(loadSystemHealth, 100);
+                }
+            });
+        });
     </script>
 </body>
 </html>

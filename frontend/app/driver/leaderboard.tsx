@@ -35,45 +35,34 @@ export default function LeaderboardScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [userRank, setUserRank] = useState<LeaderboardEntry | null>(null);
 
-  // Mock data for demo
-  const mockLeaderboard: LeaderboardEntry[] = [
-    { rank: 1, driver_id: '1', name: 'Chukwuemeka Obi', trips: 187, earnings: 485000, rating: 4.96, badge: 'gold' },
-    { rank: 2, driver_id: '2', name: 'Adebayo Johnson', trips: 165, earnings: 425000, rating: 4.92, badge: 'silver' },
-    { rank: 3, driver_id: '3', name: 'Ibrahim Musa', trips: 152, earnings: 398000, rating: 4.89, badge: 'bronze' },
-    { rank: 4, driver_id: '4', name: 'Oluwaseun Adeleke', trips: 143, earnings: 372000, rating: 4.87 },
-    { rank: 5, driver_id: '5', name: 'Emeka Nwankwo', trips: 138, earnings: 358000, rating: 4.85 },
-    { rank: 6, driver_id: '6', name: 'Tunde Bakare', trips: 131, earnings: 341000, rating: 4.82 },
-    { rank: 7, driver_id: '7', name: 'Yusuf Abdullahi', trips: 125, earnings: 325000, rating: 4.80 },
-    { rank: 8, driver_id: '8', name: 'Kingsley Eze', trips: 118, earnings: 307000, rating: 4.78 },
-    { rank: 9, driver_id: '9', name: 'Femi Ogundimu', trips: 112, earnings: 291000, rating: 4.75 },
-    { rank: 10, driver_id: '10', name: 'Chidi Okeke', trips: 105, earnings: 273000, rating: 4.72 },
-  ];
-
   useEffect(() => {
     loadLeaderboard();
   }, [period]);
 
   const loadLeaderboard = async () => {
     try {
-      // In production, fetch from API
-      // const response = await getDriverLeaderboard('lagos', period);
-      // setLeaderboard(response.data);
-      
-      // For demo, use mock data
-      setLeaderboard(mockLeaderboard);
-      
-      // Set user's rank (mock)
-      setUserRank({
-        rank: 24,
-        driver_id: user?.id || '',
-        name: user?.name || 'You',
-        trips: 45,
-        earnings: 117000,
-        rating: 4.85,
-      });
+      const response = await getDriverLeaderboard('lagos', period);
+      const rows = Array.isArray(response?.data) ? response.data : (response?.data?.drivers || []);
+      const normalized: LeaderboardEntry[] = rows.map((row: any, idx: number) => ({
+        rank: row.rank || idx + 1,
+        driver_id: row.driver_id || row.id || `driver-${idx}`,
+        name: row.name || 'Driver',
+        trips: Number(row.trips || row.total_trips || 0),
+        earnings: Number(row.earnings || row.total_earnings || 0),
+        rating: Number(row.rating || 0),
+        badge: row.badge,
+      }));
+      setLeaderboard(normalized);
+      if (user?.id) {
+        const mine = normalized.find((entry) => entry.driver_id === user.id) || null;
+        setUserRank(mine);
+      } else {
+        setUserRank(null);
+      }
     } catch (error) {
       console.log('Error loading leaderboard:', error);
-      setLeaderboard(mockLeaderboard);
+      setLeaderboard([]);
+      setUserRank(null);
     }
   };
 

@@ -7,264 +7,636 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Modal,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { Card, Button } from '@/src/components/UI';
+import { LinearGradient } from 'expo-linear-gradient';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
-export default function BankScreen() {
+// Complete list of ALL Nigerian banks
+const NIGERIAN_BANKS = [
+  'Access Bank', 'Citibank', 'Ecobank', 'Fidelity Bank', 'First Bank of Nigeria',
+  'First City Monument Bank (FCMB)', 'Globus Bank', 'Guaranty Trust Bank (GTBank)',
+  'Heritage Bank', 'Keystone Bank', 'Polaris Bank', 'Providus Bank',
+  'Stanbic IBTC Bank', 'Standard Chartered Bank', 'Sterling Bank',
+  'SunTrust Bank', 'Titan Trust Bank', 'Union Bank of Nigeria',
+  'United Bank for Africa (UBA)', 'Unity Bank', 'Wema Bank', 'Zenith Bank',
+  // Digital Banks
+  'Kuda Bank', 'ALAT by Wema', 'Rubies Bank', 'VFD Microfinance Bank',
+  // Payment Banks
+  'OPay', 'PalmPay', 'Moniepoint', 'Paga', 'Carbon',
+].sort();
+
+export default function BankDetailsScreen() {
   const router = useRouter();
   const { user } = useAppStore();
-  const [loading, setLoading] = useState(false);
+  
   const [bankName, setBankName] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [verifying, setVerifying] = useState(false);
+
+  const filteredBanks = NIGERIAN_BANKS.filter(bank =>
+    bank.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const handleVerifyAccount = async () => {
+    if (!bankName) {
+      Alert.alert('Required', 'Please select your bank');
+      return;
+    }
+    if (!accountNumber || accountNumber.length !== 10) {
+      Alert.alert('Invalid', 'Please enter a valid 10-digit account number');
+      return;
+    }
+
+    setVerifying(true);
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/drivers/${user?.id}/verify-bank`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ bank_name: bankName, account_number: accountNumber }),
+      });
+      const data = await res.json();
+      if (data.account_name) {
+        setAccountName(data.account_name);
+        Alert.alert('Verified!', `Account name: ${data.account_name}`);
+      } else {
+        Alert.alert(
+          'Enter Manually',
+          'Please enter your account name exactly as it appears on your bank statement.',
+        );
+      }
+    } catch {
+      Alert.alert(
+        'Enter Manually',
+        'Please enter your account name exactly as it appears on your bank statement.',
+      );
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!bankName || !accountNumber || !accountName) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Incomplete', 'Please fill in all fields');
       return;
     }
 
     setLoading(true);
-    // In a real app, save to backend
-    setTimeout(() => {
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${user?.id}/bank-details`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          bank_name: bankName,
+          account_number: accountNumber,
+          account_name: accountName,
+        }),
+      });
+
+      if (response.ok) {
+        Alert.alert('✅ Saved!', 'Your bank details have been updated', [
+          { text: 'OK', onPress: () => router.back() }
+        ]);
+      } else {
+        Alert.alert('Error', 'Could not save bank details');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Network error. Please try again.');
+    } finally {
       setLoading(false);
-      Alert.alert('Success', 'Bank details saved successfully');
-    }, 1000);
+    }
   };
 
-  const banks = [
-    'Access Bank',
-    'First Bank',
-    'GTBank',
-    'UBA',
-    'Zenith Bank',
-    'Kuda Bank',
-    'Opay',
-    'Palmpay',
-    'Wema Bank',
-    'Fidelity Bank',
-  ];
-
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <Text style={styles.title}>Bank Details</Text>
+          <Text style={styles.headerTitle}>Bank Details</Text>
+          <View style={styles.placeholder} />
         </View>
 
-        {/* Info Card */}
-        <Card style={styles.infoCard}>
-          <Ionicons name="information-circle" size={24} color={COLORS.info} />
-          <Text style={styles.infoText}>
-            Riders will transfer payments directly to your bank account. Make sure your details are correct.
-          </Text>
-        </Card>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          {/* Option Label */}
+          <View style={styles.optionLabel}>
+            <View style={[styles.optionBadge, { backgroundColor: COLORS.accentGreen }]}>
+              <Text style={styles.optionBadgeText}>1</Text>
+            </View>
+            <Text style={styles.optionText}>Bank Transfer (Active)</Text>
+          </View>
 
-        {/* Bank Selection */}
-        <Text style={styles.label}>Select Bank</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.bankScroll}>
-          {banks.map((bank) => (
-            <TouchableOpacity
-              key={bank}
-              style={[
-                styles.bankOption,
-                bankName === bank && styles.bankOptionSelected
-              ]}
-              onPress={() => setBankName(bank)}
+          {/* Info Card */}
+          <View style={styles.infoCard}>
+            <Ionicons name="shield-checkmark" size={32} color={COLORS.accentGreen} />
+            <Text style={styles.infoTitle}>Direct Payment from Riders</Text>
+            <Text style={styles.infoText}>
+              Riders pay you directly to this bank account after each trip. No middleman, no delays — you receive 100% of your fare instantly.
+            </Text>
+          </View>
+
+          {/* Bank Selection */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Select Your Bank *</Text>
+            <TouchableOpacity 
+              style={styles.bankSelector}
+              onPress={() => setShowBankModal(true)}
             >
-              <Text style={[
-                styles.bankText,
-                bankName === bank && styles.bankTextSelected
-              ]}>{bank}</Text>
+              <Ionicons name="business" size={24} color={bankName ? COLORS.accentGreen : COLORS.lightTextMuted} />
+              <Text style={[styles.bankSelectorText, !bankName && styles.placeholder]}>
+                {bankName || 'Choose your bank'}
+              </Text>
+              <Ionicons name="chevron-down" size={20} color={COLORS.lightTextSecondary} />
             </TouchableOpacity>
-          ))}
+          </View>
+
+          {/* Account Number */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Account Number *</Text>
+            <View style={styles.inputRow}>
+              <TextInput
+                style={styles.input}
+                placeholder="10-digit account number"
+                value={accountNumber}
+                onChangeText={setAccountNumber}
+                keyboardType="number-pad"
+                maxLength={10}
+                placeholderTextColor={COLORS.lightTextMuted}
+              />
+              {accountNumber.length === 10 && bankName && (
+                <TouchableOpacity 
+                  style={styles.verifyButton}
+                  onPress={handleVerifyAccount}
+                  disabled={verifying}
+                >
+                  {verifying ? (
+                    <ActivityIndicator size="small" color={COLORS.white} />
+                  ) : (
+                    <Text style={styles.verifyText}>Verify</Text>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
+
+          {/* Account Name */}
+          <View style={styles.section}>
+            <Text style={styles.label}>Account Name *</Text>
+            <TextInput
+              style={[styles.input, accountName && styles.inputVerified]}
+              placeholder="Enter name exactly as on your bank account"
+              value={accountName}
+              onChangeText={setAccountName}
+              placeholderTextColor={COLORS.lightTextMuted}
+              autoCapitalize="words"
+            />
+            <Text style={styles.helperText}>
+              This name will be shown to riders for payment confirmation
+            </Text>
+          </View>
+
+          {/* Security Note */}
+          <View style={styles.securityNote}>
+            <Ionicons name="lock-closed" size={16} color={COLORS.accentGreen} />
+            <Text style={styles.securityText}>
+              🔒 Your banking information is encrypted end-to-end
+            </Text>
+          </View>
         </ScrollView>
 
-        {/* Account Number */}
-        <Text style={styles.label}>Account Number</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter your 10-digit account number"
-          placeholderTextColor={COLORS.gray400}
-          value={accountNumber}
-          onChangeText={setAccountNumber}
-          keyboardType="number-pad"
-          maxLength={10}
-        />
+        {/* Save Button */}
+        <View style={styles.bottomSection}>
+          <TouchableOpacity 
+            style={[styles.saveButton, (!bankName || !accountNumber || !accountName) && styles.saveButtonDisabled]}
+            onPress={handleSave}
+            disabled={!bankName || !accountNumber || !accountName || loading}
+          >
+            <LinearGradient
+              colors={(!bankName || !accountNumber || !accountName) 
+                ? [COLORS.lightBorder, COLORS.lightBorder]
+                : [COLORS.accentGreen, COLORS.accentBlue]}
+              style={styles.saveGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <>
+                  <Ionicons name="checkmark-circle" size={20} color={COLORS.white} />
+                  <Text style={styles.saveText}>Save Bank Details</Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
 
-        {/* Account Name */}
-        <Text style={styles.label}>Account Name</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Enter account holder name"
-          placeholderTextColor={COLORS.gray400}
-          value={accountName}
-          onChangeText={setAccountName}
-          autoCapitalize="words"
-        />
+          {/* Option 2: Crypto Coming Soon */}
+          <View style={styles.cryptoOption}>
+            <View style={styles.optionLabel}>
+              <View style={[styles.optionBadge, { backgroundColor: '#F7931A' }]}>
+                <Text style={styles.optionBadgeText}>2</Text>
+              </View>
+              <Text style={styles.optionText}>Cryptocurrency</Text>
+              <View style={styles.comingSoonBadge}>
+                <Text style={styles.comingSoonText}>COMING SOON</Text>
+              </View>
+            </View>
+            <View style={styles.cryptoCard}>
+              <View style={styles.cryptoRow}>
+                <Ionicons name="logo-bitcoin" size={28} color="#F7931A" />
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.cryptoTitle}>Crypto Wallet Payout</Text>
+                  <Text style={styles.cryptoDesc}>Receive earnings in USDT, USDC, or BTC. Protect against Naira devaluation.</Text>
+                </View>
+              </View>
+              <View style={styles.cryptoCoins}>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>{'\u20BF'} BTC</Text>
+                </View>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>{'\u039E'} ETH</Text>
+                </View>
+                <View style={styles.cryptoCoinChip}>
+                  <Text style={styles.cryptoCoinText}>$ USDT</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+      </SafeAreaView>
 
-        {/* Preview Card */}
-        {bankName && accountNumber && accountName && (
-          <Card style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Payment Details Preview</Text>
-            <View style={styles.previewRow}>
-              <Text style={styles.previewLabel}>Bank:</Text>
-              <Text style={styles.previewValue}>{bankName}</Text>
-            </View>
-            <View style={styles.previewRow}>
-              <Text style={styles.previewLabel}>Account Number:</Text>
-              <Text style={styles.previewValue}>{accountNumber}</Text>
-            </View>
-            <View style={styles.previewRow}>
-              <Text style={styles.previewLabel}>Account Name:</Text>
-              <Text style={styles.previewValue}>{accountName}</Text>
-            </View>
-            <Text style={styles.previewNote}>
-              Riders will see these details when paying via bank transfer
-            </Text>
-          </Card>
-        )}
+      {/* Bank Selection Modal */}
+      <Modal
+        visible={showBankModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Select Your Bank</Text>
+            <TouchableOpacity onPress={() => setShowBankModal(false)}>
+              <Ionicons name="close" size={28} color={COLORS.lightTextPrimary} />
+            </TouchableOpacity>
+          </View>
 
-        <Button
-          title={loading ? 'Saving...' : 'Save Bank Details'}
-          onPress={handleSave}
-          loading={loading}
-          disabled={!bankName || !accountNumber || !accountName}
-          style={styles.saveButton}
-        />
-      </ScrollView>
-    </SafeAreaView>
+          {/* Search Bar */}
+          <View style={styles.searchBar}>
+            <Ionicons name="search" size={20} color={COLORS.lightTextSecondary} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search banks..."
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              placeholderTextColor={COLORS.lightTextMuted}
+            />
+          </View>
+
+          <ScrollView style={styles.bankList}>
+            {filteredBanks.map((bank) => (
+              <TouchableOpacity
+                key={bank}
+                style={styles.bankItem}
+                onPress={() => {
+                  setBankName(bank);
+                  setShowBankModal(false);
+                  setSearchQuery('');
+                }}
+              >
+                <Ionicons name="business" size={24} color={COLORS.accentGreen} />
+                <Text style={styles.bankItemText}>{bank}</Text>
+                {bankName === bank && (
+                  <Ionicons name="checkmark-circle" size={24} color={COLORS.accentGreen} />
+                )}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.lightBackground,
   },
-  content: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
+  safeArea: {
+    flex: 1,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.lg,
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightBorder,
   },
   backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.white,
+    width: 40,
+    height: 40,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: SPACING.md,
-    ...SHADOWS.sm,
   },
-  title: {
-    fontSize: FONT_SIZE.xxl,
+  headerTitle: {
+    fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.textPrimary,
+    color: COLORS.lightTextPrimary,
+  },
+  placeholder: {
+    width: 40,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: SPACING.lg,
+    paddingBottom: 100,
   },
   infoCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    alignItems: 'center',
     marginBottom: SPACING.lg,
-    backgroundColor: COLORS.info + '15',
+  },
+  infoTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.xs,
   },
   infoText: {
-    flex: 1,
-    marginLeft: SPACING.sm,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.info,
-    lineHeight: 22,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  section: {
+    marginBottom: SPACING.lg,
   },
   label: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
-  },
-  bankScroll: {
-    marginBottom: SPACING.lg,
-  },
-  bankOption: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.gray200,
-    marginRight: SPACING.sm,
-  },
-  bankOptionSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  bankText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.xs,
   },
-  bankTextSelected: {
-    color: COLORS.white,
-  },
-  input: {
+  bankSelector: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.gray200,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
+    padding: SPACING.md,
+    borderWidth: 2,
+    borderColor: COLORS.lightBorder,
+    gap: SPACING.sm,
+  },
+  bankSelectorText: {
+    flex: 1,
     fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.lg,
-  },
-  previewCard: {
-    marginBottom: SPACING.lg,
-    backgroundColor: COLORS.primary + '10',
-    borderWidth: 1,
-    borderColor: COLORS.primary,
-  },
-  previewTitle: {
-    fontSize: FONT_SIZE.lg,
+    color: COLORS.lightTextPrimary,
     fontWeight: '600',
-    color: COLORS.primary,
-    marginBottom: SPACING.md,
   },
-  previewRow: {
+  placeholder: {
+    color: COLORS.lightTextMuted,
+  },
+  inputRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.sm,
+    gap: SPACING.sm,
   },
-  previewLabel: {
+  input: {
+    flex: 1,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
     fontSize: FONT_SIZE.md,
-    color: COLORS.textSecondary,
+    color: COLORS.lightTextPrimary,
+    borderWidth: 2,
+    borderColor: COLORS.lightBorder,
   },
-  previewValue: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
+  inputVerified: {
+    borderColor: COLORS.accentGreen,
+  },
+  verifyButton: {
+    backgroundColor: COLORS.accentGreen,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.lg,
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  verifyText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
+  verifiedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: SPACING.xs,
+    gap: 4,
+  },
+  verifiedText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.accentGreen,
+  },
+  helperText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextMuted,
+    marginTop: SPACING.xs,
     fontWeight: '600',
   },
-  previewNote: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-    fontStyle: 'italic',
-    marginTop: SPACING.sm,
-    paddingTop: SPACING.sm,
+  securityNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    gap: SPACING.xs,
+  },
+  securityText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextSecondary,
+  },
+  bottomSection: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
     borderTopWidth: 1,
-    borderTopColor: COLORS.gray200,
+    borderTopColor: COLORS.lightBorder,
   },
   saveButton: {
-    marginTop: 'auto',
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+  },
+  saveButtonDisabled: {
+    opacity: 0.5,
+  },
+  saveGradient: {
+    paddingVertical: SPACING.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+  },
+  saveText: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: COLORS.lightBackground,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.lightBorder,
+  },
+  modalTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    margin: SPACING.lg,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    gap: SPACING.sm,
+  },
+  searchInput: {
+    flex: 1,
+    paddingVertical: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextPrimary,
+  },
+  bankList: {
+    flex: 1,
+  },
+  bankItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.white,
+    padding: SPACING.md,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    gap: SPACING.sm,
+  },
+  bankItemText: {
+    flex: 1,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.lightTextPrimary,
+    fontWeight: '600',
+  },
+  optionLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: SPACING.md,
+  },
+  optionBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  optionBadgeText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  optionText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  comingSoonBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  comingSoonText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  cryptoOption: {
+    marginTop: SPACING.lg,
+    paddingTop: SPACING.lg,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  cryptoCard: {
+    backgroundColor: '#FFFBEB',
+    borderRadius: 16,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderStyle: 'dashed',
+  },
+  cryptoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
+  },
+  cryptoTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  cryptoDesc: {
+    fontSize: 13,
+    color: '#A16207',
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  cryptoCoins: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: SPACING.sm,
+  },
+  cryptoCoinChip: {
+    backgroundColor: '#FFF',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  cryptoCoinText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#92400E',
   },
 });

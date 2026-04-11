@@ -7,6 +7,7 @@
 
 import { useState, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from '@/src/services/api';
 
 // Mood & Preference Types
 export type RideMood = 
@@ -532,3 +533,11 @@ export const useMoodMatching = () => {
     loadPreferences,
   };
 };
+
+/** Fetch AI-powered rider assistant for mood-based suggestions (Emergent LLM → GPT-4o) */
+export async function fetchAIMoodSuggestions(userId: string, mood: string): Promise<any> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ai/rider-assistant?user_id=${userId}&question=Suggest%20ride%20preferences%20for%20${mood}%20mood`);
+    return await res.json();
+  } catch { return null; }
+}

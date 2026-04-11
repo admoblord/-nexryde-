@@ -1,6 +1,7 @@
 import React, { Component, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import CrashReporter from '@/src/services/crashReporting';
 
 interface Props {
   children: ReactNode;
@@ -43,12 +44,14 @@ export class ErrorBoundary extends Component<Props, State> {
     console.error('Error message:', error.message);
     console.error('Error stack:', error.stack);
     console.error('Component stack:', errorInfo.componentStack);
-    
+
+    CrashReporter.captureException(error, { component: errorInfo?.componentStack?.slice(0, 200) || 'unknown' });
+
     // Log to help identify the issue
     if (error.message) {
       console.error('📋 Specific error:', error.message);
     }
-    
+
     this.setState({
       error,
       errorInfo,

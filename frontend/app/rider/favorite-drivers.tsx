@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { getFavoriteDrivers, removeFavoriteDriver, getTripsWithDriver } from '@/src/services/api';
 
 interface FavoriteDriver {
   id: string;
@@ -26,66 +27,65 @@ interface FavoriteDriver {
   isOnline: boolean;
   lastSeen: string;
   profileImage?: string;
+  ridesTogether: number;
+  totalSpent: number;
 }
 
 export default function FavoriteDriversScreen() {
   const router = useRouter();
   const { user } = useAppStore();
+  const { colors } = useThemeColors();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([
-    {
-      id: 'drv-001',
-      name: 'John Doe',
-      rating: 4.9,
-      totalTrips: 156,
-      vehicle: 'Toyota Camry',
-      plate: 'ABC-123XY',
-      isOnline: true,
-      lastSeen: 'Online now',
-    },
-    {
-      id: 'drv-002',
-      name: 'Jane Smith',
-      rating: 4.8,
-      totalTrips: 203,
-      vehicle: 'Honda Accord',
-      plate: 'XYZ-789AB',
-      isOnline: false,
-      lastSeen: '5 min ago',
-    },
-    {
-      id: 'drv-003',
-      name: 'David Johnson',
-      rating: 5.0,
-      totalTrips: 89,
-      vehicle: 'Toyota Corolla',
-      plate: 'DEF-456CD',
-      isOnline: true,
-      lastSeen: 'Online now',
-    },
-  ]);
+  const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
 
-  useEffect(() => {
-    loadFavoriteDrivers();
-  }, []);
-
-  const loadFavoriteDrivers = async () => {
+  const loadFavoriteDrivers = useCallback(async () => {
     try {
       setLoading(true);
-      // TODO: Call API to load favorite drivers
-      // const response = await getFavoriteDrivers(user?.id);
-      // setFavoriteDrivers(response.data);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      if (!user?.id) {
+        setFavoriteDrivers([]);
+        return;
+      }
+      const response = await getFavoriteDrivers(user.id);
+      const rawDrivers = response.data?.favorite_drivers || response.data;
+      const rows = Array.isArray(rawDrivers) ? rawDrivers : [];
+
+      const mapped: FavoriteDriver[] = await Promise.all(
+        rows.map(async (d: any) => {
+          const driverId = d.driver_id || d.id;
+          let ridesTogether = 0;
+          let totalSpent = 0;
+          try {
+            const histRes = await getTripsWithDriver(user!.id, driverId);
+            ridesTogether = histRes.data?.total_rides || 0;
+            totalSpent = histRes.data?.total_spent || 0;
+          } catch {}
+          return {
+            id: driverId,
+            name: d.name || 'Driver',
+            rating: Number(d.rating || 0),
+            totalTrips: Number(d.total_trips || 0),
+            vehicle: d.vehicle_model || d.vehicle || 'Vehicle',
+            plate: d.vehicle_plate || d.plate || '',
+            isOnline: Boolean(d.is_online),
+            lastSeen: d.is_online ? 'Online now' : 'Offline',
+            ridesTogether,
+            totalSpent,
+          };
+        })
+      );
+      setFavoriteDrivers(mapped);
     } catch (error) {
       Alert.alert('Error', 'Failed to load favorite drivers');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [user?.id]);
+
+  useEffect(() => {
+    loadFavoriteDrivers();
+  }, [loadFavoriteDrivers]);
 
   const handleRequestDriver = (driver: FavoriteDriver) => {
     if (!driver.isOnline) {
@@ -108,7 +108,6 @@ export default function FavoriteDriversScreen() {
         {
           text: 'Send Request',
           onPress: () => {
-            // TODO: Implement request to specific driver
             router.push({
               pathname: '/rider/book',
               params: { requestedDriverId: driver.id, driverName: driver.name }
@@ -130,7 +129,9 @@ export default function FavoriteDriversScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // TODO: Call API to remove favorite
+              if (user?.id) {
+                await removeFavoriteDriver(user.id, driver.id);
+              }
               setFavoriteDrivers(favoriteDrivers.filter(d => d.id !== driver.id));
               Alert.alert('Success', `${driver.name} removed from favorites`);
             } catch (error) {
@@ -155,7 +156,7 @@ export default function FavoriteDriversScreen() {
           {/* Avatar */}
           <View style={styles.avatar}>
             {driver.profileImage ? (
-              <Text>IMG</Text>
+              <Text style={styles.avatarText}>{driver.name.charAt(0).toUpperCase()}</Text>
             ) : (
               <Text style={styles.avatarText}>
                 {driver.name.charAt(0).toUpperCase()}
@@ -183,10 +184,26 @@ export default function FavoriteDriversScreen() {
         <TouchableOpacity 
           style={styles.removeButton}
           onPress={() => handleRemoveFavorite(driver)}
+          accessibilityLabel={"Remove " + driver.name + " from favorites"}
+          accessibilityRole="button"
         >
           <Ionicons name="close-circle" size={24} color={COLORS.error} />
         </TouchableOpacity>
       </View>
+
+      {/* Ride history stats */}
+      {driver.ridesTogether > 0 && (
+        <View style={styles.historyRow}>
+          <View style={styles.historyItem}>
+            <Ionicons name="repeat" size={14} color={COLORS.accentBlue} />
+            <Text style={styles.historyText}>{driver.ridesTogether} rides together</Text>
+          </View>
+          <View style={styles.historyItem}>
+            <Ionicons name="cash-outline" size={14} color={COLORS.accentGreen} />
+            <Text style={styles.historyText}>{'\u20A6'}{driver.totalSpent.toLocaleString()} spent</Text>
+          </View>
+        </View>
+      )}
 
       {/* Status */}
       <View style={[styles.statusBadge, driver.isOnline ? styles.statusOnline : styles.statusOffline]}>
@@ -196,52 +213,70 @@ export default function FavoriteDriversScreen() {
         </Text>
       </View>
 
-      {/* Action Button */}
-      {driver.isOnline ? (
-        <TouchableOpacity 
-          style={styles.requestButton}
-          onPress={() => handleRequestDriver(driver)}
+      {/* Action Buttons */}
+      <View style={styles.actionRow}>
+        <TouchableOpacity
+          style={styles.profileButton}
+          onPress={() => router.push({ pathname: '/rider/driver-details', params: { driverId: driver.id } })}
+          accessibilityLabel={"View " + driver.name + " profile"}
+          accessibilityRole="button"
         >
-          <LinearGradient
-            colors={[COLORS.accentGreen, COLORS.accentBlue]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 0 }}
-            style={styles.requestGradient}
+          <Ionicons name="person-outline" size={18} color={COLORS.primary} />
+          <Text style={styles.profileButtonText}>View Profile</Text>
+        </TouchableOpacity>
+
+        {driver.isOnline ? (
+          <TouchableOpacity 
+            style={[styles.requestButton, { flex: 1 }]}
+            onPress={() => handleRequestDriver(driver)}
+            accessibilityLabel={"Request ride from " + driver.name}
+            accessibilityRole="button"
           >
-            <Ionicons name="car" size={20} color={COLORS.white} />
-            <Text style={styles.requestButtonText}>Request Ride</Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity 
-          style={styles.notifyButton}
-          onPress={() => {
-            Alert.alert('Notification Set!', `You'll be notified when ${driver.name} comes online.`);
-          }}
-        >
-          <Ionicons name="notifications-outline" size={20} color={COLORS.accentBlue} />
-          <Text style={styles.notifyButtonText}>Notify When Online</Text>
-        </TouchableOpacity>
-      )}
+            <LinearGradient
+              colors={[COLORS.accentGreen, COLORS.accentBlue]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+              style={styles.requestGradient}
+            >
+              <Ionicons name="car" size={20} color={COLORS.white} />
+              <Text style={styles.requestButtonText}>Request Ride</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity 
+            style={[styles.notifyButton, { flex: 1 }]}
+            onPress={() => {
+              Alert.alert('Notification Set!', `You'll be notified when ${driver.name} comes online.`);
+            }}
+            accessibilityLabel={"Notify when " + driver.name + " is online"}
+            accessibilityRole="button"
+          >
+            <Ionicons name="notifications-outline" size={20} color={COLORS.accentBlue} />
+            <Text style={styles.notifyButtonText}>Notify When Online</Text>
+          </TouchableOpacity>
+        )}
+      </View>
     </View>
   );
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={COLORS.accentGreen} />
-        <Text style={styles.loadingText}>Loading your favorites...</Text>
+        <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading your favorites...</Text>
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => router.back()}
+          accessibilityLabel="Go back"
+          accessibilityRole="button"
         >
           <Ionicons name="arrow-back" size={24} color={COLORS.white} />
         </TouchableOpacity>
@@ -270,13 +305,15 @@ export default function FavoriteDriversScreen() {
             <View style={styles.emptyIcon}>
               <Ionicons name="star-outline" size={64} color={COLORS.gray400} />
             </View>
-            <Text style={styles.emptyTitle}>No Favorite Drivers Yet</Text>
-            <Text style={styles.emptyText}>
+            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Favorite Drivers Yet</Text>
+            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
               After a great ride, add drivers to your favorites to request them directly!
             </Text>
             <TouchableOpacity 
               style={styles.emptyButton}
               onPress={() => router.push('/rider/book')}
+              accessibilityLabel="Book your first ride"
+              accessibilityRole="button"
             >
               <Text style={styles.emptyButtonText}>Book Your First Ride</Text>
             </TouchableOpacity>
@@ -436,6 +473,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  historyRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  historyItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.gray100,
+    paddingVertical: SPACING.xs,
+    paddingHorizontal: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  historyText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -462,6 +518,26 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+  },
+  profileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    paddingVertical: SPACING.md,
+    paddingHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
+    borderColor: COLORS.primary,
+  },
+  profileButtonText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: COLORS.primary,
   },
   requestButton: {
     borderRadius: BORDER_RADIUS.lg,

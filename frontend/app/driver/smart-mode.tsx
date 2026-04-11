@@ -51,19 +51,42 @@ export default function SmartModeScreen() {
 
   const [showPreview, setShowPreview] = useState(false);
   const [earnings, setEarnings] = useState({
-    today: 12500,
-    average: 15000,
-    projected: 18500,
+    today: 0,
+    average: 0,
+    projected: 0,
   });
 
   useEffect(() => {
     loadSettings();
+    loadEarnings();
   }, []);
 
   const loadSettings = async () => {
-    // TODO: Load from backend
-    // const response = await getSmartModeSettings(user?.id);
-    // setSettings(response.data);
+    if (!user?.id) return;
+    try {
+      const { BACKEND_URL } = require('@/src/services/api');
+      const res = await fetch(`${BACKEND_URL}/api/smart-mode/settings/${user.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.settings) setSettings((prev: any) => ({ ...prev, ...data.settings }));
+      }
+    } catch { /* keep defaults */ }
+  };
+
+  const loadEarnings = async () => {
+    if (!user?.id) return;
+    try {
+      const { BACKEND_URL } = require('@/src/services/api');
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`);
+      if (res.ok) {
+        const data = await res.json();
+        setEarnings({
+          today: data?.today_earnings || data?.projections?.daily || 0,
+          average: data?.average_daily || data?.projections?.daily || 0,
+          projected: data?.projections?.daily || 0,
+        });
+      }
+    } catch { /* keep defaults */ }
   };
 
   const saveSettings = async () => {

@@ -7,6 +7,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BACKEND_URL } from '@/src/services/api';
 
 export type StoryType = 'photo' | 'video' | 'text';
 export type StoryPrivacy = 'public' | 'verified_riders' | 'repeat_riders';
@@ -303,3 +304,11 @@ export const useDriverStories = (driverId?: string) => {
     loadStories,
   };
 };
+
+/** Fetch AI-powered driver profile insights (Emergent LLM → GPT-4o) */
+export async function fetchAIDriverInsights(driverId: string): Promise<any> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ai/driver-assistant?user_id=${driverId}&question=Give%20me%20a%20brief%20driver%20performance%20summary`);
+    return await res.json();
+  } catch { return null; }
+}

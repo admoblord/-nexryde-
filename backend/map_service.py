@@ -32,8 +32,8 @@ class MapUsageConfig:
     MAX_DISTANCE_CALCS_PER_TRIP = 1  # Only calculate once
     
     # Trial limitations
-    TRIAL_MAX_REQUESTS_PER_DAY = 20
-    TRIAL_MAX_DISTANCE_CALCS = 3  # 3 trips only
+    TRIAL_MAX_REQUESTS_PER_DAY = 200
+    TRIAL_MAX_DISTANCE_CALCS = 200  # Keep trial usable while still cost-controlled
     
     # Navigation throttling
     NAVIGATION_UPDATE_INTERVAL_SECONDS = 30  # Update every 30 seconds max
@@ -457,6 +457,9 @@ from fastapi import APIRouter, HTTPException, Depends
 
 map_router = APIRouter(prefix="/api/map", tags=["map"])
 
+_map_service_instance = MapService()
+_map_tracker_instance = MapUsageTracker()
+
 @map_router.post("/calculate-distance")
 async def calculate_ride_distance(
     driver_id: str,
@@ -472,9 +475,7 @@ async def calculate_ride_distance(
     subscription_status = "active"  # Placeholder
     trial_expired = False
     
-    map_service = MapService()
-    
-    result = await map_service.calculate_distance_and_fare(
+    result = await _map_service_instance.calculate_distance_and_fare(
         driver_id=driver_id,
         ride_id=ride_id,
         pickup_coords={"lat": pickup_lat, "lng": pickup_lng},
@@ -492,7 +493,7 @@ async def calculate_ride_distance(
 async def get_map_usage_stats(driver_id: str):
     """Get driver's map usage statistics"""
     
-    tracker = MapUsageTracker()
+    tracker = _map_tracker_instance
     
     if driver_id not in tracker.usage_cache:
         return {

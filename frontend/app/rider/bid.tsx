@@ -16,9 +16,9 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
   background: '#F8FAFC',
@@ -51,7 +51,7 @@ export default function RideBidScreen() {
   const params = useLocalSearchParams();
   const { user } = useAppStore();
   
-  const [offeredPrice, setOfferedPrice] = useState(params.suggestedFare?.toString() || '2500');
+  const [offeredPrice, setOfferedPrice] = useState(params.suggestedFare?.toString() || '');
   const [bidId, setBidId] = useState<string | null>(null);
   const [driverOffers, setDriverOffers] = useState<DriverOffer[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,7 +76,7 @@ export default function RideBidScreen() {
 
   useEffect(() => {
     if (bidId) {
-      const interval = setInterval(fetchOffers, 30000); // Refresh every 30 seconds (was 3 sec - too aggressive!)
+      const interval = setInterval(fetchOffers, 3000);
       return () => clearInterval(interval);
     }
   }, [bidId]);
@@ -99,24 +99,26 @@ export default function RideBidScreen() {
     
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/bid/create`, {
+      const res = await fetch(`${BACKEND_URL}/api/rides/bid/create?rider_id=${encodeURIComponent(user.id)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          user_id: user.id,
+          rider_offered_price: parseFloat(offeredPrice),
           pickup_lat: pickup.lat,
           pickup_lng: pickup.lng,
           pickup_address: pickup.address,
           dropoff_lat: dropoff.lat,
           dropoff_lng: dropoff.lng,
           dropoff_address: dropoff.address,
-          offered_price: parseFloat(offeredPrice),
+          ride_type: (params.vehicleType as string) || 'economy',
         }),
       });
       const data = await res.json();
-      if (data.bid_id) {
+      if (res.ok && data.bid_id) {
         setBidId(data.bid_id);
         setWaitingForOffers(true);
+      } else {
+        Alert.alert('Error', data?.detail || 'Failed to create bid request');
       }
     } catch (e) {
       console.error('Create bid error:', e);
@@ -139,16 +141,22 @@ export default function RideBidScreen() {
   };
 
   const acceptOffer = async (offerId: string) => {
+    if (!user?.id || !bidId) return;
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/bid/${bidId}/accept/${offerId}`, {
+      const res = await fetch(
+        `${BACKEND_URL}/api/rides/bid/${bidId}/accept?rider_id=${encodeURIComponent(user.id)}&offer_id=${encodeURIComponent(offerId)}`,
+        {
         method: 'POST',
-      });
+        }
+      );
       const data = await res.json();
-      if (data.success) {
+      if (res.ok && data.success) {
         Alert.alert('Ride Confirmed!', 'Your driver is on the way', [
           { text: 'OK', onPress: () => router.replace('/(rider-tabs)/rider-home') }
         ]);
+      } else {
+        Alert.alert('Error', data?.detail || 'Failed to accept offer');
       }
     } catch (e) {
       console.error('Accept offer error:', e);
@@ -224,7 +232,7 @@ export default function RideBidScreen() {
           </TouchableOpacity>
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>Name Your Price</Text>
-            <Text style={styles.headerSubtitle}>Bid for Your Ride</Text>
+            <Text style={styles.headerSubtitle}>Negotiate Your Fare</Text>
           </View>
           <View style={{ width: 44 }} />
         </View>

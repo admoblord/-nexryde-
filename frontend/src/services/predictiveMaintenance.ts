@@ -2,6 +2,7 @@
  * NEXRYDE Predictive Maintenance AI
  * "Fix it before it breaks!" 🔧
  */
+import { BACKEND_URL } from '@/src/services/api';
 
 export interface VehicleHealth {
   overall: number; // 0-100
@@ -83,4 +84,12 @@ export class PredictiveMaintenanceAI {
     
     return { health, alerts };
   }
+}
+
+/** Fetch AI driver awareness insights from backend (Emergent LLM → GPT-4o) */
+export async function fetchAIDriverAwareness(): Promise<any> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/driver/awareness`);
+    return await res.json();
+  } catch { return null; }
 }

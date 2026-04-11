@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,16 +11,15 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
-import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
-import { saveUserSession } from '@/utils/authStorage';
+import { saveUserSession, getUserSession } from '@/utils/authStorage';
+import { BACKEND_URL } from '@/src/services/api';
 
 const { width, height } = Dimensions.get('window');
 
@@ -44,403 +43,223 @@ const COLORS = {
   googleSoft: 'rgba(66, 133, 244, 0.15)',
 };
 
-// Emergent Auth URL
-const EMERGENT_AUTH_BASE = 'https://auth.emergentagent.com';
-
-// Warm up WebBrowser for faster auth
-WebBrowser.maybeCompleteAuthSession();
-
 export default function LoginScreen() {
   const router = useRouter();
-  const [phone, setPhone] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
-  const { setUser, setIsAuthenticated } = useAppStore();
+  const params = useLocalSearchParams<{ flow?: string; role?: string }>();
+  const requestedFlow = params.flow === 'register' ? 'register' : 'login';
+  const requestedRole = params.role === 'driver' || params.role === 'rider' ? params.role : null;
+  const [email, setEmail] = useState('');
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [biometricReady, setBiometricReady] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+
+  useEffect(() => {
+    const checkBiometricLoginAvailability = async () => {
+      try {
+        const { isBiometricEnabled, isBiometricSupported } = await import('@/utils/authStorage');
+        const [enabled, supported, savedSession] = await Promise.all([
+          isBiometricEnabled(),
+          isBiometricSupported(),
+          getUserSession(),
+        ]);
+        setBiometricReady(Boolean(enabled && supported && savedSession));
+      } catch {
+        setBiometricReady(false);
+      }
+    };
+    void checkBiometricLoginAvailability();
+  }, []);
   
-  // Store phone in AsyncStorage for later use
-  const storePhone = async (phoneNumber: string) => {
+  const getBackendUrl = () => BACKEND_URL;
+  const openLegal = async (path: string) => {
     try {
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      await AsyncStorage.setItem('pending_phone', phoneNumber);
-    } catch (e) {
-      console.log('Failed to store phone:', e);
+      await Linking.openURL(`${BACKEND_URL}${path}`);
+    } catch {
+      Alert.alert('Unable to open link', 'Please try again later.');
     }
   };
-  
-  // CRITICAL: Ref to prevent double processing of session_id
-  const isProcessingSession = useRef(false);
-  const processedSessionIds = useRef<Set<string>>(new Set());
 
-  // OTP request function with 15-second timeout
-  const handleContinue = async () => {
-    if (phone.length < 10) return;
-    setLoading(true);
-    storePhone(phone);
+  const routeVerifiedUser = async (loggedUser: any, resolvedToken: string | null) => {
+    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (resolvedToken) authHeaders.Authorization = `Bearer ${resolvedToken}`;
 
+    if (loggedUser?.role === 'driver') {
+      try {
+        const st = await fetch(`${getBackendUrl()}/api/drivers/${loggedUser.id}/onboarding-status`, {
+          headers: authHeaders,
+        });
+        const status = await st.json();
+        if (!st.ok || !status?.completed) {
+          if (status?.step === 'terms') {
+            router.replace({
+              pathname: '/(auth)/driver-terms',
+              params: { phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+            });
+            return;
+          }
+          if (status?.step === 'documents') {
+            router.replace({
+              pathname: '/(auth)/driver-documents',
+              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+            });
+            return;
+          }
+          if (status?.step === 'profile') {
+            router.replace({
+              pathname: '/(auth)/driver-profile',
+              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+            });
+            return;
+          }
+        }
+        router.replace('/(driver-tabs)/driver-home');
+        return;
+      } catch {
+        // Never grant direct dashboard access when verification check fails.
+        router.replace({
+          pathname: '/(auth)/driver-documents',
+          params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+        });
+        return;
+      }
+      router.replace({
+        pathname: '/(auth)/driver-documents',
+        params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+      });
+      return;
+    }
+
+    try {
+      const st = await fetch(`${getBackendUrl()}/api/users/${loggedUser.id}/rider-verification-status`, {
+        headers: authHeaders,
+      });
+      const riderStatus = await st.json();
+      if (st.ok && riderStatus?.completed) {
+        router.replace('/(rider-tabs)/rider-home');
+      } else {
+        router.replace('/(auth)/rider-verification');
+      }
+    } catch {
+      router.replace('/(auth)/rider-verification');
+    }
+  };
+
+  const handleEmailSignIn = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
+    if (!validEmail) {
+      Alert.alert("Invalid email", "Please enter a valid email address.");
+      return;
+    }
+
+    setEmailLoading(true);
     const controller = new AbortController();
     const t = setTimeout(() => {
       controller.abort();
-      setLoading(false);
-      Alert.alert("Connection Timeout", "Could not reach server. Please check your internet connection and try again.");
+      setEmailLoading(false);
+      Alert.alert("Connection Timeout", "Could not reach server. Please try again.");
     }, 15000);
 
     try {
-      const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
-      const fullPhone = `+234${phone}`;
-      const endpoint = `${BASE_URL}/api/auth/request-otp`;
-
-      const res = await fetch(endpoint, {
+      const res = await fetch(`${getBackendUrl()}/api/auth/email-signin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: fullPhone }),
+        body: JSON.stringify({ email: normalizedEmail }),
         signal: controller.signal,
       });
 
       const text = await res.text();
-      let data: Record<string, any> | null = null;
-      try {
-        if (text?.trim()) data = JSON.parse(text);
-      } catch {
-        Alert.alert("OTP Error", "Server response was invalid. Please check your connection and try again.");
-        return;
-      }
+      let data: any = null;
+      try { data = JSON.parse(text); } catch {}
 
       if (!res.ok) {
-        if (res.status === 429 && data?.detail) {
-          Alert.alert("Please Wait", data.detail);
+        Alert.alert("Email sign-in failed", data?.detail || data?.message || text || "Please try again.");
+        return;
+      }
+
+      if (data?.is_new_user) {
+        const newEmail = data?.email_data?.email || normalizedEmail;
+        const newName = data?.email_data?.name || normalizedEmail.split('@')[0];
+        if (requestedRole === 'driver') {
+          router.push({
+            pathname: '/(auth)/driver-terms',
+            params: {
+              email: newEmail,
+              name: newName,
+            },
+          });
+        } else if (requestedRole === 'rider') {
+          router.push({
+            pathname: '/(auth)/rider-nin',
+            params: {
+              email: newEmail,
+              name: newName,
+            },
+          });
         } else {
-          Alert.alert("OTP failed", data?.detail || data?.message || "Could not send code. Please try again.");
+          router.push({
+            pathname: '/(auth)/register',
+            params: {
+              email: newEmail,
+              name: newName,
+              auth_type: 'email',
+            },
+          });
         }
         return;
       }
 
-      if (!data?.success) {
-        Alert.alert("OTP failed", data?.message || "Unable to send OTP. Please try again.");
-        return;
-      }
-
-      router.push({
-        pathname: '/(auth)/verify',
-        params: {
-          phone: phone,
-          provider: data.provider || 'termii',
-        }
-      });
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        return;
-      }
-      Alert.alert(
-        "Connection Error", 
-        "Cannot connect to server. Please check:\n\n1. Your internet connection\n2. Backend server is running\n3. Backend URL is correct in .env file"
-      );
-    } finally {
-      clearTimeout(t);
-      setLoading(false);
-    }
-  };
-
-  // WhatsApp OTP request function
-  const [whatsappLoading, setWhatsappLoading] = useState(false);
-  
-  const handleWhatsAppOTP = async () => {
-    if (phone.length < 10) return;
-    setWhatsappLoading(true);
-    storePhone(phone);
-    
-    const BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
-    const fullPhone = `+234${phone}`;
-    
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      controller.abort();
-      setWhatsappLoading(false);
-      Alert.alert("Connection Timeout", "Could not reach server. Please try SMS instead.");
-    }, 15000);
-    
-    try {
-      const res = await fetch(`${BASE_URL}/api/auth/request-otp-whatsapp`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: fullPhone }),
-        signal: controller.signal,
-      });
-      
-      const text = await res.text();
-      let data: Record<string, any> | null = null;
-      try {
-        if (text?.trim()) data = JSON.parse(text);
-      } catch {
-        Alert.alert('WhatsApp OTP Error', 'Server response was invalid. Try SMS instead.');
-        return;
-      }
-
-      if (!res.ok) {
-        if (res.status === 429 && data?.detail) {
-          Alert.alert("Please Wait", data.detail);
-        } else {
-          Alert.alert('WhatsApp OTP failed', data?.detail || data?.message || 'Try SMS instead');
-        }
-        return;
-      }
-
-      if (!data?.success) {
-        Alert.alert('WhatsApp OTP failed', data?.message || 'Try SMS instead');
-        return;
-      }
-      
-      router.push({
-        pathname: '/(auth)/verify',
-        params: {
-          phone: phone,
-          provider: 'whatsapp',
-        }
-      });
-      
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        return;
-      }
-      Alert.alert('Connection Error', 'Cannot connect to server. Please try SMS instead.');
-    } finally {
-      clearTimeout(t);
-      setWhatsappLoading(false);
-    }
-  };
-
-  // Get backend URL for Google auth
-  const getBackendUrl = () => process.env.EXPO_PUBLIC_BACKEND_URL || "https://nexryde-ui.emergent.host";
-
-  // Extract session_id from URL (supports both hash and query params)
-  const extractSessionId = (url: string): string | null => {
-    try {
-      console.log('Extracting session_id from URL:', url);
-      
-      // Method 1: Check hash fragment (#session_id=...)
-      if (url.includes('#')) {
-        const hashPart = url.split('#')[1];
-        if (hashPart && hashPart.includes('session_id')) {
-          const params = new URLSearchParams(hashPart);
-          const sessionId = params.get('session_id');
-          if (sessionId) {
-            console.log('Found session_id in hash');
-            return decodeURIComponent(sessionId);
-          }
-        }
-      }
-      
-      // Method 2: Check query params (?session_id=... or &session_id=...)
-      if (url.includes('session_id=')) {
-        // Handle URLs like exp://...?session_id=xxx or exp://...&session_id=xxx
-        const match = url.match(/[?&]session_id=([^&#]+)/);
-        if (match && match[1]) {
-          console.log('Found session_id in query params');
-          return decodeURIComponent(match[1]);
-        }
-      }
-      
-      console.log('No session_id found in URL');
-      return null;
-    } catch (error) {
-      console.error('Error extracting session_id:', error);
-      return null;
-    }
-  };
-
-  // Process Google auth with session_id - with duplicate protection
-  const processGoogleAuth = async (sessionId: string): Promise<boolean> => {
-    // CRITICAL: Check if we've already processed this session_id
-    if (processedSessionIds.current.has(sessionId)) {
-      console.log('Session already processed, skipping');
-      return false;
-    }
-    
-    // CRITICAL: Check if we're currently processing a session
-    if (isProcessingSession.current) {
-      console.log('Already processing a session, skipping');
-      return false;
-    }
-    
-    // Mark as processing
-    isProcessingSession.current = true;
-    processedSessionIds.current.add(sessionId);
-    
-    try {
-      const backendUrl = getBackendUrl();
-      console.log('Processing Google auth with session_id:', sessionId.substring(0, 15) + '...');
-      console.log('Using backend URL:', backendUrl);
-      
-      const response = await fetch(`${backendUrl}/api/auth/google/exchange`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-        },
-        body: JSON.stringify({ session_id: sessionId }),
-      });
-      
-      console.log('Backend response status:', response.status);
-      
-      const responseText = await response.text();
-      console.log('Response text length:', responseText?.length ?? 0);
-
-      let data: Record<string, any> | null = null;
-      try {
-        if (responseText?.trim()) {
-          data = JSON.parse(responseText);
-        }
-      } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        Alert.alert('Sign In Error', 'Server response was invalid. Please try again or use phone sign-in.');
-        return false;
-      }
-
-      if (!response.ok) {
-        const errorMessage = data?.detail || data?.message || (typeof data?.error === 'string' ? data.error : null) || 'Unable to sign in. Try again or use phone sign-in.';
-        Alert.alert('Sign In Failed', typeof errorMessage === 'string' ? errorMessage : 'Unable to sign in. Please try again.');
-        return false;
-      }
-
-      if (!data) {
-        Alert.alert('Sign In Error', 'Empty response from server. Please try again.');
-        return false;
-      }
-      
-      if (data.is_new_user) {
-        // New user - go to registration with Google data
-        console.log('New user, redirecting to register');
-        router.push({
-          pathname: '/(auth)/register',
-          params: {
-            email: data.google_data?.email || '',
-            name: data.google_data?.name || '',
-            picture: data.google_data?.picture || '',
-            google_id: data.google_data?.google_id || '',
-            auth_type: 'google'
-          }
-        });
-      } else {
-        // Existing user - log them in
-        console.log('Existing user, logging in');
-        
-        // ✅ CRITICAL FIX: Add null check for data.user
-        if (!data.user) {
-          throw new Error('Invalid user data received from server');
-        }
-        
+      if (!data?.is_new_user && data?.user) {
+        const resolvedToken = data?.token || data?.user?.token || null;
         setUser(data.user);
+        setToken(resolvedToken);
         setIsAuthenticated(true);
-        
-        // 💾 SAVE USER SESSION FOR AUTO-LOGIN
-        await saveUserSession(data.user);
-        console.log('✅ User session saved - auto-login enabled');
-        
-        // ✅ CRITICAL FIX: Safe navigation with null check
-        if (data.user?.role === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
-        } else {
-          router.replace('/(rider-tabs)/rider-home');
-        }
+        await saveUserSession({ ...data.user, token: resolvedToken });
+        await routeVerifiedUser(data.user, resolvedToken);
+        return;
       }
-      
-      return true;
-    } catch (error: any) {
-      console.error('Google auth error:', error);
-      
-      // Check for network errors
-      if (error.message?.includes('Network request failed')) {
-        Alert.alert('Network Error', 'Please check your internet connection and try again.');
-      } else {
-        Alert.alert('Error', 'Failed to complete sign in. Please try again.');
+
+      if (!data?.user) {
+        Alert.alert("Email sign-in failed", data?.message || "Could not complete sign in.");
+        return;
       }
-      return false;
+    } catch (e: any) {
+      if (e?.name !== "AbortError") {
+        Alert.alert("Connection Error", "Unable to sign in with email right now.");
+      }
     } finally {
-      isProcessingSession.current = false;
+      clearTimeout(t);
+      setEmailLoading(false);
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    if (googleLoading) return;
-    
-    setGoogleLoading(true);
-    
+  const handleBiometricSignIn = async () => {
+    setBiometricLoading(true);
     try {
-      // Create redirect URL based on platform
-      let redirectUrl: string;
-      if (Platform.OS === 'web') {
-        redirectUrl = `${window.location.origin}/`;
-      } else {
-        // Mobile: Use deep link scheme
-        redirectUrl = Linking.createURL('/');
+      const { authenticateWithBiometrics } = await import('@/utils/authStorage');
+      const auth = await authenticateWithBiometrics();
+      if (!auth.success) {
+        Alert.alert('Biometric Failed', auth.error || 'Could not verify identity.');
+        return;
       }
-      
-      console.log('=== Google Sign-In Started ===');
-      console.log('Platform:', Platform.OS);
-      console.log('Redirect URL:', redirectUrl);
-      
-      const authUrl = `${EMERGENT_AUTH_BASE}/?redirect=${encodeURIComponent(redirectUrl)}`;
-      console.log('Auth URL:', authUrl);
-      
-      if (Platform.OS === 'web') {
-        // Web: Direct redirect
-        window.location.href = authUrl;
-        return; // Don't reset loading on web redirect
+
+      const saved = await getUserSession();
+      if (!saved) {
+        Alert.alert('Session Missing', 'No saved account found. Please sign in with phone or email.');
+        setBiometricReady(false);
+        return;
       }
-      
-      // Mobile: Use WebBrowser
-      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUrl);
-      
-      console.log('WebBrowser result type:', result.type);
-      
-      if (result.type === 'success' && result.url) {
-        console.log('Success! Callback URL:', result.url);
-        
-        const sessionId = extractSessionId(result.url);
-        
-        if (sessionId) {
-          const success = await processGoogleAuth(sessionId);
-          if (!success) {
-            console.log('Session processing failed or was duplicate');
-          }
-        } else {
-          console.error('No session_id found in callback URL');
-          Alert.alert('Error', 'Could not get session from Google. Please try again.');
-        }
-      } else if (result.type === 'cancel') {
-        console.log('User cancelled sign-in');
-      } else if (result.type === 'dismiss') {
-        console.log('Sign-in dismissed');
-      }
-    } catch (error: any) {
-      console.error('Google sign-in error:', error);
-      Alert.alert('Error', error.message || 'Google sign-in failed. Please try again.');
+
+      setUser(saved);
+      setToken(saved?.token || null);
+      setIsAuthenticated(true);
+      await routeVerifiedUser(saved, saved?.token || null);
     } finally {
-      setGoogleLoading(false);
+      setBiometricLoading(false);
     }
   };
 
-  // Handle web platform only - check for session_id on page load
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      const checkWebSession = async () => {
-        const hash = window.location.hash;
-        if (hash && hash.includes('session_id=')) {
-          const sessionId = extractSessionId(window.location.href);
-          if (sessionId) {
-            // Clean URL immediately
-            window.history.replaceState(null, '', window.location.pathname);
-            setGoogleLoading(true);
-            await processGoogleAuth(sessionId);
-            setGoogleLoading(false);
-          }
-        }
-      };
-      checkWebSession();
-    }
-    // NOTE: We do NOT check Linking.getInitialURL() on mobile here
-    // because WebBrowser.openAuthSessionAsync handles the callback directly
-    // Adding that check would cause DOUBLE processing of the session_id!
-  }, []);
 
   return (
     <View style={styles.container}>
@@ -490,115 +309,78 @@ export default function LoginScreen() {
 
             {/* Login Form */}
             <View style={styles.formSection}>
-              <Text style={styles.formTitle}>Enter your phone number</Text>
-              
-              <View style={styles.inputContainer}>
-                <View style={styles.prefixContainer}>
-                  <Text style={styles.flag}>🇳🇬</Text>
-                  <Text style={styles.prefixText}>+234</Text>
-                </View>
+              <Text style={styles.formTitle}>
+                {requestedFlow === 'register'
+                  ? `Continue as ${requestedRole === 'driver' ? 'Driver' : 'Rider'}`
+                  : 'Sign in to continue'}
+              </Text>
+
+              {/* Email Sign-In */}
+              <View style={styles.emailContainer}>
                 <TextInput
-                  style={styles.input}
-                  placeholder="801 234 5678"
+                  style={styles.emailInput}
+                  placeholder="you@example.com"
                   placeholderTextColor={COLORS.textMuted}
-                  keyboardType="phone-pad"
-                  maxLength={11}
-                  value={phone}
-                  onChangeText={setPhone}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={email}
+                  onChangeText={setEmail}
                 />
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.continueButton,
-                  phone.length >= 10 && styles.continueButtonActive
-                ]}
-                onPress={handleContinue}
-                disabled={phone.length < 10 || loading}
-                activeOpacity={0.9}
-              >
-                <LinearGradient
-                  colors={phone.length >= 10 
-                    ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-                    : [COLORS.gray700, COLORS.gray700]
-                  }
-                  style={styles.buttonGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
+                <TouchableOpacity
+                  style={styles.continueButton}
+                  onPress={handleEmailSignIn}
+                  disabled={emailLoading}
+                  activeOpacity={0.9}
                 >
-                  {loading ? (
-                    <ActivityIndicator color={COLORS.primary} />
-                  ) : (
-                    <>
-                      <Ionicons name="chatbubble" size={20} color={phone.length >= 10 ? COLORS.primary : COLORS.textMuted} style={{ marginRight: 8 }} />
-                      <Text style={[
-                        styles.continueButtonText,
-                        phone.length >= 10 && styles.continueButtonTextActive
-                      ]}>
-                        Continue with SMS
-                      </Text>
-                    </>
-                  )}
-                </LinearGradient>
-              </TouchableOpacity>
-
-              {/* WhatsApp OTP Button */}
-              <TouchableOpacity
-                style={[
-                  styles.whatsappButton,
-                  phone.length >= 10 && styles.whatsappButtonActive
-                ]}
-                onPress={handleWhatsAppOTP}
-                disabled={phone.length < 10 || whatsappLoading}
-                activeOpacity={0.9}
-              >
-                {whatsappLoading ? (
-                  <ActivityIndicator color="#25D366" />
-                ) : (
-                  <>
-                    <Ionicons name="logo-whatsapp" size={22} color={phone.length >= 10 ? "#25D366" : COLORS.textMuted} style={{ marginRight: 8 }} />
-                    <Text style={[
-                      styles.whatsappButtonText,
-                      phone.length >= 10 && styles.whatsappButtonTextActive
-                    ]}>
-                      Send code to WhatsApp
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-
-              {/* OR Divider */}
-              <View style={styles.orDivider}>
-                <View style={styles.orLine} />
-                <Text style={styles.orText}>OR</Text>
-                <View style={styles.orLine} />
+                  <LinearGradient
+                    colors={email.includes('@')
+                      ? [COLORS.greenLight, COLORS.green, COLORS.blue]
+                      : [COLORS.gray700, COLORS.gray700]
+                    }
+                    style={styles.buttonGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 0 }}
+                  >
+                    {emailLoading ? (
+                      <ActivityIndicator color={COLORS.primary} />
+                    ) : (
+                      <>
+                        <Ionicons name="mail" size={20} color={email.includes('@') ? COLORS.primary : COLORS.textMuted} style={{ marginRight: 8 }} />
+                        <Text style={[
+                          styles.continueButtonText,
+                          email.includes('@') && styles.continueButtonTextActive
+                        ]}>
+                          Continue with Email
+                        </Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
 
-              {/* Google Sign-In Button */}
-              <TouchableOpacity
-                style={styles.googleButton}
-                onPress={handleGoogleSignIn}
-                disabled={googleLoading}
-                activeOpacity={0.9}
-              >
-                <View style={styles.googleButtonContent}>
-                  {googleLoading ? (
-                    <ActivityIndicator color={COLORS.google} />
+              {biometricReady && (
+                <TouchableOpacity
+                  style={styles.biometricButton}
+                  onPress={handleBiometricSignIn}
+                  disabled={biometricLoading}
+                  activeOpacity={0.9}
+                >
+                  {biometricLoading ? (
+                    <ActivityIndicator color={COLORS.green} />
                   ) : (
                     <>
-                      <View style={styles.googleIconContainer}>
-                        <Ionicons name="logo-google" size={20} color={COLORS.google} />
-                      </View>
-                      <Text style={styles.googleButtonText}>Continue with Google</Text>
+                      <Ionicons name="finger-print" size={20} color={COLORS.green} style={{ marginRight: 8 }} />
+                      <Text style={styles.biometricButtonText}>Use Biometrics</Text>
                     </>
                   )}
-                </View>
-              </TouchableOpacity>
+                </TouchableOpacity>
+              )}
 
               <Text style={styles.termsText}>
                 By continuing, you agree to our{' '}
-                <Text style={styles.linkText}>Terms of Service</Text> and{' '}
-                <Text style={styles.linkText}>Privacy Policy</Text>
+                <Text style={styles.linkText} onPress={() => openLegal('/terms-of-service')}>Terms of Service</Text> and{' '}
+                <Text style={styles.linkText} onPress={() => openLegal('/privacy-policy')}>Privacy Policy</Text>
               </Text>
             </View>
 
@@ -614,7 +396,7 @@ export default function LoginScreen() {
               <FeatureCard
                 icon="location"
                 title="Premium Safety"
-                subtitle="Verified drivers & live tracking"
+                subtitle="Driver checks, support tools & live tracking"
                 color={COLORS.blue}
                 bgColor={COLORS.blueSoft}
               />
@@ -823,6 +605,22 @@ const styles = StyleSheet.create({
   continueButtonTextActive: {
     color: COLORS.primary,
   },
+  biometricButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: COLORS.greenSoft,
+    paddingVertical: 14,
+    marginBottom: 8,
+  },
+  biometricButtonText: {
+    color: COLORS.white,
+    fontSize: 15,
+    fontWeight: '800',
+  },
   orDivider: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -848,31 +646,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.surfaceLight,
     marginBottom: 16,
   },
-  whatsappButton: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginTop: 12,
-    marginBottom: 16,
+  emailContainer: {
+    gap: 10,
+    marginBottom: 12,
+  },
+  emailInput: {
     backgroundColor: COLORS.surface,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: COLORS.surfaceLight,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 24,
-  },
-  whatsappButtonActive: {
-    backgroundColor: 'rgba(37, 211, 102, 0.1)',
-    borderColor: '#25D366',
-  },
-  whatsappButtonText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: COLORS.textMuted,
-  },
-  whatsappButtonTextActive: {
-    color: '#25D366',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    color: COLORS.white,
+    fontSize: 15,
   },
   googleButtonContent: {
     flexDirection: 'row',

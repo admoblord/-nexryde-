@@ -7,530 +7,343 @@ import {
   TouchableOpacity,
   Alert,
   Modal,
-  TextInput,
-  ActivityIndicator,
-  Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
-import { sendOTP, verifyOTP } from '@/src/services/api';
+import { deleteUserAccount, updateUser } from '@/src/services/api';
 import * as ImagePicker from 'expo-image-picker';
+import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMergedPreferences';
+import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
+import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
+import { ProfileWalletRewardsCard } from '@/src/components/profile/ProfileWalletRewardsCard';
 
 export default function RiderProfileScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { user, logout, setUser } = useAppStore();
-  const [showSwitchModal, setShowSwitchModal] = useState(false);
-  const [verificationStep, setVerificationStep] = useState(0);
-  const [otp, setOtp] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [otpSent, setOtpSent] = useState(false);
+  const { colors } = useThemeColors();
   const [profileImage, setProfileImage] = useState(user?.profile_image || null);
+  const [showDriverModal, setShowDriverModal] = useState(false);
 
   const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Logout',
+        style: 'destructive',
+        onPress: () => {
+          logout();
+          router.dismissAll();
+          router.replace('/(auth)/login');
+        },
+      },
+    ]);
+  };
+
+  const handleDeleteAccount = () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Delete Account',
+      'This will deactivate your account and remove access to NEXRYDE. This action cannot be undone easily.',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
-          style: 'destructive',
-          onPress: () => {
-            logout();
-            // Clear all navigation state and go to login
-            router.dismissAll();
-            router.replace('/(auth)/login');
-          }
-        }
-      ]
-    );
-  };
-
-  const handleBecomeDriver = async () => {
-    setShowSwitchModal(true);
-    setVerificationStep(0);
-    setOtp('');
-    setOtpSent(false);
-    
-    // Auto-send OTP when modal opens
-    await handleSendOTP();
-  };
-
-  const handleSendOTP = async () => {
-    if (!user?.phone) {
-      Alert.alert('Error', 'Phone number not found');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      await sendOTP(user.phone);
-      setOtpSent(true);
-      Alert.alert(
-        'OTP Sent!',
-        `We've sent a verification code to ${user.phone}. Please enter it to continue.`,
-        [{ text: 'OK' }]
-      );
-    } catch (error: any) {
-      console.error('Send OTP error:', error);
-      Alert.alert(
-        'Error Sending OTP',
-        error.response?.data?.detail || 'Failed to send verification code. Please try again.',
-        [{ text: 'OK' }]
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleVerifyOTP = async () => {
-    if (otp.length !== 6) {
-      Alert.alert('Invalid OTP', 'Please enter a 6-digit verification code');
-      return;
-    }
-
-    if (!user?.phone) {
-      Alert.alert('Error', 'Phone number not found');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const response = await verifyOTP(user.phone, otp);
-      
-      if (response.data.verified) {
-        // OTP is valid, proceed to next step
-        setVerificationStep(1);
-      } else {
-        Alert.alert(
-          'Invalid Code',
-          'The verification code you entered is incorrect. Please check and try again.',
-          [{ text: 'OK' }]
-        );
-        setOtp('');
-      }
-    } catch (error: any) {
-      console.error('Verify OTP error:', error);
-      Alert.alert(
-        'Verification Failed',
-        error.response?.data?.detail || 'Failed to verify code. Please try again.',
-        [{ text: 'OK' }]
-      );
-      setOtp('');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleCompleteSwitch = () => {
-    if (user) {
-      setUser({ ...user, role: 'driver' });
-    }
-    setShowSwitchModal(false);
-    setVerificationStep(0);
-    setOtp('');
-
-    Alert.alert(
-      'Welcome, Driver!',
-      'Your account has been upgraded to Driver. You can now earn with NEXRYDE!',
-      [
         {
-          text: 'Start Earning',
-          onPress: () => {
-            router.replace('/(driver-tabs)/driver-home');
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              if (user?.id) await deleteUserAccount(user.id);
+              await logout();
+              router.replace('/(auth)/login');
+            } catch {
+              Alert.alert('Error', 'Could not delete account right now.');
+            }
           },
         },
       ]
     );
   };
 
-  // 📸 PROFILE PICTURE UPLOAD
-  const handleProfilePictureUpload = async () => {
-    Alert.alert(
-      'Update Profile Picture',
-      'Choose an option',
-      [
-        {
-          text: 'Take Photo',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please allow camera access to take a photo.');
-              return;
-            }
-
-            const result = await ImagePicker.launchCameraAsync({
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets[0]) {
-              setProfileImage(result.assets[0].uri);
-              if (user) {
-                setUser({ ...user, profile_image: result.assets[0].uri });
-              }
-              Alert.alert('Success', 'Profile picture updated!');
-            }
-          }
-        },
-        {
-          text: 'Choose from Gallery',
-          onPress: async () => {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-              Alert.alert('Permission Required', 'Please allow access to your photos.');
-              return;
-            }
-
-            const result = await ImagePicker.launchImageLibraryAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [1, 1],
-              quality: 0.8,
-            });
-
-            if (!result.canceled && result.assets[0]) {
-              setProfileImage(result.assets[0].uri);
-              if (user) {
-                setUser({ ...user, profile_image: result.assets[0].uri });
-              }
-              Alert.alert('Success', 'Profile picture updated!');
-            }
-          }
-        },
-        { text: 'Cancel', style: 'cancel' }
-      ]
-    );
+  const saveProfileImage = async (uri: string) => {
+    setProfileImage(uri);
+    if (user) {
+      setUser({ ...user, profile_image: uri });
+      try {
+        await updateUser(user.id, { profile_image: uri });
+      } catch {
+        console.log('Failed to save profile image to server');
+      }
+    }
   };
 
+  const handleProfilePictureUpload = async () => {
+    Alert.alert('Update Profile Picture', 'Choose an option', [
+      {
+        text: 'Take Photo',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow camera access to take a photo.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await saveProfileImage(result.assets[0].uri);
+            Alert.alert('Success', 'Profile picture updated!');
+          }
+        },
+      },
+      {
+        text: 'Choose from Gallery',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Permission Required', 'Please allow access to your photos.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+          });
+          if (!result.canceled && result.assets[0]) {
+            await saveProfileImage(result.assets[0].uri);
+            Alert.alert('Success', 'Profile picture updated!');
+          }
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const confirmSwitchToDriver = () => {
+    if (user) setUser({ ...user, role: 'driver' });
+    setShowDriverModal(false);
+    Alert.alert('Switched to Driver', 'Complete driver setup from the driver home when you are ready.', [
+      { text: 'OK', onPress: () => router.replace('/(driver-tabs)/driver-home') },
+    ]);
+  };
+
+  const initial = (user?.name && user.name.length > 0 ? user.name.charAt(0) : 'R').toUpperCase();
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Header */}
-        <View style={styles.profileHeader}>
-          <TouchableOpacity style={styles.avatarContainer} onPress={handleProfilePictureUpload} activeOpacity={0.7}>
-            <View style={styles.avatar}>
-              {profileImage ? (
-                <Image source={{ uri: profileImage }} style={styles.avatarImage} />
-              ) : (
-                <Text style={styles.avatarText}>
-                  {(user?.name && user.name.length > 0) ? user.name.charAt(0).toUpperCase() : 'R'}
-                </Text>
-              )}
-            </View>
-            <View style={styles.verifiedBadge}>
-              <Ionicons name="checkmark" size={12} color={COLORS.white} />
-            </View>
-            <View style={styles.cameraIcon}>
-              <Ionicons name="camera" size={16} color={COLORS.white} />
-            </View>
-          </TouchableOpacity>
-          <Text style={styles.userName}>{user?.name || 'Rider'}</Text>
-          <Text style={styles.userPhone}>{user?.phone || '+234'}</Text>
-          <View style={styles.riderBadge}>
-            <Ionicons name="person" size={14} color={COLORS.info} />
-            <Text style={styles.riderBadgeText}>Rider Account</Text>
-          </View>
-          
-          {/* Stats */}
-          <View style={styles.statsRow}>
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>{user?.total_trips || 0}</Text>
-              <Text style={styles.statLabel}>Trips</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>
-                {user?.trips_completed > 0 ? (user?.rating?.toFixed(1) || 'N/A') : 'New User'}
-              </Text>
-              <Text style={styles.statLabel}>Rating</Text>
-            </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Text style={styles.statValue}>0</Text>
-              <Text style={styles.statLabel}>Reviews</Text>
-            </View>
-          </View>
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.content, { paddingBottom: SPACING.lg }]}
+        showsVerticalScrollIndicator={false}
+      >
+        <ProfileHeroCard
+          user={user}
+          profileImage={profileImage}
+          fallbackInitial={initial}
+          roleLabel="Rider"
+          roleIcon="bicycle"
+          roleTint="#2563EB"
+          roleBg={COLORS.infoSoft}
+          colors={colors}
+          onAvatarPress={handleProfilePictureUpload}
+        />
+
+        <ProfileQuickActions
+          title="Quick actions"
+          colors={colors}
+          actions={[
+            {
+              key: 'edit',
+              label: 'Edit Profile',
+              icon: 'create-outline',
+              iconColor: COLORS.info,
+              iconBg: COLORS.infoSoft,
+              onPress: () => router.push('/edit-profile'),
+            },
+            {
+              key: 'history',
+              label: 'Ride History',
+              icon: 'time-outline',
+              iconColor: COLORS.gray700,
+              iconBg: COLORS.gray100,
+              onPress: () => router.push('/(rider-tabs)/rider-trips' as any),
+            },
+            {
+              key: 'saved',
+              label: 'Saved Places',
+              icon: 'location-outline',
+              iconColor: COLORS.success,
+              iconBg: COLORS.successSoft,
+              onPress: () => router.push('/saved-places'),
+            },
+            {
+              key: 'fav',
+              label: 'Favorite Drivers',
+              icon: 'heart-outline',
+              iconColor: COLORS.error,
+              iconBg: '#FEF2F2',
+              onPress: () => router.push('/rider/favorite-drivers'),
+            },
+          ]}
+        />
+
+        <ProfileWalletRewardsCard userId={user?.id} colors={colors} />
+
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Preferences</Text>
+          <ProfileMergedPreferences variant="rider" />
         </View>
 
-        {/* Become a Driver Card */}
-        <TouchableOpacity style={styles.becomeDriverCard} onPress={handleBecomeDriver} activeOpacity={0.9}>
-          <View style={styles.becomeDriverIcon}>
-            <Ionicons name="car-sport" size={28} color={COLORS.primary} />
-          </View>
-          <View style={styles.becomeDriverContent}>
-            <Text style={styles.becomeDriverTitle}>Become a Driver</Text>
-            <Text style={styles.becomeDriverText}>Earn money with NEXRYDE. Keep 100% of your fares!</Text>
-          </View>
-          <Ionicons name="chevron-forward" size={24} color={COLORS.primary} />
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety & trust</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/tracking')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="navigate-outline" size={20} color={COLORS.info} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Live Tracking</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/share-trip')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
+              <Ionicons name="share-social-outline" size={20} color={COLORS.accent} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Share Trip</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/security-code')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="lock-closed-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Security Code</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/safety')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.success} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Safety Center</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/shield-disputes')}>
+            <View style={[styles.menuIcon, { backgroundColor: 'rgba(13, 148, 136, 0.15)' }]}>
+              <Ionicons name="ribbon-outline" size={20} color="#0D9488" />
+            </View>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Nexryde Shield</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Disputes</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Grow with Nexryde</Text>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/wallet')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
+              <Ionicons name="people-outline" size={20} color={COLORS.warning} />
+            </View>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Invite & Earn</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Share your code, earn rewards</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => setShowDriverModal(true)}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
+              <Ionicons name="car-sport-outline" size={20} color={COLORS.info} />
+            </View>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Switch to Driver Mode</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Drive and earn on Nexryde</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.linkRow, { backgroundColor: colors.card }]}
+          onPress={() => router.push('/ratings')}
+        >
+          <Ionicons name="star-outline" size={18} color={COLORS.accent} />
+          <Text style={[styles.linkRowText, { color: colors.text }]}>My ratings & reviews</Text>
+          <Ionicons name="chevron-forward" size={18} color={COLORS.gray400} />
         </TouchableOpacity>
 
-        {/* Menu Items */}
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Account</Text>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/edit-profile')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="person-outline" size={20} color={COLORS.info} />
-            </View>
-            <Text style={styles.menuText}>Edit Profile</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/ratings')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
-              <Ionicons name="star-outline" size={20} color={COLORS.accent} />
-            </View>
-            <Text style={styles.menuText}>My Ratings & Reviews</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/saved-places')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="location-outline" size={20} color={COLORS.success} />
-            </View>
-            <Text style={styles.menuText}>Saved Places</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.menuSection}>
-          <Text style={styles.menuSectionTitle}>Preferences</Text>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings/notifications')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
-              <Ionicons name="notifications-outline" size={20} color={COLORS.warning} />
-            </View>
-            <Text style={styles.menuText}>Notifications</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/settings')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="settings-outline" size={20} color={COLORS.gray600} />
-            </View>
-            <Text style={styles.menuText}>Settings</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & legal</Text>
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
             <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
               <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
             </View>
-            <Text style={styles.menuText}>Help & Support</Text>
+            <Text style={[styles.menuText, { color: colors.text }]}>Help & Support</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="document-text-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Privacy Policy</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/terms-of-service')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
+              <Ionicons name="reader-outline" size={20} color={COLORS.gray600} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Terms of Service</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
         </View>
 
-        {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
-          <Text style={styles.logoutText}>Logout</Text>
-        </TouchableOpacity>
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Account actions</Text>
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast, styles.deleteRow]} onPress={handleDeleteAccount}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.errorSoft }]}>
+              <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+            </View>
+            <Text style={[styles.menuText, { color: COLORS.error }]}>Delete Account</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
+        </View>
 
         <Text style={styles.versionText}>NEXRYDE v1.0.0</Text>
       </ScrollView>
 
-      {/* Become Driver Modal */}
-      <Modal
-        visible={showSwitchModal}
-        animationType="slide"
-        transparent={true}
-        onRequestClose={() => setShowSwitchModal(false)}
+      <View
+        style={[
+          styles.logoutBar,
+          {
+            backgroundColor: colors.background,
+            borderTopColor: colors.border,
+            paddingBottom: Math.max(insets.bottom, SPACING.md),
+          },
+        ]}
       >
+        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout} accessibilityLabel="Logout" accessibilityRole="button">
+          <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Modal visible={showDriverModal} animationType="slide" transparent onRequestClose={() => setShowDriverModal(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <TouchableOpacity 
-              style={styles.modalClose}
-              onPress={() => setShowSwitchModal(false)}
-            >
+          <View style={[styles.modalContent, { backgroundColor: colors.card }]}>
+            <TouchableOpacity style={styles.modalClose} onPress={() => setShowDriverModal(false)}>
               <Ionicons name="close" size={24} color={COLORS.gray500} />
             </TouchableOpacity>
-
-            {verificationStep === 0 ? (
-              // Step 1: OTP Verification - POLISHED
-              <>
-                {/* Premium Icon with Glow */}
-                <View style={styles.modalIconWrap}>
-                  <View style={styles.iconGlow} />
-                  <Ionicons name="shield-checkmark" size={48} color={COLORS.accent} />
-                </View>
-                
-                {/* Titles with Better Hierarchy */}
-                <Text style={styles.modalTitle}>Verify Your Identity</Text>
-                <Text style={styles.modalSubtitle}>
-                  {otpSent 
-                    ? `Enter the 6-digit code we sent to\n${user?.phone}` 
-                    : `We'll send a secure verification code to\n${user?.phone}`}
-                </Text>
-
-                {otpSent && (
-                  <View style={styles.otpContainer}>
-                    <TextInput
-                      style={styles.otpInput}
-                      placeholder="• • • • • •"
-                      placeholderTextColor={COLORS.gray300}
-                      value={otp}
-                      onChangeText={setOtp}
-                      keyboardType="number-pad"
-                      maxLength={6}
-                      editable={!loading}
-                      autoFocus
-                    />
-                  </View>
-                )}
-
-                {otpSent && (
-                  <View style={styles.otpSuccessBadge}>
-                    <View style={styles.successDot} />
-                    <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
-                    <Text style={styles.otpSuccessText}>Code sent successfully!</Text>
-                  </View>
-                )}
-
-                {/* Premium Buttons */}
-                {otpSent ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.modalButton,
-                      (otp.length !== 6 || loading) && styles.modalButtonDisabled
-                    ]}
-                    onPress={handleVerifyOTP}
-                    disabled={otp.length !== 6 || loading}
-                    activeOpacity={0.8}
-                  >
-                    {loading ? (
-                      <ActivityIndicator color={COLORS.primary} size="small" />
-                    ) : (
-                      <>
-                        <Text style={styles.modalButtonText}>Verify & Continue</Text>
-                        <Ionicons name="arrow-forward-circle" size={22} color={COLORS.primary} />
-                      </>
-                    )}
-                  </TouchableOpacity>
-                ) : (
-                  <TouchableOpacity
-                    style={[styles.modalButton, loading && styles.modalButtonDisabled]}
-                    onPress={handleSendOTP}
-                    disabled={loading}
-                    activeOpacity={0.8}
-                  >
-                    {loading ? (
-                      <ActivityIndicator color={COLORS.primary} size="small" />
-                    ) : (
-                      <>
-                        <Ionicons name="mail" size={22} color={COLORS.primary} />
-                        <Text style={styles.modalButtonText}>Send Verification Code</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
-
-                {otpSent && (
-                  <TouchableOpacity
-                    style={styles.resendButton}
-                    onPress={handleSendOTP}
-                    disabled={loading}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="refresh" size={16} color={COLORS.accent} />
-                    <Text style={styles.resendText}>
-                      {loading ? 'Sending...' : 'Resend Code'}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </>
-            ) : (
-              // Step 2: Confirmation - POLISHED
-              <>
-                {/* Premium Car Icon with Animation Feel */}
-                <View style={[styles.modalIconWrap, styles.modalIconWrapSuccess]}>
-                  <View style={styles.iconGlowGreen} />
-                  <Ionicons name="car-sport" size={52} color={COLORS.accent} />
-                </View>
-                
-                <Text style={styles.modalTitle}>Ready to Earn?</Text>
-                <Text style={styles.modalSubtitle}>
-                  You're about to become a NEXRYDE driver.{'\n'}Here's what you'll get:
-                </Text>
-
-                {/* Premium Benefits Cards */}
-                <View style={styles.benefitsList}>
-                  <View style={styles.benefitCard}>
-                    <View style={styles.benefitIconWrap}>
-                      <Ionicons name="cash" size={24} color={COLORS.success} />
-                    </View>
-                    <View style={styles.benefitContent}>
-                      <Text style={styles.benefitTitle}>100% Earnings</Text>
-                      <Text style={styles.benefitDesc}>Keep every Naira you earn</Text>
-                    </View>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
-                    </View>
-                  </View>
-
-                  <View style={styles.benefitCard}>
-                    <View style={styles.benefitIconWrap}>
-                      <Ionicons name="wallet" size={24} color={COLORS.info} />
-                    </View>
-                    <View style={styles.benefitContent}>
-                      <Text style={styles.benefitTitle}>From ₦18,000/month</Text>
-                      <Text style={styles.benefitDesc}>Two flexible tiers available</Text>
-                    </View>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
-                    </View>
-                  </View>
-
-                  <View style={styles.benefitCard}>
-                    <View style={styles.benefitIconWrap}>
-                      <Ionicons name="time" size={24} color={COLORS.warning} />
-                    </View>
-                    <View style={styles.benefitContent}>
-                      <Text style={styles.benefitTitle}>Your Schedule</Text>
-                      <Text style={styles.benefitDesc}>Work whenever you want</Text>
-                    </View>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
-                    </View>
-                  </View>
-
-                  <View style={styles.benefitCard}>
-                    <View style={styles.benefitIconWrap}>
-                      <Ionicons name="trophy" size={24} color={COLORS.accent} />
-                    </View>
-                    <View style={styles.benefitContent}>
-                      <Text style={styles.benefitTitle}>Exclusive Benefits</Text>
-                      <Text style={styles.benefitDesc}>Rewards & bonuses</Text>
-                    </View>
-                    <View style={styles.benefitCheck}>
-                      <Ionicons name="checkmark" size={16} color={COLORS.white} />
-                    </View>
-                  </View>
-                </View>
-
-                {/* Premium Action Button with Gradient Feel */}
-                <TouchableOpacity
-                  style={styles.modalButton}
-                  onPress={handleCompleteSwitch}
-                  activeOpacity={0.8}
-                >
-                  <Text style={styles.modalButtonText}>Become a Driver</Text>
-                  <Ionicons name="arrow-forward-circle" size={24} color={COLORS.primary} />
-                </TouchableOpacity>
-
-                {/* Secondary Button */}
-                <TouchableOpacity
-                  style={styles.modalSecondaryButton}
-                  onPress={() => setShowSwitchModal(false)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.modalSecondaryText}>Maybe Later</Text>
-                </TouchableOpacity>
-              </>
-            )}
+            <View style={styles.modalIconWrap}>
+              <Ionicons name="car-sport" size={40} color={COLORS.info} />
+            </View>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>Switch to driver?</Text>
+            <Text style={[styles.modalSubtitle, { color: colors.textSecondary }]}>
+              You will use the driver app experience. You can switch back to rider anytime from your profile.
+            </Text>
+            <TouchableOpacity style={styles.modalConfirm} onPress={confirmSwitchToDriver}>
+              <Text style={styles.modalConfirmText}>Switch to Driver</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -539,164 +352,12 @@ export default function RiderProfileScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-  },
+  container: { flex: 1 },
+  scroll: { flex: 1 },
   content: {
     padding: SPACING.lg,
   },
-  profileHeader: {
-    alignItems: 'center',
-    paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xxl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.sm,
-  },
-  avatarContainer: {
-    position: 'relative',
-    marginBottom: SPACING.md,
-  },
-  avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.lg,
-    overflow: 'hidden',
-  },
-  avatarImage: {
-    width: '100%',
-    height: '100%',
-    borderRadius: 50,
-  },
-  avatarText: {
-    fontSize: FONT_SIZE.display,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  verifiedBadge: {
-    position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.white,
-  },
-  cameraIcon: {
-    position: 'absolute',
-    bottom: 4,
-    left: 4,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: COLORS.white,
-  },
-  userName: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.5,
-  },
-  userPhone: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginTop: SPACING.xs,
-  },
-  riderBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.infoSoft,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    marginTop: SPACING.md,
-    gap: SPACING.xs,
-  },
-  riderBadgeText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#2563EB',
-  },
-  statsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: SPACING.lg,
-    paddingTop: SPACING.lg,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.gray100,
-    width: '80%',
-  },
-  statItem: {
-    flex: 1,
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
-    color: '#0F172A',
-  },
-  statLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: '#475569',
-    marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  statDivider: {
-    width: 1,
-    height: 30,
-    backgroundColor: COLORS.gray200,
-  },
-  becomeDriverCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.accent,
-    padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.gold,
-  },
-  becomeDriverIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  becomeDriverContent: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  becomeDriverTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    letterSpacing: -0.3,
-  },
-  becomeDriverText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginTop: 2,
-  },
   menuSection: {
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.lg,
@@ -704,8 +365,7 @@ const styles = StyleSheet.create({
   },
   menuSectionTitle: {
     fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
+    fontWeight: '800',
     paddingHorizontal: SPACING.md,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.sm,
@@ -719,6 +379,8 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray100,
   },
+  menuItemLast: { borderBottomWidth: 0 },
+  deleteRow: { backgroundColor: COLORS.errorSoft },
   menuIcon: {
     width: 40,
     height: 40,
@@ -731,7 +393,29 @@ const styles = StyleSheet.create({
     marginLeft: SPACING.md,
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: '#0F172A',
+  },
+  menuSubtext: {
+    fontSize: FONT_SIZE.sm,
+    marginTop: 2,
+  },
+  linkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    gap: SPACING.sm,
+    ...SHADOWS.sm,
+  },
+  linkRowText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+  },
+  logoutBar: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: SPACING.lg,
+    paddingTop: SPACING.sm,
   },
   logoutButton: {
     flexDirection: 'row',
@@ -741,236 +425,66 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.sm,
-    marginBottom: SPACING.md,
   },
   logoutText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
+    fontWeight: '700',
     color: COLORS.error,
   },
   versionText: {
     fontSize: FONT_SIZE.xs,
     color: COLORS.gray400,
     textAlign: 'center',
+    marginBottom: SPACING.sm,
   },
-  // Modal Styles - PREMIUM POLISH
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.75)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: COLORS.white,
     borderTopLeftRadius: BORDER_RADIUS.xxxl,
     borderTopRightRadius: BORDER_RADIUS.xxxl,
     padding: SPACING.xl,
-    paddingTop: SPACING.xxl,
-    paddingBottom: SPACING.xxl + SPACING.lg,
-    alignItems: 'center',
-    ...SHADOWS.lg,
+    paddingTop: SPACING.xl + 8,
   },
   modalClose: {
     position: 'absolute',
-    top: SPACING.lg,
-    right: SPACING.lg,
+    top: SPACING.md,
+    right: SPACING.md,
     padding: SPACING.sm,
-    backgroundColor: COLORS.gray50,
-    borderRadius: BORDER_RADIUS.full,
-    zIndex: 10,
   },
   modalIconWrap: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    backgroundColor: COLORS.accentSoft,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: COLORS.infoSoft,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.xl,
-    ...SHADOWS.md,
-    position: 'relative',
-    overflow: 'visible',
-  },
-  modalIconWrapSuccess: {
-    backgroundColor: COLORS.successSoft,
-  },
-  iconGlow: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.accent,
-    opacity: 0.15,
-  },
-  iconGlowGreen: {
-    position: 'absolute',
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.success,
-    opacity: 0.15,
+    alignSelf: 'center',
+    marginBottom: SPACING.md,
   },
   modalTitle: {
-    fontSize: FONT_SIZE.xxxl,
+    fontSize: FONT_SIZE.xxl,
     fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.sm,
-    letterSpacing: -0.8,
     textAlign: 'center',
+    marginBottom: SPACING.sm,
   },
   modalSubtitle: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: '#475569',
     textAlign: 'center',
-    marginBottom: SPACING.xl,
-    lineHeight: 24,
-    paddingHorizontal: SPACING.sm,
-  },
-  otpContainer: {
-    width: '100%',
-    marginBottom: SPACING.md,
-  },
-  otpInput: {
-    backgroundColor: COLORS.gray50,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.xl,
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '800',
-    textAlign: 'center',
-    letterSpacing: 12,
-    borderWidth: 3,
-    borderColor: COLORS.accent,
-    color: '#0F172A',
-    ...SHADOWS.sm,
-  },
-  otpSuccessBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    backgroundColor: COLORS.successSoft,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.full,
+    lineHeight: 22,
     marginBottom: SPACING.lg,
   },
-  successDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: COLORS.success,
-  },
-  otpSuccessText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: COLORS.success,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  modalButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.accent,
-    paddingVertical: SPACING.lg + SPACING.xs,
-    paddingHorizontal: SPACING.xl,
-    borderRadius: BORDER_RADIUS.xxl,
-    width: '100%',
-    gap: SPACING.md,
-    ...SHADOWS.gold,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  modalButtonDisabled: {
-    backgroundColor: COLORS.gray200,
-    shadowOpacity: 0,
-    borderColor: COLORS.gray300,
-  },
-  modalButtonText: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: COLORS.primary,
-    letterSpacing: 0.5,
-  },
-  modalSecondaryButton: {
-    marginTop: SPACING.lg,
+  modalConfirm: {
+    backgroundColor: COLORS.info,
     padding: SPACING.md,
-  },
-  modalSecondaryText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.gray500,
-  },
-  benefitsList: {
-    width: '100%',
-    gap: SPACING.md,
-    marginBottom: SPACING.xl,
-  },
-  benefitCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.gray50,
-    padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl,
-    gap: SPACING.md,
-    ...SHADOWS.sm,
-    borderWidth: 2,
-    borderColor: COLORS.gray100,
-  },
-  benefitIconWrap: {
-    width: 48,
-    height: 48,
     borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.white,
     alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.sm,
   },
-  benefitContent: {
-    flex: 1,
-  },
-  benefitTitle: {
+  modalConfirmText: {
+    color: COLORS.white,
     fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: 2,
-    letterSpacing: -0.3,
-  },
-  benefitDesc: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#64748B',
-  },
-  benefitCheck: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: COLORS.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...SHADOWS.sm,
-  },
-  benefitText: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    flex: 1,
-    letterSpacing: -0.3,
-  },
-  resendButton: {
-    marginTop: SPACING.lg,
-    padding: SPACING.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    backgroundColor: COLORS.gray50,
-    borderRadius: BORDER_RADIUS.full,
-    paddingHorizontal: SPACING.lg,
-  },
-  resendText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.accent,
     fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
   },
 });

@@ -12,6 +12,14 @@ export interface User {
   profile_image: string | null;
   rating: number;
   total_trips: number;
+  trips_completed: number;
+  completion_rate: number;
+  cancellation_rate: number;
+  online_hours: number;
+  gender: string;
+  vehicle_type: string | null;
+  plate_number: string | null;
+  is_online: boolean;
   created_at: string;
 }
 
@@ -53,7 +61,7 @@ export interface Trip {
   duration_mins: number;
   fare: number;
   surge_multiplier: number;
-  status: 'pending' | 'accepted' | 'ongoing' | 'completed' | 'cancelled';
+  status: 'pending' | 'pending_driver_offers' | 'accepted' | 'arrived' | 'ongoing' | 'pending_payment' | 'completed' | 'cancelled';
   payment_method: string;
   payment_status: string;
   rider_rating: number | null;
@@ -73,6 +81,7 @@ export interface Location {
 interface AppState {
   // Auth
   user: User | null;
+  token: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   
@@ -92,6 +101,7 @@ interface AppState {
   
   // Actions
   setUser: (user: User | null) => void;
+  setToken: (token: string | null) => void;
   setIsAuthenticated: (value: boolean) => void;
   setIsLoading: (value: boolean) => void;
   setDriverProfile: (profile: DriverProfile | null) => void;
@@ -103,7 +113,7 @@ interface AppState {
   setPickupLocation: (location: Location | null) => void;
   setDropoffLocation: (location: Location | null) => void;
   switchRole: () => void;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 export const useAppStore = create<AppState>()(
@@ -111,6 +121,7 @@ export const useAppStore = create<AppState>()(
     (set, get) => ({
       // Initial state
       user: null,
+      token: null,
       isAuthenticated: false,
       isLoading: false,
       driverProfile: null,
@@ -124,6 +135,7 @@ export const useAppStore = create<AppState>()(
       
       // Actions
       setUser: (user) => set({ user }),
+      setToken: (token) => set({ token }),
       setIsAuthenticated: (value) => set({ isAuthenticated: value }),
       setIsLoading: (value) => set({ isLoading: value }),
       setDriverProfile: (profile) => set({ driverProfile: profile }),
@@ -147,24 +159,40 @@ export const useAppStore = create<AppState>()(
         }
       },
       
-      logout: () => set({
-        user: null,
-        isAuthenticated: false,
-        driverProfile: null,
-        subscription: null,
-        isOnline: false,
-        currentTrip: null,
-        pendingTrips: [],
-        pickupLocation: null,
-        dropoffLocation: null
-      })
+      logout: async () => {
+        // Clear SecureStore session
+        try {
+          const { clearUserSession } = await import('@/utils/authStorage');
+          await clearUserSession();
+          console.log('✅ SecureStore session cleared');
+        } catch (error) {
+          console.error('❌ Error clearing SecureStore:', error);
+        }
+        
+        // Clear store state
+        set({
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          driverProfile: null,
+          subscription: null,
+          isOnline: false,
+          currentTrip: null,
+          pendingTrips: [],
+          pickupLocation: null,
+          dropoffLocation: null
+        });
+      }
     }),
     {
       name: 'nexryde-storage',
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         user: state.user,
-        isAuthenticated: state.isAuthenticated
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
+        currentTrip: state.currentTrip,
+        isOnline: state.isOnline,
       })
     }
   )

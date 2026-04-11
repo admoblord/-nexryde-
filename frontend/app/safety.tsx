@@ -18,9 +18,9 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // BRIGHTER, BOLDER COLORS
 const COLORS = {
@@ -146,7 +146,7 @@ export default function SafetyScreen() {
       if (user?.id) {
         await fetch(`${BACKEND_URL}/api/users/${user.id}/emergency-contacts`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify(newContact),
         });
       }
@@ -195,7 +195,7 @@ export default function SafetyScreen() {
     try {
       await fetch(`${BACKEND_URL}/api/sos/trigger`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ user_id: user?.id, location: { lat: 6.4281, lng: 3.4219 } }),
       });
       

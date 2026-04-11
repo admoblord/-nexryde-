@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Card, Button, Badge } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
@@ -167,8 +168,19 @@ export default function FamilyModeScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // In production, get real location
-              await triggerFamilySafetyAlert(family.id, user.id, 6.5244, 3.3792);
+              let lat = 6.5244;
+              let lng = 3.3792;
+              try {
+                const { status } = await Location.requestForegroundPermissionsAsync();
+                if (status === 'granted') {
+                  const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                  lat = pos.coords.latitude;
+                  lng = pos.coords.longitude;
+                }
+              } catch (locErr) {
+                console.log('Family safety location fallback used:', locErr);
+              }
+              await triggerFamilySafetyAlert(family.id, user.id, lat, lng);
               Alert.alert('Alert Sent', 'All family members have been notified');
             } catch (error) {
               Alert.alert('Error', 'Failed to send alert');

@@ -74,8 +74,22 @@ export const en = {
     search: 'Search',
     filter: 'Filter',
     settings: 'Settings',
+    comingSoon: 'Coming Soon',
+    retry: 'Retry',
+    noData: 'No data available',
+    viewAll: 'View All',
   },
-  
+
+  tabs: {
+    home: 'Home',
+    trips: 'My Trips',
+    safety: 'Safety',
+    wallet: 'Wallet',
+    earnings: 'Earnings',
+    profile: 'Profile',
+    requests: 'Requests',
+  },
+
   auth: {
     login: 'Login',
     logout: 'Logout',
@@ -86,15 +100,31 @@ export const en = {
     enterOTP: 'Enter verification code',
     resendOTP: 'Resend Code',
     continueText: 'Continue',
+    signInToContinue: 'Sign in to continue',
+    continueWithEmail: 'Continue with Email',
+    useBiometrics: 'Use Biometrics',
   },
-  
+
   home: {
-    whereTo: 'Where to?',
+    whereTo: 'Where to today?',
     enterDestination: 'Enter your destination',
     bookRide: 'Book a Ride',
     myTrips: 'My Trips',
     wallet: 'Wallet',
     more: 'More',
+    quickAccess: 'Quick Access',
+    allFeatures: 'All Features',
+    recentTrips: 'Recent Trips',
+    goodMorning: 'Good Morning',
+    goodAfternoon: 'Good Afternoon',
+    goodEvening: 'Good Evening',
+    support: 'Support',
+    receipts: 'Receipts',
+    liveTrack: 'Live Track',
+    shareTrip: 'Share Trip',
+    security: 'Security',
+    schedule: 'Schedule',
+    delivery: 'Delivery',
   },
   
   ride: {
@@ -213,8 +243,22 @@ export const yo = {
     search: 'Wá',
     filter: 'Yọrò',
     settings: 'Àwọn ètò',
+    comingSoon: 'Ó ń bọ̀',
+    retry: 'Gbìyànjú lẹ́ẹ̀kan sí i',
+    noData: 'Kò sí dátà',
+    viewAll: 'Wo gbogbo rẹ̀',
   },
-  
+
+  tabs: {
+    home: 'Ilé',
+    trips: 'Ìrìn-àjò Mi',
+    safety: 'Ààbò',
+    wallet: 'Àpamọ́wọ́',
+    earnings: 'Èrè',
+    profile: 'Profaili',
+    requests: 'Àwọn Ìbéèrè',
+  },
+
   auth: {
     login: 'Wọlé',
     logout: 'Jáde',
@@ -225,15 +269,31 @@ export const yo = {
     enterOTP: 'Tẹ kóòdù ìfidájú',
     resendOTP: 'Ránṣẹ́ kóòdù',
     continueText: 'Tẹ̀síwájú',
+    signInToContinue: 'Wọlé láti tẹ̀síwájú',
+    continueWithEmail: 'Tẹ̀síwájú pẹ̀lú Ímeèlì',
+    useBiometrics: 'Lo Bàyómẹ́tíríkì',
   },
-  
+
   home: {
-    whereTo: 'Níbo lo fẹ́ lọ?',
+    whereTo: 'Níbo lo fẹ́ lọ lónìí?',
     enterDestination: 'Tẹ ibi tó ń lọ sínú',
     bookRide: 'Ṣètò ìrìn-àjò',
     myTrips: 'Àwọn ìrìn-àjò mi',
     wallet: 'Àpamọ́wọ́',
     more: 'Sí i',
+    quickAccess: 'Ìráyè Kíákíá',
+    allFeatures: 'Gbogbo Ẹ̀ka',
+    recentTrips: 'Ìrìn-àjò Àìpẹ́',
+    goodMorning: 'Ẹ káàárọ̀',
+    goodAfternoon: 'Ẹ káàsán',
+    goodEvening: 'Ẹ kú ìrọ̀lẹ́',
+    support: 'Ìrànlọ́wọ́',
+    receipts: 'Ìwé-owó',
+    liveTrack: 'Tẹ̀lé',
+    shareTrip: 'Pín Ìrìn-àjò',
+    security: 'Ààbò',
+    schedule: 'Ètò Ìrìn-àjò',
+    delivery: 'Ìfihàn',
   },
   
   ride: {
@@ -352,8 +412,22 @@ export const ig = {
     search: 'Chọọ',
     filter: 'Họrọ',
     settings: 'Ntọala',
+    comingSoon: 'Ọ na-abịa',
+    retry: 'Nwaa ọzọ',
+    noData: 'Enweghị data',
+    viewAll: 'Lee ha niile',
   },
-  
+
+  tabs: {
+    home: 'Ụlọ',
+    trips: 'Njem M',
+    safety: 'Nchekwa',
+    wallet: 'Akpa Ego',
+    earnings: 'Ego Nwetara',
+    profile: 'Profaịlụ',
+    requests: 'Arịrịọ',
+  },
+
   auth: {
     login: 'Banye',
     logout: 'Pụọ',
@@ -364,15 +438,31 @@ export const ig = {
     enterOTP: 'Tinye koodu nkwenye',
     resendOTP: 'Ziga koodu ọzọ',
     continueText: 'Gaa n\'ihu',
+    signInToContinue: 'Banye ịga n\'ihu',
+    continueWithEmail: 'Gaa n\'ihu site na Email',
+    useBiometrics: 'Jiri Biometrics',
   },
-  
+
   home: {
-    whereTo: 'Ebee ka ị na-aga?',
+    whereTo: 'Ebee ka ị na-aga taa?',
     enterDestination: 'Tinye ebe ị na-aga',
     bookRide: 'Kwuo njem',
     myTrips: 'Njem m',
     wallet: 'Akpa ego',
     more: 'Ọzọ',
+    quickAccess: 'Nnweta Ọsọ Ọsọ',
+    allFeatures: 'Ihe Niile',
+    recentTrips: 'Njem Nso Nso',
+    goodMorning: 'Ụtụtụ ọma',
+    goodAfternoon: 'Ehihie ọma',
+    goodEvening: 'Mgbede ọma',
+    support: 'Enyemaka',
+    receipts: 'Risịịtị',
+    liveTrack: 'Soro Ụzọ',
+    shareTrip: 'Kesaa Njem',
+    security: 'Nchekwa',
+    schedule: 'Tọọ Njem',
+    delivery: 'Nnyefe',
   },
   
   ride: {
@@ -491,8 +581,22 @@ export const ha = {
     search: 'Nema',
     filter: 'Tace',
     settings: 'Saitunan',
+    comingSoon: 'Yana zuwa nan ba da jimawa ba',
+    retry: 'Sake gwadawa',
+    noData: 'Babu bayani',
+    viewAll: 'Duba duka',
   },
-  
+
+  tabs: {
+    home: 'Gida',
+    trips: 'Tafiyoyina',
+    safety: 'Tsaro',
+    wallet: 'Walat',
+    earnings: 'Kuɗi',
+    profile: 'Bayanan ni',
+    requests: 'Buƙatu',
+  },
+
   auth: {
     login: 'Shiga',
     logout: 'Fita',
@@ -503,15 +607,31 @@ export const ha = {
     enterOTP: 'Shigar da lambar tabbatarwa',
     resendOTP: 'Sake aiko lambar',
     continueText: 'Ci gaba',
+    signInToContinue: 'Ku shiga don ci gaba',
+    continueWithEmail: 'Ci gaba da Imel',
+    useBiometrics: 'Yi amfani da Biometrics',
   },
-  
+
   home: {
-    whereTo: 'Ina kake zuwa?',
+    whereTo: 'Ina kake zuwa yau?',
     enterDestination: 'Shigar da inda kake zuwa',
     bookRide: 'Yi ajiyar tafiya',
     myTrips: 'Tafiyoyina',
     wallet: 'Walat',
     more: 'Ƙari',
+    quickAccess: 'Hanyar Sauri',
+    allFeatures: 'Dukan Abubuwa',
+    recentTrips: 'Tafiyoyi Na Baya-bayan Nan',
+    goodMorning: 'Ina kwana',
+    goodAfternoon: 'Barka da rana',
+    goodEvening: 'Barka da yamma',
+    support: 'Taimako',
+    receipts: 'Rasidi',
+    liveTrack: 'Bi Sawun',
+    shareTrip: 'Raba Tafiya',
+    security: 'Tsaro',
+    schedule: 'Tsara Tafiya',
+    delivery: 'Ɗaukar Kaya',
   },
   
   ride: {
@@ -630,8 +750,22 @@ export const pcm = {
     search: 'Find am',
     filter: 'Filter am',
     settings: 'Settings',
+    comingSoon: 'E dey come',
+    retry: 'Try again',
+    noData: 'Nothing dey here',
+    viewAll: 'See all',
   },
-  
+
+  tabs: {
+    home: 'Home',
+    trips: 'My Trips',
+    safety: 'Safety',
+    wallet: 'Money',
+    earnings: 'Earnings',
+    profile: 'Profile',
+    requests: 'Requests',
+  },
+
   auth: {
     login: 'Enter',
     logout: 'Comot',
@@ -642,15 +776,31 @@ export const pcm = {
     enterOTP: 'Put the code wey we send you',
     resendOTP: 'Send code again',
     continueText: 'Make we continue',
+    signInToContinue: 'Sign in to continue',
+    continueWithEmail: 'Continue with Email',
+    useBiometrics: 'Use Biometrics',
   },
-  
+
   home: {
-    whereTo: 'Wetin you wan do?',
+    whereTo: 'Where you dey go today?',
     enterDestination: 'Where you dey go?',
     bookRide: 'Book ride',
     myTrips: 'My trips dem',
     wallet: 'My money',
     more: 'More thing',
+    quickAccess: 'Quick Quick',
+    allFeatures: 'Everything',
+    recentTrips: 'Recent Trips',
+    goodMorning: 'Good Morning',
+    goodAfternoon: 'Good Afternoon',
+    goodEvening: 'Good Evening',
+    support: 'Help',
+    receipts: 'Receipts',
+    liveTrack: 'Track am',
+    shareTrip: 'Share Trip',
+    security: 'Security',
+    schedule: 'Schedule Ride',
+    delivery: 'Delivery',
   },
   
   ride: {

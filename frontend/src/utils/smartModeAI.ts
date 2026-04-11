@@ -287,57 +287,6 @@ export class SmartModeAI {
     }
   }
 
-  /**
-   * Simulate ride evaluation for testing/preview
-   */
-  static simulateEvaluation(preferences: SmartModePreferences): EvaluationResult[] {
-    const testRides: RideRequest[] = [
-      {
-        id: 'ride-1',
-        riderId: 'rider-1',
-        riderName: 'John Doe',
-        riderRating: 4.9,
-        pickupLocation: { lat: 6.5244, lng: 3.3792, address: 'Victoria Island' },
-        dropoffLocation: { lat: 6.4474, lng: 3.3903, address: 'Lekki Phase 1' },
-        estimatedDistance: 8.5,
-        estimatedDuration: 18,
-        baseFare: 1500,
-        surgeMultiplier: 1.8,
-        estimatedEarnings: 2700,
-        requestTime: new Date(),
-      },
-      {
-        id: 'ride-2',
-        riderId: 'rider-2',
-        riderName: 'Jane Smith',
-        riderRating: 3.2,
-        pickupLocation: { lat: 6.5244, lng: 3.3792, address: 'Ikeja' },
-        dropoffLocation: { lat: 6.4474, lng: 3.3903, address: 'Ajah' },
-        estimatedDistance: 25,
-        estimatedDuration: 45,
-        baseFare: 3000,
-        surgeMultiplier: 1.0,
-        estimatedEarnings: 3000,
-        requestTime: new Date(),
-      },
-      {
-        id: 'ride-3',
-        riderId: 'rider-3',
-        riderName: 'Mike Johnson',
-        riderRating: 4.7,
-        pickupLocation: { lat: 6.5244, lng: 3.3792, address: 'Yaba' },
-        dropoffLocation: { lat: 6.4474, lng: 3.3903, address: 'Surulere' },
-        estimatedDistance: 6.5,
-        estimatedDuration: 15,
-        baseFare: 1200,
-        surgeMultiplier: 2.5,
-        estimatedEarnings: 3000,
-        requestTime: new Date(),
-      },
-    ];
-
-    return testRides.map(ride => this.evaluateRide(ride, preferences));
-  }
 }
 
 /**
@@ -370,6 +319,5 @@ export const useSmartMode = (preferences: SmartModePreferences) => {
     evaluateRide: (ride: RideRequest) => SmartModeAI.evaluateRide(ride, preferences),
     evaluateAndAccept,
     getExplanation: SmartModeAI.getDecisionExplanation,
-    simulateEvaluation: () => SmartModeAI.simulateEvaluation(preferences),
   };
 };

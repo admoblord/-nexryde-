@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 interface EmergencyContact {
   name: string;
@@ -35,27 +36,40 @@ export default function ShareTripScreen() {
   const [shareLink, setShareLink] = useState('');
   const [tracking, setTracking] = useState(false);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
+  const locationSubscription = React.useRef<Location.LocationSubscription | null>(null);
 
   useEffect(() => {
     loadEmergencyContacts();
     generateShareLink();
     startLocationTracking();
+    return () => {
+      if (locationSubscription.current) {
+        locationSubscription.current.remove();
+      }
+    };
   }, []);
 
   const loadEmergencyContacts = async () => {
-    // TODO: Load from API
-    // For now, using sample data
-    setEmergencyContacts([
-      { name: 'Mom', phone: '+234XXXXXXXXXX', relationship: 'Family' },
-      { name: 'John', phone: '+234XXXXXXXXXX', relationship: 'Friend' },
-    ]);
+    try {
+      const raw = await AsyncStorage.getItem('emergency_contacts');
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed)) {
+        setEmergencyContacts(parsed);
+      } else {
+        setEmergencyContacts([]);
+      }
+    } catch {
+      setEmergencyContacts([]);
+    }
   };
 
   const generateShareLink = () => {
-    // Generate unique trip tracking link
-    const tripId = currentTrip?.id || params.tripId || 'DEMO123';
-    const link = `https://nexryde.com/track/${tripId}`;
-    setShareLink(link);
+    const tripId = currentTrip?.id || params.tripId;
+    if (!tripId) {
+      setShareLink('');
+      return;
+    }
+    setShareLink(`https://nexryde.com/track/${tripId}`);
   };
 
   const startLocationTracking = async () => {
@@ -74,8 +88,7 @@ export default function ShareTripScreen() {
       });
       setCurrentLocation(location.coords);
 
-      // Start watching location (every 10 seconds)
-      Location.watchPositionAsync(
+      const sub = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
           timeInterval: 10000,
@@ -83,40 +96,11 @@ export default function ShareTripScreen() {
         },
         (newLocation) => {
           setCurrentLocation(newLocation.coords);
-          // TODO: Send location to backend for real-time sharing
         }
       );
+      locationSubscription.current = sub;
     } catch (error) {
       Alert.alert('Error', 'Failed to access location');
-    }
-  };
-
-  const handleShareViaWhatsApp = async (contact: EmergencyContact) => {
-    const message = `🚨 Hey ${contact.name}! I'm taking a ride with NEXRYDE.
-
-📍 Track my trip live: ${shareLink}
-
-🚗 Driver: ${currentTrip?.driver?.name || 'Unknown'}
-🚙 Vehicle: ${currentTrip?.vehicle?.plate || 'Unknown'}
-📞 My Phone: ${user?.phone || 'N/A'}
-
-⏰ Started: ${new Date().toLocaleTimeString()}
-
-Stay safe! 🛡️`;
-
-    try {
-      const whatsappUrl = `whatsapp://send?phone=${contact.phone.replace('+', '')}&text=${encodeURIComponent(message)}`;
-      
-      const canOpen = await Linking.canOpenURL(whatsappUrl);
-      if (canOpen) {
-        await Linking.openURL(whatsappUrl);
-        setSharedWith([...sharedWith, contact.name]);
-        Alert.alert('Success', `Trip shared with ${contact.name} via WhatsApp!`);
-      } else {
-        Alert.alert('WhatsApp Not Installed', 'Please install WhatsApp to share via this method.');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to share via WhatsApp');
     }
   };
 
@@ -157,6 +141,10 @@ Stay safe! 🛡️`;
   };
 
   const handleCopyLink = () => {
+    if (!shareLink) {
+      Alert.alert('No Active Trip', 'Start a trip to generate a real tracking link.');
+      return;
+    }
     Clipboard.setString(shareLink);
     Alert.alert('Link Copied!', 'Trip tracking link copied to clipboard');
   };
@@ -315,17 +303,10 @@ Stay safe! 🛡️`;
                 <View style={styles.contactActions}>
                   <TouchableOpacity 
                     style={styles.actionBtn}
-                    onPress={() => handleShareViaWhatsApp(contact)}
-                  >
-                    <Ionicons name="logo-whatsapp" size={24} color="#25D366" />
-                    <Text style={styles.actionBtnText}>WhatsApp</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.actionBtn}
                     onPress={() => handleShareViaSMS(contact)}
                   >
-                    <Ionicons name="chatbubble" size={24} color={COLORS.accentBlue} />
-                    <Text style={styles.actionBtnText}>SMS</Text>
+                    <Ionicons name="share-social" size={24} color={COLORS.accentBlue} />
+                    <Text style={styles.actionBtnText}>Share</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -336,7 +317,7 @@ Stay safe! 🛡️`;
               <Text style={styles.emptyText}>No emergency contacts</Text>
               <TouchableOpacity 
                 style={styles.addContactBtn}
-                onPress={() => router.push('/(tabs)/safety')}
+                onPress={() => router.push('/(rider-tabs)/rider-safety')}
               >
                 <Text style={styles.addContactBtnText}>Add Contacts</Text>
               </TouchableOpacity>

@@ -228,7 +228,7 @@ export default function EarningsScreen() {
                 <Text style={styles.subscriptionReminderTitle}>Subscription</Text>
                 <Text style={styles.subscriptionReminderText}>
                   {driverStats?.subscription_active 
-                    ? `${driverStats.subscription_days_remaining} days remaining`
+                    ? `${driverStats.subscription_days_remaining ?? driverStats.subscription_days_left ?? 0} days remaining`
                     : 'Subscribe to continue driving'
                   }
                 </Text>
@@ -246,7 +246,7 @@ export default function EarningsScreen() {
               </Text>
               <Button
                 title="Top Up Wallet"
-                onPress={() => {}}
+                onPress={() => router.push('/rider/wallet')}
                 variant="outline"
                 icon="add-circle"
                 style={styles.topUpButton}

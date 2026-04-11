@@ -1,6 +1,6 @@
-from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect, Form, File, UploadFile, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from typing import Set
@@ -18,9 +18,13 @@ import httpx
 import hashlib
 import json
 import asyncio
+import time
+from openai import OpenAI
 
-# Import LLM Chat for AI Assistants
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+# LLM Chat disabled - emergentintegrations removed
+# from emergentintegrations.llm.chat import LlmChat, UserMessage
+LlmChat = None
+UserMessage = None
 
 # Import Subscription Management System
 from subscription_manager import subscription_router
@@ -37,19 +41,34 @@ from smart_route_planner import route_planner_router
 
 # Import Map Service (Cost Controlled)
 from map_service import map_router
+from places_service import places_router
 
 # Import Call Service (Privacy Protected)
 from call_service import call_router
 
-# Import Places Service (Google Maps Autocomplete Proxy)
-from places_service import places_router
+# Import Smart Mode AI (NEW)
+from smart_mode_ai import router as smart_mode_router
+
+# Import Community & Safety Routers (REFACTORED)
+from routers.community import community_router, seed_community_groups, seed_community_content, cleanup_test_community_events
+from routers.safety import safety_router, seed_danger_zones
+from routers.ai_features import ai_router
+from routers.admin import admin_router
+from routers.trips import trips_router, set_fare_estimate_store, set_shared_functions
+from routers.auth import auth_router, send_otp as router_send_otp, ensure_otp_indexes
+from routers.bidding import bidding_router
+from routers.payments import payments_router, set_payments_shared_functions, set_payments_fare_estimate_store
+from routers.voice import voice_router
+from enforcement_system import enforcement_router, record_violation, check_user_status
+from driver_compliance import compliance_router, start_compliance_background_tasks
+from routers.ai_intelligence import ai_intelligence_router, set_ai_intelligence_db
 
 ROOT_DIR = Path(__file__).parent
-ADMIN_DIR = ROOT_DIR.parent / 'admin'
+ADMIN_DIR = ROOT_DIR / 'admin'  # admin folder is inside backend/
 load_dotenv(ROOT_DIR / '.env')
 
 # MongoDB connection
-mongo_url = os.environ['MONGO_URL']
+mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL')
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'nexryde_db')]
 
@@ -58,14 +77,15 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 
 # Emergent LLM Key for AI Assistants
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
 # Termii SMS OTP Configuration
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
-TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://api.ng.termii.com')
+TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 
-# Emergent Auth URL - FIXED: Using correct production URL
-EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', 'https://auth.emergentagent.com/session-data')
+# Emergent Auth URL
+EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
@@ -82,15 +102,182 @@ logger = logging.getLogger(__name__)
 
 # ==================== CONFIGURATION ====================
 
+# ==================== NIGERIAN MARKET FARE CONFIGURATION ====================
+# Comprehensive pricing for Nigerian ride-hailing market
+# Based on inDrive, Bolt, and Lag Ride competitive analysis
 FARE_CONFIG = {
     "lagos": {
-        "economy": {"base_fare": 800, "per_km": 120, "per_min": 20, "min_fare": 1500, "max_multiplier": 1.2},
-        "premium": {"base_fare": 1200, "per_km": 180, "per_min": 30, "min_fare": 2500, "max_multiplier": 1.2}
+        "economy": {
+            "base_fare": 400,           # ₦400 flat fee to start
+            "per_km": 400,              # ₦400 per kilometer
+            "per_min": 80,              # ₦80 per minute (for traffic/waiting)
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
+            "max_multiplier": 2.5,      # Max 2.5x surge pricing
+            "cancellation_fee": 300,    # ₦300 if rider cancels after driver accepts
+        },
+        "comfort": {
+            "base_fare": 600,           # ₦600 flat fee to start
+            "per_km": 500,              # ₦500 per kilometer
+            "per_min": 100,             # ₦100 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+        "xl": {
+            "base_fare": 500,           # ₦500 flat fee to start
+            "per_km": 450,              # ₦450 per kilometer
+            "per_min": 90,              # ₦90 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
+            "max_multiplier": 2.5,
+            "cancellation_fee": 450,
+        },
+        "premium": {
+            "base_fare": 800,           # ₦800 flat fee to start
+            "per_km": 600,              # ₦600 per kilometer
+            "per_min": 120,             # ₦120 per minute
+            "booking_fee": 0,           # Platform service fee
+            "min_fare": 0,              # Minimum fare
+            "max_multiplier": 3.0,      # Premium can surge up to 3x
+            "cancellation_fee": 500,
+        },
+    },
+    "abuja": {
+        "economy": {
+            "base_fare": 400,
+            "per_km": 130,
+            "per_min": 20,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 250,
+        },
+        "comfort": {
+            "base_fare": 600,
+            "per_km": 180,
+            "per_min": 30,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 350,
+        },
+        "premium": {
+            "base_fare": 900,
+            "per_km": 300,
+            "per_min": 45,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 450,
+        },
+        "xl": {
+            "base_fare": 700,
+            "per_km": 220,
+            "per_min": 35,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+    },
+    "port_harcourt": {
+        "economy": {
+            "base_fare": 450,
+            "per_km": 140,
+            "per_min": 22,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 280,
+        },
+        "comfort": {
+            "base_fare": 650,
+            "per_km": 190,
+            "per_min": 32,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 380,
+        },
+        "premium": {
+            "base_fare": 950,
+            "per_km": 320,
+            "per_min": 48,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 480,
+        },
+        "xl": {
+            "base_fare": 750,
+            "per_km": 230,
+            "per_min": 38,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 420,
+        },
     },
     "default": {
-        "economy": {"base_fare": 800, "per_km": 120, "per_min": 20, "min_fare": 1500, "max_multiplier": 1.2},
-        "premium": {"base_fare": 1200, "per_km": 180, "per_min": 30, "min_fare": 2500, "max_multiplier": 1.2}
+        "economy": {
+            "base_fare": 500,
+            "per_km": 150,
+            "per_min": 25,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 300,
+        },
+        "comfort": {
+            "base_fare": 700,
+            "per_km": 200,
+            "per_min": 35,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 400,
+        },
+        "premium": {
+            "base_fare": 1000,
+            "per_km": 350,
+            "per_min": 50,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 3.0,
+            "cancellation_fee": 500,
+        },
+        "xl": {
+            "base_fare": 800,
+            "per_km": 250,
+            "per_min": 40,
+            "booking_fee": 0,
+            "min_fare": 0,
+            "max_multiplier": 2.5,
+            "cancellation_fee": 450,
+        },
     }
+}
+
+# Surge Pricing Configuration
+SURGE_CONFIG = {
+    "high_demand_threshold": 0.7,      # 70% of drivers busy = start surge
+    "very_high_demand_threshold": 0.85, # 85% = higher surge
+    "critical_demand_threshold": 0.95,  # 95% = max surge
+    "surge_levels": {
+        "normal": 1.0,
+        "high": 1.3,
+        "very_high": 1.8,
+        "critical": 2.5,
+    },
+    "peak_hours": {
+        "morning": {"start": 7, "end": 9, "multiplier": 1.2},   # 7-9 AM
+        "evening": {"start": 17, "end": 20, "multiplier": 1.3}, # 5-8 PM
+    },
+    "weekend_multiplier": 1.1,  # 10% increase on weekends
+    "rain_multiplier": 1.4,     # 40% increase during rain
+    "holiday_multiplier": 1.5,  # 50% increase on holidays
 }
 
 # Driver Certification Levels
@@ -133,9 +320,10 @@ DRIVER_CERTIFICATION_LEVELS = {
 ROUTE_DEVIATION_THRESHOLD = 0.5
 # Abnormal stop duration in seconds
 ABNORMAL_STOP_THRESHOLD = 300  # 5 minutes
-# Cache settings
+# Cache settings — in-memory acts as L1, MongoDB as persistent L2
 route_cache: Dict[str, Dict[str, Any]] = {}
-CACHE_TTL_SECONDS = 300
+CACHE_TTL_SECONDS = 300          # L1 in-memory: 5 minutes
+PERSISTENT_CACHE_TTL_HOURS = 24  # L2 MongoDB: 24 hours
 # Fare lock duration
 FARE_LOCK_MINUTES = 3
 # OTP storage
@@ -145,13 +333,14 @@ fare_estimate_store: Dict[str, Dict[str, Any]] = {}
 
 # ==================== DRIVER SUBSCRIPTION CONFIG ====================
 SUBSCRIPTION_CONFIG = {
-    "monthly_fee": 25000,  # ₦25,000 monthly
-    "trial_days": 7,       # 7 days free trial
+    "monthly_fee": 18000,  # ₦18,000 standard monthly
+    "trial_hours": 48,     # 48-hour free trial
+    "trial_trips": 3,      # or 3 trips (whichever comes first)
     "currency": "NGN",
     "bank_details": {
-        "bank_name": "UBA",
-        "account_name": "ADMOBLORDGROUP LIMITED",
-        "account_number": "1028400669",
+        "provider": "SquadCo",
+        "mode": "virtual_account_only",
+        "message": "Virtual account is generated per driver. No manual company transfer account.",
     }
 }
 
@@ -159,12 +348,21 @@ SUBSCRIPTION_CONFIG = {
 SURGE_CONFIG = {
     "enabled": True,
     "base_multiplier": 1.0,
-    "max_multiplier": 3.0,
+    "max_multiplier": 2.5,
     "peak_hours": {
-        "morning": {"start": 7, "end": 9, "multiplier": 1.5},
-        "evening": {"start": 17, "end": 20, "multiplier": 1.8},
+        "morning": {"start": 7, "end": 9, "multiplier": 1.2},
+        "evening": {"start": 17, "end": 20, "multiplier": 1.3},
     },
-    "high_demand_threshold": 0.7,  # 70% of drivers busy = surge
+    "high_demand_threshold": 0.7,       # 70% drivers busy => 1.3x
+    "very_high_demand_threshold": 0.85, # 85% drivers busy => 1.5x
+    "critical_demand_threshold": 0.95,  # 95% drivers busy => max
+    "surge_levels": {
+        "normal": 1.0,
+        "high": 1.3,
+        "very_high": 1.5,
+        "critical": 2.5,
+    },
+    "weekend_multiplier": 1.1,
     "rain_multiplier": 1.3,
     "holiday_multiplier": 1.5,
 }
@@ -226,6 +424,10 @@ class User(BaseModel):
     trust_score: float = 100.0  # Trust score (inheritable)
     # Women-only mode preference
     women_only_mode: bool = False
+    # New fields for registration
+    nin: Optional[str] = None  # National Identification Number for riders
+    terms_accepted: Optional[bool] = None  # Terms acceptance for drivers
+    terms_accepted_at: Optional[str] = None  # Timestamp when driver accepted terms
     
 class DriverProfile(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -265,7 +467,7 @@ class DriverProfile(BaseModel):
 class Subscription(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     driver_id: str
-    amount: float = 25000.0
+    amount: float = 18000.0
     status: str = "trial"  # trial, pending_payment, pending_verification, active, expired, suspended
     start_date: datetime = Field(default_factory=datetime.utcnow)
     end_date: datetime = Field(default_factory=lambda: datetime.utcnow() + timedelta(days=30))
@@ -281,7 +483,7 @@ class Subscription(BaseModel):
 class PaymentProofSubmission(BaseModel):
     driver_id: str
     screenshot: str  # Base64 encoded image
-    amount: float = 25000.0
+    amount: float = 18000.0
     payment_reference: Optional[str] = None
 
 class Trip(BaseModel):
@@ -311,6 +513,9 @@ class Trip(BaseModel):
     # Safety features
     is_monitored: bool = True
     sos_triggered: bool = False
+    security_code: Optional[str] = None  # 4-digit code for driver verification
+    security_code_verified: bool = False
+    security_code_attempts: int = 0
     sos_triggered_at: Optional[datetime] = None
     route_deviation_detected: bool = False
     abnormal_stop_detected: bool = False
@@ -393,6 +598,9 @@ class RegisterRequest(BaseModel):
     role: str = "rider"
     google_id: Optional[str] = None
     profile_image: Optional[str] = None
+    nin: Optional[str] = None  # National Identification Number for riders
+    terms_accepted: Optional[bool] = None  # Terms acceptance for drivers
+    terms_accepted_at: Optional[str] = None  # Timestamp when terms were accepted
 
 class UpdateProfileRequest(BaseModel):
     name: Optional[str] = None
@@ -611,7 +819,7 @@ class LostItem(BaseModel):
 TIER_CONFIG = {
     "basic": {
         "name": "KODA Basic",
-        "monthly_fee": 25000,
+        "monthly_fee": 18000,
         "earning_per_ride": {"min": 200, "max": 300},
         "requirements": {
             "vehicle_year_min": None,
@@ -623,7 +831,7 @@ TIER_CONFIG = {
     },
     "premium": {
         "name": "KODA Premium", 
-        "monthly_fee": 25000,  # Same fee!
+        "monthly_fee": 18000,  # Same fee!
         "earning_per_ride": {"min": 300, "max": 450},
         "requirements": {
             "vehicle_year_min": 2018,
@@ -761,15 +969,77 @@ def calculate_distance_haversine(lat1: float, lon1: float, lat2: float, lon2: fl
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+def _haversine_estimate(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> dict:
+    """Free estimate using Haversine — no API cost. Applies 1.35x road-factor for Nigerian roads."""
+    straight_km = calculate_distance_haversine(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    road_km = straight_km * 1.35
+    avg_speed_kmh = 25
+    duration_seconds = int((road_km / avg_speed_kmh) * 3600)
+    return {
+        "distance_meters": int(road_km * 1000),
+        "duration_seconds": max(300, duration_seconds),
+        "duration_in_traffic_seconds": max(300, int(duration_seconds * 1.2)),
+        "polyline": "",
+        "source": "haversine",
+    }
+
+
+async def _store_route_in_db(cache_key: str, result: dict):
+    """Persist route to MongoDB for long-term reuse across Cloud Run instances."""
+    try:
+        await db.route_cache_v2.update_one(
+            {"cache_key": cache_key},
+            {"$set": {
+                "cache_key": cache_key,
+                "data": result,
+                "cached_at": datetime.utcnow(),
+                "hits": 0,
+            }},
+            upsert=True,
+        )
+    except Exception as e:
+        logger.warning(f"Route DB cache write failed: {e}")
+
+
+async def _get_route_from_db(cache_key: str) -> dict | None:
+    """Retrieve route from MongoDB persistent cache (24-hour TTL)."""
+    try:
+        entry = await db.route_cache_v2.find_one({"cache_key": cache_key})
+        if not entry:
+            return None
+        cached_at = entry.get("cached_at")
+        if not cached_at:
+            return None
+        age_hours = (datetime.utcnow() - cached_at).total_seconds() / 3600
+        if age_hours > PERSISTENT_CACHE_TTL_HOURS:
+            return None
+        await db.route_cache_v2.update_one(
+            {"cache_key": cache_key},
+            {"$inc": {"hits": 1}},
+        )
+        return entry["data"]
+    except Exception as e:
+        logger.warning(f"Route DB cache read failed: {e}")
+        return None
+
+
 async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> dict:
     cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+
+    # L1: in-memory cache (fastest, 5-minute TTL)
     if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
         return route_cache[cache_key]["data"]
-    
+
+    # L2: persistent MongoDB cache (survives restarts, 24-hour TTL)
+    db_cached = await _get_route_from_db(cache_key)
+    if db_cached:
+        route_cache[cache_key] = {"data": db_cached, "cached_at": datetime.utcnow()}
+        return db_cached
+
     if not GOOGLE_MAPS_API_KEY:
-        return None
-    
-    # Try Routes API first
+        return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+
+    # L3: Google Routes API (primary — costs money)
     try:
         url = "https://routes.googleapis.com/directions/v2:computeRoutes"
         headers = {
@@ -783,11 +1053,11 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
             "travelMode": "DRIVE",
             "routingPreference": "TRAFFIC_AWARE"
         }
-        
+
         async with httpx.AsyncClient() as client:
             response = await client.post(url, headers=headers, json=body, timeout=10.0)
             data = response.json()
-        
+
         if "routes" in data and len(data["routes"]) > 0:
             route = data["routes"][0]
             duration_str = route.get("duration", "0s")
@@ -797,13 +1067,15 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
                 "duration_seconds": duration_seconds,
                 "duration_in_traffic_seconds": duration_seconds,
                 "polyline": route.get("polyline", {}).get("encodedPolyline", ""),
+                "source": "google_routes_api",
             }
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
+            await _store_route_in_db(cache_key, result)
             return result
     except Exception as e:
         logger.warning(f"Routes API failed: {e}")
-    
-    # Fallback to Directions API
+
+    # L4: Google Directions API (fallback — costs money)
     try:
         url = "https://maps.googleapis.com/maps/api/directions/json"
         params = {
@@ -815,7 +1087,7 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=10.0)
             data = response.json()
-        
+
         if data.get("status") == "OK":
             route = data["routes"][0]
             leg = route["legs"][0]
@@ -824,49 +1096,106 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
                 "duration_seconds": leg["duration"]["value"],
                 "duration_in_traffic_seconds": leg.get("duration_in_traffic", {}).get("value", leg["duration"]["value"]),
                 "polyline": route["overview_polyline"]["points"],
+                "source": "google_directions_api",
             }
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
+            await _store_route_in_db(cache_key, result)
             return result
     except Exception as e:
         logger.warning(f"Directions API failed: {e}")
-    
-    return None
 
-def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: int, service_type: str = "economy", city: str = "lagos") -> dict:
-    city_config = FARE_CONFIG.get(city.lower(), FARE_CONFIG["default"])
-    config = city_config.get(service_type, city_config["economy"])
+    # L5: Haversine fallback (free, always works)
+    return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+
+def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: int, service_type: str = "economy", city: str = "lagos", is_surge: bool = False, surge_multiplier: float = 1.0) -> dict:
+    """
+    Calculate fare for Nigerian market with comprehensive pricing formula:
+    Total Fare = (Base Fare + (Distance × Rate/km) + (Time × Rate/min) + Traffic Fee + Booking Fee) × Surge Multiplier
+    """
+    city_key = (city or "default").lower()
+    city_config = FARE_CONFIG.get(city_key, FARE_CONFIG["default"])
+    service_key = (service_type or "economy").lower()
+    # "Standard" in UI is the same tier as "economy" in backend pricing.
+    if service_key == "standard":
+        service_key = "economy"
+    config = city_config.get(service_key, city_config.get("economy", FARE_CONFIG["default"]["economy"]))
     
-    base_fare = config["base_fare"]
-    per_km = config["per_km"]
-    per_min = config["per_min"]
-    min_fare = config["min_fare"]
-    max_multiplier = config["max_multiplier"]
+    # Extract pricing components
+    base_fare = config.get("base_fare", 500)
+    per_km = config.get("per_km", 150)
+    per_min = config.get("per_min", 25)
+    booking_fee = config.get("booking_fee", 100)
+    min_fare = config.get("min_fare", 800)
+    max_multiplier = config.get("max_multiplier", 2.5)
+    cancellation_fee = config.get("cancellation_fee", 300)
     
-    distance_fee = distance_km * per_km
-    time_fee = duration_min * per_min
+    # Step 1: Calculate distance fee
+    distance_fee = round(distance_km * per_km, 2)
+    
+    # Step 2: Calculate time fee (for time spent in traffic/waiting)
+    time_fee = round(duration_min * per_min, 2)
+    
+    # Step 3: Calculate extra traffic fee (when traffic time exceeds normal duration)
     extra_traffic_min = max(0, traffic_duration_min - duration_min)
-    traffic_fee = min(extra_traffic_min * per_min, base_fare * 0.3)
+    traffic_fee = round(min(extra_traffic_min * per_min, base_fare * 0.5), 2)  # Cap at 50% of base fare
     
-    subtotal = base_fare + distance_fee + time_fee + traffic_fee
-    subtotal = max(min_fare, subtotal)
+    # Step 4: Calculate subtotal before surge
+    subtotal = base_fare + distance_fee + time_fee + traffic_fee + booking_fee
     
-    current_hour = datetime.utcnow().hour + 1
-    is_peak = current_hour in [7, 8, 9, 17, 18, 19, 20]
-    multiplier = min(1.1 if is_peak else 1.0, max_multiplier)
+    # Step 5: Calculate surge/dynamic pricing (min_fare removed per user request)
+    current_hour = datetime.utcnow().hour + 1  # Nigerian time (WAT = UTC+1)
+    is_weekend = datetime.utcnow().weekday() >= 5
     
-    total_fare = round(subtotal * multiplier, 2)
+    # Peak hours: Morning rush (7-9 AM) and Evening rush (5-8 PM)
+    is_morning_peak = 7 <= current_hour <= 9
+    is_evening_peak = 17 <= current_hour <= 20
+    is_peak = is_morning_peak or is_evening_peak
+    
+    # Calculate dynamic multiplier
+    dynamic_multiplier = 1.0
+    if is_surge and surge_multiplier > 1.0:
+        dynamic_multiplier = min(surge_multiplier, max_multiplier)
+    elif is_peak:
+        peak_config = SURGE_CONFIG.get("peak_hours", {})
+        if is_morning_peak:
+            dynamic_multiplier = peak_config.get("morning", {}).get("multiplier", 1.2)
+        elif is_evening_peak:
+            dynamic_multiplier = peak_config.get("evening", {}).get("multiplier", 1.3)
+    
+    # Add weekend multiplier
+    if is_weekend:
+        dynamic_multiplier *= SURGE_CONFIG.get("weekend_multiplier", 1.1)
+    
+    # Cap the multiplier
+    dynamic_multiplier = min(dynamic_multiplier, max_multiplier)
+    
+    # Step 7: Calculate final fare
+    total_fare = round(subtotal * dynamic_multiplier, 2)
+    
+    # Round to nearest ₦50 for cleaner prices
+    total_fare = round(total_fare / 50) * 50
     
     return {
         "base_fare": base_fare,
-        "distance_fee": round(distance_fee, 2),
-        "time_fee": round(time_fee, 2),
-        "traffic_fee": round(traffic_fee, 2),
+        "distance_km": round(distance_km, 2),
+        "distance_fee": distance_fee,
+        "duration_min": duration_min,
+        "time_fee": time_fee,
+        "traffic_duration_min": traffic_duration_min,
+        "traffic_fee": traffic_fee,
+        "booking_fee": booking_fee,
         "subtotal": round(subtotal, 2),
-        "multiplier": multiplier,
+        "surge_multiplier": round(dynamic_multiplier, 2),
         "total_fare": total_fare,
         "min_fare": min_fare,
+        "cancellation_fee": cancellation_fee,
         "is_peak": is_peak,
-        "currency": "NGN"
+        "is_weekend": is_weekend,
+        "peak_type": "morning" if is_morning_peak else ("evening" if is_evening_peak else None),
+        "service_type": service_key,
+        "city": city_key,
+        "currency": "NGN",
+        "price_breakdown": f"₦{base_fare} base + ₦{distance_fee} ({distance_km}km) + ₦{time_fee} ({duration_min}min) + ₦{traffic_fee} traffic + ₦{booking_fee} booking"
     }
 
 def generate_otp() -> str:
@@ -902,5470 +1231,80 @@ def calculate_behavior_score_change(event_type: str) -> float:
     }
     return changes.get(event_type, 0)
 
-# ==================== AUTH ENDPOINTS ====================
 
-# OTP Configuration
-OTP_EXPIRY_MINUTES = 10
-OTP_MAX_ATTEMPTS = 3
-OTP_RESEND_COOLDOWN_SECONDS = 60
-OTP_MAX_DAILY_REQUESTS = 10
+# Auth endpoints extracted to routers/auth.py
 
-def normalize_phone(phone: str) -> str:
-    """Normalize Nigerian phone number to international format with + prefix"""
-    import re
-    cleaned = re.sub(r'\s+', '', phone)
-    if cleaned.startswith('0'):
-        cleaned = '+234' + cleaned[1:]
-    elif not cleaned.startswith('+'):
-        cleaned = '+' + cleaned
-    return cleaned
+# ==================== USER ENDPOINTS (REFACTORED TO routers/users.py) ====================
 
-async def get_otp_record(phone: str):
-    """Get OTP record from database"""
-    return await db.otp_records.find_one({"phone": phone})
+# ==================== PROFILE PICTURE (REFACTORED TO routers/users.py) ====================
 
-async def save_otp_record(phone: str, otp: str, provider: str, message_id: str = None):
-    """Save OTP record to database with expiry"""
-    now = datetime.utcnow()
-    expiry = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
-    
-    # Check for existing record
-    existing = await db.otp_records.find_one({"phone": phone})
-    
-    if existing:
-        # Update existing record
-        await db.otp_records.update_one(
-            {"phone": phone},
-            {
-                "$set": {
-                    "otp": otp,
-                    "provider": provider,
-                    "message_id": message_id,
-                    "expires_at": expiry,
-                    "attempts": 0,
-                    "last_sent_at": now,
-                    "updated_at": now
-                },
-                "$inc": {"daily_requests": 1}
-            }
-        )
-    else:
-        # Create new record
-        await db.otp_records.insert_one({
-            "phone": phone,
-            "otp": otp,
-            "provider": provider,
-            "message_id": message_id,
-            "expires_at": expiry,
-            "attempts": 0,
-            "daily_requests": 1,
-            "last_sent_at": now,
-            "created_at": now,
-            "updated_at": now,
-            "daily_reset_at": now + timedelta(days=1)
-        })
+# ==================== EMERGENCY CONTACTS (REFACTORED TO routers/users.py) ====================
 
-async def check_resend_cooldown(phone: str) -> dict:
-    """Check if user can request new OTP (cooldown check)"""
-    record = await db.otp_records.find_one({"phone": phone})
-    
-    if not record:
-        return {"can_resend": True, "wait_seconds": 0}
-    
-    now = datetime.utcnow()
-    last_sent = record.get("last_sent_at")
-    
-    if last_sent:
-        elapsed = (now - last_sent).total_seconds()
-        if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
-            wait_time = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
-            return {"can_resend": False, "wait_seconds": wait_time}
-    
-    # Check daily limit
-    daily_reset = record.get("daily_reset_at")
-    if daily_reset and now > daily_reset:
-        # Reset daily counter
-        await db.otp_records.update_one(
-            {"phone": phone},
-            {"$set": {"daily_requests": 0, "daily_reset_at": now + timedelta(days=1)}}
-        )
-    elif record.get("daily_requests", 0) >= OTP_MAX_DAILY_REQUESTS:
-        return {"can_resend": False, "wait_seconds": -1, "error": "Daily limit reached. Try again tomorrow."}
-    
-    return {"can_resend": True, "wait_seconds": 0}
+# ==================== FAVORITE/BLOCKED DRIVERS (REFACTORED TO routers/users.py) ====================
 
-async def increment_otp_attempts(phone: str) -> int:
-    """Increment OTP verification attempts and return new count"""
-    result = await db.otp_records.find_one_and_update(
-        {"phone": phone},
-        {"$inc": {"attempts": 1}},
-        return_document=True
-    )
-    return result.get("attempts", 0) if result else 0
+# ==================== FACE VERIFICATION (REFACTORED TO routers/users.py) ====================
 
-async def delete_otp_record(phone: str):
-    """Delete OTP record after successful verification"""
-    await db.otp_records.delete_one({"phone": phone})
+# ==================== DRIVER ENDPOINTS (REFACTORED TO routers/drivers.py) ====================
 
-async def send_sms_notification(phone: str, message: str):
-    """Send SMS notification via Termii"""
-    try:
-        if not TERMII_API_KEY:
-            logger.info(f"SMS notification (mock): {phone} - {message}")
-            return True
-        
-        async with httpx.AsyncClient() as http_client:
-            # Termii requires phone number WITHOUT the + prefix
-            termii_phone = phone.lstrip('+')
-            
-            payload = {
-                "api_key": TERMII_API_KEY,
-                "to": termii_phone,
-                "from": "NEXRYDE",
-                "channel": "dnd",
-                "type": "plain",
-                "sms": message
-            }
-            
-            logger.info(f"Sending SMS notification to {termii_phone}")
-            
-            response = await http_client.post(
-                f"{TERMII_BASE_URL}/api/sms/send",
-                json=payload,
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                logger.info(f"✅ SMS notification sent to {termii_phone}")
-                return True
-            else:
-                logger.error(f"SMS notification failed: {response.status_code} - {response.text}")
-                return False
-    except Exception as e:
-        logger.error(f"SMS notification error: {e}")
-        return False
+# ==================== DRIVER DOCUMENT VERIFICATION (REFACTORED TO routers/drivers.py) ====================
 
-async def send_driver_verification_notification(user_id: str, status: str, reason: str = None):
-    """Send notification to driver about verification status"""
-    try:
-        user = await db.users.find_one({"id": user_id})
-        if not user or not user.get("phone"):
-            logger.warning(f"Cannot send notification - user {user_id} not found or no phone")
-            return
-        
-        phone = user.get("phone")
-        name = user.get("name", "Driver")
-        
-        if status == "approved":
-            message = f"🎉 Congratulations {name}! Your NEXRYDE driver account has been APPROVED. You can now start accepting rides and earning money. Welcome to the team!"
-        elif status == "rejected":
-            message = f"Hi {name}, your NEXRYDE driver verification was not approved. Reason: {reason or 'Documents did not meet requirements'}. Please re-submit your documents."
-        else:
-            message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you soon!"
-        
-        # Send SMS
-        await send_sms_notification(phone, message)
-        
-        # Also store in-app notification
-        notification = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "type": "verification_" + status,
-            "title": "Driver Verification " + status.upper(),
-            "message": message,
-            "read": False,
-            "created_at": datetime.utcnow()
-        }
-        await db.notifications.insert_one(notification)
-        
-        logger.info(f"📱 Verification notification sent to {name} ({phone}): {status}")
-        
-    except Exception as e:
-        logger.error(f"Failed to send verification notification: {e}")
 
-@api_router.post("/auth/send-otp")
-@api_router.post("/auth/request-otp")  # Alias endpoint
-async def send_otp(request: OTPRequest):
-    """Send OTP via Termii SMS or fallback to mock mode"""
-    try:
-        normalized_phone = normalize_phone(request.phone)
-        
-        # Check resend cooldown
-        cooldown_check = await check_resend_cooldown(request.phone)
-        if not cooldown_check["can_resend"]:
-            if cooldown_check.get("error"):
-                return JSONResponse(
-                    status_code=429,
-                    content={
-                        "success": False,
-                        "message": cooldown_check["error"],
-                        "error": cooldown_check["error"]
-                    }
-                )
-            return JSONResponse(
-                status_code=429,
-                content={
-                    "success": False,
-                    "message": f"Please wait {cooldown_check['wait_seconds']} seconds before requesting a new code.",
-                    "wait_seconds": cooldown_check["wait_seconds"]
-                }
-            )
-        
-        # Generate OTP
-        otp_code = generate_otp()
-        
-        # Check if Termii is configured and try to send
-        if TERMII_API_KEY:
-            try:
-                async with httpx.AsyncClient() as http_client:
-                    # Termii requires phone number WITHOUT the + prefix
-                    termii_phone = normalized_phone.lstrip('+')
-                    
-                    # Use the registered sender ID from environment
-                    sender_id = TERMII_FROM_ID or "OE Alert"
-                    
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": termii_phone,
-                        "from": sender_id,
-                        "channel": "dnd",
-                        "type": "plain",
-                        "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                    }
-                    
-                    logger.info(f"Sending OTP to {termii_phone} via Termii v3 API (sender: {sender_id})")
-                    
-                    response = await http_client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload,
-                        timeout=30.0
-                    )
-                    
-                    logger.info(f"Termii response status: {response.status_code}")
-                    logger.info(f"Termii response: {response.text}")
-                    
-                    if response.status_code == 200:
-                        data = response.json()
-                        message_id = data.get('message_id')
-                        
-                        # Save OTP to database with NORMALIZED phone
-                        await save_otp_record(
-                            phone=normalized_phone,
-                            otp=otp_code,
-                            provider="termii",
-                            message_id=message_id
-                        )
-                        
-                        logger.info(f"✅ Termii SMS sent successfully to {normalized_phone}")
-                        
-                        # CRITICAL: Return explicit JSONResponse for consistency
-                        return JSONResponse(
-                            status_code=200,
-                            content={
-                                "success": True,
-                                "message": "OTP sent successfully via SMS",
-                                "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                                "provider": "termii"
-                            }
-                        )
-                    else:
-                        logger.error(f"Termii API error: {response.status_code} - {response.text}")
-                        raise Exception(f"Termii API failed: {response.text}")
-            except Exception as e:
-                logger.error(f"Termii error: {str(e)}")
-                # Fall through to mock mode
-        
-        # Fallback: Mock OTP (for testing/development)
-        await save_otp_record(
-            phone=normalized_phone,
-            otp=otp_code,
-            provider="mock"
-        )
-        
-        # Also keep in memory for backward compatibility
-        otp_store[normalized_phone] = {
-            "otp": otp_code,
-            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
-            "provider": "mock"
-        }
-        
-        logger.info(f"📱 Mock OTP for {normalized_phone}: {otp_code}")
-        
-        # CRITICAL: Return explicit JSONResponse for consistency
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "OTP sent successfully (test mode)",
-                "otp": otp_code,  # Only shown in mock mode for testing
-                "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                "provider": "mock"
-            }
-        )
-        
-    except HTTPException as http_err:
-        # Re-raise HTTPException as proper JSON
-        return JSONResponse(
-            status_code=http_err.status_code,
-            content={
-                "success": False,
-                "message": str(http_err.detail),
-                "error": str(http_err.detail)
-            }
-        )
-    except Exception as e:
-        logger.error(f"Error sending OTP: {str(e)}")
-        # Final fallback - ALWAYS return JSON
-        otp = generate_otp()
-        await save_otp_record(phone=request.phone, otp=otp, provider="mock")
-        otp_store[request.phone] = {
-            "otp": otp,
-            "expires": datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES),
-            "provider": "mock"
-        }
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "OTP sent successfully (test mode - error fallback)",
-                "otp": otp,
-                "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                "provider": "mock",
-                "note": "Using fallback due to error"
-            }
-        )
 
-@api_router.post("/auth/request-otp-whatsapp")
-async def send_otp_whatsapp(request: OTPRequest):
-    """Send OTP via WhatsApp using Termii"""
-    try:
-        # Normalize phone number
-        normalized_phone = request.phone.replace('+', '').replace(' ', '').replace('-', '')
-        if normalized_phone.startswith('0'):
-            normalized_phone = '234' + normalized_phone[1:]
-        elif not normalized_phone.startswith('234'):
-            normalized_phone = '234' + normalized_phone
-        
-        # Generate OTP
-        otp_code = str(random.randint(100000, 999999))
-        
-        # Store OTP
-        expires_at = datetime.utcnow() + timedelta(minutes=OTP_EXPIRY_MINUTES)
-        otp_store[request.phone] = {
-            "otp": otp_code,
-            "expires": expires_at,
-            "attempts": 0
-        }
-        
-        # Try WhatsApp via Termii
-        if TERMII_API_KEY:
-            try:
-                payload = {
-                    "api_key": TERMII_API_KEY,
-                    "to": normalized_phone,
-                    "from": TERMII_FROM_ID,
-                    "channel": "whatsapp",
-                    "type": "plain",
-                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                }
-                
-                logger.info(f"Sending WhatsApp OTP to {normalized_phone}")
-                
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload
-                    )
-                    
-                    logger.info(f"WhatsApp Termii response: {response.text}")
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("code") == "ok":
-                            logger.info(f"WhatsApp OTP sent successfully to {normalized_phone}")
-                            return {
-                                "success": True,
-                                "message": "OTP sent successfully via WhatsApp",
-                                "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                                "provider": "whatsapp"
-                            }
-                    
-                    # WhatsApp failed - return error with details
-                    error_msg = response.text
-                    logger.error(f"WhatsApp delivery failed: {error_msg}")
-                    return {
-                        "success": False,
-                        "message": "WhatsApp not available. Please use SMS instead."
-                    }
-                    
-            except Exception as e:
-                logger.error(f"WhatsApp error: {str(e)}")
-                return {
-                    "success": False,
-                    "message": "WhatsApp service unavailable. Please use SMS instead."
-                }
-        
-        # Termii not configured
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": False,
-                "message": "WhatsApp service not configured. Please use SMS instead.",
-                "error": "whatsapp_not_configured"
-            }
-        )
-        
-    except Exception as e:
-        logger.error(f"WhatsApp OTP error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "message": "Failed to send WhatsApp OTP. Please use SMS instead.",
-                "error": str(e)
-            }
-        )
+# ==================== NOTIFICATIONS (REFACTORED TO routers/users.py) ====================
 
-@api_router.post("/auth/verify-otp")
-async def verify_otp(request: OTPVerify):
-    """Verify OTP with retry limiting"""
-    # Normalize phone number to match storage format
-    normalized_phone = normalize_phone(request.phone)
-    
-    # First try database record with normalized phone
-    db_record = await get_otp_record(normalized_phone)
-    
-    # Fall back to in-memory store if no DB record
-    stored = db_record or otp_store.get(normalized_phone)
-    
-    if not stored:
-        raise HTTPException(status_code=400, detail="OTP not found. Please request a new code.")
-    
-    # Check expiry
-    expiry = stored.get("expires_at") or stored.get("expires")
-    if expiry and datetime.utcnow() > expiry:
-        await delete_otp_record(normalized_phone)
-        if normalized_phone in otp_store:
-            del otp_store[normalized_phone]
-        raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
-    
-    # Check attempt limit
-    current_attempts = stored.get("attempts", 0)
-    if current_attempts >= OTP_MAX_ATTEMPTS:
-        await delete_otp_record(normalized_phone)
-        if normalized_phone in otp_store:
-            del otp_store[normalized_phone]
-        raise HTTPException(
-            status_code=400, 
-            detail="Too many failed attempts. Please request a new code."
-        )
-    
-    # Verify OTP
-    stored_otp = stored.get("otp")
-    if stored_otp != request.otp:
-        # Increment attempts
-        new_attempts = await increment_otp_attempts(normalized_phone)
-        remaining = OTP_MAX_ATTEMPTS - new_attempts
-        
-        if remaining <= 0:
-            await delete_otp_record(normalized_phone)
-            if normalized_phone in otp_store:
-                del otp_store[normalized_phone]
-            raise HTTPException(
-                status_code=400, 
-                detail="Too many failed attempts. Please request a new code."
-            )
-        
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid OTP code. {remaining} attempt(s) remaining."
-        )
-    
-    # OTP verified successfully - clean up with normalized phone
-    await delete_otp_record(normalized_phone)
-    if normalized_phone in otp_store:
-        del otp_store[normalized_phone]
-    
-    # Check if user exists (use normalized phone for consistency)
-    user = await db.users.find_one({"phone": normalized_phone})
-    if user:
-        await db.users.update_one({"phone": normalized_phone}, {"$set": {"is_verified": True}})
-        user["is_verified"] = True
-        user["_id"] = str(user["_id"])
-        return {"message": "Login successful", "user": user, "is_new_user": False, "verified": True}
-    
-    return {"message": "OTP verified", "is_new_user": True, "verified": True}
 
-@api_router.get("/auth/otp-status/{phone}")
-async def get_otp_status(phone: str):
-    """Get OTP status for a phone number (resend cooldown, attempts remaining)"""
-    record = await get_otp_record(phone)
-    
-    if not record:
-        return {
-            "has_active_otp": False,
-            "can_resend": True,
-            "wait_seconds": 0,
-            "attempts_remaining": OTP_MAX_ATTEMPTS
-        }
-    
-    now = datetime.utcnow()
-    
-    # Check if expired
-    expiry = record.get("expires_at")
-    if expiry and now > expiry:
-        return {
-            "has_active_otp": False,
-            "can_resend": True,
-            "wait_seconds": 0,
-            "attempts_remaining": OTP_MAX_ATTEMPTS
-        }
-    
-    # Calculate resend cooldown
-    last_sent = record.get("last_sent_at")
-    wait_seconds = 0
-    can_resend = True
-    
-    if last_sent:
-        elapsed = (now - last_sent).total_seconds()
-        if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
-            wait_seconds = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
-            can_resend = False
-    
-    # Calculate attempts remaining
-    attempts = record.get("attempts", 0)
-    attempts_remaining = max(0, OTP_MAX_ATTEMPTS - attempts)
-    
-    # Calculate time until expiry
-    seconds_until_expiry = int((expiry - now).total_seconds()) if expiry else 0
-    
-    return {
-        "has_active_otp": True,
-        "can_resend": can_resend,
-        "wait_seconds": wait_seconds,
-        "attempts_remaining": attempts_remaining,
-        "expires_in_seconds": max(0, seconds_until_expiry)
-    }
+# SUBSCRIPTION ENDPOINTS - extracted to routers/
 
-# Google Sign-In with Emergent Auth
-class SessionExchangeRequest(BaseModel):
-    session_id: str
 
-class SessionDataResponse(BaseModel):
-    id: str
-    email: str
-    name: str
-    picture: Optional[str] = None
-    session_token: str
+# FARE ESTIMATE - extracted to routers/
 
-@api_router.post("/auth/google/exchange")
-async def exchange_google_session(request: SessionExchangeRequest, response: Response):
-    """Exchange session_id from Emergent Auth for user data and session"""
-    try:
-        logger.info(f"🔐 Google Auth: Received session_id for exchange: {request.session_id[:20]}..." if len(request.session_id) > 20 else f"Received session_id: {request.session_id}")
-        logger.info(f"🌐 Calling Emergent Auth URL: {EMERGENT_AUTH_URL}")
-        
-        # Call Emergent Auth to get user data
-        async with httpx.AsyncClient() as client:
-            auth_response = await client.get(
-                EMERGENT_AUTH_URL,
-                headers={"X-Session-ID": request.session_id},
-                timeout=30.0
-            )
-            
-            logger.info(f"📡 Emergent Auth response status: {auth_response.status_code}")
-            logger.info(f"📝 Response headers: {dict(auth_response.headers)}")
-            
-            if auth_response.status_code != 200:
-                error_text = auth_response.text[:500]  # Limit error text length
-                logger.error(f"❌ Emergent Auth error: {auth_response.status_code} - {error_text}")
-                
-                # Provide more specific error messages
-                if auth_response.status_code == 401:
-                    raise HTTPException(status_code=401, detail="Session expired or invalid. Please sign in again.")
-                elif auth_response.status_code == 404:
-                    raise HTTPException(status_code=401, detail="Authentication service not found. Please contact support.")
-                elif auth_response.status_code >= 500:
-                    raise HTTPException(status_code=503, detail="Authentication service temporarily unavailable. Please try again.")
-                else:
-                    raise HTTPException(status_code=401, detail=f"Authentication failed (code: {auth_response.status_code}). Please try again.")
-            
-            # Parse response
-            try:
-                user_data = auth_response.json()
-                logger.info(f"✅ Emergent Auth returned user: {user_data.get('email', 'unknown')}")
-            except Exception as parse_error:
-                logger.error(f"❌ Failed to parse Emergent Auth response: {parse_error}")
-                logger.error(f"Response text: {auth_response.text[:200]}")
-                raise HTTPException(status_code=500, detail="Invalid response from authentication service")
-            
-            # Validate response data
-            if not user_data.get('email'):
-                logger.error(f"❌ Missing email in Emergent Auth response: {user_data}")
-                raise HTTPException(status_code=500, detail="Invalid user data from authentication service")
-            
-            session_data = SessionDataResponse(**user_data)
-        
-        # Check if user exists by email
-        existing_user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
-        
-        if existing_user:
-            # Update existing user
-            update_data = {
-                "is_verified": True,
-                "google_id": session_data.id,
-            }
-            if session_data.name and not existing_user.get("name"):
-                update_data["name"] = session_data.name
-            if session_data.picture and not existing_user.get("profile_image"):
-                update_data["profile_image"] = session_data.picture
-            
-            await db.users.update_one(
-                {"email": session_data.email}, 
-                {"$set": update_data}
-            )
-            
-            # Get updated user
-            user = await db.users.find_one({"email": session_data.email}, {"_id": 0})
-            
-            # Store session
-            await db.user_sessions.insert_one({
-                "user_id": user["id"],
-                "session_token": session_data.session_token,
-                "expires_at": datetime.now(timezone.utc) + timedelta(days=7),
-                "created_at": datetime.now(timezone.utc)
-            })
-            
-            # Set cookie
-            response.set_cookie(
-                key="session_token",
-                value=session_data.session_token,
-                httponly=True,
-                secure=True,
-                samesite="none",
-                max_age=7*24*60*60,
-                path="/"
-            )
-            
-            return {
-                "message": "Login successful",
-                "user": user,
-                "session_token": session_data.session_token,
-                "is_new_user": False
-            }
-        else:
-            # New user - need to register
-            return {
-                "message": "Google account verified",
-                "is_new_user": True,
-                "google_data": {
-                    "email": session_data.email,
-                    "name": session_data.name,
-                    "picture": session_data.picture,
-                    "google_id": session_data.id
-                },
-                "session_token": session_data.session_token
-            }
-            
-    except HTTPException as http_err:
-        # Ensure HTTPException returns proper JSON
-        logger.error(f"HTTPException in Google auth: {http_err.detail}")
-        return JSONResponse(
-            status_code=http_err.status_code,
-            content={
-                "success": False,
-                "message": str(http_err.detail),
-                "error": str(http_err.detail),
-                "is_new_user": False
-            }
-        )
-    except httpx.TimeoutException:
-        logger.error("⏱️ Timeout connecting to Emergent Auth")
-        return JSONResponse(
-            status_code=504,
-            content={
-                "success": False,
-                "message": "Authentication service timeout. Please try again.",
-                "error": "timeout"
-            }
-        )
-    except httpx.NetworkError as e:
-        logger.error(f"🌐 Network error connecting to Emergent Auth: {str(e)}")
-        return JSONResponse(
-            status_code=503,
-            content={
-                "success": False,
-                "message": "Cannot reach authentication service. Please check your connection.",
-                "error": "network_error"
-            }
-        )
-    except Exception as e:
-        logger.error(f"❌ Google session exchange error: {str(e)}")
-        logger.error(f"Error type: {type(e).__name__}")
-        import traceback
-        logger.error(f"Traceback: {traceback.format_exc()}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "message": f"Failed to process Google sign-in: {str(e)}",
-                "error": str(e)
-            }
-        )
 
-# Legacy Google Sign-In endpoint (for backwards compatibility)
-class GoogleSignInRequest(BaseModel):
-    id_token: str
-    email: str
-    name: Optional[str] = None
-    photo_url: Optional[str] = None
 
-@api_router.post("/auth/google")
-async def google_sign_in(request: GoogleSignInRequest):
-    """Handle Google Sign-In authentication (legacy)"""
-    try:
-        # Check if user exists by email
-        user = await db.users.find_one({"email": request.email})
-        
-        if user:
-            # Update user with Google info if needed
-            update_data = {"is_verified": True}
-            if request.name and not user.get("name"):
-                update_data["name"] = request.name
-            if request.photo_url and not user.get("profile_image"):
-                update_data["profile_image"] = request.photo_url
-            
-            await db.users.update_one({"email": request.email}, {"$set": update_data})
-            user.update(update_data)
-            user["_id"] = str(user["_id"])
-            
-            return {
-                "message": "Login successful",
-                "user": user,
-                "is_new_user": False
-            }
-        else:
-            # New user - return flag for registration
-            return {
-                "message": "Google account verified",
-                "is_new_user": True,
-                "google_data": {
-                    "email": request.email,
-                    "name": request.name,
-                    "photo_url": request.photo_url
-                }
-            }
-    except Exception as e:
-        logger.error(f"Google sign-in error: {str(e)}")
-        raise HTTPException(status_code=400, detail="Google sign-in failed")
+# ==================== TRIPS (REFACTORED TO routers/trips.py) ====================
 
-@api_router.post("/auth/register")
-async def register(request: RegisterRequest):
-    """Register new user with comprehensive error handling"""
-    try:
-        # Check for existing user by phone or email
-        if request.phone:
-            existing = await db.users.find_one({"phone": request.phone})
-            if existing:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "message": "User with this phone already exists",
-                        "error": "phone_exists"
-                    }
-                )
-        
-        if request.email:
-            existing = await db.users.find_one({"email": request.email})
-            if existing:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "message": "User with this email already exists",
-                        "error": "email_exists"
-                    }
-                )
-        
-        if request.google_id:
-            existing = await db.users.find_one({"google_id": request.google_id})
-            if existing:
-                return JSONResponse(
-                    status_code=400,
-                    content={
-                        "success": False,
-                        "message": "User with this Google account already exists",
-                        "error": "google_id_exists"
-                    }
-                )
-        
-        user = User(
-            phone=request.phone or "",
-            name=request.name, 
-            email=request.email, 
-            role=request.role, 
-            is_verified=True,
-            google_id=request.google_id,
-            profile_image=request.profile_image
-        )
-        await db.users.insert_one(user.dict())
-        
-        wallet = Wallet(user_id=user.id)
-        await db.wallets.insert_one(wallet.dict())
-        
-        if request.role == "driver":
-            driver_profile = DriverProfile(user_id=user.id)
-            await db.driver_profiles.insert_one(driver_profile.dict())
-        
-        logger.info(f"✅ User registered successfully: {user.name} ({user.role})")
-        
-        return JSONResponse(
-            status_code=200,
-            content={
-                "success": True,
-                "message": "Registration successful",
-                "user": user.dict()
-            }
-        )
-    
-    except HTTPException as http_err:
-        return JSONResponse(
-            status_code=http_err.status_code,
-            content={
-                "success": False,
-                "message": str(http_err.detail),
-                "error": str(http_err.detail)
-            }
-        )
-    except Exception as e:
-        logger.error(f"Registration error: {str(e)}")
-        return JSONResponse(
-            status_code=500,
-            content={
-                "success": False,
-                "message": f"Registration failed: {str(e)}",
-                "error": str(e)
-            }
-        )
-
-@api_router.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    """Logout user and clear session"""
-    try:
-        # Get session token from cookie
-        session_token = request.cookies.get("session_token")
-        
-        if session_token:
-            # Delete session from database
-            await db.user_sessions.delete_one({"session_token": session_token})
-        
-        # Clear session cookie
-        response.delete_cookie(
-            key="session_token",
-            path="/",
-            secure=True,
-            httponly=True,
-            samesite="none"
-        )
-        
-        return {"message": "Logout successful"}
-    except Exception as e:
-        logger.error(f"Logout error: {str(e)}")
-        return {"message": "Logout successful"}
-
-# ==================== USER ENDPOINTS ====================
-
-@api_router.get("/users/{user_id}")
-async def get_user(user_id: str):
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user["_id"] = str(user["_id"])
-    return user
-
-@api_router.put("/users/{user_id}")
-async def update_user(user_id: str, request: UpdateProfileRequest):
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
-    if update_data:
-        await db.users.update_one({"id": user_id}, {"$set": update_data})
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    user["_id"] = str(user["_id"])
-    return user
-
-@api_router.put("/users/{user_id}/switch-role")
-async def switch_role(user_id: str):
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    new_role = "driver" if user["role"] == "rider" else "rider"
-    if new_role == "driver":
-        profile = await db.driver_profiles.find_one({"user_id": user_id})
-        if not profile:
-            await db.driver_profiles.insert_one(DriverProfile(user_id=user_id).dict())
-    
-    await db.users.update_one({"id": user_id}, {"$set": {"role": new_role}})
-    user = await db.users.find_one({"id": user_id})
-    user["_id"] = str(user["_id"])
-    return user
-
-# ==================== EMERGENCY CONTACTS ====================
-
-@api_router.post("/users/{user_id}/emergency-contacts")
-async def add_emergency_contact(user_id: str, request: EmergencyContactRequest):
-    """Add emergency contact - ENHANCED with validation"""
-    # Validate phone number format
-    phone = request.phone.strip()
-    if not phone.startswith('+'):
-        # Auto-add +234 for Nigerian numbers
-        if phone.startswith('0'):
-            phone = '+234' + phone[1:]
-        elif phone.startswith('234'):
-            phone = '+' + phone
-        else:
-            phone = '+234' + phone
-    
-    # Validate phone has at least 10 digits
-    digits = ''.join(filter(str.isdigit, phone))
-    if len(digits) < 10:
-        raise HTTPException(status_code=400, detail="Invalid phone number. Must have at least 10 digits.")
-    
-    # Check if contact already exists
-    user = await db.users.find_one({"id": user_id})
-    if user:
-        existing_contacts = user.get("emergency_contacts", [])
-        if any(c["phone"] == phone for c in existing_contacts):
-            raise HTTPException(status_code=400, detail="This contact is already added.")
-        
-        # Limit to 5 emergency contacts
-        if len(existing_contacts) >= 5:
-            raise HTTPException(status_code=400, detail="Maximum 5 emergency contacts allowed.")
-    
-    contact = {
-        "name": request.name.strip(),
-        "phone": phone,
-        "relationship": request.relationship.strip(),
-        "added_at": datetime.utcnow().isoformat()
-    }
-    
-    await db.users.update_one({"id": user_id}, {"$push": {"emergency_contacts": contact}})
-    
-    logger.info(f"✅ Emergency contact added for user {user_id}: {contact['name']} ({contact['phone']})")
-    
-    return {
-        "success": True,
-        "message": "Emergency contact added successfully",
-        "contact": contact
-    }
-
-@api_router.get("/users/{user_id}/emergency-contacts")
-async def get_emergency_contacts(user_id: str):
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    return {"contacts": user.get("emergency_contacts", [])}
-
-@api_router.delete("/users/{user_id}/emergency-contacts/{contact_phone}")
-async def remove_emergency_contact(user_id: str, contact_phone: str):
-    await db.users.update_one(
-        {"id": user_id},
-        {"$pull": {"emergency_contacts": {"phone": contact_phone}}}
-    )
-    return {"message": "Emergency contact removed"}
-
-# ==================== FAVORITE/BLOCKED DRIVERS ====================
-
-@api_router.post("/users/{user_id}/favorite-drivers")
-async def add_favorite_driver(user_id: str, request: FavoriteDriverRequest):
-    await db.users.update_one(
-        {"id": user_id},
-        {"$addToSet": {"favorite_drivers": request.driver_id}}
-    )
-    return {"message": "Driver added to favorites"}
-
-@api_router.delete("/users/{user_id}/favorite-drivers/{driver_id}")
-async def remove_favorite_driver(user_id: str, driver_id: str):
-    await db.users.update_one(
-        {"id": user_id},
-        {"$pull": {"favorite_drivers": driver_id}}
-    )
-    return {"message": "Driver removed from favorites"}
-
-@api_router.get("/users/{user_id}/favorite-drivers")
-async def get_favorite_drivers(user_id: str):
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    driver_ids = user.get("favorite_drivers", [])
-    drivers = []
-    for driver_id in driver_ids:
-        driver = await db.users.find_one({"id": driver_id})
-        if driver:
-            profile = await db.driver_profiles.find_one({"user_id": driver_id})
-            drivers.append({
-                "id": driver["id"],
-                "name": driver.get("name"),
-                "rating": driver.get("rating", 5.0),
-                "vehicle": profile.get("vehicle_model") if profile else None,
-                "plate": profile.get("vehicle_plate") if profile else None
-            })
-    return {"favorite_drivers": drivers}
-
-@api_router.post("/users/{user_id}/blocked-drivers")
-async def block_driver(user_id: str, request: FavoriteDriverRequest):
-    await db.users.update_one(
-        {"id": user_id},
-        {"$addToSet": {"blocked_drivers": request.driver_id}}
-    )
-    return {"message": "Driver blocked"}
-
-@api_router.delete("/users/{user_id}/blocked-drivers/{driver_id}")
-async def unblock_driver(user_id: str, driver_id: str):
-    await db.users.update_one(
-        {"id": user_id},
-        {"$pull": {"blocked_drivers": driver_id}}
-    )
-    return {"message": "Driver unblocked"}
-
-# ==================== FACE VERIFICATION ====================
-
-@api_router.post("/users/{user_id}/verify-face")
-async def verify_face(user_id: str, request: FaceVerificationRequest):
-    """Store face image for verification - ENHANCED with validation"""
-    # Validate base64 image
-    try:
-        # Check if it's valid base64
-        import base64
-        image_data = request.face_image
-        if ',' in image_data:
-            # Remove data:image/...;base64, prefix if present
-            image_data = image_data.split(',')[1]
-        
-        decoded = base64.b64decode(image_data)
-        
-        # Basic size check (between 10KB and 5MB)
-        image_size = len(decoded)
-        if image_size < 10000:  # 10KB
-            raise HTTPException(status_code=400, detail="Image too small. Please use a clear photo.")
-        if image_size > 5000000:  # 5MB
-            raise HTTPException(status_code=400, detail="Image too large. Maximum 5MB.")
-        
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
-    
-    # Store face image
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {
-            "face_image": request.face_image,
-            "face_verified": True,
-            "face_verified_at": datetime.utcnow().isoformat()
-        }}
-    )
-    
-    logger.info(f"✅ Face verified for user {user_id}")
-    
-    return {
-        "success": True,
-        "message": "Face verified successfully",
-        "verified": True,
-        "verified_at": datetime.utcnow().isoformat()
-    }
-
-@api_router.post("/drivers/{user_id}/verify-face-at-start")
-async def verify_face_at_ride_start(user_id: str, request: FaceVerificationRequest):
-    """Verify driver face matches registered face at ride start - ENHANCED"""
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if not profile or not profile.get("face_image"):
-        raise HTTPException(status_code=400, detail="No registered face image found. Please complete driver verification first.")
-    
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    stored_face = user.get("face_image") or profile.get("face_image")
-    if not stored_face:
-        raise HTTPException(status_code=400, detail="No face image on file")
-    
-    # TODO: In production: Use AI face matching API (e.g., AWS Rekognition, Azure Face API)
-    # For now: Accept and log for manual review
-    
-    # Log verification attempt for audit
-    await db.face_verifications.insert_one({
-        "driver_id": user_id,
-        "timestamp": datetime.utcnow(),
-        "verification_type": "ride_start",
-        "status": "pending_ai_verification",
-        "current_image": request.face_image[:100],  # Store first 100 chars for audit
-        "verified": True  # Auto-accept for now, manual review later
-    })
-    
-    logger.info(f"🎭 Face verification at ride start for driver {user_id} - Auto-accepted (manual review pending)")
-    
-    return {
-        "success": True,
-        "verified": True,
-        "message": "Face verified successfully",
-        "match_confidence": 95.0,  # Placeholder for AI result
-        "note": "Verification logged for security audit"
-    }
-    # For MVP: Always return success if image provided
-    match_score = 0.95  # Simulated match score
-    is_match = match_score > 0.8
-    
-    return {
-        "verified": is_match,
-        "match_score": match_score,
-        "message": "Face verified" if is_match else "Face does not match"
-    }
-
-# ==================== DRIVER ENDPOINTS ====================
-
-@api_router.get("/drivers/{user_id}/profile")
-async def get_driver_profile(user_id: str):
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if not profile:
-        raise HTTPException(status_code=404, detail="Driver profile not found")
-    profile["_id"] = str(profile["_id"])
-    return profile
-
-@api_router.put("/drivers/{user_id}/profile")
-async def update_driver_profile(user_id: str, request: DriverProfileUpdate):
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
-    if update_data:
-        result = await db.driver_profiles.update_one({"user_id": user_id}, {"$set": update_data})
-        if result.modified_count == 0:
-            profile = DriverProfile(user_id=user_id, **update_data)
-            await db.driver_profiles.insert_one(profile.dict())
-    
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    profile["_id"] = str(profile["_id"])
-    return profile
-
-@api_router.put("/drivers/{user_id}/location")
-async def update_driver_location(user_id: str, request: LocationUpdate):
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"current_location": {"lat": request.latitude, "lng": request.longitude, "updated_at": datetime.utcnow().isoformat()}}}
-    )
-    return {"message": "Location updated"}
-
-@api_router.put("/drivers/{user_id}/online")
-async def toggle_driver_online(user_id: str, is_online: bool):
-    subscription = await db.subscriptions.find_one({
-        "driver_id": user_id,
-        "status": {"$in": ["active", "grace_period"]}
-    })
-    
-    if is_online and not subscription:
-        raise HTTPException(status_code=403, detail="Active subscription required to go online")
-    
-    # Check fatigue
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if profile and profile.get("hours_driven_today", 0) >= 10:
-        raise HTTPException(
-            status_code=403, 
-            detail="You've been driving for over 10 hours. Please take a break for safety."
-        )
-    
-    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
-    return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
-
-@api_router.get("/drivers/{user_id}/stats")
-async def get_driver_stats(user_id: str):
-    user = await db.users.find_one({"id": user_id})
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    subscription = await db.subscriptions.find_one({
-        "driver_id": user_id,
-        "status": {"$in": ["active", "grace_period"]}
-    })
-    
-    completed_trips = await db.trips.count_documents({"driver_id": user_id, "status": "completed"})
-    
-    pipeline = [
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
-    ]
-    earnings_result = await db.trips.aggregate(pipeline).to_list(1)
-    total_earnings = earnings_result[0]["total"] if earnings_result else 0
-    
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_pipeline = [
-        {"$match": {"driver_id": user_id, "status": "completed", "completed_at": {"$gte": today_start}}},
-        {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
-    ]
-    today_result = await db.trips.aggregate(today_pipeline).to_list(1)
-    today_earnings = today_result[0]["total"] if today_result else 0
-    
-    # Weekly stats
-    week_start = datetime.utcnow() - timedelta(days=7)
-    weekly_trips = await db.trips.count_documents({
-        "driver_id": user_id, 
-        "status": "completed",
-        "completed_at": {"$gte": week_start}
-    })
-    
-    days_remaining = 0
-    if subscription:
-        days_remaining = max(0, (subscription["end_date"] - datetime.utcnow()).days)
-    
-    return {
-        "total_trips": completed_trips,
-        "total_earnings": total_earnings,
-        "today_earnings": today_earnings,
-        "weekly_trips": weekly_trips,
-        "rating": user.get("rating", 5.0) if user else 5.0,
-        "completion_rate": profile.get("completion_rate", 100.0) if profile else 100.0,
-        "rank": profile.get("rank", "standard") if profile else "standard",
-        "subscription_active": subscription is not None,
-        "subscription_days_remaining": days_remaining,
-        "is_online": profile.get("is_online", False) if profile else False,
-        "hours_driven_today": profile.get("hours_driven_today", 0) if profile else 0,
-        "fatigue_warning": profile.get("fatigue_warning", False) if profile else False,
-        "comfort_ratings": {
-            "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
-            "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
-            "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0,
-            "safety": profile.get("safety_rating", 5.0) if profile else 5.0,
-        },
-        "streaks": user.get("streaks", {}) if user else {},
-        "badges": user.get("badges", []) if user else []
-    }
-
-# ==================== DRIVER DOCUMENT VERIFICATION ====================
-
-@api_router.post("/drivers/verification/submit")
-async def submit_driver_verification(request: DriverVerificationSubmission):
-    """Submit driver verification documents for AI-powered auto-verification"""
-    # Check if user exists
-    user = await db.users.find_one({"id": request.user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Check if verification already exists
-    existing = await db.driver_verifications.find_one({"user_id": request.user_id})
-    if existing and existing.get("status") == "approved":
-        raise HTTPException(status_code=400, detail="Driver is already verified")
-    
-    verification_id = existing.get("id") if existing else str(uuid.uuid4())
-    
-    # Create or update verification record
-    verification_data = {
-        "id": verification_id,
-        "user_id": request.user_id,
-        "personal_info": request.personal_info,
-        "vehicle_info": request.vehicle_info,
-        "documents": request.documents,
-        "status": "ai_reviewing",  # AI is reviewing
-        "submitted_at": datetime.utcnow(),
-        "reviewed_at": None,
-        "reviewed_by": None,
-        "rejection_reason": None,
-        "ai_verification_result": None
-    }
-    
-    await db.driver_verifications.update_one(
-        {"user_id": request.user_id},
-        {"$set": verification_data},
-        upsert=True
-    )
-    
-    # Update user record
-    await db.users.update_one(
-        {"id": request.user_id},
-        {"$set": {"verification_status": "ai_reviewing"}}
-    )
-    
-    logger.info(f"Driver verification submitted for user {request.user_id} - Starting AI verification")
-    
-    # Run AI verification in background
-    import asyncio
-    asyncio.create_task(ai_verify_driver_documents(verification_id, request.user_id, request.personal_info, request.vehicle_info, request.documents))
-    
-    return {
-        "success": True,
-        "message": "Documents submitted! AI Agent is now verifying your documents. This usually takes less than 30 seconds.",
-        "verification_id": verification_id,
-        "status": "ai_reviewing"
-    }
-
-async def ai_verify_driver_documents(verification_id: str, user_id: str, personal_info: dict, vehicle_info: dict, documents: dict):
-    """AI Agent that automatically verifies driver documents using GPT-4o vision"""
-    try:
-        logger.info(f"🤖 AI Agent starting document verification for {user_id}")
-        
-        # Check required documents are uploaded
-        required_docs = ["nin", "drivers_license", "passport_photo"]
-        missing_docs = []
-        uploaded_docs = []
-        
-        for doc in required_docs:
-            if doc in documents and documents[doc].get("uploaded"):
-                uploaded_docs.append(doc)
-            else:
-                missing_docs.append(doc)
-        
-        if missing_docs:
-            # Reject - missing required documents
-            rejection_reason = f"Missing required documents: {', '.join(missing_docs).replace('_', ' ').upper()}"
-            await _ai_reject_verification(verification_id, user_id, rejection_reason)
-            return
-        
-        # Use AI to verify document validity
-        verification_results = []
-        
-        if EMERGENT_LLM_KEY:
-            try:
-                chat = LlmChat(
-                    api_key=EMERGENT_LLM_KEY,
-                    session_id=f"ai-verifier-{user_id}",
-                    system_message="You are an AI Document Verification Agent for NEXRYDE ride-hailing platform."
-                ).with_model("openai", "gpt-4o")
-                
-                # Prepare verification prompt
-                verification_prompt = f"""
-You are an AI Document Verification Agent for NEXRYDE, a ride-hailing platform in Nigeria.
-
-A driver has submitted the following information for verification:
-
-PERSONAL INFORMATION:
-- Full Name: {personal_info.get('fullName', 'Not provided')}
-- Phone: {personal_info.get('phone', 'Not provided')}
-- Email: {personal_info.get('email', 'Not provided')}
-- Address: {personal_info.get('address', 'Not provided')}
-- Date of Birth: {personal_info.get('dateOfBirth', 'Not provided')}
-
-VEHICLE INFORMATION:
-- Make: {vehicle_info.get('vehicleMake', 'Not provided')}
-- Model: {vehicle_info.get('vehicleModel', 'Not provided')}
-- Year: {vehicle_info.get('vehicleYear', 'Not provided')}
-- Color: {vehicle_info.get('vehicleColor', 'Not provided')}
-- Plate Number: {vehicle_info.get('plateNumber', 'Not provided')}
-
-DOCUMENTS UPLOADED:
-- NIN (National ID): {'✅ Uploaded' if documents.get('nin', {}).get('uploaded') else '❌ Not uploaded'}
-- Driver's License: {'✅ Uploaded' if documents.get('drivers_license', {}).get('uploaded') else '❌ Not uploaded'}
-- Passport Photo: {'✅ Uploaded' if documents.get('passport_photo', {}).get('uploaded') else '❌ Not uploaded'}
-- Vehicle Registration: {'✅ Uploaded' if documents.get('vehicle_registration', {}).get('uploaded') else '⚠️ Optional - Not uploaded'}
-- Insurance: {'✅ Uploaded' if documents.get('insurance', {}).get('uploaded') else '⚠️ Optional - Not uploaded'}
-
-Based on the information provided, verify if:
-1. All REQUIRED documents are uploaded (NIN, Driver's License, Passport Photo)
-2. Personal information is complete (name, phone, email are required)
-3. Vehicle information is complete (make, model, plate number are required)
-4. The information appears consistent and legitimate
-
-Respond with JSON format:
-{{
-    "approved": true/false,
-    "confidence_score": 0-100,
-    "verification_notes": "Brief explanation",
-    "issues_found": ["list of any issues"] or [],
-    "recommendation": "APPROVE" or "REJECT" or "MANUAL_REVIEW"
-}}
-
-Be lenient and driver-friendly. If all required documents are uploaded and basic info is provided, APPROVE. 
-Only REJECT if there are clear issues like missing required documents or obviously incomplete information.
-"""
-                
-                response = await chat.send_message(UserMessage(text=verification_prompt))
-                ai_response = response  # Direct string response
-                
-                logger.info(f"🤖 AI Agent response for {user_id}: {str(ai_response)[:200]}...")
-                
-                # Parse AI response
-                try:
-                    # Extract JSON from response
-                    import re
-                    json_match = re.search(r'\{[^{}]*"approved"[^{}]*\}', ai_response, re.DOTALL)
-                    if json_match:
-                        ai_result = json.loads(json_match.group())
-                    else:
-                        # Try to parse entire response as JSON
-                        ai_result = json.loads(ai_response)
-                    
-                    # Store AI result
-                    await db.driver_verifications.update_one(
-                        {"id": verification_id},
-                        {"$set": {"ai_verification_result": ai_result}}
-                    )
-                    
-                    # Make decision based on AI result
-                    if ai_result.get("approved") or ai_result.get("recommendation") == "APPROVE":
-                        await _ai_approve_verification(verification_id, user_id, vehicle_info, f"AI Auto-Approved: {ai_result.get('verification_notes', 'All documents verified')}")
-                        logger.info(f"✅ AI Agent APPROVED driver {user_id}")
-                    elif ai_result.get("recommendation") == "MANUAL_REVIEW":
-                        # Set to pending for manual review
-                        await db.driver_verifications.update_one(
-                            {"id": verification_id},
-                            {"$set": {"status": "pending", "ai_notes": ai_result.get('verification_notes')}}
-                        )
-                        await db.users.update_one(
-                            {"id": user_id},
-                            {"$set": {"verification_status": "pending"}}
-                        )
-                        logger.info(f"⏳ AI Agent flagged driver {user_id} for MANUAL REVIEW")
-                    else:
-                        issues = ai_result.get("issues_found", [])
-                        rejection_reason = ai_result.get("verification_notes", "Documents did not pass AI verification")
-                        if issues:
-                            rejection_reason += f" Issues: {', '.join(issues)}"
-                        await _ai_reject_verification(verification_id, user_id, rejection_reason)
-                        logger.info(f"❌ AI Agent REJECTED driver {user_id}: {rejection_reason}")
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"AI response parsing error: {e}")
-                    # Default to approval if all required docs are uploaded
-                    await _ai_approve_verification(verification_id, user_id, vehicle_info, "AI Auto-Approved: All required documents uploaded")
-                    
-            except Exception as e:
-                logger.error(f"AI verification error: {e}")
-                # Fallback: Auto-approve if all required documents are uploaded
-                await _ai_approve_verification(verification_id, user_id, vehicle_info, "Auto-Approved: All required documents uploaded (AI fallback)")
-        else:
-            # No AI key - auto-approve based on document upload status
-            logger.info(f"No AI key available - using fallback verification for {user_id}")
-            await _ai_approve_verification(verification_id, user_id, vehicle_info, "Auto-Approved: All required documents uploaded")
-            
-    except Exception as e:
-        logger.error(f"AI verification failed for {user_id}: {e}")
-        # On any error, set to pending for manual review
-        await db.driver_verifications.update_one(
-            {"id": verification_id},
-            {"$set": {"status": "pending", "ai_error": str(e)}}
-        )
-        await db.users.update_one(
-            {"id": user_id},
-            {"$set": {"verification_status": "pending"}}
-        )
-
-async def _ai_approve_verification(verification_id: str, user_id: str, vehicle_info: dict, notes: str):
-    """Internal function to approve verification by AI Agent"""
-    # Update verification status
-    await db.driver_verifications.update_one(
-        {"id": verification_id},
-        {"$set": {
-            "status": "approved",
-            "reviewed_at": datetime.utcnow(),
-            "reviewed_by": "AI_AGENT",
-            "notes": notes
-        }}
-    )
-    
-    # Update user verification status
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"verification_status": "verified"}}
-    )
-    
-    # Update driver profile with verified documents
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "nin_verified": True,
-            "license_uploaded": True,
-            "vehicle_docs_uploaded": True,
-            "selfie_verified": True,
-            "vehicle_type": vehicle_info.get("vehicleMake"),
-            "vehicle_model": vehicle_info.get("vehicleModel"),
-            "vehicle_plate": vehicle_info.get("plateNumber"),
-            "vehicle_color": vehicle_info.get("vehicleColor")
-        }},
-        upsert=True
-    )
-    
-    # Send SMS notification to driver
-    await send_driver_verification_notification(user_id, "approved")
-    
-    logger.info(f"🤖✅ AI Agent approved driver {user_id}: {notes}")
-
-async def _ai_reject_verification(verification_id: str, user_id: str, reason: str):
-    """Internal function to reject verification by AI Agent"""
-    await db.driver_verifications.update_one(
-        {"id": verification_id},
-        {"$set": {
-            "status": "rejected",
-            "reviewed_at": datetime.utcnow(),
-            "reviewed_by": "AI_AGENT",
-            "rejection_reason": reason
-        }}
-    )
-    
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"verification_status": "rejected"}}
-    )
-    
-    # Send SMS notification to driver
-    await send_driver_verification_notification(user_id, "rejected", reason)
-    
-    logger.info(f"🤖❌ AI Agent rejected driver {user_id}: {reason}")
-
-@api_router.get("/drivers/verification/{user_id}")
-async def get_driver_verification_status(user_id: str):
-    """Get driver's verification status"""
-    verification = await db.driver_verifications.find_one({"user_id": user_id})
-    
-    if not verification:
-        return {
-            "status": "not_submitted",
-            "message": "No verification documents submitted yet"
-        }
-    
-    verification["_id"] = str(verification["_id"])
-    return verification
-
-@api_router.get("/admin/verifications")
-async def admin_get_verifications(status: str = None, limit: int = 100, skip: int = 0):
-    """Get all driver verification submissions for admin review"""
-    query = {}
-    if status:
-        query["status"] = status
-    
-    verifications = await db.driver_verifications.find(
-        query,
-        {"_id": 0}
-    ).sort("submitted_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with user names
-    enriched_verifications = []
-    for v in verifications:
-        user = await db.users.find_one({"id": v.get("user_id")}, {"name": 1, "phone": 1, "_id": 0})
-        enriched_verifications.append({
-            **v,
-            "user_name": user.get("name") if user else "Unknown",
-            "user_phone": user.get("phone") if user else "Unknown"
-        })
-    
-    # Get counts by status
-    pending_count = await db.driver_verifications.count_documents({"status": "pending"})
-    under_review_count = await db.driver_verifications.count_documents({"status": "under_review"})
-    approved_count = await db.driver_verifications.count_documents({"status": "approved"})
-    rejected_count = await db.driver_verifications.count_documents({"status": "rejected"})
-    
-    return {
-        "verifications": enriched_verifications,
-        "counts": {
-            "pending": pending_count,
-            "under_review": under_review_count,
-            "approved": approved_count,
-            "rejected": rejected_count,
-            "total": pending_count + under_review_count + approved_count + rejected_count
-        }
-    }
-
-@api_router.post("/admin/verifications/{verification_id}/review")
-async def admin_start_verification_review(verification_id: str):
-    """Mark verification as under review"""
-    result = await db.driver_verifications.update_one(
-        {"id": verification_id},
-        {"$set": {"status": "under_review"}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Verification not found")
-    
-    return {"success": True, "message": "Verification marked as under review"}
-
-@api_router.post("/admin/verifications/{verification_id}/approve")
-async def admin_approve_verification(verification_id: str, notes: str = None):
-    """Approve driver verification"""
-    verification = await db.driver_verifications.find_one({"id": verification_id})
-    if not verification:
-        raise HTTPException(status_code=404, detail="Verification not found")
-    
-    # Update verification status
-    await db.driver_verifications.update_one(
-        {"id": verification_id},
-        {"$set": {
-            "status": "approved",
-            "reviewed_at": datetime.utcnow(),
-            "reviewed_by": "admin",
-            "notes": notes
-        }}
-    )
-    
-    # Update user verification status
-    await db.users.update_one(
-        {"id": verification.get("user_id")},
-        {"$set": {"verification_status": "verified"}}
-    )
-    
-    # Update driver profile with verified documents
-    await db.driver_profiles.update_one(
-        {"user_id": verification.get("user_id")},
-        {"$set": {
-            "nin_verified": True,
-            "license_uploaded": True,
-            "vehicle_docs_uploaded": True,
-            "selfie_verified": True,
-            "vehicle_type": verification.get("vehicle_info", {}).get("vehicleMake"),
-            "vehicle_model": verification.get("vehicle_info", {}).get("vehicleModel"),
-            "vehicle_plate": verification.get("vehicle_info", {}).get("plateNumber"),
-            "vehicle_color": verification.get("vehicle_info", {}).get("vehicleColor")
-        }},
-        upsert=True
-    )
-    
-    logger.info(f"Driver verification approved for {verification.get('user_id')}")
-    
-    return {"success": True, "message": "Driver verification approved"}
-
-@api_router.post("/admin/verifications/{verification_id}/reject")
-async def admin_reject_verification(verification_id: str, reason: str = "Documents do not meet requirements"):
-    """Reject driver verification"""
-    verification = await db.driver_verifications.find_one({"id": verification_id})
-    if not verification:
-        raise HTTPException(status_code=404, detail="Verification not found")
-    
-    # Update verification status
-    await db.driver_verifications.update_one(
-        {"id": verification_id},
-        {"$set": {
-            "status": "rejected",
-            "reviewed_at": datetime.utcnow(),
-            "reviewed_by": "admin",
-            "rejection_reason": reason
-        }}
-    )
-    
-    # Update user verification status
-    await db.users.update_one(
-        {"id": verification.get("user_id")},
-        {"$set": {"verification_status": "rejected"}}
-    )
-    
-    logger.info(f"Driver verification rejected for {verification.get('user_id')}: {reason}")
-    
-    return {"success": True, "message": "Driver verification rejected", "reason": reason}
-
-# ==================== NOTIFICATIONS ENDPOINTS ====================
-
-@api_router.get("/users/{user_id}/notifications")
-async def get_user_notifications(user_id: str, limit: int = 50, unread_only: bool = False):
-    """Get user's notifications"""
-    query = {"user_id": user_id}
-    if unread_only:
-        query["read"] = False
-    
-    notifications = await db.notifications.find(
-        query,
-        {"_id": 0}
-    ).sort("created_at", -1).limit(limit).to_list(limit)
-    
-    unread_count = await db.notifications.count_documents({"user_id": user_id, "read": False})
-    
-    return {
-        "notifications": notifications,
-        "unread_count": unread_count
-    }
-
-@api_router.post("/users/{user_id}/notifications/{notification_id}/read")
-async def mark_notification_read(user_id: str, notification_id: str):
-    """Mark a notification as read"""
-    result = await db.notifications.update_one(
-        {"id": notification_id, "user_id": user_id},
-        {"$set": {"read": True}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Notification not found")
-    
-    return {"success": True}
-
-@api_router.post("/users/{user_id}/notifications/read-all")
-async def mark_all_notifications_read(user_id: str):
-    """Mark all notifications as read"""
-    result = await db.notifications.update_many(
-        {"user_id": user_id, "read": False},
-        {"$set": {"read": True}}
-    )
-    
-    return {"success": True, "marked_read": result.modified_count}
-
-# ==================== SUBSCRIPTION ENDPOINTS ====================
-
-@api_router.get("/subscriptions/config")
-async def get_subscription_config():
-    """Get subscription configuration including bank details"""
-    return {
-        "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
-        "trial_days": SUBSCRIPTION_CONFIG["trial_days"],
-        "currency": SUBSCRIPTION_CONFIG["currency"],
-        "bank_details": SUBSCRIPTION_CONFIG["bank_details"]
-    }
-
-@api_router.get("/subscriptions/{driver_id}")
-async def get_subscription(driver_id: str):
-    """Get driver's subscription status"""
-    subscription = await db.subscriptions.find_one({
-        "driver_id": driver_id
-    }, sort=[("created_at", -1)])
-    
-    if subscription:
-        subscription["_id"] = str(subscription["_id"])
-        
-        # Calculate days remaining
-        now = datetime.utcnow()
-        
-        # Check trial status
-        if subscription.get("status") == "trial":
-            trial_end = subscription.get("trial_end_date")
-            if trial_end and now > trial_end:
-                # Trial expired
-                await db.subscriptions.update_one(
-                    {"id": subscription["id"]},
-                    {"$set": {"status": "pending_payment"}}
-                )
-                subscription["status"] = "pending_payment"
-                subscription["trial_expired"] = True
-                subscription["days_remaining"] = 0
-            else:
-                days_remaining = (trial_end - now).days if trial_end else 0
-                subscription["days_remaining"] = max(0, days_remaining)
-                subscription["trial_expired"] = False
-        elif subscription.get("status") == "active":
-            end_date = subscription.get("end_date")
-            if end_date:
-                if now > end_date:
-                    # Subscription expired
-                    await db.subscriptions.update_one(
-                        {"id": subscription["id"]},
-                        {"$set": {"status": "expired"}}
-                    )
-                    subscription["status"] = "expired"
-                    subscription["days_remaining"] = 0
-                else:
-                    subscription["days_remaining"] = max(0, (end_date - now).days)
-            else:
-                subscription["days_remaining"] = 0
-        else:
-            subscription["days_remaining"] = 0
-        
-        # Add bank details
-        subscription["bank_details"] = SUBSCRIPTION_CONFIG["bank_details"]
-        subscription["monthly_fee"] = SUBSCRIPTION_CONFIG["monthly_fee"]
-        
-        return subscription
-    
-    # No subscription found - return default data for new drivers
-    return {
-        "status": "none",
-        "days_remaining": 0,
-        "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
-        "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
-        "message": "No active subscription. Start your 7-day free trial!"
-    }
-
-@api_router.post("/subscriptions/{driver_id}/start-trial")
-async def start_trial(driver_id: str):
-    """Start 7-day free trial for new driver"""
-    # Check if driver already has a subscription
-    existing = await db.subscriptions.find_one({"driver_id": driver_id})
-    if existing:
-        raise HTTPException(status_code=400, detail="Driver already has a subscription record")
-    
-    # Create trial subscription
-    now = datetime.utcnow()
-    trial_end = now + timedelta(days=SUBSCRIPTION_CONFIG["trial_days"])
-    
-    subscription = {
-        "id": str(uuid.uuid4()),
-        "driver_id": driver_id,
-        "amount": SUBSCRIPTION_CONFIG["monthly_fee"],
-        "status": "trial",
-        "start_date": now,
-        "trial_end_date": trial_end,
-        "end_date": trial_end,
-        "created_at": now
-    }
-    
-    await db.subscriptions.insert_one(subscription)
-    
-    # Remove MongoDB _id field for JSON serialization
-    subscription.pop("_id", None)
-    
-    return {
-        "message": f"Free {SUBSCRIPTION_CONFIG['trial_days']}-day trial activated!",
-        "subscription": subscription,
-        "trial_end_date": trial_end.isoformat(),
-        "days_remaining": SUBSCRIPTION_CONFIG["trial_days"]
-    }
-
-@api_router.post("/subscriptions/{driver_id}/submit-payment")
-async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission):
-    """Submit payment screenshot for verification"""
-    # Find existing subscription
-    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
-    
-    if not subscription:
-        # Create new subscription record
-        subscription = {
-            "id": str(uuid.uuid4()),
-            "driver_id": driver_id,
-            "amount": SUBSCRIPTION_CONFIG["monthly_fee"],
-            "status": "pending_verification",
-            "created_at": datetime.utcnow()
-        }
-        await db.subscriptions.insert_one(subscription)
-    
-    # Update with payment proof
-    now = datetime.utcnow()
-    await db.subscriptions.update_one(
-        {"driver_id": driver_id},
-        {"$set": {
-            "status": "pending_verification",
-            "payment_screenshot": request.screenshot,
-            "payment_submitted_at": now,
-            "amount": request.amount,
-            "payment_reference": request.payment_reference
-        }}
-    )
-    
-    # Auto-verify after 2 seconds (simulating admin approval)
-    # In production, this would be manual admin approval
-    import asyncio
-    async def auto_verify():
-        await asyncio.sleep(2)
-        await verify_payment(driver_id)
-    
-    asyncio.create_task(auto_verify())
-    
-    return {
-        "message": "Payment proof submitted successfully. Awaiting verification.",
-        "status": "pending_verification"
-    }
-
-@api_router.post("/subscriptions/{driver_id}/verify-payment")
-async def verify_payment(driver_id: str):
-    """Verify payment and activate subscription (admin or auto)"""
-    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
-    
-    if not subscription:
-        raise HTTPException(status_code=404, detail="No subscription found")
-    
-    now = datetime.utcnow()
-    end_date = now + timedelta(days=30)  # 30 days subscription
-    
-    await db.subscriptions.update_one(
-        {"driver_id": driver_id},
-        {"$set": {
-            "status": "active",
-            "start_date": now,
-            "end_date": end_date,
-            "payment_verified_at": now,
-            "transaction_id": f"TXN_{uuid.uuid4().hex[:12].upper()}"
-        }}
-    )
-    
-    logger.info(f"Subscription activated for driver {driver_id} until {end_date}")
-    
-    return {
-        "message": "Payment verified! Subscription activated.",
-        "status": "active",
-        "start_date": now.isoformat(),
-        "end_date": end_date.isoformat(),
-        "days_remaining": 30
-    }
-
-@api_router.get("/subscriptions/{driver_id}/check-restrictions")
-async def check_restrictions(driver_id: str):
-    """Check if driver has any restrictions due to subscription status"""
-    subscription = await db.subscriptions.find_one({"driver_id": driver_id})
-    
-    restrictions = {
-        "can_go_online": False,
-        "can_accept_rides": False,
-        "can_withdraw_earnings": False,
-        "show_payment_popup": False,
-        "message": ""
-    }
-    
-    if not subscription:
-        restrictions["show_payment_popup"] = True
-        restrictions["message"] = "Please subscribe to start accepting rides"
-        return restrictions
-    
-    status = subscription.get("status")
-    now = datetime.utcnow()
-    
-    if status == "trial":
-        trial_end = subscription.get("trial_end_date")
-        if trial_end and now > trial_end:
-            restrictions["show_payment_popup"] = True
-            restrictions["message"] = "Your free trial has expired. Please make payment to continue."
-        else:
-            days_left = (trial_end - now).days if trial_end else 0
-            restrictions["can_go_online"] = True
-            restrictions["can_accept_rides"] = True
-            restrictions["can_withdraw_earnings"] = True
-            restrictions["message"] = f"Trial period: {days_left} days remaining"
-    
-    elif status == "active":
-        end_date = subscription.get("end_date")
-        if end_date and now > end_date:
-            restrictions["show_payment_popup"] = True
-            restrictions["message"] = "Your subscription has expired. Please renew to continue."
-        else:
-            days_left = (end_date - now).days if end_date else 0
-            restrictions["can_go_online"] = True
-            restrictions["can_accept_rides"] = True
-            restrictions["can_withdraw_earnings"] = True
-            restrictions["message"] = f"Subscription active: {days_left} days remaining"
-    
-    elif status == "pending_verification":
-        restrictions["message"] = "Payment is being verified. Please wait."
-    
-    elif status in ["pending_payment", "expired"]:
-        restrictions["show_payment_popup"] = True
-        restrictions["message"] = "Please make payment to activate your account."
-    
-    return restrictions
-
-@api_router.post("/subscriptions/{driver_id}/grace-period")
-async def request_grace_period(driver_id: str, request: GracePeriodRequest):
-    """Request grace period for subscription (emergency earnings access)"""
-    subscription = await db.subscriptions.find_one({
-        "driver_id": driver_id,
-        "status": {"$in": ["active", "expired"]}
-    })
-    
-    if not subscription:
-        raise HTTPException(status_code=404, detail="No subscription found")
-    
-    if subscription.get("grace_period_requested"):
-        raise HTTPException(status_code=400, detail="Grace period already requested")
-    
-    # Grant grace period (max 3 days)
-    days = min(request.days_requested, 3)
-    new_end_date = datetime.utcnow() + timedelta(days=days)
-    
-    await db.subscriptions.update_one(
-        {"driver_id": driver_id},
-        {"$set": {
-            "status": "grace_period",
-            "end_date": new_end_date,
-            "grace_period_requested": True
-        }}
-    )
-    
-    return {
-        "message": f"Grace period of {days} days granted",
-        "new_end_date": new_end_date.isoformat()
-    }
-
-# ==================== FARE ESTIMATE ====================
-
-@api_router.post("/fare/estimate")
-async def estimate_fare(request: FareEstimateRequest):
-    route_data = await get_directions_from_google(
-        request.pickup_lat, request.pickup_lng,
-        request.dropoff_lat, request.dropoff_lng
-    )
-    
-    if route_data:
-        distance_km = route_data["distance_meters"] / 1000
-        duration_min = math.ceil(route_data["duration_seconds"] / 60)
-        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-        polyline = route_data.get("polyline")
-    else:
-        distance_km = calculate_distance_haversine(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
-        )
-        duration_min = max(5, math.ceil((distance_km / 25) * 60))
-        traffic_duration_min = duration_min
-        polyline = None
-    
-    distance_km = max(0.5, distance_km)
-    duration_min = max(5, duration_min)
-    
-    fare = calculate_fare(distance_km, duration_min, traffic_duration_min, request.service_type, request.city)
-    
-    estimate_id = str(uuid.uuid4())
-    fare_estimate_store[estimate_id] = {
-        "fare": fare,
-        "distance_km": round(distance_km, 2),
-        "duration_min": duration_min,
-        "polyline": polyline,
-        "service_type": request.service_type,
-        "city": request.city,
-        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng},
-        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng},
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)
-    }
-    
-    return {
-        "estimate_id": estimate_id,
-        "distance_km": round(distance_km, 2),
-        "duration_min": duration_min,
-        "base_fare": fare["base_fare"],
-        "distance_fee": fare["distance_fee"],
-        "time_fee": fare["time_fee"],
-        "traffic_fee": fare["traffic_fee"],
-        "total_fare": fare["total_fare"],
-        "multiplier": fare["multiplier"],
-        "is_peak": fare["is_peak"],
-        "currency": fare["currency"],
-        "min_fare": fare["min_fare"],
-        "service_type": request.service_type,
-        "polyline": polyline,
-        "price_valid_until": (datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
-        "price_lock_minutes": FARE_LOCK_MINUTES,
-        "is_insured": True
-    }
-
-# ==================== TRIP ENDPOINTS ====================
-
-@api_router.post("/trips/request")
-async def request_trip(rider_id: str, request: TripRequest):
-    # Check if rider has blocked drivers to exclude
-    rider = await db.users.find_one({"id": rider_id})
-    blocked_drivers = rider.get("blocked_drivers", []) if rider else []
-    
-    fare_data = None
-    if request.fare_estimate_id and request.fare_estimate_id in fare_estimate_store:
-        estimate = fare_estimate_store[request.fare_estimate_id]
-        if datetime.utcnow() < estimate["expires_at"]:
-            fare_data = estimate
-    
-    if fare_data:
-        distance_km = fare_data["distance_km"]
-        duration_min = fare_data["duration_min"]
-        fare = fare_data["fare"]
-        polyline = fare_data.get("polyline")
-    else:
-        route_data = await get_directions_from_google(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
-        )
-        
-        if route_data:
-            distance_km = route_data["distance_meters"] / 1000
-            duration_min = math.ceil(route_data["duration_seconds"] / 60)
-            traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-            polyline = route_data.get("polyline")
-        else:
-            distance_km = calculate_distance_haversine(
-                request.pickup_lat, request.pickup_lng,
-                request.dropoff_lat, request.dropoff_lng
-            )
-            duration_min = max(5, math.ceil((distance_km / 25) * 60))
-            traffic_duration_min = duration_min
-            polyline = None
-        
-        fare = calculate_fare(distance_km, duration_min, traffic_duration_min, request.service_type)
-    
-    trip = Trip(
-        rider_id=rider_id,
-        pickup_location={"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        dropoff_location={"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        distance_km=round(distance_km, 2),
-        duration_mins=duration_min,
-        base_fare=fare["base_fare"],
-        distance_fee=fare["distance_fee"],
-        time_fee=fare["time_fee"],
-        traffic_fee=fare["traffic_fee"],
-        fare=fare["total_fare"],
-        surge_multiplier=fare["multiplier"],
-        service_type=request.service_type,
-        payment_method=request.payment_method,
-        polyline=polyline,
-        recording_enabled=request.enable_recording,
-        fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
-        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}"
-    )
-    
-    await db.trips.insert_one(trip.dict())
-    
-    return {"message": "Trip requested", "trip": trip.dict()}
-
-@api_router.post("/trips/book-for-other")
-async def book_for_other(booker_id: str, request: BookForOtherRequest):
-    """Book a ride for family member or friend"""
-    route_data = await get_directions_from_google(
-        request.pickup_lat, request.pickup_lng,
-        request.dropoff_lat, request.dropoff_lng
-    )
-    
-    if route_data:
-        distance_km = route_data["distance_meters"] / 1000
-        duration_min = math.ceil(route_data["duration_seconds"] / 60)
-        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-        polyline = route_data.get("polyline")
-    else:
-        distance_km = calculate_distance_haversine(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
-        )
-        duration_min = max(5, math.ceil((distance_km / 25) * 60))
-        traffic_duration_min = duration_min
-        polyline = None
-    
-    fare = calculate_fare(distance_km, duration_min, traffic_duration_min, request.service_type)
-    
-    trip = Trip(
-        rider_id=booker_id,
-        pickup_location={"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        dropoff_location={"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        distance_km=round(distance_km, 2),
-        duration_mins=duration_min,
-        base_fare=fare["base_fare"],
-        distance_fee=fare["distance_fee"],
-        time_fee=fare["time_fee"],
-        traffic_fee=fare["traffic_fee"],
-        fare=fare["total_fare"],
-        surge_multiplier=fare["multiplier"],
-        service_type=request.service_type,
-        payment_method=request.payment_method,
-        polyline=polyline,
-        fare_locked_until=datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
-        insurance_id=f"INS_{uuid.uuid4().hex[:8].upper()}"
-    )
-    
-    trip_dict = trip.dict()
-    trip_dict["booked_for"] = {"name": request.rider_name, "phone": request.rider_phone}
-    
-    await db.trips.insert_one(trip_dict)
-    
-    return {"message": "Trip booked for other person", "trip": trip_dict}
-
-@api_router.get("/trips/pending")
-async def get_pending_trips(driver_lat: float, driver_lng: float):
-    # Get driver's blocked riders
-    # For now, return all pending trips within range
-    trips = await db.trips.find({"status": "pending"}).to_list(50)
-    
-    nearby_trips = []
-    for trip in trips:
-        pickup = trip["pickup_location"]
-        distance = calculate_distance_haversine(driver_lat, driver_lng, pickup["lat"], pickup["lng"])
-        if distance <= 10:
-            trip["_id"] = str(trip["_id"])
-            trip["distance_to_pickup"] = round(distance, 2)
-            nearby_trips.append(trip)
-    
-    nearby_trips.sort(key=lambda x: x["distance_to_pickup"])
-    return nearby_trips[:10]
-
-@api_router.put("/trips/{trip_id}/accept")
-async def accept_trip(trip_id: str, driver_id: str):
-    subscription = await db.subscriptions.find_one({
-        "driver_id": driver_id,
-        "status": {"$in": ["active", "grace_period"]}
-    })
-    
-    if not subscription:
-        raise HTTPException(status_code=403, detail="Active subscription required")
-    
-    # Get trip and check if rider blocked this driver
-    trip = await db.trips.find_one({"id": trip_id})
-    if trip:
-        rider = await db.users.find_one({"id": trip["rider_id"]})
-        if rider and driver_id in rider.get("blocked_drivers", []):
-            raise HTTPException(status_code=403, detail="You cannot accept this ride")
-    
-    result = await db.trips.update_one(
-        {"id": trip_id, "status": "pending"},
-        {"$set": {"driver_id": driver_id, "status": "accepted", "accepted_at": datetime.utcnow()}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Trip not available")
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    trip["_id"] = str(trip["_id"])
-    return trip
-
-@api_router.put("/trips/{trip_id}/verify-face-and-start")
-async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequest):
-    """Verify driver face and start trip"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    if trip["status"] != "accepted":
-        raise HTTPException(status_code=400, detail="Trip must be accepted first")
-    
-    # In production: Verify face matches registered image
-    # For MVP: Accept any image
-    face_verified = True
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {
-            "status": "ongoing",
-            "started_at": datetime.utcnow(),
-            "face_verified_at_start": face_verified
-        }}
-    )
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    trip["_id"] = str(trip["_id"])
-    return {"trip": trip, "face_verified": face_verified}
-
-@api_router.put("/trips/{trip_id}/start")
-async def start_trip(trip_id: str):
-    result = await db.trips.update_one(
-        {"id": trip_id, "status": "accepted"},
-        {"$set": {"status": "ongoing", "started_at": datetime.utcnow()}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Cannot start trip")
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    trip["_id"] = str(trip["_id"])
-    return trip
-
-@api_router.put("/trips/{trip_id}/update-location")
-async def update_trip_location(trip_id: str, request: LocationUpdate):
-    """Update trip location for live monitoring"""
-    location_point = {
-        "lat": request.latitude,
-        "lng": request.longitude,
-        "timestamp": datetime.utcnow().isoformat()
-    }
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Check for route deviation
-    route_deviation = False
-    if trip.get("polyline"):
-        # In production: Decode polyline and check deviation
-        pass
-    
-    # Check for abnormal stop (same location for too long)
-    actual_route = trip.get("actual_route", [])
-    abnormal_stop = False
-    if len(actual_route) >= 2:
-        last_point = actual_route[-1]
-        distance = calculate_distance_haversine(
-            request.latitude, request.longitude,
-            last_point["lat"], last_point["lng"]
-        )
-        if distance < 0.01:  # Less than 10 meters
-            last_time = datetime.fromisoformat(last_point["timestamp"])
-            if (datetime.utcnow() - last_time).total_seconds() > ABNORMAL_STOP_THRESHOLD:
-                abnormal_stop = True
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {
-            "$push": {"actual_route": location_point},
-            "$set": {
-                "route_deviation_detected": route_deviation,
-                "abnormal_stop_detected": abnormal_stop
-            }
-        }
-    )
-    
-    # Create safety check if needed
-    if route_deviation or abnormal_stop:
-        safety_check = SafetyCheck(
-            trip_id=trip_id,
-            check_type="route_deviation" if route_deviation else "abnormal_stop",
-            location={"lat": request.latitude, "lng": request.longitude}
-        )
-        await db.safety_checks.insert_one(safety_check.dict())
-    
-    return {
-        "location_updated": True,
-        "route_deviation": route_deviation,
-        "abnormal_stop": abnormal_stop
-    }
-
-@api_router.put("/trips/{trip_id}/complete")
-async def complete_trip(trip_id: str):
-    result = await db.trips.update_one(
-        {"id": trip_id, "status": "ongoing"},
-        {"$set": {"status": "completed", "completed_at": datetime.utcnow(), "payment_status": "completed"}}
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=400, detail="Cannot complete trip")
-    
-    trip = await db.trips.find_one({"id": trip_id})
-    
-    # Update stats
-    if trip.get("driver_id"):
-        await db.users.update_one({"id": trip["driver_id"]}, {"$inc": {"total_trips": 1}})
-        # Update streak
-        await db.users.update_one(
-            {"id": trip["driver_id"]},
-            {"$inc": {"streaks.current": 1}}
-        )
-    
-    await db.users.update_one({"id": trip["rider_id"]}, {"$inc": {"total_trips": 1}})
-    
-    trip["_id"] = str(trip["_id"])
-    return trip
-
-@api_router.put("/trips/{trip_id}/cancel")
-async def cancel_trip(trip_id: str, cancelled_by: str):
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    if trip["status"] in ["completed", "cancelled"]:
-        raise HTTPException(status_code=400, detail="Cannot cancel this trip")
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"status": "cancelled", "cancelled_by": cancelled_by, "cancelled_at": datetime.utcnow()}}
-    )
-    
-    # Update behavior score and streak
-    if cancelled_by == trip.get("driver_id"):
-        await db.driver_profiles.update_one(
-            {"user_id": cancelled_by},
-            {"$inc": {"cancellation_count": 1}}
-        )
-        # Reset streak on cancellation
-        await db.users.update_one(
-            {"id": cancelled_by},
-            {"$set": {"streaks.current": 0}}
-        )
-    
-    return {"message": "Trip cancelled"}
-
-@api_router.put("/trips/{trip_id}/rate")
-async def rate_trip(trip_id: str, rater_id: str, request: ComfortRatingRequest):
-    """Rate trip with comfort ratings"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    if trip["status"] != "completed":
-        raise HTTPException(status_code=400, detail="Can only rate completed trips")
-    
-    is_rider_rating = rater_id == trip["rider_id"]
-    update_field = "driver_rating" if is_rider_rating else "rider_rating"
-    rated_user_id = trip["driver_id"] if is_rider_rating else trip["rider_id"]
-    
-    update_data = {update_field: request.overall_rating}
-    
-    if is_rider_rating and request.smoothness:
-        update_data["comfort_ratings"] = {
-            "smoothness": request.smoothness,
-            "politeness": request.politeness,
-            "cleanliness": request.cleanliness,
-            "safety": request.safety
-        }
-        update_data["rating_comment"] = request.comment
-        
-        # Update driver comfort ratings
-        if rated_user_id:
-            profile = await db.driver_profiles.find_one({"user_id": rated_user_id})
-            if profile:
-                # Calculate new averages
-                for rating_type in ["smoothness", "politeness", "cleanliness", "safety"]:
-                    if getattr(request, rating_type):
-                        current = profile.get(f"{rating_type}_rating", 5.0)
-                        new_rating = (current + getattr(request, rating_type)) / 2
-                        await db.driver_profiles.update_one(
-                            {"user_id": rated_user_id},
-                            {"$set": {f"{rating_type}_rating": round(new_rating, 1)}}
-                        )
-    
-    await db.trips.update_one({"id": trip_id}, {"$set": update_data})
-    
-    # Update user rating
-    if rated_user_id:
-        if is_rider_rating:
-            ratings = await db.trips.find(
-                {"driver_id": rated_user_id, "driver_rating": {"$exists": True}}
-            ).to_list(1000)
-            if ratings:
-                avg_rating = sum(r["driver_rating"] for r in ratings) / len(ratings)
-                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(avg_rating, 1)}})
-        else:
-            ratings = await db.trips.find(
-                {"rider_id": rated_user_id, "rider_rating": {"$exists": True}}
-            ).to_list(1000)
-            if ratings:
-                avg_rating = sum(r["rider_rating"] for r in ratings) / len(ratings)
-                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(avg_rating, 1)}})
-    
-    return {"message": "Rating submitted"}
-
-@api_router.get("/trips/user/{user_id}")
-async def get_user_trips(user_id: str, role: str = "rider"):
-    if role == "rider":
-        trips = await db.trips.find({"rider_id": user_id}).sort("created_at", -1).to_list(50)
-    else:
-        trips = await db.trips.find({"driver_id": user_id}).sort("created_at", -1).to_list(50)
-    
-    for trip in trips:
-        trip["_id"] = str(trip["_id"])
-    return trips
-
-@api_router.get("/trips/{trip_id}")
-async def get_trip(trip_id: str):
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    trip["_id"] = str(trip["_id"])
-    return trip
-
-# ==================== SOS & SAFETY ENDPOINTS ====================
-
-@api_router.post("/sos/trigger")
-async def trigger_sos(request: SOSRequest):
-    """Trigger SOS alert - ENHANCED with real SMS notifications"""
-    trip = await db.trips.find_one({"id": request.trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Determine who triggered (rider or driver)
-    user_id = trip["rider_id"]  # Default to rider
-    user_role = "rider"
-    
-    # Get user's emergency contacts
-    user = await db.users.find_one({"id": user_id})
-    emergency_contacts = user.get("emergency_contacts", []) if user else []
-    user_name = user.get("name", "A user") if user else "A user"
-    
-    # Create SOS alert
-    sos = SOSAlert(
-        trip_id=request.trip_id,
-        user_id=user_id,
-        user_role=user_role,
-        location={"lat": request.location_lat, "lng": request.location_lng},
-        auto_triggered=request.auto_triggered,
-        emergency_contacts_notified=[c["phone"] for c in emergency_contacts],
-        admin_notified=True
-    )
-    
-    await db.sos_alerts.insert_one(sos.dict())
-    
-    # Update trip
-    await db.trips.update_one(
-        {"id": request.trip_id},
-        {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.utcnow()}}
-    )
-    
-    # ENHANCED: Send REAL SMS to emergency contacts via Termii
-    contacts_successfully_notified = 0
-    if TERMII_API_KEY and emergency_contacts:
-        # Create Google Maps link for location
-        location_link = f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-        
-        async with httpx.AsyncClient() as http_client:
-            for contact in emergency_contacts:
-                try:
-                    # Format phone number (remove + for Termii)
-                    contact_phone = contact["phone"].lstrip('+')
-                    
-                    # Craft urgent SOS message
-                    sms_text = (
-                        f"🚨 EMERGENCY! {user_name} triggered SOS on NexRyde! "
-                        f"Location: {location_link} "
-                        f"Trip ID: {request.trip_id}. Please check on them immediately!"
-                    )
-                    
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": contact_phone,
-                        "from": TERMII_FROM_ID or "NexRyde",
-                        "channel": "dnd",
-                        "type": "plain",
-                        "sms": sms_text
-                    }
-                    
-                    response = await http_client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload,
-                        timeout=10.0
-                    )
-                    
-                    if response.status_code == 200:
-                        contacts_successfully_notified += 1
-                        logger.info(f"✅ SOS SMS sent to {contact['name']} ({contact_phone})")
-                    else:
-                        logger.error(f"❌ Failed to send SOS SMS to {contact_phone}: {response.text}")
-                        
-                except Exception as e:
-                    logger.error(f"❌ Error sending SOS SMS to {contact.get('name', 'contact')}: {e}")
-    
-    # Log critical alert
-    logger.critical(f"🚨 SOS TRIGGERED for trip {request.trip_id} by {user_name} at {request.location_lat}, {request.location_lng}")
-    logger.critical(f"📱 Emergency SMS sent to {contacts_successfully_notified}/{len(emergency_contacts)} contacts")
-    
-    return {
-        "success": True,
-        "message": "SOS alert activated! Emergency contacts notified.",
-        "sos_id": sos.id,
-        "contacts_notified": contacts_successfully_notified,
-        "total_contacts": len(emergency_contacts),
-        "support_notified": True,
-        "location_link": f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-    }
-
-@api_router.post("/sos/{sos_id}/resolve")
-async def resolve_sos(sos_id: str, resolution: str = "resolved"):
-    """Resolve SOS alert"""
-    await db.sos_alerts.update_one(
-        {"id": sos_id},
-        {"$set": {"status": resolution, "resolved_at": datetime.utcnow()}}
-    )
-    return {"message": "SOS resolved"}
-
-@api_router.get("/sos/trip/{trip_id}")
-async def get_trip_sos(trip_id: str):
-    """Get SOS alerts for a trip"""
-    alerts = await db.sos_alerts.find({"trip_id": trip_id}).to_list(10)
-    for alert in alerts:
-        alert["_id"] = str(alert["_id"])
-    return {"alerts": alerts}
-
-@api_router.post("/safety/respond")
-async def respond_to_safety_check(request: SafetyResponseRequest):
-    """Respond to safety check prompt"""
-    await db.safety_checks.update_one(
-        {"id": request.check_id},
-        {"$set": {"rider_response": request.response, "responded_at": datetime.utcnow()}}
-    )
-    
-    if request.response == "need_help":
-        # Auto-trigger SOS
-        check = await db.safety_checks.find_one({"id": request.check_id})
-        if check:
-            # Create SOS alert
-            sos = SOSAlert(
-                trip_id=check["trip_id"],
-                user_id="",  # Will be filled from trip
-                user_role="rider",
-                location=check["location"],
-                auto_triggered=True
-            )
-            await db.sos_alerts.insert_one(sos.dict())
-    
-    return {"message": "Response recorded"}
-
-@api_router.post("/trips/{trip_id}/risk-alert")
-async def trigger_risk_alert(trip_id: str, user_id: str, request: RiskAlertRequest):
-    """Driver or rider triggers risk alert for suspicious behavior"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    is_driver = user_id == trip.get("driver_id")
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {
-            "risk_alert_by_driver" if is_driver else "risk_alert_by_rider": True,
-            "is_monitored": True
-        }}
-    )
-    
-    # Log the alert for admin review
-    logger.warning(f"RISK ALERT on trip {trip_id} by {'driver' if is_driver else 'rider'}: {request.reason}")
-    
-    return {"message": "Risk alert recorded. Support team notified."}
-
-# ==================== WALLET ENDPOINTS ====================
-
-@api_router.get("/wallet/{user_id}")
-async def get_wallet_balance(user_id: str):
-    """Get user wallet balance"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        # Create user wallet with 0 balance
-        return {"balance": 0, "currency": "NGN", "user_id": user_id}
-    return {"balance": user.get("wallet_balance", 0), "currency": "NGN", "user_id": user_id}
-
-@api_router.post("/wallet/{user_id}/topup")
-async def topup_wallet_balance(user_id: str, amount: float):
-    """Top up wallet - ENHANCED with validation and logging"""
-    # Validation
-    if amount < 100:
-        raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
-    if amount > 1000000:
-        raise HTTPException(status_code=400, detail="Maximum single top-up is ₦1,000,000. Contact support for larger amounts.")
-    
-    # Check if user exists
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Create transaction record for audit
-    transaction = {
-        "id": str(uuid.uuid4()),
-        "user_id": user_id,
-        "type": "topup",
-        "amount": amount,
-        "status": "completed",
-        "timestamp": datetime.utcnow(),
-        "payment_method": "card",  # TODO: Get from request
-        "reference": f"TOP{uuid.uuid4().hex[:10].upper()}"
-    }
-    
-    await db.transactions.insert_one(transaction)
-    
-    # Update wallet balance
-    await db.users.update_one(
-        {"id": user_id},
-        {"$inc": {"wallet_balance": amount}}
-    )
-    
-    user = await db.users.find_one({"id": user_id})
-    new_balance = user.get("wallet_balance", amount)
-    
-    logger.info(f"💰 Wallet top-up: User {user_id} added ₦{amount:,.2f}. New balance: ₦{new_balance:,.2f}")
-    
-    return {
-        "success": True,
-        "message": f"Successfully added ₦{amount:,.2f} to wallet",
-        "new_balance": new_balance,
-        "amount_added": amount,
-        "transaction_id": transaction["id"],
-        "reference": transaction["reference"]
-    }
-
-# ==================== CHALLENGES & GAMIFICATION ====================
-
-@api_router.get("/challenges/active")
-async def get_active_challenges():
-    """Get active weekly challenges"""
-    now = datetime.utcnow()
-    challenges = await db.challenges.find({
-        "is_active": True,
-        "start_date": {"$lte": now},
-        "end_date": {"$gte": now}
-    }).to_list(20)
-    
-    # If no challenges, return default ones
-    if not challenges:
-        default_challenges = [
-            {
-                "id": "weekly_trips_30",
-                "title": "Weekly Warrior",
-                "description": "Complete 30 trips this week",
-                "target_type": "trips",
-                "target_value": 30,
-                "reward_type": "badge",
-                "reward_value": "Priority Boost + Badge",
-                "is_active": True
-            },
-            {
-                "id": "five_star_week",
-                "title": "5-Star Week",
-                "description": "Maintain 5.0 rating for all rides this week",
-                "target_type": "rating",
-                "target_value": 5.0,
-                "reward_type": "badge",
-                "reward_value": "Gold Badge + 10% Ride Priority",
-                "is_active": True
-            },
-            {
-                "id": "no_cancel_week",
-                "title": "Commitment Champion",
-                "description": "Complete all accepted rides with zero cancellations",
-                "target_type": "cancellation_free",
-                "target_value": 0,
-                "reward_type": "badge",
-                "reward_value": "Reliability Badge",
-                "is_active": True
-            }
-        ]
-        return {"challenges": default_challenges}
-    
-    for c in challenges:
-        c["_id"] = str(c["_id"])
-    return {"challenges": challenges}
-
-@api_router.get("/drivers/{user_id}/challenges")
-async def get_driver_challenge_progress(user_id: str):
-    """Get driver's progress on active challenges"""
-    challenges = await db.challenges.find({"is_active": True}).to_list(20)
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    
-    progress = []
-    for challenge in challenges:
-        current_value = 0
-        if challenge["target_type"] == "trips":
-            current_value = profile.get("weekly_trips", 0) if profile else 0
-        elif challenge["target_type"] == "rating":
-            user = await db.users.find_one({"id": user_id})
-            current_value = user.get("rating", 0) if user else 0
-        
-        progress.append({
-            "challenge_id": challenge["id"],
-            "title": challenge["title"],
-            "target": challenge["target_value"],
-            "current": current_value,
-            "completed": current_value >= challenge["target_value"]
-        })
-    
-    return {"challenge_progress": progress}
-
-# ==================== AI ASSISTANT ENDPOINTS ====================
-
-# AI System prompts
-RIDER_ASSISTANT_PROMPT = """You are KODA AI, a friendly and helpful ride assistant for riders in Nigeria. 
-You help riders with their trip questions, fare estimates, driver information, and safety concerns.
-
-Key information about KODA:
-- KODA is a driver-first ride-hailing platform in Nigeria
-- Drivers pay a flat monthly subscription (₦25,000) instead of per-trip commission
-- Riders pay drivers directly via cash or bank transfer (peer-to-peer)
-- All drivers are verified with NIN and documents
-- Safety features include: SOS button, trip sharing, driver face verification, route monitoring
-- Fares are calculated by the system (base fare + distance + time)
-
-Be concise, friendly, and helpful. Use Nigerian context when relevant.
-If you don't have specific trip data, provide general helpful information.
-Keep responses under 100 words."""
-
-DRIVER_ASSISTANT_PROMPT = """You are KODA AI, a supportive driving assistant for KODA drivers in Nigeria.
-You help drivers maximize their earnings, find high-demand areas, and improve their ratings.
-
-Key information about KODA:
-- Drivers keep 100% of their earnings - KODA takes no commission
-- Monthly subscription is ₦25,000 for unlimited trips
-- Riders pay drivers directly via cash or bank transfer
-- Peak hours: 7-9 AM and 5-8 PM weekdays
-- High demand areas in Lagos: Victoria Island, Lekki, Ikeja, Airport
-- Driver ratings are based on: smoothness, politeness, cleanliness, safety
-
-Be encouraging and practical. Use Nigerian context.
-Keep responses under 100 words."""
-
-@api_router.get("/ai/rider-assistant")
-async def rider_assistant(user_id: str, question: str):
-    """
-    AI Ride Assistant for Riders - Powered by GPT
-    """
-    try:
-        # Get user's current trip context
-        current_trip = await db.trips.find_one({
-            "rider_id": user_id,
-            "status": {"$in": ["pending", "accepted", "ongoing"]}
-        })
-        
-        # Build context
-        context = ""
-        if current_trip:
-            context = f"\nRider's current trip: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
-            if current_trip.get("driver_id"):
-                driver = await db.users.find_one({"id": current_trip["driver_id"]})
-                if driver:
-                    context += f", Driver={driver.get('name', 'Assigned')}"
-        else:
-            context = "\nRider has no active trip currently."
-        
-        # Use LLM for response
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"rider-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=RIDER_ASSISTANT_PROMPT + context
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {
-                "response": response_text,
-                "type": "ai",
-                "powered_by": "gpt-4o"
-            }
-        else:
-            # Fallback to rule-based responses
-            return await _rider_assistant_fallback(user_id, question, current_trip)
-            
-    except Exception as e:
-        logger.error(f"AI Assistant error: {e}")
-        return await _rider_assistant_fallback(user_id, question, None)
-
-async def _rider_assistant_fallback(user_id: str, question: str, current_trip):
-    """Fallback responses when LLM is unavailable"""
-    question_lower = question.lower()
-    
-    if "driver" in question_lower and "where" in question_lower:
-        if current_trip and current_trip.get("driver_id"):
-            return {"response": "Your driver is on the way. They should arrive shortly.", "type": "location"}
-        return {"response": "You don't have an active ride. Would you like to book one?", "type": "info"}
-    
-    elif "price" in question_lower or "fare" in question_lower or "cost" in question_lower:
-        if current_trip:
-            return {"response": f"Your trip fare is ₦{current_trip['fare']:,.0f}. This includes base fare, distance, and time charges.", "type": "fare"}
-        return {"response": "Fares are calculated based on distance, time, and current traffic. Get a fare estimate by entering your destination.", "type": "info"}
-    
-    elif "safe" in question_lower or "safety" in question_lower:
-        return {"response": "Your safety is our priority! All drivers are verified. You can use the SOS button anytime, share your trip with family, and rate your driver after the ride.", "type": "safety"}
-    
-    elif "cancel" in question_lower:
-        return {"response": "You can cancel your ride anytime before it starts. To cancel an ongoing ride, please contact support.", "type": "info"}
-    
-    else:
-        return {"response": "I'm here to help! You can ask me about your driver's location, fare details, safety features, or trip status.", "type": "help"}
-
-@api_router.get("/ai/driver-assistant")
-async def driver_assistant(user_id: str, question: str):
-    """
-    AI Assistant for Drivers - Powered by GPT
-    """
-    try:
-        # Get driver stats for context
-        stats = await db.trips.aggregate([
-            {"$match": {"driver_id": user_id, "status": "completed"}},
-            {"$group": {
-                "_id": None,
-                "total_earnings": {"$sum": "$fare"},
-                "total_trips": {"$sum": 1},
-                "avg_fare": {"$avg": "$fare"}
-            }}
-        ]).to_list(1)
-        
-        driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}
-        
-        # Get today's stats
-        today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-        today_stats = await db.trips.aggregate([
-            {"$match": {"driver_id": user_id, "status": "completed", "completed_at": {"$gte": today_start}}},
-            {"$group": {"_id": None, "earnings": {"$sum": "$fare"}, "trips": {"$sum": 1}}}
-        ]).to_list(1)
-        
-        today = today_stats[0] if today_stats else {"earnings": 0, "trips": 0}
-        
-        # Build context
-        context = f"\nDriver stats: Today's earnings=₦{today['earnings']:,.0f}, Today's trips={today['trips']}, Total earnings=₦{driver_stats['total_earnings']:,.0f}, Total trips={driver_stats['total_trips']}"
-        
-        # Get rating
-        user = await db.users.find_one({"id": user_id})
-        if user:
-            context += f", Rating={user.get('rating', 5.0):.1f}"
-        
-        # Use LLM for response
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"driver-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=DRIVER_ASSISTANT_PROMPT + context
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {
-                "response": response_text,
-                "type": "ai",
-                "powered_by": "gpt-4o",
-                "data": {
-                    "today_earnings": today["earnings"],
-                    "today_trips": today["trips"],
-                    "total_earnings": driver_stats["total_earnings"],
-                    "rating": user.get('rating', 5.0) if user else 5.0
-                }
-            }
-        else:
-            # Fallback to rule-based responses
-            return await _driver_assistant_fallback(user_id, question, driver_stats, today)
-            
-    except Exception as e:
-        logger.error(f"AI Assistant error: {e}")
-        return await _driver_assistant_fallback(user_id, question, {"total_earnings": 0, "total_trips": 0, "avg_fare": 0}, {"earnings": 0, "trips": 0})
-
-async def _driver_assistant_fallback(user_id: str, question: str, driver_stats, today):
-    """Fallback responses when LLM is unavailable"""
-    question_lower = question.lower()
-    
-    if "earn" in question_lower or "money" in question_lower:
-        return {
-            "response": f"Today you've earned ₦{today['earnings']:,.0f} from {today['trips']} trips. Your average fare is ₦{driver_stats.get('avg_fare', 0):,.0f}.",
-            "type": "earnings",
-            "data": {"today_earnings": today["earnings"], "today_trips": today["trips"]}
-        }
-    
-    elif "best time" in question_lower or "when" in question_lower or "busy" in question_lower:
-        return {
-            "response": "Peak hours are typically 7-9 AM and 5-8 PM on weekdays. Weekends see more activity in evening hours. Consider positioning yourself in business districts during morning rush.",
-            "type": "insight"
-        }
-    
-    elif "demand" in question_lower or "area" in question_lower or "where" in question_lower:
-        return {
-            "response": "High demand areas right now include Victoria Island, Lekki, and Ikeja. Airport runs are also lucrative. Stay near major business hubs for consistent rides.",
-            "type": "demand"
-        }
-    
-    elif "tip" in question_lower or "advice" in question_lower:
-        return {
-            "response": "Pro tips: Keep your car clean for better ratings. Stay hydrated and take breaks every 2-3 hours. Accept rides during surge times for higher earnings.",
-            "type": "tips"
-        }
-    
-    else:
-        return {
-            "response": "I can help you with earnings info, best times to drive, high-demand areas, tips for better ratings, and more. What would you like to know?",
-            "type": "help"
-        }
-
-# ==================== PIDGIN ENGLISH AI SUPPORT ====================
-
-PIDGIN_RIDER_PROMPT = """You be KODA AI assistant for riders wey dey Nigeria. 
-You go help riders with their trip wahala, price matter, driver info, and safety concern.
-
-Wetin KODA be:
-- KODA na driver-first ride app for Naija
-- Drivers dey pay flat monthly sub (₦25,000) instead of per-trip commission
-- Riders dey pay drivers direct via cash or bank transfer (person to person)
-- All drivers don verify with NIN and documents
-- Safety features include: SOS button, trip sharing, driver face verification, route monitoring
-
-Make you dey friendly and helpful. Use pidgin well well.
-Keep response under 100 words."""
-
-PIDGIN_DRIVER_PROMPT = """You be KODA AI assistant for drivers wey dey Naija.
-You go help drivers maximize their earnings, find high-demand areas, and improve their ratings.
-
-Wetin KODA be:
-- Drivers keep 100% of their money - KODA no take commission
-- Monthly subscription na ₦25,000 for unlimited trips  
-- Riders dey pay drivers direct via cash or bank transfer
-- Peak hours: 7-9 AM and 5-8 PM for weekdays
-- Hot areas for Lagos: Victoria Island, Lekki, Ikeja, Airport
-
-Make you dey encouraging and practical. Na Naija context you go use.
-Keep response under 100 words."""
-
-@api_router.get("/ai/rider-assistant-pidgin")
-async def rider_assistant_pidgin(user_id: str, question: str):
-    """AI Ride Assistant in Pidgin English"""
-    try:
-        current_trip = await db.trips.find_one({
-            "rider_id": user_id,
-            "status": {"$in": ["pending", "accepted", "ongoing"]}
-        })
-        
-        context = ""
-        if current_trip:
-            context = f"\nRider trip wey dey ground: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
-        else:
-            context = "\nRider no get active trip now."
-        
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"rider-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=PIDGIN_RIDER_PROMPT + context
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
-        else:
-            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
-            
-    except Exception as e:
-        logger.error(f"Pidgin AI error: {e}")
-        return {"response": "E get wahala. Abeg try again.", "type": "error"}
-
-@api_router.get("/ai/driver-assistant-pidgin")
-async def driver_assistant_pidgin(user_id: str, question: str):
-    """AI Driver Assistant in Pidgin English"""
-    try:
-        stats = await db.trips.aggregate([
-            {"$match": {"driver_id": user_id, "status": "completed"}},
-            {"$group": {"_id": None, "total_earnings": {"$sum": "$fare"}, "total_trips": {"$sum": 1}}}
-        ]).to_list(1)
-        
-        driver_stats = stats[0] if stats else {"total_earnings": 0, "total_trips": 0}
-        context = f"\nDriver stats: Total earnings=₦{driver_stats['total_earnings']:,.0f}, Total trips={driver_stats['total_trips']}"
-        
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"driver-pidgin-{user_id}-{datetime.utcnow().strftime('%Y%m%d')}",
-                system_message=PIDGIN_DRIVER_PROMPT + context
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=question)
-            response_text = await chat.send_message(user_message)
-            
-            return {"response": response_text, "type": "ai", "language": "pidgin", "powered_by": "gpt-4o"}
-        else:
-            return {"response": "Abeg, AI no dey available now. Try again later.", "type": "error"}
-            
-    except Exception as e:
-        logger.error(f"Pidgin AI error: {e}")
-        return {"response": "E get wahala. Abeg try again.", "type": "error"}
-
-# ==================== REAL-TIME CHAT SYSTEM ====================
-
-# AI Chat Request Model
-class AIChatRequest(BaseModel):
-    user_id: str
-    message: str
-    user_role: str = "rider"  # rider or driver
-    session_id: Optional[str] = None
-
-# Driver-Rider Chat Models
-class ChatMessageRequest(BaseModel):
-    trip_id: str
-    sender_id: str
-    sender_role: str  # rider or driver
-    message: str
-    message_type: str = "text"  # text or preset
-
-class ChatMessage(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    trip_id: str
-    sender_id: str
-    sender_role: str
-    message: str
-    message_type: str = "text"
-    is_read: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-
-# Enhanced AI System Prompts for Chat
-AI_CHAT_SYSTEM_PROMPT = """You are NEXRYDE AI, a smart and friendly assistant for Nigeria's premier ride-hailing platform.
-
-About NEXRYDE:
-- Driver-first platform: Drivers pay ₦25,000/month flat fee, keep 100% of earnings
-- No per-trip commission - drivers keep what they earn
-- Safety features: SOS button, trip sharing, verified drivers, route monitoring
-- Cash and bank transfer payments (peer-to-peer)
-
-Your personality:
-- Friendly, helpful, and concise
-- Use Nigerian context and expressions naturally
-- Be empathetic and solution-oriented
-- Keep responses under 150 words
-
-You can help with:
-- Fare estimates and pricing questions
-- Safety features and emergency help
-- Account and payment questions  
-- Trip information and status
-- Driver/rider ratings and feedback
-- General platform questions
-
-Always be helpful and if you don't know something specific, guide users to contact support."""
-
-@api_router.post("/chat/ai")
-async def ai_chat(request: AIChatRequest):
-    """
-    Real-time AI Chat - Powered by GPT-4o
-    Handles conversation with memory for better context
-    """
-    try:
-        session_id = request.session_id or f"chat-{request.user_id}-{datetime.utcnow().strftime('%Y%m%d%H')}"
-        
-        # Get user context
-        user = await db.users.find_one({"id": request.user_id})
-        user_context = ""
-        if user:
-            user_context = f"\nUser: {user.get('name', 'User')}, Role: {request.user_role}"
-            
-            # Check for active trip
-            current_trip = await db.trips.find_one({
-                f"{request.user_role}_id": request.user_id,
-                "status": {"$in": ["pending", "accepted", "ongoing"]}
-            })
-            if current_trip:
-                user_context += f"\nActive trip: Status={current_trip['status']}, Fare=₦{current_trip.get('fare', 0):,.0f}"
-        
-        # Store message in chat history
-        chat_msg = {
-            "session_id": session_id,
-            "user_id": request.user_id,
-            "role": "user",
-            "message": request.message,
-            "created_at": datetime.utcnow()
-        }
-        await db.chat_history.insert_one(chat_msg)
-        
-        # Get recent chat history for context (last 10 messages)
-        history = await db.chat_history.find(
-            {"session_id": session_id}
-        ).sort("created_at", -1).limit(10).to_list(10)
-        history.reverse()  # Oldest first
-        
-        # Build conversation history string for context
-        conversation_context = ""
-        for msg in history[-6:]:  # Last 6 messages for context
-            role = "User" if msg["role"] == "user" else "AI"
-            conversation_context += f"\n{role}: {msg['message']}"
-        
-        if EMERGENT_LLM_KEY:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=session_id,
-                system_message=AI_CHAT_SYSTEM_PROMPT + user_context + f"\n\nRecent conversation:{conversation_context}"
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=request.message)
-            response_text = await chat.send_message(user_message)
-            
-            # Store AI response
-            ai_msg = {
-                "session_id": session_id,
-                "user_id": request.user_id,
-                "role": "assistant",
-                "message": response_text,
-                "created_at": datetime.utcnow()
-            }
-            await db.chat_history.insert_one(ai_msg)
-            
-            return {
-                "success": True,
-                "message": response_text,
-                "session_id": session_id,
-                "powered_by": "gpt-4o",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-        else:
-            # Fallback response
-            fallback = "I'm here to help! You can ask me about fares, safety, payments, or trip status. What would you like to know?"
-            return {
-                "success": True,
-                "message": fallback,
-                "session_id": session_id,
-                "powered_by": "fallback",
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            
-    except Exception as e:
-        logger.error(f"AI Chat error: {str(e)}")
-        return {
-            "success": False,
-            "message": "Sorry, I'm having trouble right now. Please try again in a moment.",
-            "error": str(e),
-            "timestamp": datetime.utcnow().isoformat()
-        }
-
-@api_router.get("/chat/ai/history/{user_id}")
-async def get_ai_chat_history(user_id: str, limit: int = 50):
-    """Get AI chat history for a user"""
-    try:
-        # Get latest session
-        latest = await db.chat_history.find_one(
-            {"user_id": user_id},
-            sort=[("created_at", -1)]
-        )
-        
-        if not latest:
-            return {"messages": [], "session_id": None}
-        
-        session_id = latest.get("session_id")
-        
-        messages = await db.chat_history.find(
-            {"session_id": session_id}
-        ).sort("created_at", 1).limit(limit).to_list(limit)
-        
-        return {
-            "messages": [
-                {
-                    "id": str(msg.get("_id")),
-                    "role": msg["role"],
-                    "message": msg["message"],
-                    "timestamp": msg["created_at"].isoformat()
-                }
-                for msg in messages
-            ],
-            "session_id": session_id
-        }
-    except Exception as e:
-        logger.error(f"Get chat history error: {e}")
-        return {"messages": [], "session_id": None, "error": str(e)}
-
-# ==================== DRIVER-RIDER REAL-TIME MESSAGING ====================
-
-@api_router.post("/chat/message")
-async def send_chat_message(request: ChatMessageRequest):
-    """Send a message between driver and rider"""
-    try:
-        # Verify trip exists
-        trip = await db.trips.find_one({"id": request.trip_id})
-        if not trip:
-            raise HTTPException(status_code=404, detail="Trip not found")
-        
-        # Verify sender is part of trip
-        if request.sender_role == "rider" and trip["rider_id"] != request.sender_id:
-            raise HTTPException(status_code=403, detail="Not authorized")
-        if request.sender_role == "driver" and trip.get("driver_id") != request.sender_id:
-            raise HTTPException(status_code=403, detail="Not authorized")
-        
-        # Create message
-        message = {
-            "id": str(uuid.uuid4()),
-            "trip_id": request.trip_id,
-            "sender_id": request.sender_id,
-            "sender_role": request.sender_role,
-            "message": request.message,
-            "message_type": request.message_type,
-            "is_read": False,
-            "created_at": datetime.utcnow()
-        }
-        
-        await db.trip_messages.insert_one(message)
-        
-        # Update trip with latest message timestamp
-        await db.trips.update_one(
-            {"id": request.trip_id},
-            {"$set": {"last_message_at": datetime.utcnow()}}
-        )
-        
-        return {
-            "success": True,
-            "message_id": message["id"],
-            "timestamp": message["created_at"].isoformat()
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Send message error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send message")
-
-@api_router.get("/chat/messages/{trip_id}")
-async def get_trip_messages(trip_id: str, user_id: str, limit: int = 50, since: Optional[str] = None):
-    """Get messages for a trip (polling endpoint for real-time updates)"""
-    try:
-        trip = await db.trips.find_one({"id": trip_id})
-        if not trip:
-            raise HTTPException(status_code=404, detail="Trip not found")
-        
-        # Build query
-        query = {"trip_id": trip_id}
-        if since:
-            try:
-                since_dt = datetime.fromisoformat(since.replace('Z', '+00:00'))
-                query["created_at"] = {"$gt": since_dt}
-            except:
-                pass
-        
-        messages = await db.trip_messages.find(query).sort("created_at", 1).limit(limit).to_list(limit)
-        
-        # Mark messages as read for this user
-        other_role = "driver" if trip["rider_id"] == user_id else "rider"
-        await db.trip_messages.update_many(
-            {"trip_id": trip_id, "sender_role": other_role, "is_read": False},
-            {"$set": {"is_read": True}}
-        )
-        
-        return {
-            "messages": [
-                {
-                    "id": msg["id"],
-                    "sender_id": msg["sender_id"],
-                    "sender_role": msg["sender_role"],
-                    "message": msg["message"],
-                    "message_type": msg["message_type"],
-                    "is_read": msg["is_read"],
-                    "timestamp": msg["created_at"].isoformat()
-                }
-                for msg in messages
-            ],
-            "trip_id": trip_id
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Get messages error: {e}")
-        return {"messages": [], "trip_id": trip_id, "error": str(e)}
-
-@api_router.get("/chat/unread-count/{user_id}")
-async def get_unread_count(user_id: str):
-    """Get unread message count for a user"""
-    try:
-        # Find active trips for user
-        active_trips = await db.trips.find({
-            "$or": [
-                {"rider_id": user_id},
-                {"driver_id": user_id}
-            ],
-            "status": {"$in": ["accepted", "ongoing"]}
-        }).to_list(100)
-        
-        total_unread = 0
-        for trip in active_trips:
-            # Determine user's role in this trip
-            is_rider = trip["rider_id"] == user_id
-            other_role = "driver" if is_rider else "rider"
-            
-            count = await db.trip_messages.count_documents({
-                "trip_id": trip["id"],
-                "sender_role": other_role,
-                "is_read": False
-            })
-            total_unread += count
-        
-        return {"unread_count": total_unread}
-        
-    except Exception as e:
-        logger.error(f"Get unread count error: {e}")
-        return {"unread_count": 0, "error": str(e)}
-
-# Preset messages for quick replies
-PRESET_MESSAGES = {
-    "driver": [
-        "I'm on my way",
-        "I've arrived at pickup",
-        "Please come to the car",
-        "I'm waiting for you",
-        "Traffic is heavy",
-        "I'll be there in 5 minutes"
-    ],
-    "rider": [
-        "I'm coming out now",
-        "Please wait a moment",
-        "I'm at the entrance",
-        "Can you call me?",
-        "Running a bit late",
-        "I see you!"
-    ]
-}
-
-@api_router.get("/chat/presets/{role}")
-async def get_preset_messages(role: str):
-    """Get preset quick reply messages"""
-    if role not in PRESET_MESSAGES:
-        return {"presets": PRESET_MESSAGES["rider"]}
-    return {"presets": PRESET_MESSAGES[role]}
-
-
-# ==================== WEBSOCKET CHAT ====================
-
-class ConnectionManager:
-    """Manages WebSocket connections for real-time chat"""
-    def __init__(self):
-        # Store active connections by trip_id
-        self.active_connections: Dict[str, Set[WebSocket]] = {}
-        # Store user to websocket mapping
-        self.user_connections: Dict[str, WebSocket] = {}
-    
-    async def connect(self, websocket: WebSocket, trip_id: str, user_id: str):
-        await websocket.accept()
-        if trip_id not in self.active_connections:
-            self.active_connections[trip_id] = set()
-        self.active_connections[trip_id].add(websocket)
-        self.user_connections[user_id] = websocket
-        logger.info(f"WebSocket connected: user={user_id}, trip={trip_id}")
-    
-    def disconnect(self, websocket: WebSocket, trip_id: str, user_id: str):
-        if trip_id in self.active_connections:
-            self.active_connections[trip_id].discard(websocket)
-            if not self.active_connections[trip_id]:
-                del self.active_connections[trip_id]
-        if user_id in self.user_connections:
-            del self.user_connections[user_id]
-        logger.info(f"WebSocket disconnected: user={user_id}, trip={trip_id}")
-    
-    async def send_personal_message(self, message: dict, websocket: WebSocket):
-        try:
-            await websocket.send_json(message)
-        except Exception as e:
-            logger.error(f"Error sending message: {e}")
-    
-    async def broadcast_to_trip(self, message: dict, trip_id: str, exclude_user: str = None):
-        """Broadcast message to all users in a trip"""
-        if trip_id not in self.active_connections:
-            return
-        
-        for connection in self.active_connections[trip_id]:
-            try:
-                # Get user_id for this connection
-                user_id = None
-                for uid, ws in self.user_connections.items():
-                    if ws == connection:
-                        user_id = uid
-                        break
-                
-                if exclude_user and user_id == exclude_user:
-                    continue
-                    
-                await connection.send_json(message)
-            except Exception as e:
-                logger.error(f"Error broadcasting: {e}")
-
-# Global connection manager
-chat_manager = ConnectionManager()
-
-@app.websocket("/ws/chat/{trip_id}/{user_id}")
-async def websocket_chat(websocket: WebSocket, trip_id: str, user_id: str):
-    """WebSocket endpoint for real-time driver-rider chat"""
-    await chat_manager.connect(websocket, trip_id, user_id)
-    
-    try:
-        # Send connection confirmation
-        await websocket.send_json({
-            "type": "connected",
-            "trip_id": trip_id,
-            "user_id": user_id,
-            "message": "Connected to chat"
-        })
-        
-        # Load existing messages
-        messages = await db.trip_messages.find(
-            {"trip_id": trip_id},
-            {"_id": 0}
-        ).sort("timestamp", 1).to_list(100)
-        
-        if messages:
-            await websocket.send_json({
-                "type": "history",
-                "messages": messages
-            })
-        
-        while True:
-            # Wait for messages from this client
-            data = await websocket.receive_json()
-            
-            if data.get("type") == "message":
-                # Get user info
-                user = await db.users.find_one({"id": user_id}, {"name": 1, "role": 1, "_id": 0})
-                
-                # Create message document
-                message_doc = {
-                    "id": str(uuid.uuid4()),
-                    "trip_id": trip_id,
-                    "sender_id": user_id,
-                    "sender_name": user.get("name", "User") if user else "User",
-                    "sender_role": data.get("sender_role", user.get("role", "rider") if user else "rider"),
-                    "message": data.get("message", ""),
-                    "message_type": data.get("message_type", "text"),
-                    "timestamp": datetime.utcnow().isoformat(),
-                    "is_read": False
-                }
-                
-                # Save to database
-                await db.trip_messages.insert_one(message_doc)
-                
-                # Broadcast to all users in trip
-                await chat_manager.broadcast_to_trip({
-                    "type": "new_message",
-                    **message_doc
-                }, trip_id)
-                
-            elif data.get("type") == "typing":
-                # Broadcast typing indicator
-                await chat_manager.broadcast_to_trip({
-                    "type": "typing",
-                    "user_id": user_id,
-                    "is_typing": data.get("is_typing", False)
-                }, trip_id, exclude_user=user_id)
-                
-            elif data.get("type") == "read":
-                # Mark messages as read
-                await db.trip_messages.update_many(
-                    {"trip_id": trip_id, "sender_id": {"$ne": user_id}},
-                    {"$set": {"is_read": True}}
-                )
-                await chat_manager.broadcast_to_trip({
-                    "type": "messages_read",
-                    "user_id": user_id
-                }, trip_id, exclude_user=user_id)
-                
-    except WebSocketDisconnect:
-        chat_manager.disconnect(websocket, trip_id, user_id)
-    except Exception as e:
-        logger.error(f"WebSocket error: {e}")
-        chat_manager.disconnect(websocket, trip_id, user_id)
-
-
-# ==================== SURGE PRICING ====================
-
-def calculate_surge_multiplier(lat: float, lng: float) -> dict:
-    """Calculate surge multiplier based on time, demand, and conditions"""
-    now = datetime.utcnow()
-    hour = now.hour
-    
-    base_multiplier = SURGE_CONFIG["base_multiplier"]
-    surge_reason = []
-    
-    # Check peak hours
-    for period, config in SURGE_CONFIG["peak_hours"].items():
-        if config["start"] <= hour < config["end"]:
-            base_multiplier = max(base_multiplier, config["multiplier"])
-            surge_reason.append(f"{period.title()} rush hour")
-    
-    # Simulate demand-based surge
-    demand_ratio = random.uniform(0.3, 0.9)
-    if demand_ratio > SURGE_CONFIG["high_demand_threshold"]:
-        demand_surge = 1 + (demand_ratio - SURGE_CONFIG["high_demand_threshold"]) * 2
-        if demand_surge > base_multiplier:
-            base_multiplier = demand_surge
-            surge_reason.append("High demand in area")
-    
-    final_multiplier = min(base_multiplier, SURGE_CONFIG["max_multiplier"])
-    
-    return {
-        "multiplier": round(final_multiplier, 2),
-        "is_surge": final_multiplier > 1.0,
-        "reasons": surge_reason if surge_reason else ["Normal pricing"],
-        "expires_in_minutes": 5
-    }
-
-@api_router.get("/surge/check")
-async def check_surge_pricing(lat: float, lng: float):
-    """Check current surge pricing for a location"""
-    return calculate_surge_multiplier(lat, lng)
-
-# ==================== RIDE BIDDING (INDRIVE STYLE) ====================
-
-class BidRequest(BaseModel):
-    rider_offered_price: float
-    pickup_lat: float
-    pickup_lng: float
-    dropoff_lat: float
-    dropoff_lng: float
-    pickup_address: str
-    dropoff_address: str
-    ride_type: str = "economy"
-
-@api_router.post("/rides/bid/create")
-async def create_ride_bid(request: BidRequest, rider_id: str):
-    """Rider creates a bid request with their offered price"""
-    surge = calculate_surge_multiplier(request.pickup_lat, request.pickup_lng)
-    
-    bid = {
-        "id": str(uuid.uuid4()),
-        "rider_id": rider_id,
-        "rider_offered_price": request.rider_offered_price,
-        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        "ride_type": request.ride_type,
-        "surge_multiplier": surge["multiplier"],
-        "status": "open",
-        "driver_bids": [],
-        "accepted_driver_id": None,
-        "accepted_price": None,
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(minutes=5)
-    }
-    
-    await db.ride_bids.insert_one(bid)
-    
-    return {"bid_id": bid["id"], "status": "open", "expires_in_minutes": 5, "surge_multiplier": surge["multiplier"]}
-
-@api_router.post("/rides/bid/{bid_id}/driver-offer")
-async def driver_make_offer(bid_id: str, driver_id: str, counter_price: float, message: Optional[str] = None):
-    """Driver makes a counter-offer"""
-    bid = await db.ride_bids.find_one({"id": bid_id, "status": "open"})
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found or closed")
-    
-    driver = await db.users.find_one({"id": driver_id, "role": "driver"})
-    
-    offer = {
-        "offer_id": str(uuid.uuid4()),
-        "driver_id": driver_id,
-        "driver_name": driver.get("name", "Driver") if driver else "Driver",
-        "driver_rating": driver.get("rating", 5.0) if driver else 5.0,
-        "counter_price": counter_price,
-        "message": message,
-        "created_at": datetime.utcnow()
-    }
-    
-    await db.ride_bids.update_one({"id": bid_id}, {"$push": {"driver_bids": offer}})
-    return {"success": True, "offer_id": offer["offer_id"]}
-
-@api_router.post("/rides/bid/{bid_id}/accept")
-async def accept_driver_offer(bid_id: str, rider_id: str, offer_id: str):
-    """Rider accepts a driver's offer"""
-    bid = await db.ride_bids.find_one({"id": bid_id, "rider_id": rider_id})
-    if not bid:
-        raise HTTPException(status_code=404, detail="Bid not found")
-    
-    accepted_offer = next((o for o in bid.get("driver_bids", []) if o["offer_id"] == offer_id), None)
-    if not accepted_offer:
-        raise HTTPException(status_code=404, detail="Offer not found")
-    
-    await db.ride_bids.update_one({"id": bid_id}, {"$set": {
-        "status": "accepted",
-        "accepted_driver_id": accepted_offer["driver_id"],
-        "accepted_price": accepted_offer["counter_price"]
-    }})
-    
-    trip = {
-        "id": str(uuid.uuid4()),
-        "bid_id": bid_id,
-        "rider_id": rider_id,
-        "driver_id": accepted_offer["driver_id"],
-        "pickup": bid["pickup"],
-        "dropoff": bid["dropoff"],
-        "fare": accepted_offer["counter_price"],
-        "ride_type": bid["ride_type"],
-        "status": "accepted",
-        "created_at": datetime.utcnow()
-    }
-    await db.trips.insert_one(trip)
-    
-    return {"success": True, "trip_id": trip["id"], "agreed_price": accepted_offer["counter_price"]}
-
-@api_router.get("/rides/bid/open")
-async def get_open_bids(lat: float, lng: float):
-    """Get open bids for drivers"""
-    bids = await db.ride_bids.find({"status": "open", "expires_at": {"$gt": datetime.utcnow()}}).limit(20).to_list(20)
-    return {"bids": [{"bid_id": b["id"], "rider_offered_price": b["rider_offered_price"], 
-                      "pickup_address": b["pickup"]["address"], "dropoff_address": b["dropoff"]["address"]} for b in bids]}
-
-# ==================== SCHEDULED RIDES ====================
-
-class ScheduledRideRequest(BaseModel):
-    pickup_lat: float
-    pickup_lng: float
-    pickup_address: str
-    dropoff_lat: float
-    dropoff_lng: float
-    dropoff_address: str
-    scheduled_time: datetime
-    ride_type: str = "economy"
-
-@api_router.post("/rides/schedule")
-async def schedule_ride(request: ScheduledRideRequest, rider_id: str):
-    """Schedule a ride for future"""
-    if request.scheduled_time < datetime.utcnow() + timedelta(minutes=30):
-        raise HTTPException(status_code=400, detail="Schedule at least 30 minutes ahead")
-    
-    scheduled = {
-        "id": str(uuid.uuid4()),
-        "rider_id": rider_id,
-        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        "scheduled_time": request.scheduled_time,
-        "ride_type": request.ride_type,
-        "status": "scheduled",
-        "created_at": datetime.utcnow()
-    }
-    await db.scheduled_rides.insert_one(scheduled)
-    return {"scheduled_ride_id": scheduled["id"], "scheduled_time": request.scheduled_time.isoformat()}
-
-@api_router.get("/rides/scheduled/{rider_id}")
-async def get_scheduled_rides(rider_id: str):
-    """Get scheduled rides"""
-    rides = await db.scheduled_rides.find({"rider_id": rider_id, "status": "scheduled"}).to_list(50)
-    return {"scheduled_rides": [{"id": r["id"], "pickup_address": r["pickup"]["address"], 
-                                 "scheduled_time": r["scheduled_time"].isoformat()} for r in rides]}
-
-# ==================== SPLIT FARE ====================
-
-@api_router.post("/rides/{trip_id}/split-fare")
-async def split_fare(trip_id: str, rider_id: str, phones: List[str]):
-    """Split fare with friends"""
-    trip = await db.trips.find_one({"id": trip_id, "rider_id": rider_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    per_person = round(trip.get("fare", 0) / (len(phones) + 1), 2)
-    split = {
-        "id": str(uuid.uuid4()),
-        "trip_id": trip_id,
-        "total_fare": trip.get("fare", 0),
-        "per_person": per_person,
-        "participants": [{"phone": p, "paid": False} for p in phones],
-        "created_at": datetime.utcnow()
-    }
-    await db.split_fares.insert_one(split)
-    return {"split_id": split["id"], "per_person": per_person, "num_participants": len(phones) + 1}
-
-# ==================== PACKAGE DELIVERY ====================
-
-class PackageRequest(BaseModel):
-    pickup_lat: float
-    pickup_lng: float
-    pickup_address: str
-    dropoff_lat: float
-    dropoff_lng: float
-    dropoff_address: str
-    recipient_name: str
-    recipient_phone: str
-    package_description: str
-    package_size: str = "small"
-
-@api_router.post("/delivery/request")
-async def request_delivery(request: PackageRequest, sender_id: str):
-    """Request package delivery"""
-    size_surcharge = {"small": 0, "medium": 200, "large": 500}
-    base_fare = 1500 + size_surcharge.get(request.package_size, 0)
-    
-    delivery = {
-        "id": str(uuid.uuid4()),
-        "sender_id": sender_id,
-        "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
-        "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        "recipient": {"name": request.recipient_name, "phone": request.recipient_phone},
-        "package": {"description": request.package_description, "size": request.package_size},
-        "fare": base_fare,
-        "pickup_code": str(random.randint(1000, 9999)),
-        "delivery_code": str(random.randint(1000, 9999)),
-        "status": "pending",
-        "created_at": datetime.utcnow()
-    }
-    await db.deliveries.insert_one(delivery)
-    return {"delivery_id": delivery["id"], "fare": base_fare, "pickup_code": delivery["pickup_code"]}
-
-# ==================== FEMALE DRIVER OPTION ====================
-
-@api_router.post("/rides/request-female-driver")
-async def request_female_driver(rider_id: str, pickup_lat: float, pickup_lng: float, pickup_address: str,
-                                 dropoff_lat: float, dropoff_lng: float, dropoff_address: str):
-    """Request ride with female driver only"""
-    trip = {
-        "id": str(uuid.uuid4()),
-        "rider_id": rider_id,
-        "pickup": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address},
-        "dropoff": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address},
-        "ride_type": "female_only",
-        "female_driver_only": True,
-        "status": "pending",
-        "created_at": datetime.utcnow()
-    }
-    await db.trips.insert_one(trip)
-    return {"trip_id": trip["id"], "message": "Looking for female drivers..."}
-
-# ==================== DRIVER HEAT MAPS ====================
-
-@api_router.get("/driver/heatmap")
-async def get_heatmap():
-    """Get demand heatmap for drivers"""
-    zones = [
-        {"lat": 6.5244, "lng": 3.3792, "intensity": 0.9, "name": "Lagos Island", "surge": 1.5},
-        {"lat": 6.4281, "lng": 3.4219, "intensity": 0.8, "name": "Victoria Island", "surge": 1.3},
-        {"lat": 6.4355, "lng": 3.4567, "intensity": 0.7, "name": "Lekki Phase 1", "surge": 1.2},
-        {"lat": 6.5833, "lng": 3.3500, "intensity": 0.85, "name": "Ikeja", "surge": 1.4},
-    ]
-    return {"zones": zones, "recommendation": "Head to Victoria Island for best earnings"}
-
-# ==================== PROMO CODES & REFERRALS ====================
-
-@api_router.post("/promo/apply")
-async def apply_promo(rider_id: str, code: str):
-    """Apply promo code"""
-    promo = await db.promo_codes.find_one({"code": code.upper(), "active": True})
-    if not promo:
-        raise HTTPException(status_code=404, detail="Invalid promo code")
-    
-    await db.users.update_one({"id": rider_id}, {"$push": {"active_promos": {"code": code, "applied_at": datetime.utcnow()}}})
-    return {"success": True, "discount_percent": promo.get("discount_percent", 10)}
-
-@api_router.get("/referral/code/{user_id}")
-async def get_referral_code(user_id: str):
-    """Get referral code"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    code = user.get("referral_code") or f"NEX{user.get('name', 'U')[:3].upper()}{random.randint(100, 999)}"
-    if not user.get("referral_code"):
-        await db.users.update_one({"id": user_id}, {"$set": {"referral_code": code}})
-    
-    return {"referral_code": code, "bonus_per_referral": 500}
-
-# Wallet endpoints moved to line 3144 - removed duplicates
-
-# ==================== TRIP RECEIPTS ====================
-
-@api_router.get("/trips/{trip_id}/receipt")
-async def get_receipt(trip_id: str):
-    """Get trip receipt"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    return {
-        "receipt_id": f"NXR-{trip_id[:8].upper()}",
-        "date": trip.get("created_at", datetime.utcnow()).isoformat(),
-        "pickup": trip.get("pickup", {}).get("address", ""),
-        "dropoff": trip.get("dropoff", {}).get("address", ""),
-        "fare": trip.get("fare", 0),
-        "payment_method": trip.get("payment_method", "cash"),
-        "status": trip.get("status", "completed")
-    }
-
-# ==================== MULTI-LANGUAGE ====================
-
-TRANSLATIONS = {
-    "en": {"welcome": "Welcome to NEXRYDE", "book_ride": "Book a Ride", "where_to": "Where to?"},
-    "pcm": {"welcome": "Welcome to NEXRYDE", "book_ride": "Book Ride", "where_to": "Where you dey go?"},
-    "yo": {"welcome": "Ẹ káàbọ̀ sí NEXRYDE", "book_ride": "Bẹ̀rẹ̀ Ìrìn-àjò", "where_to": "Níbo ni o ń lọ?"},
-    "ig": {"welcome": "Nnọọ na NEXRYDE", "book_ride": "Nweta Ụgbọ ala", "where_to": "Ebee ka ị na-aga?"},
-    "ha": {"welcome": "Barka da zuwa NEXRYDE", "book_ride": "Nemi Mota", "where_to": "Ina za ka?"},
-}
-
-@api_router.get("/languages")
-async def get_languages():
-    """Get supported languages"""
-    return {"languages": SUPPORTED_LANGUAGES, "default": "en"}
-
-@api_router.get("/translations/{lang}")
-async def get_translations(lang: str):
-    """Get translations"""
-    return {"language": lang, "translations": TRANSLATIONS.get(lang, TRANSLATIONS["en"])}
-
-# ==================== USER PREFERENCES ====================
-
-@api_router.put("/users/{user_id}/theme")
-async def set_theme(user_id: str, theme: str):
-    """Set theme preference"""
-    if theme not in ["light", "dark", "auto"]:
-        raise HTTPException(status_code=400, detail="Invalid theme")
-    await db.users.update_one({"id": user_id}, {"$set": {"theme_preference": theme}})
-    return {"success": True, "theme": theme}
-
-@api_router.get("/users/{user_id}/preferences")
-async def get_preferences(user_id: str):
-    """Get user preferences"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        return {"theme": "auto", "language": "en"}
-    return {
-        "theme": user.get("theme_preference", "auto"),
-        "language": user.get("preferred_language", "en"),
-        "notifications_enabled": user.get("notifications_enabled", True)
-    }
-
-
-# ==================== KODA FAMILY ====================
-
-@api_router.post("/family/create")
-async def create_family(owner_id: str, family_name: str):
-    """Create a new KODA Family group"""
-    user = await db.users.find_one({"id": owner_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if user.get("family_id"):
-        raise HTTPException(status_code=400, detail="User already belongs to a family")
-    
-    family_id = str(uuid.uuid4())
-    
-    # Create family group
-    family = {
-        "id": family_id,
-        "name": family_name,
-        "owner_id": owner_id,
-        "members": [{"user_id": owner_id, "role": "owner", "joined_at": datetime.utcnow()}],
-        "shared_payment_method": None,
-        "created_at": datetime.utcnow(),
-        "trust_score": user.get("trust_score", 100.0),
-        "max_members": 10
-    }
-    
-    await db.families.insert_one(family)
-    
-    # Update user
-    await db.users.update_one(
-        {"id": owner_id},
-        {"$set": {"family_id": family_id, "family_role": "owner"}}
-    )
-    
-    return {"message": "Family created successfully", "family_id": family_id, "family_name": family_name}
-
-@api_router.post("/family/{family_id}/add-member")
-async def add_family_member(family_id: str, phone: str, name: str, relationship: str):
-    """Add a member to KODA Family (up to 10 members)"""
-    family = await db.families.find_one({"id": family_id})
-    if not family:
-        raise HTTPException(status_code=404, detail="Family not found")
-    
-    if len(family["members"]) >= 10:
-        raise HTTPException(status_code=400, detail="Family has reached maximum 10 members")
-    
-    # Check if user exists
-    member_user = await db.users.find_one({"phone": phone})
-    
-    if member_user:
-        if member_user.get("family_id"):
-            raise HTTPException(status_code=400, detail="User already belongs to a family")
-        member_id = member_user["id"]
-    else:
-        # Create pending invitation
-        member_id = f"pending-{phone}"
-    
-    # Add to family
-    new_member = {
-        "user_id": member_id,
-        "phone": phone,
-        "name": name,
-        "relationship": relationship,
-        "role": "member",
-        "joined_at": datetime.utcnow(),
-        "is_pending": member_user is None
-    }
-    
-    await db.families.update_one(
-        {"id": family_id},
-        {"$push": {"members": new_member}}
-    )
-    
-    # Update user if exists
-    if member_user:
-        # Inherit trust score from family
-        inherited_trust = min(family.get("trust_score", 100.0), member_user.get("trust_score", 100.0))
-        await db.users.update_one(
-            {"id": member_id},
-            {"$set": {"family_id": family_id, "family_role": "member", "trust_score": inherited_trust}}
-        )
-    
-    return {"message": f"{name} added to family", "is_pending": member_user is None}
-
-@api_router.get("/family/{family_id}")
-async def get_family(family_id: str):
-    """Get family details"""
-    family = await db.families.find_one({"id": family_id})
-    if not family:
-        raise HTTPException(status_code=404, detail="Family not found")
-    
-    family["_id"] = str(family["_id"])
-    
-    # Enrich member data
-    enriched_members = []
-    for member in family["members"]:
-        if not member.get("is_pending"):
-            user = await db.users.find_one({"id": member["user_id"]})
-            if user:
-                member["rating"] = user.get("rating", 5.0)
-                member["total_trips"] = user.get("total_trips", 0)
-        enriched_members.append(member)
-    
-    family["members"] = enriched_members
-    return family
-
-@api_router.delete("/family/{family_id}/member/{member_phone}")
-async def remove_family_member(family_id: str, member_phone: str):
-    """Remove a member from family"""
-    family = await db.families.find_one({"id": family_id})
-    if not family:
-        raise HTTPException(status_code=404, detail="Family not found")
-    
-    # Find member
-    member_to_remove = None
-    for m in family["members"]:
-        if m.get("phone") == member_phone:
-            member_to_remove = m
-            break
-    
-    if not member_to_remove:
-        raise HTTPException(status_code=404, detail="Member not found")
-    
-    if member_to_remove.get("role") == "owner":
-        raise HTTPException(status_code=400, detail="Cannot remove family owner")
-    
-    # Remove from family
-    await db.families.update_one(
-        {"id": family_id},
-        {"$pull": {"members": {"phone": member_phone}}}
-    )
-    
-    # Update user if exists
-    if not member_to_remove.get("is_pending"):
-        await db.users.update_one(
-            {"id": member_to_remove["user_id"]},
-            {"$unset": {"family_id": "", "family_role": ""}}
-        )
-    
-    return {"message": "Member removed from family"}
-
-@api_router.post("/family/{family_id}/book-for-member")
-async def book_for_family_member(
-    family_id: str,
-    booker_id: str,
-    member_phone: str,
-    pickup_lat: float,
-    pickup_lng: float,
-    pickup_address: str,
-    dropoff_lat: float,
-    dropoff_lng: float,
-    dropoff_address: str
-):
-    """Book a ride for a family member"""
-    family = await db.families.find_one({"id": family_id})
-    if not family:
-        raise HTTPException(status_code=404, detail="Family not found")
-    
-    # Verify booker is in family
-    booker_in_family = any(m["user_id"] == booker_id for m in family["members"])
-    if not booker_in_family:
-        raise HTTPException(status_code=403, detail="Not authorized to book for this family")
-    
-    # Find member
-    member = None
-    for m in family["members"]:
-        if m.get("phone") == member_phone:
-            member = m
-            break
-    
-    if not member:
-        raise HTTPException(status_code=404, detail="Member not found in family")
-    
-    # Create trip
-    trip_id = str(uuid.uuid4())
-    trip = {
-        "id": trip_id,
-        "rider_id": member.get("user_id", f"family-{member_phone}"),
-        "rider_phone": member_phone,
-        "rider_name": member.get("name"),
-        "booked_by": booker_id,
-        "family_id": family_id,
-        "is_family_booking": True,
-        "pickup_location": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address},
-        "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address},
-        "status": "pending",
-        "created_at": datetime.utcnow(),
-        "fare": 0  # Will be calculated
-    }
-    
-    await db.trips.insert_one(trip)
-    
-    # Notify all family members (Safety Circle)
-    for m in family["members"]:
-        if m["user_id"] != booker_id:
-            await db.notifications.insert_one({
-                "user_id": m["user_id"],
-                "type": "family_trip_booked",
-                "title": f"Family Trip Alert",
-                "message": f"{member.get('name')} has a ride booked",
-                "data": {"trip_id": trip_id, "member_name": member.get("name")},
-                "created_at": datetime.utcnow(),
-                "read": False
-            })
-    
-    return {"message": "Trip booked for family member", "trip_id": trip_id}
-
-@api_router.post("/family/{family_id}/safety-alert")
-async def trigger_family_safety_alert(family_id: str, member_id: str, location_lat: float, location_lng: float):
-    """Trigger Safety Circle alert to all family members"""
-    family = await db.families.find_one({"id": family_id})
-    if not family:
-        raise HTTPException(status_code=404, detail="Family not found")
-    
-    member_name = "Family member"
-    for m in family["members"]:
-        if m["user_id"] == member_id:
-            member_name = m.get("name", "Family member")
-            break
-    
-    # Notify all family members
-    for m in family["members"]:
-        if m["user_id"] != member_id:
-            await db.notifications.insert_one({
-                "user_id": m["user_id"],
-                "type": "safety_circle_alert",
-                "title": "⚠️ SAFETY ALERT",
-                "message": f"{member_name} needs help! Check their location.",
-                "data": {"member_id": member_id, "location": {"lat": location_lat, "lng": location_lng}},
-                "created_at": datetime.utcnow(),
-                "read": False,
-                "urgent": True
-            })
-    
-    return {"message": "Safety alert sent to all family members", "notified_count": len(family["members"]) - 1}
-
-# ==================== DRIVER CERTIFICATION LEVELS ====================
-
-@api_router.get("/drivers/{user_id}/certification")
-async def get_driver_certification(user_id: str):
-    """Get driver's certification level and progress"""
-    user = await db.users.find_one({"id": user_id})
-    if not user or user.get("role") != "driver":
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    
-    # Calculate metrics
-    total_trips = user.get("total_trips", 0)
-    rating = user.get("rating", 5.0)
-    created_at = user.get("created_at", datetime.utcnow())
-    months_active = (datetime.utcnow() - created_at).days // 30
-    
-    # Determine current level
-    current_level = "bronze"
-    for level, requirements in DRIVER_CERTIFICATION_LEVELS.items():
-        if (total_trips >= requirements["min_trips"] and 
-            rating >= requirements["min_rating"] and 
-            months_active >= requirements["min_months"]):
-            current_level = level
-    
-    level_info = DRIVER_CERTIFICATION_LEVELS[current_level]
-    
-    # Calculate progress to next level
-    next_level = None
-    progress = {}
-    levels_order = ["bronze", "silver", "gold", "platinum"]
-    current_index = levels_order.index(current_level)
-    
-    if current_index < len(levels_order) - 1:
-        next_level = levels_order[current_index + 1]
-        next_req = DRIVER_CERTIFICATION_LEVELS[next_level]
-        progress = {
-            "trips": {"current": total_trips, "required": next_req["min_trips"], "percent": min(100, (total_trips / next_req["min_trips"]) * 100)},
-            "rating": {"current": rating, "required": next_req["min_rating"], "percent": min(100, (rating / next_req["min_rating"]) * 100)},
-            "months": {"current": months_active, "required": next_req["min_months"], "percent": min(100, (months_active / next_req["min_months"]) * 100)}
-        }
-    
-    return {
-        "current_level": current_level,
-        "level_name": level_info["name"],
-        "badge_color": level_info["badge_color"],
-        "perks": level_info["perks"],
-        "next_level": next_level,
-        "progress_to_next": progress,
-        "stats": {
-            "total_trips": total_trips,
-            "rating": rating,
-            "months_active": months_active
-        }
-    }
-
-# ==================== WOMEN-ONLY MODE ====================
-
-@api_router.post("/users/{user_id}/women-only-mode")
-async def toggle_women_only_mode(user_id: str, enabled: bool):
-    """Enable/disable women-only mode for female riders"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    if user.get("gender") != "female" and enabled:
-        raise HTTPException(status_code=400, detail="Women-only mode is only available for verified female riders")
-    
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"women_only_mode": enabled}}
-    )
-    
-    return {"message": f"Women-only mode {'enabled' if enabled else 'disabled'}", "women_only_mode": enabled}
-
-@api_router.post("/users/{user_id}/verify-gender")
-async def verify_gender(user_id: str, gender: str):
-    """Verify user gender for women-only mode"""
-    if gender not in ["male", "female", "other"]:
-        raise HTTPException(status_code=400, detail="Invalid gender")
-    
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"gender": gender}}
-    )
-    
-    return {"message": "Gender verified", "gender": gender}
-
-@api_router.get("/drivers/available-female")
-async def get_available_female_drivers(lat: float, lng: float, radius_km: float = 5.0):
-    """Get available female drivers for women-only rides"""
-    # In production, this would use geospatial queries
-    female_drivers = await db.users.find({
-        "role": "driver",
-        "gender": "female",
-        "is_verified": True
-    }).to_list(20)
-    
-    available = []
-    for driver in female_drivers:
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
-        if profile and profile.get("is_online"):
-            available.append({
-                "driver_id": driver["id"],
-                "name": driver.get("name", "Driver"),
-                "rating": driver.get("rating", 5.0),
-                "total_trips": driver.get("total_trips", 0),
-                "vehicle": profile.get("vehicle_model"),
-                "plate": profile.get("plate_number")
-            })
-    
-    return {"female_drivers": available, "count": len(available)}
-
-# ==================== EARNINGS PREDICTOR AI ====================
-
-@api_router.get("/ai/earnings-predictor/{user_id}")
-async def predict_earnings(user_id: str, hours_to_drive: int = 8):
-    """AI-powered earnings prediction for drivers"""
-    # Get historical data
-    stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {
-            "_id": None,
-            "total_earnings": {"$sum": "$fare"},
-            "total_trips": {"$sum": 1},
-            "avg_fare": {"$avg": "$fare"},
-            "avg_duration": {"$avg": "$duration_mins"}
-        }}
-    ]).to_list(1)
-    
-    driver_stats = stats[0] if stats else None
-    
-    # Get hourly pattern
-    hourly_stats = await db.trips.aggregate([
-        {"$match": {"driver_id": user_id, "status": "completed"}},
-        {"$group": {
-            "_id": {"$hour": "$created_at"},
-            "avg_fare": {"$avg": "$fare"},
-            "count": {"$sum": 1}
-        }},
-        {"$sort": {"avg_fare": -1}}
-    ]).to_list(24)
-    
-    # Calculate predictions
-    if driver_stats and driver_stats["total_trips"] > 0:
-        avg_trips_per_hour = driver_stats["total_trips"] / max(1, driver_stats["total_trips"] / 8)  # Assuming 8hr average day
-        avg_fare = driver_stats["avg_fare"]
-        
-        # Base prediction
-        predicted_trips = int(hours_to_drive * 2.5)  # Average 2.5 trips/hour in Lagos
-        predicted_earnings = predicted_trips * avg_fare
-        
-        # Find best hours
-        best_hours = [h["_id"] for h in hourly_stats[:3]] if hourly_stats else [7, 8, 17, 18]
-    else:
-        # Default for new drivers (Lagos averages)
-        avg_fare = 2500
-        predicted_trips = int(hours_to_drive * 2)
-        predicted_earnings = predicted_trips * avg_fare
-        best_hours = [7, 8, 17, 18]
-    
-    # Conservative, realistic, optimistic
-    predictions = {
-        "conservative": int(predicted_earnings * 0.7),
-        "realistic": int(predicted_earnings),
-        "optimistic": int(predicted_earnings * 1.3)
-    }
-    
-    # Use AI for personalized tips
-    ai_tip = "Focus on peak hours and high-demand areas for best results."
-    if EMERGENT_LLM_KEY:
-        try:
-            chat = LlmChat(
-                api_key=EMERGENT_LLM_KEY,
-                session_id=f"predictor-{user_id}",
-                system_message="You are KODA's earnings advisor. Give ONE short tip (under 30 words) for a driver to maximize earnings today in Lagos, Nigeria."
-            ).with_model("openai", "gpt-4o")
-            
-            user_message = UserMessage(text=f"Driver average fare: ₦{avg_fare:.0f}, planning to drive {hours_to_drive} hours. One tip?")
-            ai_tip = await chat.send_message(user_message)
-        except:
-            pass
-    
-    return {
-        "predicted_earnings": predictions,
-        "predicted_trips": predicted_trips,
-        "hours_planned": hours_to_drive,
-        "best_hours": best_hours,
-        "avg_fare": avg_fare,
-        "tip": ai_tip,
-        "disclaimer": "Predictions based on historical data. Actual earnings may vary."
-    }
-
-@api_router.get("/drivers/{user_id}/fatigue-status")
-async def get_fatigue_status(user_id: str):
-    """Get driver fatigue status"""
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if not profile:
-        return {"hours_driven": 0, "needs_break": False, "fatigue_level": "low"}
-    
-    hours_driven = profile.get("hours_driven_today", 0)
-    last_break = profile.get("last_break_at")
-    
-    # Calculate fatigue level
-    if hours_driven >= 10:
-        fatigue_level = "critical"
-        needs_break = True
-    elif hours_driven >= 8:
-        fatigue_level = "high"
-        needs_break = True
-    elif hours_driven >= 6:
-        fatigue_level = "medium"
-        needs_break = last_break is None or (datetime.utcnow() - last_break).seconds > 7200
-    else:
-        fatigue_level = "low"
-        needs_break = False
-    
-    return {
-        "hours_driven": hours_driven,
-        "needs_break": needs_break,
-        "fatigue_level": fatigue_level,
-        "last_break_at": last_break.isoformat() if last_break else None,
-        "recommendation": "Take a 15-minute break to stay alert" if needs_break else "You're doing great!"
-    }
-
-@api_router.post("/drivers/{user_id}/update-drive-time")
-async def update_drive_time(user_id: str, hours: float):
-    """Update driver's driving time (called periodically)"""
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
-    current_hours = profile.get("hours_driven_today", 0) if profile else 0
-    new_hours = current_hours + hours
-    
-    fatigue_warning = new_hours >= 8
-    
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"hours_driven_today": new_hours, "fatigue_warning": fatigue_warning}}
-    )
-    
-    return {"hours_driven": new_hours, "fatigue_warning": fatigue_warning}
-
-# ==================== LEADERBOARD ====================
-
-@api_router.get("/leaderboard/drivers")
-async def get_driver_leaderboard(city: str = "lagos", period: str = "weekly"):
-    """Get driver leaderboard"""
-    # Calculate date range
-    if period == "daily":
-        start_date = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    elif period == "weekly":
-        start_date = datetime.utcnow() - timedelta(days=7)
-    else:  # monthly
-        start_date = datetime.utcnow() - timedelta(days=30)
-    
-    # Get top earners
-    pipeline = [
-        {"$match": {"status": "completed", "completed_at": {"$gte": start_date}}},
-        {"$group": {
-            "_id": "$driver_id",
-            "total_earnings": {"$sum": "$fare"},
-            "trip_count": {"$sum": 1},
-            "avg_rating": {"$avg": "$driver_rating"}
-        }},
-        {"$sort": {"total_earnings": -1}},
-        {"$limit": 20}
-    ]
-    
-    earnings_leaders = await db.trips.aggregate(pipeline).to_list(20)
-    
-    # Enrich with driver details
-    leaderboard = []
-    for rank, leader in enumerate(earnings_leaders, 1):
-        if leader["_id"]:
-            user = await db.users.find_one({"id": leader["_id"]})
-            if user:
-                leaderboard.append({
-                    "rank": rank,
-                    "driver_id": leader["_id"],
-                    "name": user.get("name", "Anonymous")[:10] + "..." if user.get("name") else "Anonymous",
-                    "earnings": leader["total_earnings"],
-                    "trips": leader["trip_count"],
-                    "rating": round(leader["avg_rating"] or 5.0, 1)
-                })
-    
-    return {"period": period, "city": city, "leaderboard": leaderboard}
-
-@api_router.get("/leaderboard/top-rated")
-async def get_top_rated_drivers(limit: int = 20):
-    """Get top rated drivers"""
-    pipeline = [
-        {"$match": {"role": "driver", "rating": {"$exists": True}}},
-        {"$sort": {"rating": -1, "total_trips": -1}},
-        {"$limit": limit}
-    ]
-    
-    top_drivers = await db.users.aggregate(pipeline).to_list(limit)
-    
-    result = []
-    for rank, driver in enumerate(top_drivers, 1):
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]})
-        result.append({
-            "rank": rank,
-            "driver_id": driver["id"],
-            "name": (driver.get("name", "Anonymous")[:10] + "...") if driver.get("name") else "Anonymous",
-            "rating": driver.get("rating", 5.0),
-            "total_trips": driver.get("total_trips", 0),
-            "comfort_scores": {
-                "smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0,
-                "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0,
-                "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0,
-                "safety": profile.get("safety_rating", 5.0) if profile else 5.0,
-            }
-        })
-    
-    return {"top_rated_drivers": result}
-
-# ==================== TRIP SHARING (Family & Friends) ====================
-
-@api_router.post("/trips/{trip_id}/share")
-async def share_trip(trip_id: str, recipient_phone: str, recipient_name: str = ""):
-    """Share trip with family/friend for live tracking"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Generate a share token
-    share_token = str(uuid.uuid4())[:8].upper()
-    
-    # Store share info
-    share_info = {
-        "trip_id": trip_id,
-        "token": share_token,
-        "recipient_phone": recipient_phone,
-        "recipient_name": recipient_name,
-        "shared_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(hours=24)
-    }
-    
-    await db.trip_shares.insert_one(share_info)
-    
-    # In production: Send SMS with tracking link
-    tracking_link = f"https://koda.app/track/{share_token}"
-    
-    return {
-        "message": f"Trip shared with {recipient_name or recipient_phone}",
-        "share_token": share_token,
-        "tracking_link": tracking_link
-    }
-
-@api_router.get("/trips/track/{share_token}")
-async def track_shared_trip(share_token: str):
-    """Track a shared trip (for family/friends)"""
-    share = await db.trip_shares.find_one({"token": share_token})
-    if not share:
-        raise HTTPException(status_code=404, detail="Invalid tracking link")
-    
-    if datetime.utcnow() > share["expires_at"]:
-        raise HTTPException(status_code=400, detail="Tracking link has expired")
-    
-    trip = await db.trips.find_one({"id": share["trip_id"]})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Get driver location
-    driver_location = None
-    if trip.get("driver_id"):
-        profile = await db.driver_profiles.find_one({"user_id": trip["driver_id"]})
-        driver_location = profile.get("current_location") if profile else None
-    
-    return {
-        "trip_id": trip["id"],
-        "status": trip["status"],
-        "pickup": trip["pickup_location"],
-        "dropoff": trip["dropoff_location"],
-        "driver_location": driver_location,
-        "rider_name": "Rider",  # Don't expose full name for privacy
-        "fare": trip["fare"],
-        "sos_triggered": trip.get("sos_triggered", False)
-    }
-
-# ==================== FRAUD DETECTION ====================
-
-@api_router.get("/admin/fraud-alerts")
-async def get_fraud_alerts():
-    """Get potential fraud alerts (admin only)"""
-    # Find suspicious patterns
-    alerts = []
-    
-    # High cancellation users
-    high_cancel_pipeline = [
-        {"$match": {"status": "cancelled"}},
-        {"$group": {"_id": "$cancelled_by", "count": {"$sum": 1}}},
-        {"$match": {"count": {"$gt": 5}}},
-        {"$sort": {"count": -1}}
-    ]
-    high_cancellers = await db.trips.aggregate(high_cancel_pipeline).to_list(10)
-    for item in high_cancellers:
-        if item["_id"]:
-            alerts.append({
-                "type": "high_cancellation",
-                "user_id": item["_id"],
-                "count": item["count"],
-                "severity": "medium"
-            })
-    
-    # Multiple SOS triggers
-    sos_pipeline = [
-        {"$group": {"_id": "$user_id", "count": {"$sum": 1}}},
-        {"$match": {"count": {"$gt": 3}}},
-        {"$sort": {"count": -1}}
-    ]
-    sos_abusers = await db.sos_alerts.aggregate(sos_pipeline).to_list(10)
-    for item in sos_abusers:
-        if item["_id"]:
-            alerts.append({
-                "type": "sos_abuse",
-                "user_id": item["_id"],
-                "count": item["count"],
-                "severity": "high"
-            })
-    
-    # Low behavior scores
-    low_score_users = await db.users.find({"behavior_score": {"$lt": 50}}).to_list(10)
-    for user in low_score_users:
-        alerts.append({
-            "type": "low_behavior_score",
-            "user_id": user["id"],
-            "score": user.get("behavior_score", 0),
-            "severity": "medium"
-        })
-    
-    return {"fraud_alerts": alerts, "total": len(alerts)}
-
-@api_router.post("/admin/update-behavior-score")
-async def update_behavior_score(user_id: str, event_type: str):
-    """Update user behavior score based on events"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    current_score = user.get("behavior_score", 100.0)
-    change = calculate_behavior_score_change(event_type)
-    new_score = max(0, min(100, current_score + change))
-    
-    await db.users.update_one({"id": user_id}, {"$set": {"behavior_score": new_score}})
-    
-    return {"previous_score": current_score, "new_score": new_score, "change": change}
-
-# ==================== STREAK & BADGE SYSTEM ====================
-
-@api_router.get("/drivers/{user_id}/streaks")
-async def get_driver_streaks(user_id: str):
-    """Get driver's streak information"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    streaks = user.get("streaks", {"current": 0, "best": 0, "last_date": None})
-    badges = user.get("badges", [])
-    
-    # Check for badge unlocks
-    available_badges = [
-        {"id": "first_trip", "name": "First Ride", "requirement": "Complete your first trip", "icon": "🚗"},
-        {"id": "streak_7", "name": "Week Warrior", "requirement": "7-day streak", "icon": "🔥"},
-        {"id": "streak_30", "name": "Monthly Master", "requirement": "30-day streak", "icon": "⭐"},
-        {"id": "trips_100", "name": "Century Club", "requirement": "100 trips completed", "icon": "💯"},
-        {"id": "five_star", "name": "Perfect Driver", "requirement": "Maintain 5.0 rating for a week", "icon": "🌟"},
-        {"id": "early_bird", "name": "Early Bird", "requirement": "Complete 10 rides before 8 AM", "icon": "🌅"},
-        {"id": "night_owl", "name": "Night Owl", "requirement": "Complete 10 rides after 10 PM", "icon": "🦉"},
-    ]
-    
-    return {
-        "current_streak": streaks.get("current", 0),
-        "best_streak": streaks.get("best", 0),
-        "last_active": streaks.get("last_date"),
-        "earned_badges": badges,
-        "available_badges": [b for b in available_badges if b["id"] not in badges]
-    }
-
-@api_router.post("/drivers/{user_id}/check-streak")
-async def check_and_update_streak(user_id: str):
-    """Check and update driver's daily streak"""
-    user = await db.users.find_one({"id": user_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    streaks = user.get("streaks", {"current": 0, "best": 0, "last_date": None})
-    today = datetime.utcnow().date()
-    
-    last_date = streaks.get("last_date")
-    if last_date:
-        last_date = datetime.fromisoformat(last_date).date() if isinstance(last_date, str) else last_date
-    
-    new_current = streaks.get("current", 0)
-    new_best = streaks.get("best", 0)
-    
-    # Check if completed a trip today
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_trip = await db.trips.find_one({
-        "driver_id": user_id,
-        "status": "completed",
-        "completed_at": {"$gte": today_start}
-    })
-    
-    if today_trip:
-        if last_date == today - timedelta(days=1):
-            # Consecutive day
-            new_current += 1
-        elif last_date != today:
-            # Streak broken or first day
-            new_current = 1
-        
-        new_best = max(new_best, new_current)
-        
-        await db.users.update_one(
-            {"id": user_id},
-            {"$set": {
-                "streaks.current": new_current,
-                "streaks.best": new_best,
-                "streaks.last_date": today.isoformat()
-            }}
-        )
-        
-        # Check for streak badges
-        badges = user.get("badges", [])
-        if new_current >= 7 and "streak_7" not in badges:
-            await db.users.update_one({"id": user_id}, {"$push": {"badges": "streak_7"}})
-        if new_current >= 30 and "streak_30" not in badges:
-            await db.users.update_one({"id": user_id}, {"$push": {"badges": "streak_30"}})
-    
-    return {
-        "current_streak": new_current,
-        "best_streak": new_best,
-        "streak_maintained": today_trip is not None
-    }
-
-# ==================== AUDIO RECORDING ====================
-
-@api_router.post("/trips/{trip_id}/start-recording")
-async def start_trip_recording(trip_id: str):
-    """Start audio recording for trip (metadata only for MVP)"""
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"recording_enabled": True, "recording_started_at": datetime.utcnow()}}
-    )
-    return {"message": "Recording started", "trip_id": trip_id}
-
-@api_router.post("/trips/{trip_id}/stop-recording")
-async def stop_trip_recording(trip_id: str):
-    """Stop audio recording for trip"""
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"recording_enabled": False, "recording_stopped_at": datetime.utcnow()}}
-    )
-    return {"message": "Recording stopped", "trip_id": trip_id}
-
-# ==================== INSURANCE INFO ====================
-
-@api_router.get("/trips/{trip_id}/insurance")
-async def get_trip_insurance(trip_id: str):
-    """Get trip insurance information"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    return {
-        "trip_id": trip_id,
-        "is_insured": trip.get("is_insured", True),
-        "insurance_id": trip.get("insurance_id"),
-        "coverage": {
-            "personal_accident": "₦500,000",
-            "medical_expenses": "₦100,000",
-            "property_damage": "₦50,000"
-        },
-        "provider": "KODA Insurance Partners",
-        "valid_until": trip.get("completed_at") or "Trip completion"
-    }
-
-# ==================== DRIVER TIER SYSTEM ====================
-
-@api_router.get("/driver/tier/{driver_id}")
-async def get_driver_tier(driver_id: str):
-    """Get driver's current tier and requirements"""
-    tier_data = await db.driver_tiers.find_one({"driver_id": driver_id})
-    
-    if not tier_data:
-        # Create default basic tier
-        tier_data = {
-            "id": str(uuid.uuid4()),
-            "driver_id": driver_id,
-            "tier": "basic",
-            "requirements_met": {},
-            "warnings": 0,
-            "created_at": datetime.utcnow()
-        }
-        await db.driver_tiers.insert_one(tier_data)
-    
-    current_tier = tier_data.get("tier", "basic")
-    tier_config = TIER_CONFIG.get(current_tier, TIER_CONFIG["basic"])
-    
-    return {
-        "driver_id": driver_id,
-        "current_tier": current_tier,
-        "tier_name": tier_config["name"],
-        "monthly_fee": tier_config["monthly_fee"],
-        "earning_potential": tier_config["earning_per_ride"],
-        "requirements": TIER_CONFIG["premium"]["requirements"],
-        "requirements_met": tier_data.get("requirements_met", {}),
-        "warnings": tier_data.get("warnings", 0),
-        "probation_until": tier_data.get("probation_until"),
-        "can_upgrade": current_tier == "basic",
-        "upgrade_path": {
-            "steps": [
-                "Maintain 4.7★ rating for 60 days",
-                "Own/lease approved Premium vehicle (2018+)",
-                "Complete free Premium Service course",
-                "Pass vehicle inspection (₦2,000)",
-            ],
-            "extra_fee": 0  # No extra monthly fee!
-        },
-        "premium_perks": TIER_CONFIG["premium"].get("perks", [])
-    }
-
-@api_router.post("/driver/tier/upgrade")
-async def request_tier_upgrade(driver_id: str, request: DriverTierUpgradeRequest):
-    """Request upgrade to Premium tier"""
-    driver = await db.driver_profiles.find_one({"user_id": driver_id})
-    if not driver:
-        raise HTTPException(status_code=404, detail="Driver not found")
-    
-    user = await db.users.find_one({"id": driver_id})
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    
-    # Check rating requirement
-    if user.get("rating", 0) < 4.7:
-        raise HTTPException(status_code=400, detail="Rating must be 4.7 or higher")
-    
-    # Check vehicle year
-    if request.vehicle_year < 2018:
-        raise HTTPException(status_code=400, detail="Vehicle must be 2018 or newer")
-    
-    # Create inspection request
-    inspection = {
-        "id": str(uuid.uuid4()),
-        "driver_id": driver_id,
-        "inspection_type": "initial",
-        "status": "pending",
-        "interior_photo": request.interior_photo,
-        "exterior_photo": request.exterior_photo,
-        "leather_seats": request.leather_seats,
-        "ac_working": request.dual_ac,
-        "vehicle_year": request.vehicle_year,
-        "created_at": datetime.utcnow()
-    }
-    await db.vehicle_inspections.insert_one(inspection)
-    
-    # Update tier requirements met
-    await db.driver_tiers.update_one(
-        {"driver_id": driver_id},
-        {
-            "$set": {
-                "requirements_met": {
-                    "rating_ok": True,
-                    "vehicle_year_ok": True,
-                    "leather_seats": request.leather_seats,
-                    "dual_ac": request.dual_ac,
-                    "inspection_pending": True
-                }
-            }
-        },
-        upsert=True
-    )
-    
-    return {
-        "message": "Upgrade request submitted",
-        "inspection_id": inspection["id"],
-        "next_steps": [
-            "Vehicle inspection will be scheduled within 48 hours",
-            "Complete Premium Service training (free in-app course)",
-            "Inspection fee: ₦2,000 at partner garage"
-        ]
-    }
-
-@api_router.get("/tiers/config")
-async def get_tier_configuration():
-    """Get all tier configurations"""
-    return {
-        "tiers": TIER_CONFIG,
-        "same_monthly_fee": True,
-        "fee_amount": 25000,
-        "upgrade_benefit": "Higher earning potential per ride, NOT higher fee"
-    }
-
-# ==================== AUTOMATIC FARE ADJUSTMENT ====================
-
-def get_time_rate(trip_time: datetime) -> float:
-    """Get the time-based rate for fare adjustment"""
-    hour = trip_time.hour
-    weekday = trip_time.weekday()
-    
-    config = FARE_ADJUSTMENT_CONFIG
-    
-    # Night hours (10pm - 5am)
-    if hour >= config["night_hours"]["start"] or hour < config["night_hours"]["end"]:
-        return config["time_rates"]["night"]
-    
-    # Peak hours
-    peak = config["peak_hours"]
-    if (peak["morning"]["start"] <= hour < peak["morning"]["end"] or
-        peak["evening"]["start"] <= hour < peak["evening"]["end"]):
-        return config["time_rates"]["peak"]
-    
-    # Weekend
-    if weekday >= 5:
-        return config["time_rates"]["weekend"]
-    
-    return config["time_rates"]["normal"]
-
-def get_weather_surcharge(weather_condition: str) -> float:
-    """Get weather surcharge percentage"""
-    surcharges = FARE_ADJUSTMENT_CONFIG["weather_surcharges"]
-    return surcharges.get(weather_condition, 0.0)
-
-@api_router.post("/fare/calculate-adjustment")
-async def calculate_fare_adjustment(trip_id: str):
-    """Calculate automatic fare adjustment at trip end"""
-    trip = await db.trips.find_one({"id": trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    tracking = await db.trip_tracking.find_one({"trip_id": trip_id})
-    
-    base_fare = trip.get("fare", 0)
-    estimated_time = trip.get("duration_mins", 0)
-    
-    # Calculate actual time
-    started_at = trip.get("started_at")
-    completed_at = trip.get("completed_at") or datetime.utcnow()
-    
-    if started_at:
-        actual_time = int((completed_at - started_at).total_seconds() / 60)
-    else:
-        actual_time = estimated_time
-    
-    config = FARE_ADJUSTMENT_CONFIG
-    free_buffer = config["free_buffer_minutes"]
-    
-    # Extra time calculation
-    extra_time = max(0, actual_time - estimated_time - free_buffer)
-    
-    # Get time rate
-    time_rate = get_time_rate(started_at or datetime.utcnow())
-    
-    # Calculate traffic charge
-    traffic_charge = extra_time * time_rate
-    
-    # Weather surcharge (check tracking data)
-    weather_surcharge = 0.0
-    weather_condition = None
-    if tracking:
-        weather_conditions = tracking.get("weather_conditions", [])
-        for wc in weather_conditions:
-            if wc.get("surcharge_applied"):
-                weather_condition = wc.get("condition")
-                weather_surcharge = base_fare * get_weather_surcharge(weather_condition)
-                break
-    
-    # Total adjustment
-    total_adjustment = traffic_charge + weather_surcharge
-    
-    # Apply 50% cap
-    max_cap = config["max_increase_percentage"] / 100
-    max_increase = base_fare * max_cap
-    cap_applied = total_adjustment > max_increase
-    
-    if cap_applied:
-        total_adjustment = max_increase
-    
-    final_fare = base_fare + total_adjustment
-    
-    # Store adjustment
-    adjustment = {
-        "id": str(uuid.uuid4()),
-        "trip_id": trip_id,
-        "base_fare": base_fare,
-        "estimated_time_mins": estimated_time,
-        "actual_time_mins": actual_time,
-        "extra_time_mins": extra_time,
-        "time_rate": time_rate,
-        "traffic_charge": traffic_charge,
-        "weather_surcharge": weather_surcharge,
-        "weather_condition": weather_condition,
-        "total_adjustment": total_adjustment,
-        "final_fare": final_fare,
-        "cap_applied": cap_applied,
-        "max_cap_percentage": config["max_increase_percentage"],
-        "calculated_at": datetime.utcnow()
-    }
-    await db.fare_adjustments.insert_one(adjustment)
-    
-    # Update trip with final fare
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"fare": final_fare, "traffic_fee": traffic_charge}}
-    )
-    
-    return {
-        "trip_id": trip_id,
-        "breakdown": {
-            "base_fare": base_fare,
-            "traffic_delay": {
-                "extra_minutes": extra_time,
-                "rate_per_minute": time_rate,
-                "charge": traffic_charge
-            },
-            "weather_surcharge": weather_surcharge,
-            "weather_condition": weather_condition,
-            "total_adjustment": total_adjustment,
-            "cap_applied": cap_applied,
-            "max_cap": f"{config['max_increase_percentage']}%"
-        },
-        "final_fare": final_fare,
-        "message": "Fare calculated automatically based on actual trip conditions"
-    }
-
-@api_router.get("/fare/breakdown/{trip_id}")
-async def get_fare_breakdown(trip_id: str):
-    """Get detailed fare breakdown for a completed trip"""
-    adjustment = await db.fare_adjustments.find_one({"trip_id": trip_id})
-    trip = await db.trips.find_one({"id": trip_id})
-    
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    if not adjustment:
-        # No adjustment was made
-        return {
-            "trip_id": trip_id,
-            "base_fare": trip.get("fare", 0),
-            "adjustments": None,
-            "final_fare": trip.get("fare", 0),
-            "message": "No adjustments applied to this trip"
-        }
-    
-    return {
-        "trip_id": trip_id,
-        "base_fare": adjustment.get("base_fare"),
-        "estimated_time": adjustment.get("estimated_time_mins"),
-        "actual_time": adjustment.get("actual_time_mins"),
-        "breakdown": {
-            "traffic_delay": {
-                "extra_minutes": adjustment.get("extra_time_mins"),
-                "rate": adjustment.get("time_rate"),
-                "charge": adjustment.get("traffic_charge")
-            },
-            "weather": {
-                "condition": adjustment.get("weather_condition"),
-                "surcharge": adjustment.get("weather_surcharge")
-            }
-        },
-        "total_adjustment": adjustment.get("total_adjustment"),
-        "cap_applied": adjustment.get("cap_applied"),
-        "final_fare": adjustment.get("final_fare"),
-        "calculated_at": adjustment.get("calculated_at")
-    }
-
-@api_router.post("/trips/{trip_id}/track")
-async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate):
-    """Update trip tracking data (speed, location)"""
-    tracking = await db.trip_tracking.find_one({"trip_id": trip_id})
-    
-    speed_log = {
-        "timestamp": update.timestamp.isoformat(),
-        "speed_kmh": update.speed_kmh,
-        "location": {"lat": update.latitude, "lng": update.longitude}
-    }
-    
-    if not tracking:
-        tracking = {
-            "id": str(uuid.uuid4()),
-            "trip_id": trip_id,
-            "speed_logs": [speed_log],
-            "traffic_delays": [],
-            "weather_conditions": [],
-            "route_deviations": [],
-            "stationary_periods": [],
-            "created_at": datetime.utcnow()
-        }
-        await db.trip_tracking.insert_one(tracking)
-    else:
-        # Detect traffic (speed < 10 km/h for extended period)
-        speed_logs = tracking.get("speed_logs", [])
-        if len(speed_logs) >= 5:
-            recent_speeds = [log["speed_kmh"] for log in speed_logs[-5:]]
-            avg_speed = sum(recent_speeds) / len(recent_speeds)
-            
-            if avg_speed < 10 and update.speed_kmh < 10:
-                # Traffic detected
-                traffic_delays = tracking.get("traffic_delays", [])
-                if traffic_delays and not traffic_delays[-1].get("end"):
-                    # Continue existing delay
-                    pass
-                else:
-                    # New delay
-                    traffic_delays.append({
-                        "start": datetime.utcnow().isoformat(),
-                        "location": {"lat": update.latitude, "lng": update.longitude}
-                    })
-                    await db.trip_tracking.update_one(
-                        {"trip_id": trip_id},
-                        {"$set": {"traffic_delays": traffic_delays}}
-                    )
-        
-        await db.trip_tracking.update_one(
-            {"trip_id": trip_id},
-            {"$push": {"speed_logs": speed_log}}
-        )
-    
-    return {"message": "Tracking updated", "trip_id": trip_id}
-
-# ==================== RIDER PREFERENCES ====================
-
-@api_router.get("/rider/preferences/{user_id}")
-async def get_rider_preferences(user_id: str):
-    """Get rider's preferences"""
-    prefs = await db.rider_preferences.find_one({"user_id": user_id})
-    
-    if not prefs:
-        prefs = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "preferred_ride_type": "any",
-            "preferred_ac_level": "medium",
-            "preferred_music": "none",
-            "saved_routes": [],
-            "default_payment": "cash",
-            "auto_tip_percentage": 0.0,
-            "created_at": datetime.utcnow()
-        }
-        await db.rider_preferences.insert_one(prefs)
-    
-    return prefs
-
-@api_router.put("/rider/preferences/{user_id}")
-async def update_rider_preferences(user_id: str, request: RiderPreferencesUpdate):
-    """Update rider's preferences"""
-    update_data = {k: v for k, v in request.dict().items() if v is not None}
-    
-    await db.rider_preferences.update_one(
-        {"user_id": user_id},
-        {"$set": update_data},
-        upsert=True
-    )
-    
-    return {"message": "Preferences updated", "updated": update_data}
-
-@api_router.post("/rider/preferences/{user_id}/routes")
-async def save_route(user_id: str, route: SavedRouteRequest):
-    """Save a favorite route"""
-    saved_route = {
-        "id": str(uuid.uuid4()),
-        "name": route.name,
-        "pickup": {
-            "lat": route.pickup_lat,
-            "lng": route.pickup_lng,
-            "address": route.pickup_address
-        },
-        "dropoff": {
-            "lat": route.dropoff_lat,
-            "lng": route.dropoff_lng,
-            "address": route.dropoff_address
-        },
-        "created_at": datetime.utcnow().isoformat()
-    }
-    
-    await db.rider_preferences.update_one(
-        {"user_id": user_id},
-        {"$push": {"saved_routes": saved_route}},
-        upsert=True
-    )
-    
-    return {"message": "Route saved", "route": saved_route}
-
-@api_router.delete("/rider/preferences/{user_id}/routes/{route_id}")
-async def delete_saved_route(user_id: str, route_id: str):
-    """Delete a saved route"""
-    await db.rider_preferences.update_one(
-        {"user_id": user_id},
-        {"$pull": {"saved_routes": {"id": route_id}}}
-    )
-    
-    return {"message": "Route deleted"}
-
-# ==================== LOYALTY PROGRAM ====================
-
-@api_router.get("/loyalty/{user_id}")
-async def get_loyalty_status(user_id: str):
-    """Get user's loyalty program status"""
-    loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
-    
-    if not loyalty:
-        loyalty = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "tier": "bronze",
-            "points": 0,
-            "total_trips": 0,
-            "total_spent": 0.0,
-            "perks_earned": [],
-            "created_at": datetime.utcnow()
-        }
-        await db.loyalty_programs.insert_one(loyalty)
-    
-    current_tier = loyalty.get("tier", "bronze")
-    tier_config = LOYALTY_TIERS.get(current_tier, LOYALTY_TIERS["bronze"])
-    
-    # Find next tier
-    next_tier = None
-    next_tier_requirements = None
-    tier_order = ["bronze", "silver", "gold", "platinum"]
-    current_index = tier_order.index(current_tier)
-    if current_index < len(tier_order) - 1:
-        next_tier = tier_order[current_index + 1]
-        next_tier_requirements = LOYALTY_TIERS[next_tier]
-    
-    return {
-        "user_id": user_id,
-        "current_tier": current_tier,
-        "points": loyalty.get("points", 0),
-        "total_trips": loyalty.get("total_trips", 0),
-        "total_spent": loyalty.get("total_spent", 0),
-        "current_perks": tier_config["perks"],
-        "points_multiplier": tier_config["points_multiplier"],
-        "next_tier": next_tier,
-        "next_tier_requirements": next_tier_requirements,
-        "progress_to_next": {
-            "trips_needed": (next_tier_requirements["min_trips"] - loyalty.get("total_trips", 0)) if next_tier_requirements else 0,
-            "spent_needed": (next_tier_requirements["min_spent"] - loyalty.get("total_spent", 0)) if next_tier_requirements else 0
-        } if next_tier else None
-    }
-
-@api_router.post("/loyalty/{user_id}/add-points")
-async def add_loyalty_points(user_id: str, trip_fare: float):
-    """Add points from completed trip"""
-    loyalty = await db.loyalty_programs.find_one({"user_id": user_id})
-    
-    if not loyalty:
-        loyalty = {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "tier": "bronze",
-            "points": 0,
-            "total_trips": 0,
-            "total_spent": 0.0,
-            "perks_earned": [],
-            "created_at": datetime.utcnow()
-        }
-    
-    current_tier = loyalty.get("tier", "bronze")
-    multiplier = LOYALTY_TIERS[current_tier]["points_multiplier"]
-    
-    # 1 point per 100 NGN spent
-    base_points = int(trip_fare / 100)
-    earned_points = int(base_points * multiplier)
-    
-    new_total_trips = loyalty.get("total_trips", 0) + 1
-    new_total_spent = loyalty.get("total_spent", 0) + trip_fare
-    new_points = loyalty.get("points", 0) + earned_points
-    
-    # Check for tier upgrade
-    new_tier = current_tier
-    for tier_name in ["platinum", "gold", "silver"]:
-        tier_req = LOYALTY_TIERS[tier_name]
-        if new_total_trips >= tier_req["min_trips"] and new_total_spent >= tier_req["min_spent"]:
-            new_tier = tier_name
-            break
-    
-    tier_upgraded = new_tier != current_tier
-    
-    await db.loyalty_programs.update_one(
-        {"user_id": user_id},
-        {
-            "$set": {
-                "points": new_points,
-                "total_trips": new_total_trips,
-                "total_spent": new_total_spent,
-                "tier": new_tier
-            }
-        },
-        upsert=True
-    )
-    
-    return {
-        "points_earned": earned_points,
-        "total_points": new_points,
-        "tier": new_tier,
-        "tier_upgraded": tier_upgraded,
-        "message": f"Earned {earned_points} points!" + (f" Upgraded to {new_tier}!" if tier_upgraded else "")
-    }
-
-# ==================== IN-APP MESSAGING ====================
-
-@api_router.post("/messages/send")
-async def send_message(request: SendMessageRequest, sender_id: str, sender_role: str):
-    """Send in-app message during trip"""
-    trip = await db.trips.find_one({"id": request.trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    # Preset messages for quick communication
-    preset_messages = {
-        "arriving_soon": "I'm arriving soon, please be ready",
-        "at_location": "I'm at the pickup location",
-        "blue_gate": "I'm at the blue gate",
-        "red_gate": "I'm at the red gate",
-        "running_late": "I'm running a few minutes late",
-        "waiting": "I'm waiting for you",
-        "wrong_location": "The pin seems to be in the wrong location",
-        "call_me": "Please call me"
-    }
-    
-    content = request.content
-    if request.message_type == "preset" and request.content in preset_messages:
-        content = preset_messages[request.content]
-    
-    message = {
-        "id": str(uuid.uuid4()),
-        "trip_id": request.trip_id,
-        "sender_id": sender_id,
-        "sender_role": sender_role,
-        "message_type": request.message_type,
-        "content": content,
-        "read": False,
-        "created_at": datetime.utcnow()
-    }
-    await db.messages.insert_one(message)
-    
-    return {"message": "Message sent", "data": message}
-
-@api_router.get("/messages/{trip_id}")
-async def get_trip_messages(trip_id: str):
-    """Get all messages for a trip"""
-    messages = await db.messages.find({"trip_id": trip_id}).sort("created_at", 1).to_list(100)
-    
-    return {
-        "trip_id": trip_id,
-        "messages": messages,
-        "preset_options": [
-            {"key": "arriving_soon", "text": "I'm arriving soon, please be ready"},
-            {"key": "at_location", "text": "I'm at the pickup location"},
-            {"key": "blue_gate", "text": "I'm at the blue gate"},
-            {"key": "running_late", "text": "I'm running a few minutes late"},
-            {"key": "call_me", "text": "Please call me"}
-        ]
-    }
-
-@api_router.put("/messages/{message_id}/read")
-async def mark_message_read(message_id: str):
-    """Mark message as read"""
-    await db.messages.update_one({"id": message_id}, {"$set": {"read": True}})
-    return {"message": "Message marked as read"}
-
-# ==================== LOST & FOUND ====================
-
-@api_router.post("/lost-found/report")
-async def report_lost_item(request: ReportLostItemRequest, reporter_id: str, reporter_role: str):
-    """Report a lost item"""
-    trip = await db.trips.find_one({"id": request.trip_id})
-    if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
-    item = {
-        "id": str(uuid.uuid4()),
-        "trip_id": request.trip_id,
-        "reporter_id": reporter_id,
-        "reporter_role": reporter_role,
-        "item_description": request.item_description,
-        "status": "reported",
-        "created_at": datetime.utcnow()
-    }
-    await db.lost_items.insert_one(item)
-    
-    return {
-        "message": "Lost item reported",
-        "item_id": item["id"],
-        "next_steps": [
-            "The other party will be notified",
-            "You can communicate through the app",
-            "Check back for updates on item status"
-        ]
-    }
-
-@api_router.get("/lost-found/user/{user_id}")
-async def get_user_lost_items(user_id: str):
-    """Get user's lost item reports"""
-    items = await db.lost_items.find({"reporter_id": user_id}).sort("created_at", -1).to_list(50)
-    return {"items": items}
-
-@api_router.put("/lost-found/{item_id}/respond")
-async def respond_to_lost_item(item_id: str, request: LostItemResponseRequest):
-    """Respond to lost item report"""
-    await db.lost_items.update_one(
-        {"id": item_id},
-        {
-            "$set": {
-                "status": request.response,
-                "driver_response": request.response,
-                "resolution_notes": request.notes,
-                "resolved_at": datetime.utcnow() if request.response in ["found", "returned"] else None
-            }
-        }
-    )
-    
-    return {"message": f"Item marked as {request.response}"}
-
-# ==================== DRIVER EARNINGS DASHBOARD ====================
-
-@api_router.get("/driver/earnings/{driver_id}")
-async def get_driver_earnings_dashboard(driver_id: str, period: str = "today"):
-    """Get comprehensive earnings dashboard for driver"""
-    now = datetime.utcnow()
-    
-    # Calculate date range
-    if period == "today":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    elif period == "week":
-        start_date = now - timedelta(days=7)
-    elif period == "month":
-        start_date = now - timedelta(days=30)
-    else:
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    # Get completed trips
-    trips = await db.trips.find({
-        "driver_id": driver_id,
-        "status": "completed",
-        "completed_at": {"$gte": start_date}
-    }).to_list(500)
-    
-    # Calculate earnings
-    total_earnings = sum(t.get("fare", 0) for t in trips)
-    total_trips = len(trips)
-    total_distance = sum(t.get("distance_km", 0) for t in trips)
-    total_time = sum(t.get("duration_mins", 0) for t in trips)
-    
-    # Traffic compensation
-    traffic_compensation = sum(t.get("traffic_fee", 0) for t in trips)
-    
-    # Get tier info
-    tier_data = await db.driver_tiers.find_one({"driver_id": driver_id})
-    current_tier = tier_data.get("tier", "basic") if tier_data else "basic"
-    tier_config = TIER_CONFIG.get(current_tier, TIER_CONFIG["basic"])
-    
-    # Calculate daily breakdown
-    daily_breakdown = {}
-    for trip in trips:
-        trip_date = trip.get("completed_at", now).strftime("%Y-%m-%d")
-        if trip_date not in daily_breakdown:
-            daily_breakdown[trip_date] = {"trips": 0, "earnings": 0, "distance": 0}
-        daily_breakdown[trip_date]["trips"] += 1
-        daily_breakdown[trip_date]["earnings"] += trip.get("fare", 0)
-        daily_breakdown[trip_date]["distance"] += trip.get("distance_km", 0)
-    
-    # Calculate averages
-    avg_per_trip = total_earnings / total_trips if total_trips > 0 else 0
-    avg_per_km = total_earnings / total_distance if total_distance > 0 else 0
-    
-    # Projection
-    if period == "today":
-        hours_worked = (now - start_date).total_seconds() / 3600
-        projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 else 0  # Assuming 10 hour day
-    else:
-        projected_daily = total_earnings / ((now - start_date).days or 1)
-    
-    return {
-        "driver_id": driver_id,
-        "period": period,
-        "tier": {
-            "name": tier_config["name"],
-            "earning_potential": tier_config["earning_per_ride"],
-            "monthly_fee": tier_config["monthly_fee"]
-        },
-        "summary": {
-            "total_earnings": total_earnings,
-            "total_trips": total_trips,
-            "total_distance_km": round(total_distance, 1),
-            "total_time_mins": total_time,
-            "traffic_compensation": traffic_compensation,
-            "keep_percentage": 100  # 100% - No commission!
-        },
-        "averages": {
-            "per_trip": round(avg_per_trip, 2),
-            "per_km": round(avg_per_km, 2),
-            "hourly": round(total_earnings / (total_time / 60), 2) if total_time > 0 else 0
-        },
-        "projections": {
-            "daily": round(projected_daily, 2),
-            "weekly": round(projected_daily * 6, 2),  # 6 working days
-            "monthly": round(projected_daily * 24, 2)  # 24 working days
-        },
-        "daily_breakdown": daily_breakdown,
-        "commission_message": "You keep 100% of all earnings. Only ₦25,000 monthly subscription."
-    }
-
-# ==================== SMART MATCHING ====================
-
-@api_router.post("/matching/find-driver")
-async def find_best_matched_driver(rider_id: str, pickup_lat: float, pickup_lng: float, service_type: str = "economy"):
-    """Find best matched driver based on location and preferences"""
-    # Get rider preferences
-    rider_prefs = await db.rider_preferences.find_one({"user_id": rider_id})
-    rider = await db.users.find_one({"id": rider_id})
-    
-    # Get available drivers
-    available_drivers = await db.driver_profiles.find({
-        "is_online": True,
-        "current_location": {"$ne": None}
-    }).to_list(50)
-    
-    if not available_drivers:
-        return {"matched_driver": None, "message": "No drivers available"}
-    
-    scored_drivers = []
-    
-    for driver in available_drivers:
-        driver_location = driver.get("current_location", {})
-        if not driver_location:
-            continue
-        
-        # Calculate distance
-        distance = calculate_distance_haversine(
-            pickup_lat, pickup_lng,
-            driver_location.get("latitude", 0),
-            driver_location.get("longitude", 0)
-        )
-        
-        # Get driver user info
-        driver_user = await db.users.find_one({"id": driver.get("user_id")})
-        if not driver_user:
-            continue
-        
-        # Get tier info
-        tier_data = await db.driver_tiers.find_one({"driver_id": driver.get("user_id")})
-        tier = tier_data.get("tier", "basic") if tier_data else "basic"
-        
-        # Calculate score (lower is better)
-        score = distance * 10  # Base score from distance
-        
-        # Bonus for higher rating
-        rating = driver_user.get("rating", 4.0)
-        score -= (rating - 4.0) * 5  # Bonus for ratings above 4
-        
-        # Premium driver preference for premium rides
-        if service_type == "premium" and tier == "premium":
-            score -= 10  # Prefer premium drivers for premium rides
-        
-        # Match preferences if available
-        if rider_prefs:
-            # Could add more preference matching here
-            pass
-        
-        # Women-only mode
-        if rider and rider.get("women_only_mode") and rider.get("gender") == "female":
-            if driver_user.get("gender") != "female":
-                continue  # Skip non-female drivers
-        
-        scored_drivers.append({
-            "driver_id": driver.get("user_id"),
-            "name": driver_user.get("name"),
-            "rating": rating,
-            "tier": tier,
-            "distance_km": round(distance, 2),
-            "eta_mins": int(distance * 3),  # Rough ETA
-            "vehicle": {
-                "model": driver.get("vehicle_model"),
-                "color": driver.get("vehicle_color"),
-                "plate": driver.get("vehicle_plate")
-            },
-            "score": score
-        })
-    
-    # Sort by score
-    scored_drivers.sort(key=lambda x: x["score"])
-    
-    if scored_drivers:
-        best_match = scored_drivers[0]
-        return {
-            "matched_driver": best_match,
-            "alternatives": scored_drivers[1:4],  # Top 3 alternatives
-            "matching_criteria": ["distance", "rating", "tier", "preferences"]
-        }
-    
-    return {"matched_driver": None, "message": "No suitable drivers found"}
+# ==================== SOS & SAFETY (REFACTORED TO routers/support.py) ====================
+# ==================== FAMILY (REFACTORED TO routers/support.py) ====================
+# ==================== TRIP SHARING (REFACTORED TO routers/support.py) ====================
+# ==================== FRAUD DETECTION (REFACTORED TO routers/support.py) ====================
+# ==================== AUDIO/INSURANCE/TRACKING (REFACTORED TO routers/support.py) ====================
+# ==================== RIDER PREFERENCES (REFACTORED TO routers/support.py) ====================
+# ==================== IN-APP MESSAGING (REFACTORED TO routers/support.py) ====================
+# ==================== LOST & FOUND (REFACTORED TO routers/support.py) ====================
+# ==================== SMART MATCHING (REFACTORED TO routers/support.py) ====================
 
 # ==================== HEALTH CHECK ====================
+
+@api_router.get("/trips/active/{user_id}")
+async def get_active_trip(user_id: str, request: Request):
+    """Get the user's current active trip (if any)"""
+    try:
+        from auth_guard import require_authenticated
+
+        actor_id = require_authenticated(request)
+        if actor_id != user_id:
+            raise HTTPException(status_code=403, detail="Not authorized to view this active trip")
+
+        trip = await db.trips.find_one(
+            {
+                "$and": [
+                    {"$or": [{"rider_id": user_id}, {"driver_id": user_id}]},
+                    {"$or": [
+                        {"status": {"$in": ["accepted", "arrived", "pickup", "ongoing", "pending", "pending_driver_offers"]}},
+                        {"status": "completed", "payment_status": "pending"},
+                    ]},
+                ],
+            },
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        if not trip:
+            return {"active": False}
+        return {"active": True, "trip": trip}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Get active trip error: {e}")
+        return {"active": False, "error": str(e)}
 
 @api_router.get("/")
 async def root():
@@ -6375,871 +1314,32 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
-# ==================== ADMIN ENDPOINTS ====================
-
-# Admin credentials (in production, use secure hashing)
-ADMIN_CREDENTIALS = {
-    "admin@nexryde.com": "nexryde2025"
-}
-
-class AdminLoginRequest(BaseModel):
-    email: str
-    password: str
-
-@api_router.post("/admin/login")
-async def admin_login(request: AdminLoginRequest):
-    """Admin login endpoint"""
-    if request.email in ADMIN_CREDENTIALS and ADMIN_CREDENTIALS[request.email] == request.password:
-        # Generate a simple token (in production, use JWT)
-        token = hashlib.sha256(f"{request.email}{datetime.utcnow().isoformat()}".encode()).hexdigest()
-        return {"success": True, "token": token, "email": request.email}
-    return {"success": False, "detail": "Invalid credentials"}
-
-@api_router.get("/admin/overview")
-async def admin_overview():
-    """Get dashboard overview stats"""
-    total_riders = await db.users.count_documents({"role": "rider"})
-    total_drivers = await db.users.count_documents({"role": "driver"})
-    total_trips = await db.trips.count_documents({})
-    completed_trips = await db.trips.count_documents({"status": "completed"})
-    
-    # Calculate revenue from completed trips
-    revenue_pipeline = [
-        {"$match": {"status": "completed"}},
-        {"$group": {"_id": None, "total": {"$sum": "$fare"}}}
-    ]
-    revenue_result = await db.trips.aggregate(revenue_pipeline).to_list(1)
-    total_revenue = revenue_result[0]["total"] if revenue_result else 0
-    
-    # Subscription revenue
-    active_subs = await db.subscriptions.count_documents({"status": "active"})
-    subscription_revenue = active_subs * SUBSCRIPTION_CONFIG["monthly_fee"]
-    
-    # Today's stats
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    today_trips = await db.trips.count_documents({"created_at": {"$gte": today_start}})
-    today_signups = await db.users.count_documents({"created_at": {"$gte": today_start}})
-    
-    return {
-        "total_riders": total_riders,
-        "total_drivers": total_drivers,
-        "total_trips": total_trips,
-        "completed_trips": completed_trips,
-        "total_revenue": total_revenue,
-        "subscription_revenue": subscription_revenue,
-        "active_subscriptions": active_subs,
-        "today_trips": today_trips,
-        "today_signups": today_signups
-    }
-
-@api_router.get("/admin/riders")
-async def admin_get_riders(limit: int = 100, skip: int = 0):
-    """Get all riders with their details"""
-    riders = await db.users.find(
-        {"role": "rider"},
-        {"_id": 0}
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with trip counts
-    for rider in riders:
-        rider["total_trips"] = await db.trips.count_documents({"rider_id": rider["id"]})
-        rider["blocked"] = rider.get("blocked", False)
-    
-    return {"riders": riders, "total": len(riders)}
-
-@api_router.get("/admin/drivers")
-async def admin_get_drivers(limit: int = 100, skip: int = 0):
-    """Get all drivers with their details"""
-    drivers = await db.users.find(
-        {"role": "driver"},
-        {"_id": 0}
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with profile and subscription data
-    enriched_drivers = []
-    for driver in drivers:
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]}, {"_id": 0})
-        subscription = await db.subscriptions.find_one(
-            {"driver_id": driver["id"]},
-            {"_id": 0},
-            sort=[("created_at", -1)]
-        )
-        
-        enriched_drivers.append({
-            **driver,
-            "vehicle": {
-                "make": profile.get("vehicle_type") if profile else None,
-                "model": profile.get("vehicle_model") if profile else None,
-                "plate": profile.get("vehicle_plate") if profile else None,
-            } if profile else None,
-            "subscription_status": subscription.get("status") if subscription else "none",
-            "is_online": profile.get("is_online", False) if profile else False,
-            "total_trips": await db.trips.count_documents({"driver_id": driver["id"]}),
-            "blocked": driver.get("blocked", False)
-        })
-    
-    return {"drivers": enriched_drivers, "total": len(enriched_drivers)}
-
-@api_router.get("/admin/trips")
-async def admin_get_trips(limit: int = 100, skip: int = 0, status: str = None):
-    """Get all trips with details"""
-    query = {}
-    if status:
-        query["status"] = status
-    
-    trips = await db.trips.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with user names
-    enriched_trips = []
-    for trip in trips:
-        rider = await db.users.find_one({"id": trip.get("rider_id")}, {"name": 1, "_id": 0})
-        driver = await db.users.find_one({"id": trip.get("driver_id")}, {"name": 1, "_id": 0}) if trip.get("driver_id") else None
-        
-        enriched_trips.append({
-            **trip,
-            "rider_name": rider.get("name") if rider else "Unknown",
-            "driver_name": driver.get("name") if driver else None,
-            "pickup": {"address": trip.get("pickup_location", {}).get("address", "N/A")},
-            "dropoff": {"address": trip.get("dropoff_location", {}).get("address", "N/A")}
-        })
-    
-    return {"trips": enriched_trips, "total": len(enriched_trips)}
-
-@api_router.get("/admin/payments")
-async def admin_get_payments(limit: int = 100, skip: int = 0):
-    """Get subscription payments"""
-    subscriptions = await db.subscriptions.find(
-        {},
-        {"_id": 0}
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with driver names
-    payments = []
-    approved_count = 0
-    pending_count = 0
-    total_revenue = 0
-    
-    for sub in subscriptions:
-        driver = await db.users.find_one({"id": sub.get("driver_id")}, {"name": 1, "_id": 0})
-        
-        status = "approved" if sub.get("status") == "active" else sub.get("status", "pending")
-        if status == "approved" or status == "active":
-            approved_count += 1
-            total_revenue += sub.get("amount", SUBSCRIPTION_CONFIG["monthly_fee"])
-        elif status in ["pending", "pending_verification"]:
-            pending_count += 1
-        
-        payments.append({
-            "id": sub.get("id"),
-            "driver_id": sub.get("driver_id"),
-            "driver_name": driver.get("name") if driver else "Unknown",
-            "amount": sub.get("amount", SUBSCRIPTION_CONFIG["monthly_fee"]),
-            "status": status,
-            "screenshot": sub.get("payment_screenshot"),
-            "created_at": sub.get("created_at", datetime.utcnow()).isoformat() if isinstance(sub.get("created_at"), datetime) else sub.get("created_at"),
-            "payment_submitted_at": sub.get("payment_submitted_at"),
-            "auto_approved": sub.get("auto_approved", False)
-        })
-    
-    return {
-        "payments": payments,
-        "approved_count": approved_count,
-        "pending_count": pending_count,
-        "total_revenue": total_revenue
-    }
-
-@api_router.post("/admin/subscriptions/{subscription_id}/approve")
-async def admin_approve_subscription(subscription_id: str):
-    """Manually approve a subscription payment"""
-    result = await db.subscriptions.update_one(
-        {"id": subscription_id},
-        {"$set": {
-            "status": "active",
-            "payment_verified_at": datetime.utcnow(),
-            "end_date": datetime.utcnow() + timedelta(days=30)
-        }}
-    )
-    
-    if result.modified_count > 0:
-        return {"success": True, "message": "Subscription approved"}
-    return {"success": False, "message": "Subscription not found"}
-
-@api_router.post("/admin/subscriptions/{subscription_id}/reject")
-async def admin_reject_subscription(subscription_id: str, reason: str = "Payment verification failed"):
-    """Reject a subscription payment"""
-    result = await db.subscriptions.update_one(
-        {"id": subscription_id},
-        {"$set": {
-            "status": "rejected",
-            "rejection_reason": reason,
-            "payment_verified_at": datetime.utcnow()
-        }}
-    )
-    
-    if result.modified_count > 0:
-        return {"success": True, "message": "Subscription rejected"}
-    return {"success": False, "message": "Subscription not found"}
-
-@api_router.post("/admin/users/{user_id}/block")
-async def admin_block_user(user_id: str, block: bool = True):
-    """Block or unblock a user"""
-    result = await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"blocked": block}}
-    )
-    
-    if result.modified_count > 0:
-        return {"success": True, "message": f"User {'blocked' if block else 'unblocked'}"}
-    return {"success": False, "message": "User not found"}
-
-@api_router.get("/admin/promos")
-async def admin_get_promos():
-    """Get all promo codes"""
-    promos = await db.promo_codes.find({}, {"_id": 0}).to_list(100)
-    return {"promos": promos}
-
-@api_router.post("/admin/promo/create")
-async def create_promo_code(code: str, discount_percent: int = 10, max_uses: int = 1000):
-    """Create a new promo code"""
-    promo = {
-        "code": code.upper(),
-        "discount_percent": discount_percent,
-        "max_uses": max_uses,
-        "active": True,
-        "used_by": [],
-        "created_at": datetime.utcnow()
-    }
-    await db.promo_codes.update_one(
-        {"code": code.upper()},
-        {"$set": promo},
-        upsert=True
-    )
-    return {"success": True, "code": code.upper(), "discount_percent": discount_percent}
-
-@api_router.post("/admin/promo/{code}/toggle")
-async def admin_toggle_promo(code: str):
-    """Toggle promo code active status"""
-    promo = await db.promo_codes.find_one({"code": code.upper()})
-    if promo:
-        new_status = not promo.get("active", True)
-        await db.promo_codes.update_one(
-            {"code": code.upper()},
-            {"$set": {"active": new_status}}
-        )
-        return {"success": True, "active": new_status}
-    return {"success": False, "message": "Promo code not found"}
-
-
-# ============================================================================
-# ADMIN PRICING CONTROL ENDPOINTS (NEXRYDE DYNAMIC PRICING)
-# ============================================================================
-
-@api_router.get("/admin/pricing/current")
-async def admin_get_current_pricing():
-    """Get current subscription pricing configuration"""
-    config = await db.system_config.find_one({"key": "subscription_pricing"})
-    
-    if not config:
-        # Return default configuration
+@api_router.get("/route-cache/stats")
+async def route_cache_stats():
+    """Monitor route cache savings — each DB hit = 1 saved Google API call (~$0.007)."""
+    try:
+        total_cached = await db.route_cache_v2.count_documents({})
+        pipeline = [{"$group": {"_id": None, "total_hits": {"$sum": "$hits"}}}]
+        agg = await db.route_cache_v2.aggregate(pipeline).to_list(1)
+        total_hits = agg[0]["total_hits"] if agg else 0
+        estimated_savings_usd = round(total_hits * 0.007, 2)
         return {
-            "current_phase": "early",
-            "current_price": 18000,
-            "launch_drivers_count": 0,
-            "launch_driver_limit": 500,
-            "phase_prices": {
-                "launch": 15000,
-                "early": 18000,
-                "growth": 20000,
-                "premium": 25000
-            },
-            "trial_duration_hours": 24,
-            "trial_trip_limit": 3,
-            "phase_start_date": datetime.utcnow().isoformat()
+            "cached_routes": total_cached,
+            "total_cache_hits": total_hits,
+            "estimated_savings_usd": estimated_savings_usd,
+            "estimated_savings_ngn": round(estimated_savings_usd * 1600, 0),
+            "in_memory_routes": len(route_cache),
+            "persistent_ttl_hours": PERSISTENT_CACHE_TTL_HOURS,
         }
-    
-    config.pop("_id", None)
-    return config
-
-@api_router.post("/admin/pricing/set-phase")
-async def admin_set_pricing_phase(request: Dict[str, Any]):
-    """
-    Change the current subscription phase
-    Body: {"phase": "launch|early|growth|premium"}
-    """
-    phase = request.get("phase")
-    valid_phases = ["launch", "early", "growth", "premium"]
-    
-    if phase not in valid_phases:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid phase. Must be one of: {', '.join(valid_phases)}"
-        )
-    
-    # Map phase to price
-    phase_prices = {
-        "launch": 15000,
-        "early": 18000,
-        "growth": 20000,
-        "premium": 25000
-    }
-    
-    new_price = phase_prices[phase]
-    
-    # Update system configuration
-    await db.system_config.update_one(
-        {"key": "subscription_pricing"},
-        {
-            "$set": {
-                "current_phase": phase,
-                "current_price": new_price,
-                "phase_start_date": datetime.utcnow(),
-                "updated_at": datetime.utcnow()
-            }
-        },
-        upsert=True
-    )
-    
-    # Log activity
-    await db.admin_activity.insert_one({
-        "action": "pricing_phase_changed",
-        "old_phase": request.get("old_phase"),
-        "new_phase": phase,
-        "new_price": new_price,
-        "timestamp": datetime.utcnow(),
-        "admin_note": f"Pricing phase changed to {phase.upper()} (₦{new_price:,})"
-    })
-    
-    return {
-        "success": True,
-        "message": f"Pricing phase updated to {phase.upper()}",
-        "current_phase": phase,
-        "current_price": new_price,
-        "phase_prices": phase_prices
-    }
-
-@api_router.post("/admin/pricing/update-price")
-async def admin_update_phase_price(request: Dict[str, Any]):
-    """
-    Update price for a specific phase
-    Body: {"phase": "launch", "new_price": 15000}
-    """
-    phase = request.get("phase")
-    new_price = request.get("new_price")
-    
-    valid_phases = ["launch", "early", "growth", "premium"]
-    
-    if phase not in valid_phases:
-        raise HTTPException(status_code=400, detail="Invalid phase")
-    
-    if not isinstance(new_price, int) or new_price < 5000 or new_price > 50000:
-        raise HTTPException(
-            status_code=400, 
-            detail="Price must be between ₦5,000 and ₦50,000"
-        )
-    
-    # Update the phase price in system config
-    config = await db.system_config.find_one({"key": "subscription_pricing"})
-    
-    if config:
-        phase_prices = config.get("phase_prices", {})
-        phase_prices[phase] = new_price
-        
-        await db.system_config.update_one(
-            {"key": "subscription_pricing"},
-            {
-                "$set": {
-                    f"phase_prices.{phase}": new_price,
-                    "updated_at": datetime.utcnow()
-                }
-            }
-        )
-        
-        # If updating current phase, also update current_price
-        if config.get("current_phase") == phase:
-            await db.system_config.update_one(
-                {"key": "subscription_pricing"},
-                {"$set": {"current_price": new_price}}
-            )
-    
-    # Log activity
-    await db.admin_activity.insert_one({
-        "action": "phase_price_updated",
-        "phase": phase,
-        "new_price": new_price,
-        "timestamp": datetime.utcnow(),
-        "admin_note": f"{phase.upper()} phase price updated to ₦{new_price:,}"
-    })
-    
-    return {
-        "success": True,
-        "message": f"{phase.upper()} phase price updated to ₦{new_price:,}",
-        "phase": phase,
-        "new_price": new_price
-    }
-
-@api_router.get("/admin/pricing/usage-stats")
-async def admin_get_pricing_usage_stats():
-    """Get statistics on map and SMS usage for cost monitoring"""
-    # Map usage stats
-    map_usage_today = await db.map_usage.count_documents({
-        "timestamp": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
-    })
-    
-    # SMS/OTP usage stats
-    otp_usage_today = await db.otp_records.count_documents({
-        "created_at": {"$gte": datetime.utcnow().replace(hour=0, minute=0, second=0)}
-    })
-    
-    # Get top drivers by map usage
-    pipeline = [
-        {
-            "$match": {
-                "timestamp": {"$gte": datetime.utcnow() - timedelta(days=7)}
-            }
-        },
-        {
-            "$group": {
-                "_id": "$driver_id",
-                "total_requests": {"$sum": 1}
-            }
-        },
-        {
-            "$sort": {"total_requests": -1}
-        },
-        {
-            "$limit": 10
-        }
-    ]
-    
-    top_map_users = await db.map_usage.aggregate(pipeline).to_list(10)
-    
-    return {
-        "map_usage": {
-            "today": map_usage_today,
-            "estimated_cost_today": map_usage_today * 0.005,  # $0.005 per request estimate
-            "top_users_7days": top_map_users
-        },
-        "otp_usage": {
-            "today": otp_usage_today,
-            "estimated_cost_today": otp_usage_today * 0.05,  # $0.05 per SMS estimate
-        },
-        "total_estimated_cost_today": (map_usage_today * 0.005) + (otp_usage_today * 0.05)
-    }
-
-@api_router.post("/admin/pricing/set-driver-limit")
-async def admin_set_driver_limit(request: Dict[str, Any]):
-    """
-    Set maximum driver limit for launch phase
-    Body: {"limit": 500}
-    """
-    limit = request.get("limit")
-    
-    if not isinstance(limit, int) or limit < 0 or limit > 10000:
-        raise HTTPException(
-            status_code=400,
-            detail="Limit must be between 0 and 10,000"
-        )
-    
-    await db.system_config.update_one(
-        {"key": "subscription_pricing"},
-        {
-            "$set": {
-                "launch_driver_limit": limit,
-                "updated_at": datetime.utcnow()
-            }
-        },
-        upsert=True
-    )
-    
-    return {
-        "success": True,
-        "message": f"Launch phase driver limit set to {limit}",
-        "launch_driver_limit": limit
-    }
-
-@api_router.get("/admin/sos-alerts")
-async def admin_get_sos_alerts():
-    """Get all SOS alerts"""
-    alerts = await db.sos_alerts.find({}, {"_id": 0}).sort("triggered_at", -1).to_list(100)
-    return {"alerts": alerts}
-
-# Serve admin panel via /api/admin-panel for external access through ingress
-@api_router.get("/admin-panel")
-async def serve_admin_via_api():
-    """Serve admin panel via API route"""
-    admin_file = ADMIN_DIR / "index.html"
-    if admin_file.exists():
-        return FileResponse(admin_file, media_type="text/html")
-    raise HTTPException(status_code=404, detail="Admin panel not found")
-
-@api_router.get("/admin/activity-log")
-async def admin_get_activity_log(limit: int = 50):
-    """Get recent app activity"""
-    # Get recent trips
-    recent_trips = await db.trips.find(
-        {},
-        {"_id": 0, "id": 1, "status": 1, "created_at": 1, "rider_id": 1}
-    ).sort("created_at", -1).limit(limit).to_list(limit)
-    
-    # Get recent subscriptions
-    recent_subs = await db.subscriptions.find(
-        {},
-        {"_id": 0, "id": 1, "status": 1, "created_at": 1, "driver_id": 1}
-    ).sort("created_at", -1).limit(limit).to_list(limit)
-    
-    # Combine and sort
-    activities = []
-    for trip in recent_trips:
-        activities.append({
-            "type": "trip",
-            "action": f"Trip {trip.get('status', 'created')}",
-            "user_id": trip.get("rider_id"),
-            "timestamp": trip.get("created_at"),
-            "details": {"trip_id": trip.get("id")}
-        })
-    
-    for sub in recent_subs:
-        activities.append({
-            "type": "subscription",
-            "action": f"Subscription {sub.get('status', 'created')}",
-            "user_id": sub.get("driver_id"),
-            "timestamp": sub.get("created_at"),
-            "details": {"subscription_id": sub.get("id")}
-        })
-    
-    # Sort by timestamp
-    activities.sort(key=lambda x: x.get("timestamp", datetime.min), reverse=True)
-    
-    return {"activities": activities[:limit]}
+    except Exception as e:
+        return {"error": str(e)}
 
 
+# ==================== ADMIN (REFACTORED TO routers/admin.py) ====================
 
-# ============================================================================
-# PERFORMANCE REWARDS SYSTEM ENDPOINTS
-# ============================================================================
 
-from performance_rewards import PerformanceRewardsManager
+# ==================== ADMIN PANEL STATIC FILES ====================
 
-@api_router.get("/admin/rewards/top-drivers")
-async def admin_get_top_drivers(period: str = "monthly", limit: int = 10):
-    """Get top performing drivers for rewards"""
-    rewards_manager = PerformanceRewardsManager(db)
-    
-    if period == "monthly":
-        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
-    else:
-        top_drivers = await rewards_manager.get_top_drivers_monthly(limit=limit)
-    
-    return {
-        "period": period,
-        "top_drivers": top_drivers,
-        "total_qualified": len(top_drivers)
-    }
-
-@api_router.post("/admin/rewards/grant-free-month")
-async def admin_grant_free_month(request: Dict[str, Any]):
-    """Manually grant free month to a driver"""
-    driver_id = request.get("driver_id")
-    reason = request.get("reason", "admin_grant")
-    
-    if not driver_id:
-        raise HTTPException(status_code=400, detail="driver_id required")
-    
-    rewards_manager = PerformanceRewardsManager(db)
-    result = await rewards_manager.grant_free_month(driver_id, reason=reason)
-    
-    return result
-
-@api_router.post("/admin/rewards/process-monthly")
-async def admin_process_monthly_rewards():
-    """Process monthly performance rewards (top 10 drivers)"""
-    rewards_manager = PerformanceRewardsManager(db)
-    result = await rewards_manager.process_monthly_rewards()
-    
-    return result
-
-@api_router.get("/drivers/{driver_id}/rewards")
-async def get_driver_rewards(driver_id: str):
-    """Get driver's reward history"""
-    rewards = await db.rewards_log.find({"driver_id": driver_id}).sort("granted_at", -1).to_list(100)
-    
-    for reward in rewards:
-        reward.pop("_id", None)
-    
-    return {
-        "driver_id": driver_id,
-        "total_rewards": len(rewards),
-        "rewards": rewards
-    }
-
-# ============================================================================
-# TRIAL ABUSE PREVENTION ENDPOINTS
-# ============================================================================
-
-from trial_abuse_prevention import TrialAbuseDetector, validate_trial_eligibility
-
-@api_router.post("/auth/validate-trial-eligibility")
-async def validate_trial(request: Dict[str, Any]):
-    """
-    Validate if user is eligible for trial
-    Prevents abuse by checking phone, NIN, license, device
-    """
-    phone = request.get("phone")
-    nin = request.get("nin")
-    license_number = request.get("license_number")
-    device_id = request.get("device_id")
-    ip_address = request.get("ip_address")
-    
-    if not phone:
-        raise HTTPException(status_code=400, detail="Phone number required")
-    
-    detector = TrialAbuseDetector(db)
-    is_allowed, reason, checks = await detector.comprehensive_trial_check(
-        phone=phone,
-        nin=nin,
-        license_number=license_number,
-        device_id=device_id,
-        ip_address=ip_address
-    )
-    
-    return {
-        "eligible": is_allowed,
-        "reason": reason,
-        "checks": checks
-    }
-
-@api_router.get("/admin/abuse-prevention/stats")
-async def admin_get_abuse_stats():
-    """Get trial abuse prevention statistics"""
-    detector = TrialAbuseDetector(db)
-    stats = await detector.get_abuse_statistics()
-    
-    return stats
-
-@api_router.post("/admin/abuse-prevention/blacklist")
-async def admin_blacklist_phone(request: Dict[str, Any]):
-    """Manually blacklist a phone number"""
-    phone = request.get("phone")
-    reason = request.get("reason", "admin_blacklist")
-    
-    if not phone:
-        raise HTTPException(status_code=400, detail="Phone number required")
-    
-    detector = TrialAbuseDetector(db)
-    await detector.blacklist_phone(phone, reason=reason)
-    
-    return {
-        "success": True,
-        "message": f"Phone {phone} has been blacklisted"
-    }
-
-@api_router.get("/admin/abuse-prevention/blacklist")
-async def admin_get_blacklist(limit: int = 100):
-    """Get blacklisted phone numbers"""
-    blacklist = await db.trial_blacklist.find({"status": "active"}).sort("blacklisted_at", -1).to_list(limit)
-    
-    for entry in blacklist:
-        entry.pop("_id", None)
-    
-    return {
-        "total": len(blacklist),
-        "blacklist": blacklist
-    }
-
-# ============================================================================
-# DRIVER REPORT SYSTEM ENDPOINTS
-# ============================================================================
-
-from driver_report_system import DriverReportSystem, ReportCategory, ReportSeverity
-
-@api_router.post("/reports/submit")
-async def submit_driver_report(request: Dict[str, Any]):
-    """
-    Submit a report against a driver
-    Available to riders only
-    """
-    rider_id = request.get("rider_id")
-    driver_id = request.get("driver_id")
-    trip_id = request.get("trip_id")
-    category = request.get("category")
-    description = request.get("description", "")
-    evidence_urls = request.get("evidence_urls", [])
-    
-    # Validate required fields
-    if not all([rider_id, driver_id, trip_id, category]):
-        raise HTTPException(
-            status_code=400,
-            detail="rider_id, driver_id, trip_id, and category are required"
-        )
-    
-    # Validate category
-    valid_categories = [c.value for c in ReportCategory]
-    if category not in valid_categories:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
-        )
-    
-    report_system = DriverReportSystem(db)
-    result = await report_system.submit_report(
-        rider_id=rider_id,
-        driver_id=driver_id,
-        trip_id=trip_id,
-        category=category,
-        description=description,
-        evidence_urls=evidence_urls
-    )
-    
-    return result
-
-@api_router.get("/reports/driver/{driver_id}")
-async def get_driver_reports(driver_id: str, include_resolved: bool = False):
-    """Get all reports for a specific driver"""
-    report_system = DriverReportSystem(db)
-    reports = await report_system.get_driver_reports(driver_id, include_resolved=include_resolved)
-    
-    return {
-        "driver_id": driver_id,
-        "total_reports": len(reports),
-        "reports": reports
-    }
-
-@api_router.get("/reports/driver/{driver_id}/statistics")
-async def get_driver_report_statistics(driver_id: str):
-    """Get report statistics for a driver"""
-    report_system = DriverReportSystem(db)
-    stats = await report_system.get_report_statistics(driver_id)
-    
-    return stats
-
-@api_router.get("/admin/reports/all")
-async def admin_get_all_reports(
-    status: Optional[str] = None,
-    severity: Optional[str] = None,
-    limit: int = 100
-):
-    """Get all driver reports (admin only)"""
-    query = {}
-    
-    if status:
-        query["status"] = status
-    
-    if severity:
-        query["severity"] = severity
-    
-    reports = await db.driver_reports.find(query).sort("created_at", -1).to_list(limit)
-    
-    for report in reports:
-        report.pop("_id", None)
-    
-    return {
-        "total": len(reports),
-        "reports": reports
-    }
-
-@api_router.post("/admin/reports/{report_id}/resolve")
-async def admin_resolve_report(report_id: str, request: Dict[str, Any]):
-    """Resolve a driver report (admin only)"""
-    resolution_notes = request.get("resolution_notes", "")
-    action_taken = request.get("action_taken", "none")
-    
-    result = await db.driver_reports.update_one(
-        {"report_id": report_id},
-        {
-            "$set": {
-                "status": "resolved",
-                "resolution_notes": resolution_notes,
-                "action_taken": action_taken,
-                "resolved_at": datetime.utcnow(),
-                "reviewed_by": "admin",
-                "updated_at": datetime.utcnow()
-            }
-        }
-    )
-    
-    if result.modified_count == 0:
-        raise HTTPException(status_code=404, detail="Report not found")
-    
-    return {
-        "success": True,
-        "message": "Report resolved successfully",
-        "report_id": report_id
-    }
-
-@api_router.get("/admin/reports/categories")
-async def get_report_categories():
-    """Get available report categories"""
-    categories = [
-        {
-            "value": cat.value,
-            "label": cat.value.replace('_', ' ').title(),
-            "severity": CATEGORY_SEVERITY_MAP.get(cat, ReportSeverity.MEDIUM).value
-        }
-        for cat in ReportCategory
-    ]
-    
-    return {"categories": categories}
-
-@api_router.get("/drivers/{driver_id}/suspension-status")
-async def get_driver_suspension_status(driver_id: str):
-    """Check if driver is suspended"""
-    suspension = await db.driver_suspensions.find_one({
-        "driver_id": driver_id,
-        "status": "active"
-    })
-    
-    if not suspension:
-        return {
-            "is_suspended": False,
-            "message": "Driver is in good standing"
-        }
-    
-    suspension.pop("_id", None)
-    
-    return {
-        "is_suspended": True,
-        "suspension": suspension
-    }
-
-# Import for category severity map
-from driver_report_system import CATEGORY_SEVERITY_MAP
-
-# Seed default promo codes on startup
-@app.on_event("startup")
-async def seed_promo_codes():
-    """Seed default promo codes"""
-    default_promos = [
-        {"code": "FIRST10", "discount_percent": 10, "max_uses": 10000},
-        {"code": "WELCOME20", "discount_percent": 20, "max_uses": 5000},
-        {"code": "NEXRYDE50", "discount_percent": 50, "max_uses": 100},
-    ]
-    for promo in default_promos:
-        await db.promo_codes.update_one(
-            {"code": promo["code"]},
-            {"$setOnInsert": {**promo, "active": True, "used_by": [], "created_at": datetime.utcnow()}},
-            upsert=True
-        )
-    logger.info("Default promo codes seeded")
-
-# Include routers
-app.include_router(api_router)
-app.include_router(subscription_router)  # Old single-tier system (keep for backward compatibility)
-app.include_router(two_tier_router)  # NEW: Two-tier subscription system
-app.include_router(route_cache_router)  # NEW: Route caching for API cost protection
-app.include_router(route_planner_router)  # NEW: Smart Route Planner for return passengers
-app.include_router(map_router)
-app.include_router(call_router)
-app.include_router(places_router)  # NEW: Google Places autocomplete proxy
-
-# Payment reminder background job
-@app.on_event("startup")
-async def startup_event():
-    """Start background jobs on app startup"""
-    asyncio.create_task(payment_reminder_job())
-    logger.info("Payment reminder job started")
-
-# Serve admin panel at /admin (local access)
-@app.get("/admin")
 @app.get("/admin/")
 async def serve_admin():
     """Serve admin panel"""
@@ -7260,21 +1360,167 @@ async def serve_subscription_admin():
 # Direct auth routes WITHOUT /api prefix (for compatibility)
 @app.post("/auth/request-otp")
 @app.post("/auth/send-otp")
-async def direct_send_otp(request: OTPRequest):
+async def direct_send_otp(request: OTPRequest, http_request: Request):
     """Direct OTP endpoint without /api prefix"""
-    return await send_otp(request)
+    return await router_send_otp(request, http_request)
+
+# ==================== ROUTER INCLUDES ====================
+app.include_router(api_router)
+app.include_router(two_tier_router)
+app.include_router(subscription_router)
+app.include_router(smart_mode_router)
+app.include_router(route_cache_router)
+app.include_router(route_planner_router)
+app.include_router(map_router)
+app.include_router(places_router)
+app.include_router(call_router)
+app.include_router(community_router)
+app.include_router(safety_router)
+app.include_router(ai_router)
+app.include_router(admin_router)
+app.include_router(trips_router)
+app.include_router(auth_router)
+app.include_router(bidding_router)
+app.include_router(payments_router)
+app.include_router(voice_router)
+app.include_router(enforcement_router)
+app.include_router(compliance_router)
+app.include_router(ai_intelligence_router)
+set_ai_intelligence_db(db)
+
+from routers.chat import chat_router, start_call_session_cleanup_task
+app.include_router(chat_router)
+
+from routers.users import users_router
+app.include_router(users_router)
+
+from routers.gamification import gamification_router
+app.include_router(gamification_router)
+
+from routers.drivers import drivers_router
+app.include_router(drivers_router)
+
+from routers.support import support_router
+app.include_router(support_router)
+
+from routers.shield import shield_router
+app.include_router(shield_router)
+
+# ==================== SEED ON STARTUP ====================
+@app.on_event("startup")
+async def seed_promo_codes():
+    """Seed default promo codes"""
+    await ensure_otp_indexes()
+    from routers.admin import seed_promo_codes as _seed_promos
+    await _seed_promos()
+    # Restore driver community data if missing.
+    await seed_community_groups(db)
+    await cleanup_test_community_events(db)
+    await seed_community_content(db)
+    # Seed base safety zones used by safety/community alerts.
+    await seed_danger_zones(db)
+    # Create TTL index for persistent route cache (auto-delete after 48 hours as safety margin)
+    try:
+        await db.route_cache_v2.create_index("cached_at", expireAfterSeconds=48 * 3600)
+    except Exception:
+        pass
+    # Wire up shared functions for trips router
+    set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+    set_fare_estimate_store(fare_estimate_store)
+    set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+    set_payments_fare_estimate_store(fare_estimate_store)
+    # Start periodic cleanup for masked call relay sessions.
+    start_call_session_cleanup_task()
+    # Start recurring driver compliance checks.
+    start_compliance_background_tasks()
+    # Ensure MongoDB indexes for query performance.
+    from db_indexes import ensure_indexes
+    await ensure_indexes(db)
+
+ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount admin static files
-app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
+# Auth middleware - validates JWT on protected routes
+from starlette.middleware.base import BaseHTTPMiddleware
+from security_advanced import verify_jwt_token
+
+PUBLIC_PATH_PREFIXES = (
+    "/api/auth/", "/api/health", "/api/places/", "/docs", "/openapi.json",
+    "/admin", "/api/fare/estimate", "/api/squad/",
+)
+
+PROTECTED_PATH_PREFIXES = (
+    "/api/trips/", "/api/users/", "/api/drivers/", "/api/subscriptions/", "/api/subscription/",
+    "/api/wallet/", "/api/sos/", "/api/chat/", "/api/admin/",
+    "/api/rides/", "/api/community/", "/api/safety/", "/api/shield/",
+)
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        from starlette.responses import JSONResponse
+        path = request.url.path
+        if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_PATH_PREFIXES) or path == "/api/" or path == "/":
+            return await call_next(request)
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+            try:
+                payload = verify_jwt_token(token)
+                request.state.user_id = payload.get("sub")
+                request.state.user_role = payload.get("role")
+            except Exception:
+                if any(path.startswith(p) for p in PROTECTED_PATH_PREFIXES):
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Token expired"},
+                    )
+        return await call_next(request)
+
+app.add_middleware(AuthMiddleware)
+
+# Mount admin static files (only if directory exists)
+if ADMIN_DIR.exists():
+    app.mount("/admin", StaticFiles(directory=str(ADMIN_DIR), html=True), name="admin")
+else:
+    logger.warning(f"Admin directory not found at {ADMIN_DIR}, admin panel disabled")
+
+@app.get("/privacy-policy", include_in_schema=False)
+async def serve_privacy_policy():
+    pp_file = ROOT_DIR / "privacy-policy.html"
+    if pp_file.exists():
+        return FileResponse(pp_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Privacy policy not found")
+
+@app.get("/terms-of-service", include_in_schema=False)
+async def serve_terms_of_service():
+    tos_file = ROOT_DIR / "terms-of-service.html"
+    if tos_file.exists():
+        return FileResponse(tos_file, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Terms of service not found")
+
+@app.get("/support-page", include_in_schema=False)
+async def serve_support_page():
+    support_file = ROOT_DIR / "support-page.html"
+    if support_file.exists():
+        return FileResponse(support_file, media_type="text/html")
+    return {"redirect": "mailto:support@nexryde.com", "email": "support@nexryde.com", "message": "Contact NEXRYDE support at support@nexryde.com"}
+
+@app.get("/delete-account", include_in_schema=False)
+async def serve_delete_account():
+    """Public URL for app store account-deletion policy and user instructions."""
+    path = ROOT_DIR / "delete-account.html"
+    if path.exists():
+        return FileResponse(path, media_type="text/html")
+    raise HTTPException(status_code=404, detail="Delete account page not found")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+

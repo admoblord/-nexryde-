@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   RefreshControl,
   TextInput,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -14,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { TrafficAI, TrafficPrediction, useTrafficAI } from '@/src/services/trafficAI';
+import { BACKEND_URL } from '@/src/services/api';
 
 export default function RiderTrafficStatusScreen() {
   const router = useRouter();
@@ -22,6 +24,8 @@ export default function RiderTrafficStatusScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [predictions, setPredictions] = useState<TrafficPrediction[]>([]);
+  const [searchedLocation, setSearchedLocation] = useState<any>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   // Popular Lagos locations for predictions
   const popularLocations = [
@@ -53,6 +57,46 @@ export default function RiderTrafficStatusScreen() {
     setRefreshing(true);
     await loadTrafficData();
     setRefreshing(false);
+  };
+
+  const handleSearchLocation = async () => {
+    if (!searchQuery.trim()) return;
+    
+    setSearchLoading(true);
+    try {
+      const geocodeResponse = await fetch(
+        `${BACKEND_URL}/api/places/geocode-address?address=${encodeURIComponent(searchQuery + ', Lagos, Nigeria')}`
+      );
+      
+      const geocodeData = await geocodeResponse.json();
+      
+      if (geocodeResponse.ok && geocodeData?.latitude && geocodeData?.longitude) {
+        const lat = geocodeData.latitude;
+        const lng = geocodeData.longitude;
+        
+        // Fetch traffic status for this location
+        await fetchTrafficStatus(lat, lng, 5000);
+        
+        // Get AI prediction for this location
+        const prediction = await TrafficAI.getTrafficPredictions([
+          { latitude: lat, longitude: lng, name: searchQuery }
+        ]);
+        
+        setSearchedLocation({
+          name: location.formatted_address,
+          lat,
+          lng,
+          prediction: prediction[0],
+        });
+      } else {
+        alert('Location not found. Please try a different search term.');
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      alert('Failed to search location. Please try again.');
+    } finally {
+      setSearchLoading(false);
+    }
   };
 
   const getBestTimeToTravel = () => {
@@ -147,8 +191,46 @@ export default function RiderTrafficStatusScreen() {
               placeholderTextColor={COLORS.lightTextMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onSubmitEditing={handleSearchLocation}
+              returnKeyType="search"
             />
+            {searchLoading ? (
+              <ActivityIndicator size="small" color={COLORS.accentBlue} />
+            ) : (
+              <TouchableOpacity onPress={handleSearchLocation} disabled={!searchQuery.trim()}>
+                <Ionicons 
+                  name="arrow-forward-circle" 
+                  size={28} 
+                  color={searchQuery.trim() ? COLORS.accentBlue : COLORS.lightTextMuted} 
+                />
+              </TouchableOpacity>
+            )}
           </View>
+          
+          {/* Searched Location Result */}
+          {searchedLocation && (
+            <View style={styles.searchResult}>
+              <View style={styles.searchResultHeader}>
+                <Ionicons name="location" size={20} color={COLORS.accentBlue} />
+                <Text style={styles.searchResultTitle}>{searchedLocation.name}</Text>
+              </View>
+              {searchedLocation.prediction && (
+                <View style={styles.searchResultContent}>
+                  <Text style={styles.searchResultLabel}>Traffic Status:</Text>
+                  <Text style={[
+                    styles.searchResultValue,
+                    { color: searchedLocation.prediction.severity === 'low' ? COLORS.success : 
+                             searchedLocation.prediction.severity === 'medium' ? COLORS.warning : COLORS.danger }
+                  ]}>
+                    {searchedLocation.prediction.severity.toUpperCase()}
+                  </Text>
+                  <Text style={styles.searchResultDesc}>
+                    {searchedLocation.prediction.description}
+                  </Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         {/* Traffic Predictions */}
@@ -195,29 +277,27 @@ export default function RiderTrafficStatusScreen() {
           </View>
         )}
 
-        {/* Major Routes Status */}
+        {/* Route Status from live predictions */}
         <View style={styles.routesSection}>
-          <Text style={styles.sectionTitle}>🛣️ Major Routes</Text>
-          <RouteStatusItem
-            name="Lekki-Epe Expressway"
-            level="heavy"
-            delay={30}
-          />
-          <RouteStatusItem
-            name="Third Mainland Bridge"
-            level="moderate"
-            delay={15}
-          />
-          <RouteStatusItem
-            name="Ikorodu Road"
-            level="severe"
-            delay={45}
-          />
-          <RouteStatusItem
-            name="Eko Bridge"
-            level="light"
-            delay={5}
-          />
+          <Text style={styles.sectionTitle}>🛣️ Route Status</Text>
+          {predictions.length > 0 ? (
+            predictions.map((p, idx) => (
+              <RouteStatusItem
+                key={`${p.location.name}-${idx}`}
+                name={p.location.name}
+                level={p.predictedLevel}
+                delay={
+                  p.predictedLevel === 'severe' ? 45 :
+                  p.predictedLevel === 'heavy' ? 30 :
+                  p.predictedLevel === 'moderate' ? 15 : 5
+                }
+              />
+            ))
+          ) : (
+            <View style={styles.emptyRouteCard}>
+              <Text style={styles.emptyRouteText}>No live route predictions yet. Pull to refresh.</Text>
+            </View>
+          )}
         </View>
 
         {/* Travel Tips */}
@@ -587,6 +667,15 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     marginBottom: SPACING.md,
   },
+  emptyRouteCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+  },
+  emptyRouteText: {
+    color: COLORS.lightTextSecondary,
+    fontWeight: '600',
+  },
   routeStatusDot: {
     width: 12,
     height: 12,
@@ -668,5 +757,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.accentYellow,
     opacity: 0.8,
+  },
+  searchResult: {
+    backgroundColor: COLORS.accentBlueSoft,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  searchResultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  searchResultTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    flex: 1,
+  },
+  searchResultContent: {
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.lightBorder,
+  },
+  searchResultLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    marginBottom: SPACING.xs,
+  },
+  searchResultValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    marginBottom: SPACING.xs,
+  },
+  searchResultDesc: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.lightTextSecondary,
+    lineHeight: 18,
   },
 });

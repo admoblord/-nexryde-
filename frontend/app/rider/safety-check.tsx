@@ -61,6 +61,17 @@ export default function RiderSafetyCheckScreen() {
               placeholderTextColor={COLORS.lightTextMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              returnKeyType="search"
+              onSubmitEditing={() => {
+                if (searchQuery.trim().length >= 2) {
+                  const match = popularAreas.find(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()));
+                  if (match) {
+                    handleCheckArea(match.lat, match.lng, match.name);
+                  } else {
+                    handleCheckArea(6.5244, 3.3792, searchQuery.trim());
+                  }
+                }
+              }}
             />
           </View>
         </View>

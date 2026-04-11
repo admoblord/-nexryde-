@@ -2,6 +2,8 @@
  * NEXRYDE AI Traffic Intelligence System
  * Real-time traffic updates, predictions, and route optimization
  */
+import React from 'react';
+import { BACKEND_URL } from '@/src/services/api';
 
 export interface TrafficHotspot {
   id: string;
@@ -89,12 +91,30 @@ export class TrafficAI {
     radius: number = 5000 // 5km default
   ): Promise<TrafficHotspot[]> {
     try {
-      // In production, call backend API
-      // const response = await fetch(`/api/traffic/hotspots?lat=${latitude}&lng=${longitude}&radius=${radius}`);
-      // return response.json();
-
-      // For now, return simulated data
-      return this.simulateTrafficHotspots(latitude, longitude, radius);
+      const response = await fetch(
+        `${BACKEND_URL}/api/ai/traffic/predict?origin_lat=${latitude}&origin_lng=${longitude}`
+      );
+      if (!response.ok) return [];
+      const data = await response.json();
+      const hotspots = data?.hotspots || data?.traffic_hotspots || [];
+      if (!Array.isArray(hotspots)) return [];
+      return hotspots.map((h: any, idx: number) => ({
+        id: h.id || h.zone_id || `hotspot-${idx}`,
+        location: {
+          latitude: h.location?.latitude ?? latitude,
+          longitude: h.location?.longitude ?? longitude,
+          address: h.location?.address || h.address || 'Unknown',
+        },
+        severity: h.severity || 'moderate',
+        type: h.type || 'congestion',
+        delayMinutes: Number(h.delay_minutes || h.delayMinutes || 0),
+        affectedRadius: Number(h.affected_radius || radius),
+        startTime: new Date(h.start_time || Date.now()),
+        estimatedClearTime: h.estimated_clear_time ? new Date(h.estimated_clear_time) : undefined,
+        description: h.description || '',
+        verifiedReports: Number(h.verified_reports || 0),
+        aiConfidence: Number(h.ai_confidence || 0),
+      }));
     } catch (error) {
       console.error('Failed to get traffic status:', error);
       return [];
@@ -115,15 +135,14 @@ export class TrafficAI {
     }
   ): Promise<TrafficRoute[]> {
     try {
-      // In production, call backend AI service
-      // const response = await fetch('/api/traffic/optimize-routes', {
-      //   method: 'POST',
-      //   body: JSON.stringify({ origin, destination, preferences }),
-      // });
-      // return response.json();
-
-      // For now, return simulated routes
-      return this.simulateOptimizedRoutes(origin, destination, preferences);
+      const response = await fetch(`${BACKEND_URL}/api/traffic/optimize-routes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ origin, destination, preferences }),
+      });
+      if (!response.ok) return [];
+      const data = await response.json();
+      return Array.isArray(data?.routes) ? data.routes : [];
     } catch (error) {
       console.error('Failed to get optimized routes:', error);
       return [];
@@ -137,8 +156,22 @@ export class TrafficAI {
     locations: Array<{ latitude: number; longitude: number; name: string }>
   ): Promise<TrafficPrediction[]> {
     try {
-      // In production, call AI prediction service
-      return this.simulateTrafficPredictions(locations);
+      const predictions = await Promise.all(
+        locations.map(async (location) => {
+          const hotspots = await this.getTrafficStatus(location.latitude, location.longitude, 4000);
+          const maxDelay = hotspots.reduce((m, h) => Math.max(m, h.delayMinutes), 0);
+          const currentLevel = this.getTrafficLevel(maxDelay) as 'light' | 'moderate' | 'heavy' | 'severe';
+          return {
+            location,
+            currentLevel,
+            predictedLevel: currentLevel,
+            predictionTime: new Date(Date.now() + 30 * 60 * 1000),
+            confidence: hotspots.length ? 70 : 0,
+            factors: hotspots.length ? ['live traffic feed'] : [],
+          };
+        })
+      );
+      return predictions;
     } catch (error) {
       console.error('Failed to get traffic predictions:', error);
       return [];
@@ -202,158 +235,6 @@ export class TrafficAI {
    */
   static getTrafficColor(level: 'light' | 'moderate' | 'heavy' | 'severe'): string {
     return this.TRAFFIC_COLORS[level];
-  }
-
-  // ============================================
-  // SIMULATION METHODS (for development/demo)
-  // ============================================
-
-  private static simulateTrafficHotspots(
-    lat: number,
-    lng: number,
-    radius: number
-  ): TrafficHotspot[] {
-    // Simulate Lagos hotspots (for demo)
-    const lagosHotspots: TrafficHotspot[] = [
-      {
-        id: 'hs-1',
-        location: {
-          latitude: 6.5244,
-          longitude: 3.3792,
-          address: 'Ikorodu Road, Lagos',
-        },
-        severity: 'severe',
-        type: 'congestion',
-        delayMinutes: 45,
-        affectedRadius: 2000,
-        startTime: new Date(Date.now() - 30 * 60 * 1000),
-        description: 'Heavy traffic due to rush hour',
-        verifiedReports: 87,
-        aiConfidence: 95,
-      },
-      {
-        id: 'hs-2',
-        location: {
-          latitude: 6.4541,
-          longitude: 3.3947,
-          address: 'Third Mainland Bridge, Lagos',
-        },
-        severity: 'high',
-        type: 'accident',
-        delayMinutes: 25,
-        affectedRadius: 1500,
-        startTime: new Date(Date.now() - 15 * 60 * 1000),
-        estimatedClearTime: new Date(Date.now() + 20 * 60 * 1000),
-        description: 'Accident reported, 1 lane blocked',
-        verifiedReports: 54,
-        aiConfidence: 88,
-      },
-      {
-        id: 'hs-3',
-        location: {
-          latitude: 6.4968,
-          longitude: 3.3731,
-          address: 'Eko Bridge, Lagos',
-        },
-        severity: 'moderate',
-        type: 'roadwork',
-        delayMinutes: 12,
-        affectedRadius: 800,
-        startTime: new Date(Date.now() - 2 * 60 * 60 * 1000),
-        estimatedClearTime: new Date(Date.now() + 4 * 60 * 60 * 1000),
-        description: 'Road maintenance in progress',
-        verifiedReports: 31,
-        aiConfidence: 92,
-      },
-      {
-        id: 'hs-4',
-        location: {
-          latitude: 6.4281,
-          longitude: 3.4219,
-          address: 'Lekki-Epe Expressway, Lagos',
-        },
-        severity: 'high',
-        type: 'event',
-        delayMinutes: 30,
-        affectedRadius: 3000,
-        startTime: new Date(Date.now() - 1 * 60 * 60 * 1000),
-        estimatedClearTime: new Date(Date.now() + 2 * 60 * 60 * 1000),
-        description: 'Event causing traffic buildup',
-        verifiedReports: 62,
-        aiConfidence: 85,
-      },
-    ];
-
-    return lagosHotspots;
-  }
-
-  private static simulateOptimizedRoutes(
-    origin: { latitude: number; longitude: number },
-    destination: { latitude: number; longitude: number },
-    preferences?: any
-  ): TrafficRoute[] {
-    const baseDistance = this.calculateDistance(origin, destination);
-    const baseDuration = baseDistance / 8.33; // ~30 km/h average
-
-    return [
-      {
-        id: 'route-1',
-        polyline: 'encoded_polyline_1',
-        distance: baseDistance,
-        durationWithoutTraffic: baseDuration,
-        durationWithTraffic: baseDuration * 1.2, // 20% slower
-        trafficDelay: baseDuration * 0.2,
-        trafficLevel: 'moderate',
-        hotspots: [this.simulateTrafficHotspots(origin.latitude, origin.longitude, 5000)[0]],
-        toll: false,
-        fuelConsumption: baseDistance / 12000, // ~12 km/L
-        aiScore: 92,
-        timeSavedVsAlternative: 300, // 5 mins saved
-      },
-      {
-        id: 'route-2',
-        polyline: 'encoded_polyline_2',
-        distance: baseDistance * 1.15, // 15% longer
-        durationWithoutTraffic: baseDuration * 1.15,
-        durationWithTraffic: baseDuration * 1.5, // 50% slower
-        trafficDelay: baseDuration * 0.35,
-        trafficLevel: 'heavy',
-        hotspots: [
-          this.simulateTrafficHotspots(origin.latitude, origin.longitude, 5000)[0],
-          this.simulateTrafficHotspots(origin.latitude, origin.longitude, 5000)[1],
-        ],
-        toll: true,
-        tollCost: 500,
-        fuelConsumption: (baseDistance * 1.15) / 12000,
-        aiScore: 65,
-      },
-      {
-        id: 'route-3',
-        polyline: 'encoded_polyline_3',
-        distance: baseDistance * 1.3, // 30% longer
-        durationWithoutTraffic: baseDuration * 1.3,
-        durationWithTraffic: baseDuration * 1.35, // Only 35% slower
-        trafficDelay: baseDuration * 0.05,
-        trafficLevel: 'light',
-        hotspots: [],
-        toll: false,
-        fuelConsumption: (baseDistance * 1.3) / 12000,
-        aiScore: 78,
-      },
-    ].sort((a, b) => b.aiScore - a.aiScore);
-  }
-
-  private static simulateTrafficPredictions(
-    locations: Array<{ latitude: number; longitude: number; name: string }>
-  ): TrafficPrediction[] {
-    return locations.map((loc) => ({
-      location: loc,
-      currentLevel: 'moderate',
-      predictedLevel: 'heavy',
-      predictionTime: new Date(Date.now() + 30 * 60 * 1000), // 30 mins ahead
-      confidence: 85,
-      factors: ['rush hour approaching', 'historical pattern', 'event nearby'],
-    }));
   }
 
   private static generateAlertsFromHotspots(
@@ -484,6 +365,3 @@ export const useTrafficAI = () => {
     fetchTrafficAlerts,
   };
 };
-
-// Fix import (add at top)
-import React from 'react';

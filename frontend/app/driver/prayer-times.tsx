@@ -187,6 +187,10 @@ const DriverPrayerTimesScreen = () => {
         
         {settings.enabled && (
           <>
+            {/* Today's Prayer Times - ALWAYS SHOW */}
+          </>
+        )}
+
             {/* Today's Prayer Times */}
             {prayerTimes && (
               <View style={styles.section}>
@@ -240,7 +244,9 @@ const DriverPrayerTimesScreen = () => {
                 </View>
               </View>
             )}
-            
+
+        {settings.enabled && (
+          <>
             {/* Settings */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>⚙️ Prayer Settings</Text>

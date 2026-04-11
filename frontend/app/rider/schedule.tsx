@@ -17,9 +17,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
   background: '#F8FAFC',
@@ -92,14 +92,10 @@ export default function ScheduleScreen() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/rides/schedule`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           user_id: user.id,
-          pickup_lat: 6.4281,
-          pickup_lng: 3.4219,
           pickup_address: pickup,
-          dropoff_lat: 6.4355,
-          dropoff_lng: 3.4567,
           dropoff_address: dropoff,
           scheduled_time: date.toISOString(),
         }),

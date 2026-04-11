@@ -8,9 +8,10 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
+from auth_guard import verify_owner_strict
 
 # ==================== ENUMS & CONSTANTS ====================
 
@@ -35,13 +36,13 @@ class SubscriptionStatus(str, Enum):
 CITY_RIDER_PRICES = {
     "launch": 15000,   # First 500 drivers
     "early": 18000,    # Current
-    "growth": 20000,   # Months 7-12
-    "premium": 25000   # Year 2+
+    "growth": 18000,   # Standard
+    "premium": 18000   # Standard
 }
 
 ROAD_WARRIOR_PRICES = {
-    "launch": 25000,   # First 200
-    "early": 30000,    # Next 300
+    "launch": 30000,   # Intro price
+    "early": 30000,    # Standard
     "growth": 35000,   # After 500
     "premium": 40000   # Long-term
 }
@@ -49,8 +50,8 @@ ROAD_WARRIOR_PRICES = {
 # System Limits
 CITY_RIDER_LAUNCH_LIMIT = 500
 ROAD_WARRIOR_LAUNCH_LIMIT = 200
-TRIAL_DURATION_HOURS = 24
-TRIAL_TRIP_LIMIT = 3
+TRIAL_DURATION_HOURS = 48
+TRIAL_TRIP_LIMIT = 0
 
 # API Limits per tier
 API_LIMITS = {
@@ -157,9 +158,18 @@ two_tier_router = APIRouter(prefix="/api/subscription", tags=["two-tier-subscrip
 
 # Database connection helper
 def get_db():
-    mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+    mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
     client = AsyncIOMotorClient(mongo_url)
     return client[os.environ.get('DB_NAME', 'nexryde_db')]
+
+
+async def _assert_driver_account(db, driver_id: str):
+    """Ensure only driver identities can subscribe/upgrade."""
+    user = await db.users.find_one({"id": driver_id})
+    profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    if profile or (user and user.get("role") == "driver"):
+        return
+    raise HTTPException(403, "Driver account required")
 
 
 # ==================== PRICING ENDPOINTS ====================
@@ -234,8 +244,8 @@ async def get_pricing_info():
         },
         "trial": {
             "duration_hours": TRIAL_DURATION_HOURS,
-            "trip_limit": TRIAL_TRIP_LIMIT,
-            "features": "All tier features unlocked during trial"
+            "trip_limit": "unlimited_city_only",
+            "features": "Unlimited city rides during trial. Inter-city unlocks after paid activation."
         },
         "upgrade_requirements": {
             "min_rating": 4.5,
@@ -248,11 +258,13 @@ async def get_pricing_info():
 # ==================== SUBSCRIPTION ENDPOINTS ====================
 
 @two_tier_router.post("/subscribe/{tier}")
-async def subscribe_to_tier(tier: str, driver_id: str):
+async def subscribe_to_tier(tier: str, driver_id: str, request: Request):
     """
     Subscribe driver to City Rider or Road Warrior tier
     """
     db = get_db()
+    verify_owner_strict(request, driver_id)
+    await _assert_driver_account(db, driver_id)
     
     # Validate tier
     if tier not in ["city_rider", "road_warrior"]:
@@ -350,7 +362,7 @@ async def subscribe_to_tier(tier: str, driver_id: str):
     tier_number = count + 1
     
     message = f"🎉 Welcome to {tier_name} #{tier_number} at ₦{price:,}/month!"
-    message += f"\n\n⏱️ 24-hour FREE trial active with {TRIAL_TRIP_LIMIT} trips included!"
+    message += "\n\n⏱️ 48-hour FREE trial active with unlimited city rides."
     
     return {
         "success": True,
@@ -361,19 +373,21 @@ async def subscribe_to_tier(tier: str, driver_id: str):
         "phase": phase,
         "price_locked": price_locked,
         "trial_hours": TRIAL_DURATION_HOURS,
-        "trial_trips": TRIAL_TRIP_LIMIT,
+        "trial_trips": "unlimited_city_only",
         "can_do_intercity": can_do_intercity,
         "message": message
     }
 
 
 @two_tier_router.post("/upgrade-to-road-warrior/{driver_id}")
-async def upgrade_to_road_warrior(driver_id: str):
+async def upgrade_to_road_warrior(driver_id: str, request: Request):
     """
     Upgrade City Rider to Road Warrior
     Requirements: 4.5+ rating, 50+ trips
     """
     db = get_db()
+    verify_owner_strict(request, driver_id)
+    await _assert_driver_account(db, driver_id)
     
     # Get current subscription
     subscription = await db.subscriptions.find_one({"driver_id": driver_id})
@@ -384,7 +398,7 @@ async def upgrade_to_road_warrior(driver_id: str):
         raise HTTPException(400, "Already a Road Warrior")
     
     # Get driver stats
-    driver = await db.users.find_one({"_id": driver_id})
+    driver = await db.users.find_one({"id": driver_id})
     if not driver:
         raise HTTPException(404, "Driver not found")
     
@@ -458,11 +472,13 @@ async def upgrade_to_road_warrior(driver_id: str):
 
 
 @two_tier_router.get("/status/{driver_id}")
-async def get_subscription_status(driver_id: str):
+async def get_subscription_status(driver_id: str, request: Request):
     """
     Get driver's current subscription status
     """
     db = get_db()
+    verify_owner_strict(request, driver_id)
+    await _assert_driver_account(db, driver_id)
     
     subscription = await db.subscriptions.find_one({"driver_id": driver_id})
     if not subscription:
@@ -476,9 +492,7 @@ async def get_subscription_status(driver_id: str):
         now = datetime.utcnow()
         trial_end = subscription["trial_end"]
         hours_remaining = (trial_end - now).total_seconds() / 3600
-        trips_remaining = subscription["trial_trips_limit"] - subscription["trial_trips_completed"]
-        
-        trial_expired = hours_remaining <= 0 or trips_remaining <= 0
+        trial_expired = hours_remaining <= 0
         
         if trial_expired:
             # Update status
@@ -498,7 +512,7 @@ async def get_subscription_status(driver_id: str):
     # Calculate upgrade eligibility (City Rider only)
     upgrade_eligible = False
     if subscription["tier"] == "city_rider":
-        driver = await db.users.find_one({"_id": driver_id})
+        driver = await db.users.find_one({"id": driver_id})
         if driver:
             upgrade_eligible = (
                 driver.get("rating", 0) >= 4.5 and 
@@ -519,7 +533,7 @@ async def get_subscription_status(driver_id: str):
         # Trial info
         "trial_active": subscription.get("trial_active", False),
         "trial_hours_remaining": max(0, (subscription["trial_end"] - datetime.utcnow()).total_seconds() / 3600) if subscription.get("trial_active") else 0,
-        "trial_trips_remaining": subscription["trial_trips_limit"] - subscription["trial_trips_completed"] if subscription.get("trial_active") else 0,
+        "trial_trips_remaining": "unlimited_city_only" if subscription.get("trial_active") else 0,
         
         # Payment info
         "payment_verified": subscription.get("payment_verified", False),

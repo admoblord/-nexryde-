@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Card, Badge, Button } from '@/src/components/UI';
 import { useAppStore, Trip } from '@/src/store/appStore';
-import { getPendingTrips, acceptTrip, startTrip, completeTrip, cancelTrip } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, getDriverTripOffers, acceptTrip, arriveTrip, startTrip, completeTrip, cancelTrip, getTrip } from '@/src/services/api';
 
 export default function DriverTripsScreen() {
   const router = useRouter();
@@ -27,17 +27,93 @@ export default function DriverTripsScreen() {
 
   useEffect(() => {
     loadPendingTrips();
-    const interval = setInterval(loadPendingTrips, 60000); // Refresh every 60 seconds (was 10 sec)
+    recoverActiveTrip();
+    const interval = setInterval(loadPendingTrips, 10000); // Refresh every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
-  const loadPendingTrips = async () => {
-    if (!currentLocation) return;
+  const recoverActiveTrip = async () => {
+    if (!user?.id) return;
     try {
-      const response = await getPendingTrips(
-        currentLocation.latitude,
-        currentLocation.longitude
-      );
+      const response = await fetch(`${BACKEND_URL}/api/trips/active/${user.id}`, {
+        headers: getAuthHeaders(),
+      });
+      const data = await response.json();
+      if (!data?.active || !data?.trip) return;
+      const trip = data.trip;
+      const normalizedStatus =
+        trip.status === 'completed' && trip.payment_status === 'pending'
+          ? 'pending_payment'
+          : trip.status;
+      if (['accepted', 'arrived', 'ongoing', 'pending_payment'].includes(normalizedStatus)) {
+        setCurrentTrip({ ...trip, status: normalizedStatus });
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    if (!currentTrip?.id) return;
+    let mounted = true;
+    const syncTrip = async () => {
+      try {
+        const res = await getTrip(currentTrip.id);
+        if (mounted && res.data) {
+          if (res.data.status === 'completed' && res.data.payment_status === 'pending') {
+            setCurrentTrip({ ...res.data, status: 'pending_payment' });
+            return;
+          }
+          if (['completed', 'cancelled'].includes(res.data.status)) {
+            setCurrentTrip(null);
+            loadPendingTrips();
+            return;
+          }
+          setCurrentTrip(res.data);
+        }
+      } catch {}
+    };
+    syncTrip();
+    const interval = setInterval(syncTrip, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [currentTrip?.id]);
+
+  useEffect(() => {
+    if (!currentTrip?.id || !currentLocation) return;
+    if (!['accepted', 'arrived', 'ongoing'].includes(currentTrip.status)) return;
+
+    let cancelled = false;
+    const pushLocation = async () => {
+      try {
+        await fetch(`${BACKEND_URL}/api/trips/${currentTrip.id}/update-location`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            latitude: currentLocation.latitude,
+            longitude: currentLocation.longitude,
+          }),
+        });
+      } catch (error) {
+        console.log('Trip location update failed:', error);
+      }
+    };
+
+    pushLocation();
+    const interval = setInterval(() => {
+      if (!cancelled) pushLocation();
+    }, 8000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [currentTrip?.id, currentTrip?.status, currentLocation?.latitude, currentLocation?.longitude]);
+
+  const loadPendingTrips = async () => {
+    if (!user?.id) return;
+    try {
+      const response = await getDriverTripOffers(user.id);
       setTrips(response.data);
     } catch (error) {
       console.log('Error loading trips:', error);
@@ -56,7 +132,7 @@ export default function DriverTripsScreen() {
     if (!user?.id) return;
     setActionLoading(trip.id);
     try {
-      const response = await acceptTrip(trip.id, user.id);
+      const response = await acceptTrip(trip.id, user.id, trip.offer_id);
       setCurrentTrip(response.data);
       Alert.alert('Trip Accepted', 'Navigate to pickup location to start the ride.');
       setTrips(trips.filter(t => t.id !== trip.id));
@@ -68,14 +144,22 @@ export default function DriverTripsScreen() {
   };
 
   const handleStartTrip = async () => {
-    if (!currentTrip?.id) return;
-    setActionLoading('start');
+    if (!currentTrip?.id || !user?.id) return;
+    router.push({
+      pathname: '/driver/verify-rider-code',
+      params: { trip_id: currentTrip.id, driver_id: user.id },
+    } as any);
+  };
+
+  const handleArriveTrip = async () => {
+    if (!currentTrip?.id || !user?.id) return;
+    setActionLoading('arrive');
     try {
-      const response = await startTrip(currentTrip.id);
+      const response = await arriveTrip(currentTrip.id, user.id);
       setCurrentTrip(response.data);
-      Alert.alert('Trip Started', 'Navigate to dropoff location.');
+      Alert.alert('Arrived', 'Rider has been notified. Ask them to show their security code.');
     } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to start trip');
+      Alert.alert('Error', error.response?.data?.detail || 'Failed to mark arrival');
     } finally {
       setActionLoading(null);
     }
@@ -86,10 +170,21 @@ export default function DriverTripsScreen() {
     setActionLoading('complete');
     try {
       const response = await completeTrip(currentTrip.id);
+      const tripAfterComplete = response?.data || {};
+      const statusAfterComplete =
+        tripAfterComplete.status === 'completed' && tripAfterComplete.payment_status === 'pending'
+          ? 'pending_payment'
+          : tripAfterComplete.status;
       Alert.alert(
         'Trip Completed!', 
         `Collect ${CURRENCY}${currentTrip.fare.toLocaleString()} from the rider.`,
-        [{ text: 'OK', onPress: () => setCurrentTrip(null) }]
+        [{ text: 'OK', onPress: () => {
+          if (statusAfterComplete === 'pending_payment') {
+            setCurrentTrip({ ...tripAfterComplete, status: 'pending_payment' });
+          } else {
+            setCurrentTrip(null);
+          }
+        } }]
       );
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to complete trip');
@@ -210,7 +305,7 @@ export default function DriverTripsScreen() {
           <View style={styles.currentTripHeader}>
             <Badge 
               text={currentTrip.status.toUpperCase()} 
-              variant={currentTrip.status === 'ongoing' ? 'info' : 'warning'} 
+              variant={currentTrip.status === 'ongoing' ? 'info' : currentTrip.status === 'pending_payment' ? 'success' : 'warning'} 
             />
             <Text style={styles.currentTripFare}>{CURRENCY}{currentTrip.fare.toLocaleString()}</Text>
           </View>
@@ -240,10 +335,19 @@ export default function DriverTripsScreen() {
           <View style={styles.currentTripActions}>
             {currentTrip.status === 'accepted' && (
               <Button
-                title={actionLoading === 'start' ? 'Starting...' : 'Start Trip'}
+                title={actionLoading === 'arrive' ? 'Updating...' : 'Arrived at Pickup'}
+                onPress={handleArriveTrip}
+                loading={actionLoading === 'arrive'}
+                icon="location"
+                style={styles.actionButton}
+              />
+            )}
+            {currentTrip.status === 'arrived' && (
+              <Button
+                title={actionLoading === 'start' ? 'Opening...' : 'Verify Rider Code'}
                 onPress={handleStartTrip}
                 loading={actionLoading === 'start'}
-                icon="play-circle"
+                icon="key"
                 style={styles.actionButton}
               />
             )}
@@ -256,13 +360,21 @@ export default function DriverTripsScreen() {
                 style={styles.actionButton}
               />
             )}
-            <Button
-              title="Cancel"
-              onPress={handleCancelTrip}
-              variant="outline"
-              loading={actionLoading === 'cancel'}
-              style={styles.cancelButton}
-            />
+            {currentTrip.status === 'pending_payment' && (
+              <View style={styles.pendingPaymentBadge}>
+                <Ionicons name="card-outline" size={14} color={COLORS.success} />
+                <Text style={styles.pendingPaymentText}>Payment pending confirmation</Text>
+              </View>
+            )}
+            {['accepted', 'arrived', 'ongoing'].includes(currentTrip.status) && (
+              <Button
+                title="Cancel"
+                onPress={handleCancelTrip}
+                variant="outline"
+                loading={actionLoading === 'cancel'}
+                style={styles.cancelButton}
+              />
+            )}
           </View>
         </Card>
       )}
@@ -352,6 +464,22 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 0.4,
+  },
+  pendingPaymentBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.success + '15',
+    borderColor: COLORS.success + '40',
+    borderWidth: 1,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+  },
+  pendingPaymentText: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.success,
+    fontWeight: '700',
   },
   listContent: {
     padding: SPACING.md,

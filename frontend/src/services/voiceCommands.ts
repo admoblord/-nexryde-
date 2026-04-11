@@ -4,6 +4,7 @@
  * 
  * CONCEPT: Future feature for voice-based ride booking in Pidgin
  */
+import { BACKEND_URL } from '@/src/services/api';
 
 export interface VoiceCommand {
   phrase: string; // What user says
@@ -246,7 +247,7 @@ export class VoiceCommandService {
       book_ride: 'We dey find driver for you...',
       check_driver_location: 'Driver dey come, e go reach soon',
       trigger_emergency: 'We don send SOS, help dey come',
-      check_fare: 'Price na ₦1,500',
+      check_fare: 'Press Calculate Fare to see the price',
       unknown: 'I no understand, talk am again',
     };
     
@@ -270,3 +271,11 @@ export class VoiceCommandService {
  * NEXRYDE - The app wey understand you!
  * #TalkAm #NaijaPidgin #VoiceCommands
  */
+
+/** Process voice command through AI backend (Emergent LLM → GPT-4o) */
+export async function processCommandWithAI(userId: string, command: string): Promise<any> {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/ai/driver-assistant?user_id=${userId}&question=${encodeURIComponent(command)}`);
+    return await res.json();
+  } catch { return null; }
+}

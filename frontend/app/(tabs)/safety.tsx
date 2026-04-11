@@ -20,6 +20,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/consta
 import { Card, Button, Badge } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
 import {
+  BACKEND_URL,
   getEmergencyContacts,
   addEmergencyContact,
   removeEmergencyContact,
@@ -36,6 +37,7 @@ interface EmergencyContact {
 export default function SafetyScreen() {
   const router = useRouter();
   const { user, currentTrip } = useAppStore();
+  const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   
   const [refreshing, setRefreshing] = useState(false);
   const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
@@ -48,6 +50,26 @@ export default function SafetyScreen() {
   useEffect(() => {
     loadSafetyData();
   }, []);
+
+  useEffect(() => {
+    const fetchActiveTrip = async () => {
+      if (!user?.id || !BACKEND_URL) return;
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/trips/active/${user.id}`);
+        const data = await res.json();
+        if (data?.active && data?.trip?.id) {
+          setActiveTripId(String(data.trip.id));
+        } else {
+          setActiveTripId(null);
+        }
+      } catch {
+        // ignore and keep current known value
+      }
+    };
+    fetchActiveTrip();
+    const interval = setInterval(fetchActiveTrip, 10000);
+    return () => clearInterval(interval);
+  }, [user?.id, BACKEND_URL]);
 
   const loadSafetyData = async () => {
     if (!user?.id) return;
@@ -115,7 +137,8 @@ export default function SafetyScreen() {
   };
 
   const handleTriggerSOS = async () => {
-    if (!currentTrip) {
+    const effectiveTripId = currentTrip?.id || activeTripId;
+    if (!effectiveTripId) {
       Alert.alert('No Active Trip', 'SOS is only available during an active ride.');
       return;
     }
@@ -131,7 +154,7 @@ export default function SafetyScreen() {
     try {
       const location = await Location.getCurrentPositionAsync({});
       await triggerSOS({
-        trip_id: currentTrip.id,
+        trip_id: effectiveTripId,
         location_lat: location.coords.latitude,
         location_lng: location.coords.longitude,
       });
@@ -193,17 +216,17 @@ export default function SafetyScreen() {
             Press and hold during a ride to alert your emergency contacts and NEXRYDE support.
           </Text>
           <TouchableOpacity
-            style={[styles.sosButton, !currentTrip && styles.sosButtonDisabled]}
+            style={[styles.sosButton, !(currentTrip?.id || activeTripId) && styles.sosButtonDisabled]}
             onLongPress={() => setSosConfirm(true)}
             delayLongPress={500}
-            disabled={!currentTrip}
+            disabled={!(currentTrip?.id || activeTripId)}
           >
             <Ionicons name="alert-circle" size={48} color={COLORS.white} />
             <Text style={styles.sosButtonText}>
-              {currentTrip ? 'Hold for SOS' : 'SOS (No Active Trip)'}
+              {(currentTrip?.id || activeTripId) ? 'Hold for SOS' : 'SOS (No Active Trip)'}
             </Text>
           </TouchableOpacity>
-          {currentTrip && (
+          {(currentTrip?.id || activeTripId) && (
             <Text style={styles.sosHint}>Press and hold for 0.5 seconds</Text>
           )}
         </Card>

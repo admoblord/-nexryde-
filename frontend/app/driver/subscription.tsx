@@ -21,8 +21,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppStore } from '@/src/store/appStore';
+import { getSubscriptionConfig, createVirtualAccount, getDriverSubscriptionStatus } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface PricingData {
@@ -40,7 +41,7 @@ interface PricingData {
 
 interface SubscriptionStatus {
   tier: 'city_rider' | 'road_warrior' | 'none';
-  status: 'trial' | 'active' | 'expired' | 'pending_verification';
+  status: 'trial' | 'active' | 'expired' | 'pending_verification' | 'pending_payment' | 'grace_period';
   monthly_price: number;
   trial_active: boolean;
   trial_hours_remaining?: number;
@@ -53,6 +54,15 @@ interface SubscriptionStatus {
     current_rating: number;
     current_trips: number;
   };
+}
+
+interface VirtualAccountDetails {
+  account_number: string;
+  bank_name: string;
+  account_name: string;
+  reference?: string;
+  status?: string;
+  amount_expected?: number;
 }
 
 export default function SubscriptionScreen() {
@@ -68,6 +78,9 @@ export default function SubscriptionScreen() {
   const [submitting, setSubmitting] = useState(false);
   const [paymentReference, setPaymentReference] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
+  const [virtualAccount, setVirtualAccount] = useState<VirtualAccountDetails | null>(null);
+  const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastKnownStatusRef = useRef<string | null>(null);
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
@@ -75,6 +88,11 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     initializeData();
+    
+    // Safety timeout for web - stop loading after 5 seconds
+    const timeout = setTimeout(() => {
+      setLoading(false);
+    }, 5000);
     
     // Entry animations
     Animated.parallel([
@@ -89,6 +107,14 @@ export default function SubscriptionScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+    
+    return () => {
+      clearTimeout(timeout);
+      if (statusPollRef.current) {
+        clearInterval(statusPollRef.current);
+        statusPollRef.current = null;
+      }
+    };
   }, []);
 
   const initializeData = async () => {
@@ -104,9 +130,20 @@ export default function SubscriptionScreen() {
 
   const fetchPricing = async () => {
     try {
-      const response = await fetch(`${BACKEND_URL}/api/subscription/pricing`);
-      const data = await response.json();
-      setPricing(data);
+      const response = await getSubscriptionConfig();
+      const data = response.data || {};
+      setPricing({
+        city_rider: {
+          current_price: data.monthly_fee || data.current_price || 18000,
+          current_phase: data.current_phase || 'early',
+          launch_slots_remaining: data.launch_slots_remaining ?? 0,
+        },
+        road_warrior: {
+          current_price: data.road_warrior_price || 30000,
+          current_phase: data.current_phase || 'early',
+          launch_slots_remaining: data.road_warrior_launch_slots_remaining ?? 0,
+        },
+      });
     } catch (error) {
       console.error('Error fetching pricing:', error);
       // Set default pricing
@@ -115,6 +152,20 @@ export default function SubscriptionScreen() {
         road_warrior: { current_price: 30000, current_phase: 'early', launch_slots_remaining: 180 },
       });
     }
+  };
+
+  const stopStatusPolling = () => {
+    if (statusPollRef.current) {
+      clearInterval(statusPollRef.current);
+      statusPollRef.current = null;
+    }
+  };
+
+  const ensureStatusPolling = () => {
+    if (statusPollRef.current) return;
+    statusPollRef.current = setInterval(() => {
+      fetchSubscriptionStatus();
+    }, 10000);
   };
 
   const fetchSubscriptionStatus = async () => {
@@ -130,9 +181,55 @@ export default function SubscriptionScreen() {
     }
 
     try {
-      const response = await fetch(`${BACKEND_URL}/api/subscription/status/${user.id}`);
-      const data = await response.json();
-      setSubscription(data);
+      const response = await getDriverSubscriptionStatus();
+      const data = response.data || {};
+      
+      // Map API response to expected format
+      const normalizedStatus: SubscriptionStatus['status'] = data.status || 'expired';
+      const tier = data.tier || (data.subscription_active ? 'city_rider' : 'none');
+      if (data.virtual_account?.account_number) {
+        setVirtualAccount({
+          account_number: data.virtual_account.account_number,
+          bank_name: data.virtual_account.bank_name || 'SQUAD',
+          account_name: data.virtual_account.account_name || user?.name || 'Nexryde Driver',
+          reference: data.virtual_account.reference,
+          status: data.virtual_account.status,
+          amount_expected: data.virtual_account.amount_expected,
+        });
+      }
+      setSubscription({
+        tier,
+        status: normalizedStatus,
+        monthly_price: data.amount_expected || pricing?.city_rider?.current_price || 18000,
+        trial_active: data.trial_active || data.status === 'trial',
+        trial_hours_remaining: data.trial_hours_remaining,
+        trial_trips_remaining: data.trial_trips_remaining,
+        days_remaining: data.days_remaining,
+        can_upgrade: data.can_upgrade ?? (data.status === 'active' || data.status === 'trial'),
+        upgrade_requirements: data.upgrade_requirements,
+      });
+
+      // Keep checking while verification/payment is pending.
+      if (normalizedStatus === 'pending_verification' || normalizedStatus === 'pending_payment') {
+        ensureStatusPolling();
+      } else {
+        stopStatusPolling();
+      }
+
+      // If status flips from pending to an active state, move driver straight to dashboard.
+      const previous = lastKnownStatusRef.current;
+      if (
+        previous &&
+        ['pending_verification', 'pending_payment'].includes(previous) &&
+        ['active', 'trial', 'grace_period'].includes(normalizedStatus)
+      ) {
+        Alert.alert(
+          'Subscription Activated',
+          'Payment confirmed. You can now continue to your dashboard.',
+          [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
+        );
+      }
+      lastKnownStatusRef.current = normalizedStatus;
     } catch (error) {
       console.error('Error fetching subscription:', error);
       setSubscription({
@@ -142,6 +239,7 @@ export default function SubscriptionScreen() {
         trial_active: false,
         can_upgrade: false,
       });
+      stopStatusPolling();
     }
   };
 
@@ -153,22 +251,27 @@ export default function SubscriptionScreen() {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/subscription/subscribe/${tier}?driver_id=${user.id}`, {
-        method: 'POST',
+      const amount = tier === 'city_rider'
+        ? (pricing?.city_rider?.current_price || 18000)
+        : (pricing?.road_warrior?.current_price || 30000);
+      const response = await createVirtualAccount({
+        driver_id: user.id,
+        plan_amount: amount,
+        tier,
       });
-      const data = await response.json();
+      const data = response.data || {};
       
-      if (response.ok) {
+      if (data.account_number) {
+        setVirtualAccount(data);
+        ensureStatusPolling();
         Alert.alert(
-          'Trial Started! 🎉',
-          `You now have 24 hours OR 3 trips (whichever comes first) to try ${tier === 'city_rider' ? 'City Rider' : 'Road Warrior'} features for FREE!`,
-          [{ text: 'Start Driving!', onPress: () => fetchSubscriptionStatus() }]
+          'Virtual Account Ready',
+          `Transfer exactly ₦${amount.toLocaleString()} to:\n${data.bank_name}\n${data.account_number}\n\nActivation is automatic once payment is confirmed.`,
+          [{ text: 'OK', onPress: () => fetchSubscriptionStatus() }]
         );
-      } else {
-        Alert.alert('Error', data.detail || 'Failed to start trial');
       }
     } catch (error) {
-      Alert.alert('Error', 'Something went wrong');
+      Alert.alert('Error', 'Could not create virtual account right now');
     }
     setSubmitting(false);
   };
@@ -180,6 +283,7 @@ export default function SubscriptionScreen() {
     try {
       const response = await fetch(`${BACKEND_URL}/api/subscription/upgrade-to-road-warrior/${user.id}`, {
         method: 'POST',
+        headers: getAuthHeaders(),
       });
       const data = await response.json();
       
@@ -215,8 +319,7 @@ export default function SubscriptionScreen() {
   const pickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
+      allowsEditing: false,
       quality: 0.5,
       base64: true,
     });
@@ -234,8 +337,7 @@ export default function SubscriptionScreen() {
     }
 
     const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      aspect: [4, 3],
+      allowsEditing: false,
       quality: 0.5,
       base64: true,
     });
@@ -250,6 +352,10 @@ export default function SubscriptionScreen() {
       Alert.alert('Error', 'Please upload a payment screenshot');
       return;
     }
+    if (!paymentReference.trim()) {
+      Alert.alert('Reference required', 'Enter your transfer reference so payment can be verified instantly.');
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -259,7 +365,7 @@ export default function SubscriptionScreen() {
 
       const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}/submit-payment`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
           driver_id: user?.id,
           screenshot: paymentScreenshot,
@@ -272,13 +378,26 @@ export default function SubscriptionScreen() {
       const data = await response.json();
       
       if (response.ok) {
-        Alert.alert('Payment Submitted!', 'Your payment is being verified. This usually takes a few seconds.');
         setShowPaymentModal(false);
         setPaymentScreenshot(null);
         setPaymentReference('');
         setSelectedTier(null);
-        
-        setTimeout(() => fetchSubscriptionStatus(), 3000);
+
+        if (data.status === 'active') {
+          stopStatusPolling();
+          Alert.alert(
+            'Payment Confirmed!',
+            'Your payment has been verified and your subscription is active. You can now start accepting ride requests.',
+            [{ text: 'Start Driving', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
+          );
+          return;
+        }
+
+        Alert.alert('Payment Submitted!', 'Your payment is being verified now. We will move you to dashboard once confirmed.');
+        ensureStatusPolling();
+        setTimeout(async () => {
+          await fetchSubscriptionStatus();
+        }, 2000);
       } else {
         Alert.alert('Error', data.detail || 'Failed to submit payment');
       }
@@ -375,7 +494,7 @@ export default function SubscriptionScreen() {
                     <View style={styles.trialBadge}>
                       <Ionicons name="gift" size={14} color="#FFFFFF" />
                       <Text style={styles.trialBadgeText}>
-                        Trial: {subscription.trial_hours_remaining}h or {subscription.trial_trips_remaining} trips left
+                        Trial: {subscription.trial_hours_remaining}h left (Unlimited city rides)
                       </Text>
                     </View>
                   )}
@@ -409,7 +528,7 @@ export default function SubscriptionScreen() {
 
                 <View style={styles.tierPricing}>
                   <Text style={styles.tierPriceLabel}>
-                    {pricing && getPhaseLabel(pricing.city_rider.current_phase)}
+                    {pricing && pricing.city_rider && getPhaseLabel(pricing.city_rider.current_phase)}
                   </Text>
                   <View style={styles.tierPriceRow}>
                     <Text style={styles.tierCurrency}>₦</Text>
@@ -463,7 +582,7 @@ export default function SubscriptionScreen() {
                       ) : (
                         <>
                           <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Start 24h FREE Trial</Text>
+                          <Text style={styles.selectButtonText}>Get City Rider Virtual Account</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -493,7 +612,7 @@ export default function SubscriptionScreen() {
 
                 <View style={styles.tierPricing}>
                   <Text style={[styles.tierPriceLabel, { color: '#FFD700' }]}>
-                    {pricing && getPhaseLabel(pricing.road_warrior.current_phase)}
+                    {pricing && pricing.road_warrior && getPhaseLabel(pricing.road_warrior.current_phase)}
                   </Text>
                   <View style={styles.tierPriceRow}>
                     <Text style={[styles.tierCurrency, { color: '#FFD700' }]}>₦</Text>
@@ -569,7 +688,7 @@ export default function SubscriptionScreen() {
                       ) : (
                         <>
                           <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Start 24h FREE Trial</Text>
+                          <Text style={styles.selectButtonText}>Get Road Warrior Virtual Account</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -588,38 +707,38 @@ export default function SubscriptionScreen() {
               >
                 <Ionicons name="card" size={20} color="#FFFFFF" />
               </LinearGradient>
-              <Text style={styles.bankTitle}>Payment Details</Text>
+              <Text style={styles.bankTitle}>Virtual Account Details</Text>
             </View>
             
             <View style={styles.bankDetailsContainer}>
               <BankDetailRow 
                 label="Bank Name" 
-                value="UBA"
+                value={virtualAccount?.bank_name || 'SQUAD'}
                 copied={copiedField === 'bank'}
-                onCopy={() => copyToClipboard('UBA', 'bank')}
+                onCopy={() => copyToClipboard(virtualAccount?.bank_name || 'SQUAD', 'bank')}
               />
               <BankDetailRow 
                 label="Account Name" 
-                value="ADMOBLORDGROUP LIMITED"
+                value={virtualAccount?.account_name || (user?.name || 'Nexryde Driver')}
                 copied={copiedField === 'name'}
-                onCopy={() => copyToClipboard('ADMOBLORDGROUP LIMITED', 'name')}
+                onCopy={() => copyToClipboard(virtualAccount?.account_name || (user?.name || 'Nexryde Driver'), 'name')}
               />
               <BankDetailRow 
                 label="Account Number" 
-                value="1028400669"
+                value={virtualAccount?.account_number || 'Tap a tier below to generate account'}
                 copied={copiedField === 'number'}
-                onCopy={() => copyToClipboard('1028400669', 'number')}
+                onCopy={() => copyToClipboard(virtualAccount?.account_number || '', 'number')}
                 highlight
               />
             </View>
 
             <View style={styles.stepsContainer}>
-              <Text style={styles.stepsTitle}>How to Subscribe</Text>
+              <Text style={styles.stepsTitle}>How to Activate (Automatic)</Text>
               {[
-                'Choose your tier above',
-                'Transfer the amount to account above',
-                'Screenshot your payment',
-                'Upload screenshot for instant verification',
+                'Tap your tier button below to generate a unique virtual account',
+                'Transfer the exact plan amount to that account',
+                'Wait for automatic verification via Squad webhook',
+                'Status updates to Active instantly after confirmation',
               ].map((step, index) => (
                 <View key={index} style={styles.stepRow}>
                   <View style={styles.stepNumber}>
@@ -628,6 +747,59 @@ export default function SubscriptionScreen() {
                   <Text style={styles.stepText}>{step}</Text>
                 </View>
               ))}
+            </View>
+
+            <View style={styles.proofActionsRow}>
+              <TouchableOpacity
+                style={styles.proofActionButton}
+                onPress={() => startTrial('city_rider')}
+              >
+                <Ionicons name="card-outline" size={18} color="#00D084" />
+                <Text style={styles.proofActionText}>Get City Rider Virtual Account</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.proofActionButton}
+                onPress={() => startTrial('road_warrior')}
+              >
+                <Ionicons name="card-outline" size={18} color="#FFD700" />
+                <Text style={styles.proofActionText}>Get Road Warrior Virtual Account</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+
+          {/* Crypto Payment Coming Soon */}
+          <Animated.View style={[styles.cryptoCard, { opacity: fadeAnim }]}>
+            <View style={styles.cryptoHeader}>
+              <View style={styles.cryptoIconBg}>
+                <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
+              </View>
+              <View style={styles.cryptoHeaderText}>
+                <Text style={styles.cryptoTitle}>Crypto Payments</Text>
+                <View style={styles.cryptoBadge}>
+                  <Text style={styles.cryptoBadgeText}>COMING SOON</Text>
+                </View>
+              </View>
+            </View>
+            <Text style={styles.cryptoDesc}>
+              Pay your subscription with Bitcoin, USDT, and other cryptocurrencies. Lower fees, instant processing.
+            </Text>
+            <View style={styles.cryptoCoins}>
+              {[
+                { symbol: '₿', label: 'BTC' },
+                { symbol: 'Ξ', label: 'ETH' },
+                { symbol: '$', label: 'USDT' },
+                { symbol: '◎', label: 'SOL' },
+              ].map((coin) => (
+                <View key={coin.label} style={styles.cryptoCoin}>
+                  <Text style={styles.cryptoCoinSymbol}>{coin.symbol}</Text>
+                  <Text style={styles.cryptoCoinLabel}>{coin.label}</Text>
+                </View>
+              ))}
+            </View>
+            <View style={styles.cryptoNotifyBtn}>
+              <Ionicons name="notifications-outline" size={18} color="#F7931A" />
+              <Text style={styles.cryptoNotifyText}>Notify me when available</Text>
             </View>
           </Animated.View>
 
@@ -691,7 +863,7 @@ export default function SubscriptionScreen() {
                   </View>
                 )}
 
-                <Text style={styles.modalSectionTitle}>Reference (Optional)</Text>
+                <Text style={styles.modalSectionTitle}>Reference (Required for instant verification)</Text>
                 <TextInput
                   style={styles.referenceInput}
                   placeholder="Transaction reference..."
@@ -1198,6 +1370,27 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(245, 158, 11, 0.2)',
   },
+  proofActionsRow: {
+    marginTop: 14,
+    gap: 10,
+  },
+  proofActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(15,23,42,0.7)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+  },
+  proofActionText: {
+    color: '#E2E8F0',
+    fontSize: 13,
+    fontWeight: '800',
+  },
   stepsTitle: {
     fontSize: 13,
     fontWeight: '900',
@@ -1426,5 +1619,96 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     color: '#FFD700',
+  },
+
+  // Crypto Coming Soon
+  cryptoCard: {
+    backgroundColor: 'rgba(247, 147, 26, 0.08)',
+    borderRadius: 20,
+    padding: 20,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(247, 147, 26, 0.25)',
+  },
+  cryptoHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  cryptoIconBg: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(247, 147, 26, 0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  cryptoHeaderText: {
+    flex: 1,
+  },
+  cryptoTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    marginBottom: 4,
+  },
+  cryptoBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  cryptoBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 1,
+  },
+  cryptoDesc: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94A3B8',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  cryptoCoins: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    marginBottom: 16,
+  },
+  cryptoCoin: {
+    alignItems: 'center',
+  },
+  cryptoCoinSymbol: {
+    fontSize: 22,
+    color: '#FFFFFF',
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  cryptoCoinLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  cryptoNotifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(247, 147, 26, 0.12)',
+    borderRadius: 14,
+    paddingVertical: 14,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(247, 147, 26, 0.3)',
+  },
+  cryptoNotifyText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#F7931A',
   },
 });

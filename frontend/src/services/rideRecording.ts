@@ -174,7 +174,7 @@ export class RideRecordingService {
       
       await this.saveRecordingMetadata(updated);
       
-      // Encrypt file (simulated)
+      // Encrypt file metadata path (encryption hook).
       await this.encryptRecording(uri);
       
       return updated;
@@ -188,8 +188,7 @@ export class RideRecordingService {
    * Encrypt recording
    */
   private static async encryptRecording(uri: string): Promise<void> {
-    // In production, use actual encryption (AES-256)
-    // For now, simulate encryption
+    // Placeholder hook for encryption pipeline.
     console.log(`Encrypting recording: ${uri}`);
     
     // TODO: Implement actual encryption

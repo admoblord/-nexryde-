@@ -17,22 +17,31 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { saveUserSession } from '@/utils/authStorage';
 
 export default function VerifyScreen() {
   const router = useRouter();
-  const { phone, pin_id, provider, mock_otp } = useLocalSearchParams<{ 
+  const { phone, pin_id, provider } = useLocalSearchParams<{ 
     phone: string; 
     pin_id: string;
     provider: string;
-    mock_otp: string;
   }>();
-  const { setUser, setIsAuthenticated } = useAppStore();
+  const { setUser, setToken, setIsAuthenticated } = useAppStore();
   
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
   const [resendTimer, setResendTimer] = useState(60);
   const [canResend, setCanResend] = useState(false);
+
+  const normalizePhone = (value: string) => {
+    const cleaned = (value || '').replace(/\s|-/g, '');
+    if (cleaned.startsWith('+234') && cleaned.length === 14) return cleaned;
+    if (cleaned.startsWith('234') && cleaned.length === 13) return `+${cleaned}`;
+    if (cleaned.startsWith('0') && cleaned.length === 11) return `+234${cleaned.slice(1)}`;
+    if (cleaned.length === 10) return `+234${cleaned}`;
+    return cleaned.startsWith('+') ? cleaned : `+${cleaned}`;
+  };
 
   // Countdown timer for resend
   useEffect(() => {
@@ -44,6 +53,66 @@ export default function VerifyScreen() {
     }
   }, [resendTimer]);
 
+  const routeVerifiedUser = async (loggedUser: any, resolvedToken: string | null) => {
+    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (resolvedToken) authHeaders.Authorization = `Bearer ${resolvedToken}`;
+
+    if (loggedUser?.role === 'driver') {
+      try {
+        const st = await fetch(`${BACKEND_URL}/api/drivers/${loggedUser.id}/onboarding-status`, { headers: authHeaders });
+        const status = await st.json();
+        if (!st.ok || !status?.completed) {
+          if (status?.step === 'terms') {
+            router.replace({
+              pathname: '/(auth)/driver-terms',
+              params: { phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+            });
+            return;
+          }
+          if (status?.step === 'documents') {
+            router.replace({
+              pathname: '/(auth)/driver-documents',
+              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+            });
+            return;
+          }
+          if (status?.step === 'profile') {
+            router.replace({
+              pathname: '/(auth)/driver-profile',
+              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+            });
+            return;
+          }
+        }
+        router.replace('/(driver-tabs)/driver-home');
+        return;
+      } catch {
+        router.replace({
+          pathname: '/(auth)/driver-documents',
+          params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+        });
+        return;
+      }
+      router.replace({
+        pathname: '/(auth)/driver-documents',
+        params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+      });
+      return;
+    }
+
+    try {
+      const st = await fetch(`${BACKEND_URL}/api/users/${loggedUser.id}/rider-verification-status`, { headers: authHeaders });
+      const riderStatus = await st.json();
+      if (st.ok && riderStatus?.completed) {
+        router.replace('/(rider-tabs)/rider-home');
+      } else {
+        router.replace('/(auth)/rider-verification');
+      }
+    } catch {
+      router.replace('/(auth)/rider-verification');
+    }
+  };
+
   const handleVerifyOTP = async () => {
     if (otp.length !== 6) {
       Alert.alert('Error', 'Please enter the 6-digit code');
@@ -51,54 +120,59 @@ export default function VerifyScreen() {
     }
 
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setLoading(false);
+      Alert.alert('Connection Timeout', 'Verification request timed out. Please try again.');
+    }, 15000);
     try {
+      const normalizedPhone = normalizePhone(phone || '');
       const response = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ 
-          phone: `+234${phone}`,
+          phone: normalizedPhone,
           otp: otp,
           pin_id: pin_id || undefined
         }),
+        signal: controller.signal,
       });
 
       const text = await response.text();
-      let data: Record<string, any> | null = null;
+      let data: any = {};
       try {
-        data = text ? JSON.parse(text) : null;
+        data = text ? JSON.parse(text) : {};
       } catch {
-        Alert.alert('Verification Failed', 'Server returned an invalid response. Please try again.');
-        return;
+        data = { detail: text || 'Invalid server response' };
       }
-
-      if (!data) {
-        Alert.alert('Verification Failed', 'Invalid response from server. Please try again.');
-        return;
-      }
-
+      
       if (!response.ok) {
-        const msg = data.detail || data.message || 'Verification failed';
-        throw new Error(typeof msg === 'string' ? msg : 'Verification failed');
+        throw new Error(data.detail || 'Verification failed');
       }
-
+      
       if (data.is_new_user) {
+        // New user - go to registration
         router.push({
           pathname: '/(auth)/register',
           params: { phone }
         });
       } else {
+        // Existing user - log them in
         setUser(data.user);
+        const resolvedToken = data?.token || data?.user?.token || null;
+        setToken(resolvedToken);
         setIsAuthenticated(true);
-
-        if (data.user?.role === 'driver') {
-          router.replace('/(driver-tabs)/driver-home');
-        } else {
-          router.replace('/(rider-tabs)/rider-home');
-        }
+        await saveUserSession({ ...data.user, token: resolvedToken });
+        await routeVerifiedUser(data.user, resolvedToken);
       }
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
       Alert.alert('Verification Failed', error.message || 'Please check the code and try again');
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -109,19 +183,33 @@ export default function VerifyScreen() {
     setCanResend(false);
     setResendTimer(60);
     
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+      setCanResend(true);
+      Alert.alert('Connection Timeout', 'Resend request timed out. Please try again.');
+    }, 15000);
+
     try {
+      const normalizedPhone = normalizePhone(phone || '');
       const response = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: `+234${phone}` }),
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ phone: normalizedPhone }),
+        signal: controller.signal,
       });
       
       if (response.ok) {
         Alert.alert('Success', 'A new verification code has been sent to your phone');
       }
-    } catch (error) {
+    } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return;
+      }
       Alert.alert('Error', 'Failed to resend code. Please try again.');
       setCanResend(true);
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
@@ -159,7 +247,7 @@ export default function VerifyScreen() {
                   : 'Enter the 6-digit verification code'
                 }
               </Text>
-              <Text style={styles.phone}>+234 {phone}</Text>
+              <Text style={styles.phone}>{normalizePhone(phone || '')}</Text>
               
               {/* Provider indicator */}
               <View style={styles.providerBadge}>
@@ -169,7 +257,7 @@ export default function VerifyScreen() {
                   color={COLORS.accentGreen} 
                 />
                 <Text style={styles.providerText}>
-                  {isTermii ? 'SMS Verification' : 'Test Mode'}
+                  {isTermii ? 'SMS Verification' : 'Verification'}
                 </Text>
               </View>
             </View>
@@ -185,14 +273,6 @@ export default function VerifyScreen() {
                 maxLength={6}
                 autoFocus
               />
-
-              {/* Show OTP hint only for mock/test mode */}
-              {!isTermii && mock_otp && (
-                <View style={styles.otpHint}>
-                  <Ionicons name="information-circle" size={16} color={COLORS.gold} />
-                  <Text style={styles.otpHintText}>Test OTP: {mock_otp}</Text>
-                </View>
-              )}
 
               <TouchableOpacity
                 style={[styles.verifyButton, otp.length === 6 && styles.verifyButtonActive]}

@@ -26,13 +26,19 @@ export default function DriverTrafficScreen() {
   const [selectedRoute, setSelectedRoute] = useState<TrafficRoute | null>(null);
   const [showRouteComparison, setShowRouteComparison] = useState(false);
 
-  // Simulated current location (Lagos)
-  const currentLocation = {
-    latitude: 6.5244,
-    longitude: 3.3792,
-  };
+  const [currentLocation, setCurrentLocation] = useState({ latitude: 6.5244, longitude: 3.3792 });
 
   useEffect(() => {
+    (async () => {
+      try {
+        const Location = require('expo-location');
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          setCurrentLocation({ latitude: loc.coords.latitude, longitude: loc.coords.longitude });
+        }
+      } catch { /* use default */ }
+    })();
     loadTrafficData();
     
     // Auto-refresh every 3 minutes

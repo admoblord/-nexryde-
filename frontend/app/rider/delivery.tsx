@@ -15,9 +15,9 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 const COLORS = {
   background: '#F8FAFC',
@@ -66,12 +66,30 @@ export default function DeliveryScreen() {
   const estimateFare = async () => {
     try {
       const basePrice = PACKAGE_SIZES.find(s => s.id === selectedSize)?.price || 500;
-      // Simulated distance-based calculation
-      const distance = Math.random() * 10 + 2; // 2-12km
-      const distancePrice = distance * 150;
-      setFareEstimate(Math.round(basePrice + distancePrice));
+      if (pickup.lat && pickup.lng && dropoff.lat && dropoff.lng) {
+        const res = await fetch(`${BACKEND_URL}/api/fare/estimate`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            pickup_lat: pickup.lat,
+            pickup_lng: pickup.lng,
+            dropoff_lat: dropoff.lat,
+            dropoff_lng: dropoff.lng,
+            service_type: 'economy',
+            city: 'lagos',
+          }),
+        });
+        const data = await res.json();
+        const estimated = Number(data?.total_fare ?? data?.fare ?? 0);
+        if (estimated > 0) {
+          setFareEstimate(Math.round(basePrice + (estimated * 0.6)));
+          return;
+        }
+      }
+      setFareEstimate(basePrice + 1500);
     } catch (e) {
       console.error('Estimate fare error:', e);
+      setFareEstimate(PACKAGE_SIZES.find(s => s.id === selectedSize)?.price || 2000);
     }
   };
 
@@ -88,20 +106,25 @@ export default function DeliveryScreen() {
 
     setLoading(true);
     try {
+      if (!pickup.lat || !pickup.lng || !dropoff.lat || !dropoff.lng) {
+        Alert.alert('Missing Locations', 'Please set pickup and drop-off locations.');
+        setLoading(false);
+        return;
+      }
+
       const res = await fetch(`${BACKEND_URL}/api/delivery/request`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({
-          sender_id: user.id,
           recipient_name: recipientName,
           recipient_phone: recipientPhone,
-          package_description: packageDesc,
+          package_description: packageDesc || 'Package',
           package_size: selectedSize,
-          pickup_lat: pickup.lat || 6.4281,
-          pickup_lng: pickup.lng || 3.4219,
+          pickup_lat: pickup.lat,
+          pickup_lng: pickup.lng,
           pickup_address: pickup.address,
-          dropoff_lat: dropoff.lat || 6.4355,
-          dropoff_lng: dropoff.lng || 3.4567,
+          dropoff_lat: dropoff.lat,
+          dropoff_lng: dropoff.lng,
           dropoff_address: dropoff.address,
         }),
       });
@@ -109,6 +132,8 @@ export default function DeliveryScreen() {
       if (data.delivery_id) {
         setDeliveryId(data.delivery_id);
         setSuccess(true);
+      } else {
+        Alert.alert('Error', data?.detail || 'Failed to request delivery');
       }
     } catch (e) {
       console.error('Request delivery error:', e);

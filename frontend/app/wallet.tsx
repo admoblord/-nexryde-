@@ -15,8 +15,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
-
-const BACKEND_URL = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { getWallet, topupWallet, BACKEND_URL } from '@/src/services/api';
 
 export default function WalletScreen() {
   const router = useRouter();
@@ -40,9 +39,8 @@ export default function WalletScreen() {
       return;
     }
     try {
-      const res = await fetch(`${BACKEND_URL}/api/wallet/${user.id}`);
-      const data = await res.json();
-      setBalance(data.balance || 0);
+      const res = await getWallet(user.id);
+      setBalance(Number(res.data?.balance || 0));
     } catch (e) {
       console.error('Load wallet error:', e);
     }
@@ -71,12 +69,10 @@ export default function WalletScreen() {
     
     setTopupLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/wallet/${user.id}/topup?amount=${amount}`, {
-        method: 'POST'
-      });
-      const data = await res.json();
+      const res = await topupWallet(user.id, amount);
+      const data = res.data || {};
       if (data.success) {
-        setBalance(data.new_balance);
+        setBalance(Number(data.new_balance || 0));
         setShowTopup(false);
         setTopupAmount('');
         Alert.alert('Success', `₦${amount.toLocaleString()} added to your wallet`);
@@ -126,21 +122,21 @@ export default function WalletScreen() {
 
           {/* Quick Actions */}
           <View style={styles.quickActions}>
-            <TouchableOpacity style={styles.actionCard}>
+            <TouchableOpacity style={styles.actionCard} onPress={() => Alert.alert('Transfer', 'Bank transfer feature coming soon.')}>
               <View style={[styles.actionIcon, { backgroundColor: 'rgba(0,230,118,0.15)' }]}>
                 <Ionicons name="send" size={22} color="#00E676" />
               </View>
               <Text style={styles.actionText}>Transfer</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.actionCard}>
+            <TouchableOpacity style={styles.actionCard} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)}>
               <View style={[styles.actionIcon, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
                 <Ionicons name="receipt" size={22} color="#F59E0B" />
               </View>
               <Text style={styles.actionText}>History</Text>
             </TouchableOpacity>
             
-            <TouchableOpacity style={styles.actionCard}>
+            <TouchableOpacity style={styles.actionCard} onPress={() => Alert.alert('Cards', 'Card payment feature coming soon.')}>
               <View style={[styles.actionIcon, { backgroundColor: 'rgba(239,68,68,0.15)' }]}>
                 <Ionicons name="card" size={22} color="#EF4444" />
               </View>
@@ -148,33 +144,34 @@ export default function WalletScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* 🔥 CRYPTO PAYMENTS - COMING SOON */}
-          <View style={styles.comingSoonCard}>
-            <View style={styles.comingSoonHeader}>
-              <View style={styles.comingSoonBadge}>
-                <Text style={styles.comingSoonBadgeText}>COMING SOON</Text>
+          {/* Payment Methods */}
+          <View style={styles.payMethodsSection}>
+            <Text style={styles.payMethodsTitle}>Payment Methods</Text>
+            
+            <View style={styles.payMethodCard}>
+              <View style={[styles.payMethodIcon, { backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                <Ionicons name="cash" size={24} color="#22C55E" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payMethodName}>Cash / Transfer</Text>
+                <Text style={styles.payMethodStatus}>Active</Text>
+              </View>
+              <View style={styles.payMethodActive}>
+                <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
               </View>
             </View>
-            <View style={styles.comingSoonIcon}>
-              <Ionicons name="logo-bitcoin" size={32} color="#F7931A" />
-            </View>
-            <Text style={styles.comingSoonTitle}>💰 Crypto Payments</Text>
-            <Text style={styles.comingSoonDesc}>
-              Pay and receive in USDT/USDC • Protect against Naira devaluation • First in Africa!
-            </Text>
-            <View style={styles.comingSoonFeatures}>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Stable value</Text>
+
+            <View style={[styles.payMethodCard, styles.payMethodCrypto]}>
+              <View style={[styles.payMethodIcon, { backgroundColor: 'rgba(247,147,26,0.12)' }]}>
+                <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
               </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Lower fees</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.payMethodName}>Crypto Payment</Text>
+                <View style={styles.payMethodBadge}>
+                  <Text style={styles.payMethodBadgeText}>COMING SOON</Text>
+                </View>
               </View>
-              <View style={styles.featureItem}>
-                <Ionicons name="checkmark-circle" size={16} color="#00E676" />
-                <Text style={styles.featureText}>Instant transfers</Text>
-              </View>
+              <Ionicons name="time-outline" size={20} color="#F59E0B" />
             </View>
           </View>
 
@@ -221,53 +218,7 @@ export default function WalletScreen() {
             </View>
           </View>
 
-          {/* Crypto Payment - Coming Soon */}
-          <View style={styles.cryptoCard}>
-            <LinearGradient
-              colors={['rgba(99, 102, 241, 0.1)', 'rgba(139, 92, 246, 0.1)']}
-              style={styles.cryptoGradient}
-            >
-              <View style={styles.cryptoHeader}>
-                <View style={styles.cryptoIconContainer}>
-                  <Ionicons name="logo-bitcoin" size={28} color="#F7931A" />
-                </View>
-                <View style={styles.cryptoTitleContainer}>
-                  <Text style={styles.cryptoTitle}>Crypto Payments</Text>
-                  <View style={styles.comingSoonBadge}>
-                    <Text style={styles.comingSoonText}>COMING SOON</Text>
-                  </View>
-                </View>
-              </View>
-              
-              <Text style={styles.cryptoDescription}>
-                Pay for rides with Bitcoin, Ethereum, USDT and more cryptocurrencies.
-              </Text>
-              
-              <View style={styles.cryptoIcons}>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>₿</Text>
-                  <Text style={styles.cryptoCoinLabel}>BTC</Text>
-                </View>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>Ξ</Text>
-                  <Text style={styles.cryptoCoinLabel}>ETH</Text>
-                </View>
-                <View style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinIcon}>₮</Text>
-                  <Text style={styles.cryptoCoinLabel}>USDT</Text>
-                </View>
-                <View style={styles.cryptoCoin}>
-                  <Ionicons name="ellipsis-horizontal" size={20} color="#64748B" />
-                  <Text style={styles.cryptoCoinLabel}>More</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity style={styles.notifyBtn}>
-                <Ionicons name="notifications-outline" size={18} color="#8B5CF6" />
-                <Text style={styles.notifyBtnText}>Notify Me When Available</Text>
-              </TouchableOpacity>
-            </LinearGradient>
-          </View>
+          <View style={{ height: 40 }} />
         </ScrollView>
 
         {/* Topup Modal */}
@@ -665,5 +616,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  payMethodsSection: {
+    marginBottom: 16,
+  },
+  payMethodsTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#FFFFFF',
+    marginBottom: 12,
+  },
+  payMethodCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+  },
+  payMethodCrypto: {
+    borderWidth: 1,
+    borderColor: 'rgba(247,147,26,0.3)',
+    borderStyle: 'dashed',
+  },
+  payMethodIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  payMethodName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+  },
+  payMethodStatus: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#22C55E',
+    marginTop: 2,
+  },
+  payMethodActive: {},
+  payMethodBadge: {
+    backgroundColor: '#F59E0B',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 6,
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  payMethodBadgeText: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFF',
   },
 });

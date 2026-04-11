@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,8 +8,25 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL } from '@/src/services/api';
 
 export default function RiderWalletScreen() {
+  const { user } = useAppStore();
+  const [balance, setBalance] = useState(0);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const fetchBalance = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/wallet/${user.id}/balance`);
+        const data = await res.json();
+        if (typeof data?.balance === 'number') setBalance(data.balance);
+      } catch { /* keep 0 */ }
+    };
+    fetchBalance();
+  }, [user?.id]);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -19,8 +36,8 @@ export default function RiderWalletScreen() {
         {/* Balance Card */}
         <View style={styles.balanceCard}>
           <Text style={styles.balanceLabel}>Available Balance</Text>
-          <Text style={styles.balanceAmount}>₦0.00</Text>
-          <Text style={styles.balanceSubtext}>Add funds to pay for rides</Text>
+          <Text style={styles.balanceAmount}>₦{balance.toLocaleString()}</Text>
+          <Text style={styles.balanceSubtext}>{balance > 0 ? 'Ready for your next ride' : 'Add funds to pay for rides'}</Text>
         </View>
 
         {/* Payment Methods */}
@@ -45,6 +62,20 @@ export default function RiderWalletScreen() {
           <View style={styles.paymentContent}>
             <Text style={styles.paymentTitle}>Bank Transfer</Text>
             <Text style={styles.paymentDesc}>Transfer to driver's account</Text>
+          </View>
+        </View>
+
+        {/* Crypto Payment - Coming Soon */}
+        <View style={[styles.paymentCard, { opacity: 0.6 }]}>
+          <View style={[styles.paymentIcon, { backgroundColor: '#FEF3C7' }]}>
+            <Ionicons name="logo-bitcoin" size={24} color="#F59E0B" />
+          </View>
+          <View style={styles.paymentContent}>
+            <Text style={styles.paymentTitle}>Crypto</Text>
+            <Text style={styles.paymentDesc}>Pay with Bitcoin, USDT & more</Text>
+          </View>
+          <View style={styles.comingSoonBadge}>
+            <Text style={styles.comingSoonText}>Coming Soon</Text>
           </View>
         </View>
       </ScrollView>
@@ -148,5 +179,16 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: '800',
     color: '#059669',
+  },
+  comingSoonBadge: {
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  comingSoonText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: '#D97706',
   },
 });

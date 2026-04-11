@@ -3,13 +3,18 @@ import { Tabs } from 'expo-router';
 import { View, StyleSheet, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_SIZE, SHADOWS } from '@/src/constants/theme';
+import { useLanguage } from '@/src/i18n/LanguageContext';
+import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 
 export default function RiderTabLayout() {
+  const { t } = useLanguage();
+  useActiveTripCoordinator();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: COLORS.accentGreen,  // FIXED: More visible green
+        tabBarActiveTintColor: COLORS.accentGreen,
         tabBarInactiveTintColor: COLORS.gray400,
         tabBarStyle: {
           backgroundColor: COLORS.primary,
@@ -29,7 +34,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="rider-home"
         options={{
-          title: 'Home',
+          title: t.tabs.home,
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
               <Ionicons name={focused ? 'home' : 'home-outline'} size={22} color={color} />
@@ -40,7 +45,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="rider-trips"
         options={{
-          title: 'My Trips',
+          title: t.tabs.trips,
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
               <Ionicons name={focused ? 'time' : 'time-outline'} size={22} color={color} />
@@ -51,7 +56,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="rider-safety"
         options={{
-          title: 'Safety',
+          title: t.tabs.safety,
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
               <Ionicons name={focused ? 'shield-checkmark' : 'shield-checkmark-outline'} size={22} color={color} />
@@ -62,7 +67,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="rider-wallet"
         options={{
-          title: 'Wallet',
+          title: t.tabs.wallet,
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
               <Ionicons name={focused ? 'wallet' : 'wallet-outline'} size={22} color={color} />
@@ -73,7 +78,7 @@ export default function RiderTabLayout() {
       <Tabs.Screen
         name="rider-profile"
         options={{
-          title: 'Profile',
+          title: t.tabs.profile,
           tabBarIcon: ({ color, focused }) => (
             <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
               <Ionicons name={focused ? 'person' : 'person-outline'} size={22} color={color} />
