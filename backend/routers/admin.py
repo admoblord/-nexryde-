@@ -5,6 +5,7 @@ from typing import Optional, Dict, List, Any
 from datetime import datetime, timezone, timedelta
 import hashlib
 import logging
+import os
 
 from database import db, SUBSCRIPTION_CONFIG
 
@@ -14,9 +15,9 @@ admin_router = APIRouter(prefix="/api", tags=["Admin"])
 # ==================== ADMIN ENDPOINTS ====================
 
 # Admin credentials (in production, use secure hashing)
-ADMIN_CREDENTIALS = {
-    "admin@nexryde.com": "nexryde2025"
-}
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@nexryde.com')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'nexryde2025')
+ADMIN_CREDENTIALS = {ADMIN_EMAIL: ADMIN_PASSWORD}
 
 class AdminLoginRequest(BaseModel):
     email: str
@@ -76,9 +77,15 @@ async def admin_get_riders(limit: int = 100, skip: int = 0):
         {"_id": 0}
     ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     
-    # Enrich with trip counts
+    # Enrich with trip counts (batch query)
+    rider_ids = [r["id"] for r in riders]
+    trip_counts = await db.trips.aggregate([
+        {"$match": {"rider_id": {"$in": rider_ids}}},
+        {"$group": {"_id": "$rider_id", "count": {"$sum": 1}}}
+    ]).to_list(200)
+    counts_map = {t["_id"]: t["count"] for t in trip_counts}
     for rider in riders:
-        rider["total_trips"] = await db.trips.count_documents({"rider_id": rider["id"]})
+        rider["total_trips"] = counts_map.get(rider["id"], 0)
         rider["blocked"] = rider.get("blocked", False)
     
     return {"riders": riders, "total": len(riders)}
@@ -91,26 +98,31 @@ async def admin_get_drivers(limit: int = 100, skip: int = 0):
         {"_id": 0}
     ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
     
-    # Enrich with profile and subscription data
+    # Enrich with profile and subscription data (batch queries)
+    driver_ids = [d["id"] for d in drivers]
+    all_profiles = await db.driver_profiles.find({"user_id": {"$in": driver_ids}}, {"_id": 0}).to_list(200)
+    all_subs = await db.subscriptions.find({"driver_id": {"$in": driver_ids}}, {"_id": 0}).sort("created_at", -1).to_list(200)
+    trip_counts = await db.trips.aggregate([
+        {"$match": {"driver_id": {"$in": driver_ids}}},
+        {"$group": {"_id": "$driver_id", "count": {"$sum": 1}}}
+    ]).to_list(200)
+    profiles_map = {p["user_id"]: p for p in all_profiles}
+    subs_map = {}
+    for s in all_subs:
+        if s["driver_id"] not in subs_map:
+            subs_map[s["driver_id"]] = s
+    counts_map = {t["_id"]: t["count"] for t in trip_counts}
+    
     enriched_drivers = []
     for driver in drivers:
-        profile = await db.driver_profiles.find_one({"user_id": driver["id"]}, {"_id": 0})
-        subscription = await db.subscriptions.find_one(
-            {"driver_id": driver["id"]},
-            {"_id": 0},
-            sort=[("created_at", -1)]
-        )
-        
+        profile = profiles_map.get(driver["id"])
+        subscription = subs_map.get(driver["id"])
         enriched_drivers.append({
             **driver,
-            "vehicle": {
-                "make": profile.get("vehicle_type") if profile else None,
-                "model": profile.get("vehicle_model") if profile else None,
-                "plate": profile.get("vehicle_plate") if profile else None,
-            } if profile else None,
+            "vehicle": {"make": profile.get("vehicle_type") if profile else None, "model": profile.get("vehicle_model") if profile else None, "plate": profile.get("vehicle_plate") if profile else None} if profile else None,
             "subscription_status": subscription.get("status") if subscription else "none",
             "is_online": profile.get("is_online", False) if profile else False,
-            "total_trips": await db.trips.count_documents({"driver_id": driver["id"]}),
+            "total_trips": counts_map.get(driver["id"], 0),
             "blocked": driver.get("blocked", False)
         })
     

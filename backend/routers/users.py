@@ -160,17 +160,13 @@ async def get_favorite_drivers(user_id: str):
         raise HTTPException(status_code=404, detail="User not found")
     driver_ids = user.get("favorite_drivers", [])
     drivers = []
-    for did in driver_ids:
-        driver = await db.users.find_one({"id": did})
-        if driver:
-            profile = await db.driver_profiles.find_one({"user_id": did})
-            drivers.append({
-                "id": driver["id"],
-                "name": driver.get("name"),
-                "rating": driver.get("rating", 5.0),
-                "vehicle": profile.get("vehicle_model") if profile else None,
-                "plate": profile.get("vehicle_plate") if profile else None
-            })
+    if driver_ids:
+        all_drivers = await db.users.find({"id": {"$in": driver_ids}}, {"_id": 0, "id": 1, "name": 1, "rating": 1}).to_list(100)
+        all_profiles = await db.driver_profiles.find({"user_id": {"$in": driver_ids}}, {"_id": 0, "user_id": 1, "vehicle_model": 1, "vehicle_plate": 1}).to_list(100)
+        profiles_map = {p["user_id"]: p for p in all_profiles}
+        for driver in all_drivers:
+            profile = profiles_map.get(driver["id"])
+            drivers.append({"id": driver["id"], "name": driver.get("name"), "rating": driver.get("rating", 5.0), "vehicle": profile.get("vehicle_model") if profile else None, "plate": profile.get("vehicle_plate") if profile else None})
     return {"favorite_drivers": drivers}
 
 @users_router.post("/users/{user_id}/blocked-drivers")

@@ -667,22 +667,22 @@ async def rate_trip(trip_id: str, rater_id: str, request: ComfortRatingRequest):
     
     await db.trips.update_one({"id": trip_id}, {"$set": update_data})
     
-    # Update user rating
+    # Update user rating using aggregation (efficient)
     if rated_user_id:
         if is_rider_rating:
-            ratings = await db.trips.find(
-                {"driver_id": rated_user_id, "driver_rating": {"$exists": True}}
-            ).to_list(1000)
-            if ratings:
-                avg_rating = sum(r["driver_rating"] for r in ratings) / len(ratings)
-                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(avg_rating, 1)}})
+            result = await db.trips.aggregate([
+                {"$match": {"driver_id": rated_user_id, "driver_rating": {"$exists": True}}},
+                {"$group": {"_id": None, "avg": {"$avg": "$driver_rating"}}}
+            ]).to_list(1)
+            if result:
+                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(result[0]["avg"], 1)}})
         else:
-            ratings = await db.trips.find(
-                {"rider_id": rated_user_id, "rider_rating": {"$exists": True}}
-            ).to_list(1000)
-            if ratings:
-                avg_rating = sum(r["rider_rating"] for r in ratings) / len(ratings)
-                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(avg_rating, 1)}})
+            result = await db.trips.aggregate([
+                {"$match": {"rider_id": rated_user_id, "rider_rating": {"$exists": True}}},
+                {"$group": {"_id": None, "avg": {"$avg": "$rider_rating"}}}
+            ]).to_list(1)
+            if result:
+                await db.users.update_one({"id": rated_user_id}, {"$set": {"rating": round(result[0]["avg"], 1)}})
     
     return {"message": "Rating submitted"}
 
