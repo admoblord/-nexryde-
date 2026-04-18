@@ -8,7 +8,7 @@
 ## ✅ ACCOUNT STATUS
 
 ### Verified Information:
-- **API Key:** `TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU` ✅ VALID
+- **API Key:** `<REDACTED_TERMII_API_KEY>` ✅ VALID
 - **Account Balance:** ₦8,748.63 ✅ FUNDED
 - **Registered Sender IDs:**
   1. **NEXRYDE** (Status: Active) ✅ PERFECT FOR YOUR APP
@@ -91,7 +91,7 @@ Your `.env` file is now configured correctly:
 
 ```env
 # Termii SMS Configuration
-TERMII_API_KEY=TLuufgzYJpodibfqFNFPWbzSVWGBKbtIracYRVWTAPjAVSxARPNPJU
+TERMII_API_KEY=<REDACTED_TERMII_API_KEY>
 TERMII_FROM_ID=NEXRYDE
 TERMII_BASE_URL=https://v3.api.termii.com
 ```
@@ -107,7 +107,7 @@ TERMII_BASE_URL=https://v3.api.termii.com
 
 ### Test 1: Check Balance (Working ✅)
 ```bash
-curl -X GET "https://v3.api.termii.com/api/get-balance?api_key=TLuufgzYJpodibfqFNFPWbzSVWGBKbtIracYRVWTAPjAVSxARPNPJU"
+curl -X GET "https://v3.api.termii.com/api/get-balance?api_key=<REDACTED_TERMII_API_KEY>"
 ```
 
 **Response:**
@@ -122,7 +122,7 @@ curl -X GET "https://v3.api.termii.com/api/get-balance?api_key=TLuufgzYJpodibfqF
 
 ### Test 2: Check Sender IDs (Working ✅)
 ```bash
-curl -X GET "https://v3.api.termii.com/api/sender-id?api_key=TLuufgzYJpodibfqFNFPWbzSVWGBKbtIracYRVWTAPjAVSxARPNPJU"
+curl -X GET "https://v3.api.termii.com/api/sender-id?api_key=<REDACTED_TERMII_API_KEY>"
 ```
 
 **Response:**
@@ -148,7 +148,7 @@ curl -X GET "https://v3.api.termii.com/api/sender-id?api_key=TLuufgzYJpodibfqFNF
 curl -X POST https://v3.api.termii.com/api/sms/send \
 -H "Content-Type: application/json" \
 -d '{
-  "api_key": "TLuufgzYJpodibfqFNFPWbzSVWGBKbtIracYRVWTAPjAVSxARPNPJU",
+  "api_key": "<REDACTED_TERMII_API_KEY>",
   "to": "2348012345678",
   "from": "NEXRYDE",
   "channel": "generic",
@@ -288,7 +288,7 @@ async def send_otp(request: OTPRequest):
 - [ ] **Test WhatsApp channel** as alternative (if needed)
 
 ### For Emergent (Backend):
-- [x] ✅ Backend configured with correct API key (`TLuufgzYJpodibfqFNFPWbzSVWGBKbtIracYRVWTAPjAVSxARPNPJU`)
+- [x] ✅ Backend configured with correct API key (`<REDACTED_TERMII_API_KEY>`)
 - [x] ✅ Sender ID set to "NEXRYDE"
 - [x] ✅ Fallback to test mode working
 - [x] ✅ OTP appears in backend logs when Termii fails

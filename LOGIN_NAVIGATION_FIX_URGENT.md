@@ -33,7 +33,7 @@ cd backend
 cat .env | grep TERMII_API_KEY
 
 # Should show:
-TERMII_API_KEY=TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU
+TERMII_API_KEY=<REDACTED_TERMII_API_KEY>
 
 # If empty → Add the key!
 ```
@@ -305,7 +305,7 @@ cd /Users/admoblord/nexryde/backend
 cat .env | grep -E "TERMII_API_KEY|EMERGENT_AUTH_URL"
 
 # If missing, add them:
-echo 'TERMII_API_KEY=TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU' >> .env
+echo 'TERMII_API_KEY=<REDACTED_TERMII_API_KEY>' >> .env
 echo 'EMERGENT_AUTH_URL=https://auth.emergentagent.com/session-data' >> .env
 
 # Restart backend

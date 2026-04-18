@@ -326,7 +326,7 @@ gcloud run deploy nexryde-backend \
   --region us-central1 \
   --project nexryde-app \
   --allow-unauthenticated \
-  --set-env-vars MONGODB_URI="...",TERMII_API_KEY="...",GOOGLE_MAPS_API_KEY="...",ADMIN_EMAIL="admin@nexryde.com",ADMIN_PASSWORD="Admin@Nexryde2026!"
+  --set-env-vars MONGODB_URI="...",TERMII_API_KEY="...",GOOGLE_MAPS_API_KEY="...",ADMIN_EMAIL="admin@nexryde.com",ADMIN_PASSWORD="<REDACTED_ADMIN_PASSWORD>"
 ```
 
 ---

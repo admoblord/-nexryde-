@@ -252,7 +252,7 @@ cat .env
 **Required variables:**
 ```env
 MONGODB_URL=mongodb://localhost:27017
-GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED
+GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>
 GOOGLE_CLOUD_SPEECH_KEY=nexryde-speech-key.json
 TERMII_API_KEY=TLxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TERMII_FROM_ID=NexRyde

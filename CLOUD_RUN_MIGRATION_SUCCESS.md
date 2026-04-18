@@ -89,7 +89,7 @@ https://nexryde-backend-993913300770.us-central1.run.app
 ### 2. Database:
 - ✅ MongoDB Atlas (FREE tier)
 - ✅ Network access configured (0.0.0.0/0)
-- ✅ Connection string: `mongodb+srv://admoblordgroup_db_user:***@nexryde.t3qd9ab.mongodb.net`
+- ✅ Connection string: `mongodb+srv://db_user:***@YOUR_CLUSTER.mongodb.net`
 
 ### 3. Frontend:
 - ✅ Updated `.env` with new backend URL

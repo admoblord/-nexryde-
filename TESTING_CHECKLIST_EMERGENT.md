@@ -191,7 +191,7 @@ Check your Emergent dashboard:
 ## 🔟 TERMII SMS BALANCE
 
 ```bash
-curl -X GET "https://v3.api.termii.com/api/get-balance?api_key=TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU"
+curl -X GET "https://v3.api.termii.com/api/get-balance?api_key=<REDACTED_TERMII_API_KEY>"
 ```
 
 **Expected:**

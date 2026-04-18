@@ -150,7 +150,7 @@ gcloud run deploy nexryde-backend \
   --max-instances 10 \
   --min-instances 0 \
   --timeout 300 \
-  --set-env-vars "MONGO_URL=YOUR_MONGO_URL,DB_NAME=nexryde_db,GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED,TERMII_API_KEY=TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU,TERMII_FROM_ID=NEXRYDE,TERMII_BASE_URL=https://v3.api.termii.com,EMERGENT_AUTH_URL=https://auth.emergentagent.com/session-data,EMERGENT_LLM_KEY="
+  --set-env-vars "MONGO_URL=YOUR_MONGO_URL,DB_NAME=nexryde_db,GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>,TERMII_API_KEY=<REDACTED_TERMII_API_KEY>,TERMII_FROM_ID=NEXRYDE,TERMII_BASE_URL=https://v3.api.termii.com,EMERGENT_AUTH_URL=https://auth.emergentagent.com/session-data,EMERGENT_LLM_KEY="
 
 # Cloud Run will:
 # 1. Build Docker image
@@ -227,8 +227,8 @@ Instead of putting secrets in the deploy command, use Cloud Run console:
 ```
 MONGO_URL=mongodb+srv://...
 DB_NAME=nexryde_db
-GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED
-TERMII_API_KEY=TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPjAVSxARPNPJU
+GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>
+TERMII_API_KEY=<REDACTED_TERMII_API_KEY>
 TERMII_FROM_ID=NEXRYDE
 TERMII_BASE_URL=https://v3.api.termii.com
 EMERGENT_AUTH_URL=https://auth.emergentagent.com/session-data

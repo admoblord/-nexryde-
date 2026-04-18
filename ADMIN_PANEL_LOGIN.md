@@ -13,7 +13,7 @@
 ```
 URL:      https://nexryde-backend-993913300770.us-central1.run.app/admin
 Email:    admin@nexryde.com
-Password: Admin@Nexryde2026!
+Password: <REDACTED_ADMIN_PASSWORD>
 ```
 
 **✅ Login is now secure and uses environment variables!**
@@ -33,7 +33,7 @@ Password: Admin@Nexryde2026!
 ```python
 # Admin credentials from environment variables
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'admin@nexryde.com')
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'Admin@Nexryde2026!')
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '<REDACTED_ADMIN_PASSWORD>')
 
 ADMIN_CREDENTIALS = {
     ADMIN_EMAIL: ADMIN_PASSWORD
@@ -150,7 +150,7 @@ Edit `server.py`:
 
 ```python
 ADMIN_CREDENTIALS = {
-    os.environ.get('ADMIN_EMAIL', 'admin@nexryde.com'): os.environ.get('ADMIN_PASSWORD', 'Admin@Nexryde2026!'),
+    os.environ.get('ADMIN_EMAIL', 'admin@nexryde.com'): os.environ.get('ADMIN_PASSWORD', '<REDACTED_ADMIN_PASSWORD>'),
     "joseph@nexryde.com": "JosephSecurePass123!",
     "manager@nexryde.com": "ManagerPass456!"
 }
@@ -193,7 +193,7 @@ https://nexryde-backend-993913300770.us-central1.run.app/admin
 
 **3. Enter Credentials:**
 - Email: `admin@nexryde.com`
-- Password: `Admin@Nexryde2026!`
+- Password: `<REDACTED_ADMIN_PASSWORD>`
 
 **4. Click "Login"**
 
@@ -434,7 +434,7 @@ https://nexryde-backend-993913300770.us-central1.run.app/admin
 **2. Login with:**
 ```
 Email:    admin@nexryde.com
-Password: Admin@Nexryde2026!
+Password: <REDACTED_ADMIN_PASSWORD>
 ```
 
 **3. Navigate Dashboard:**
@@ -596,7 +596,7 @@ Action: Block phone number
 
 ### **Current Default:**
 ```
-Password: Admin@Nexryde2026!
+Password: <REDACTED_ADMIN_PASSWORD>
 ```
 
 **Strength:** 
@@ -618,7 +618,7 @@ Password: Admin@Nexryde2026!
 - No personal information
 
 Good examples:
-- Admin@Nexryde2026!
+- <REDACTED_ADMIN_PASSWORD>
 - SecureNex#2026$Pass
 - NexAdm!n$2026Secure
 ```
@@ -648,7 +648,7 @@ Works on:
 # Test login endpoint
 curl -X POST https://nexryde-backend-993913300770.us-central1.run.app/api/admin/login \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@nexryde.com","password":"Admin@Nexryde2026!"}'
+  -d '{"email":"admin@nexryde.com","password":"<REDACTED_ADMIN_PASSWORD>"}'
 
 Expected:
 {
@@ -678,7 +678,7 @@ Expected:
 
 **Deploying now with:**
 - ✅ `ADMIN_EMAIL="admin@nexryde.com"`
-- ✅ `ADMIN_PASSWORD="Admin@Nexryde2026!"`
+- ✅ `ADMIN_PASSWORD="<REDACTED_ADMIN_PASSWORD>"`
 - ✅ Secure token generation
 - ✅ Environment variable support
 
@@ -706,7 +706,7 @@ Expected:
 ```
 URL:      https://nexryde-backend-993913300770.us-central1.run.app/admin
 Email:    admin@nexryde.com  
-Password: Admin@Nexryde2026!
+Password: <REDACTED_ADMIN_PASSWORD>
 ```
 
 **Change password after first login for security! 🔒**

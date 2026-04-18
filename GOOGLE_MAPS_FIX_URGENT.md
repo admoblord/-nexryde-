@@ -34,7 +34,7 @@ Enable these **4 APIs**:
 
 Go to: https://console.cloud.google.com/apis/credentials
 
-Click on your API key: `GOOGLE_MAPS_KEY_REDACTED`
+Click on your API key: `<REDACTED_GOOGLE_MAPS_API_KEY>`
 
 #### **Application Restrictions:**
 ```
@@ -88,7 +88,7 @@ expo start
 
 **Test API key directly:**
 ```bash
-curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria%20Island&components=country:ng&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria%20Island&components=country:ng&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 ```
 
 **Should return:**

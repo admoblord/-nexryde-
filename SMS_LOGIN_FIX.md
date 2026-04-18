@@ -18,11 +18,11 @@ cd /Users/admoblord/nexryde/backend && gcloud run deploy nexryde-backend \
   --source . \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars MONGODB_URI="mongodb+srv://admoblordgroup_db_user:Nwabueze1..@nexryde.t3qd9ab.mongodb.net/?appName=nexryde",TERMII_API_KEY="TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPJVAWxARPNPJU",TERMII_FROM_ID="NEXRYDE",GOOGLE_MAPS_API_KEY="GOOGLE_MAPS_KEY_REDACTED"
+  --set-env-vars MONGODB_URI="mongodb+srv://USER:PASSWORD@YOUR_CLUSTER.mongodb.net/?appName=nexryde",TERMII_API_KEY="<REDACTED_TERMII_API_KEY>",TERMII_FROM_ID="NEXRYDE",GOOGLE_MAPS_API_KEY="<REDACTED_GOOGLE_MAPS_API_KEY>"
 ```
 
 ## Termii Configuration
-- **API Key**: TLuufgzYJpodibfqFNFPWbzSWTvLgJzSVWGBKbtIracYRVWTAPJVAWxARPNPJU
+- **API Key**: <REDACTED_TERMII_API_KEY>
 - **Sender ID**: NEXRYDE
 - **Channel**: generic (bypasses DND)
 - **Base URL**: https://api.ng.termii.com

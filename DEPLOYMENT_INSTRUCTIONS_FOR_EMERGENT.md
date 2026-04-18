@@ -47,12 +47,12 @@ cat .env
 
 2. **You should see:**
 ```bash
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED
+EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>
 ```
 
 3. **If it's missing, add it:**
 ```bash
-echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED" >> .env
+echo "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>" >> .env
 ```
 
 ### **Enable Required APIs in Google Cloud Console:**
@@ -68,7 +68,7 @@ Enable these 4 APIs:
 **Check if APIs are enabled:**
 ```bash
 # Test the API key:
-curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria&components=country:ng&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria&components=country:ng&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 
 # Expected: JSON response with predictions
 # If error: Enable the APIs in Google Cloud Console
@@ -141,7 +141,7 @@ cat .env
 **Must contain:**
 ```bash
 EXPO_PUBLIC_BACKEND_URL=https://nexryde-ui.emergent.host
-EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=GOOGLE_MAPS_KEY_REDACTED
+EXPO_PUBLIC_GOOGLE_MAPS_API_KEY=<REDACTED_GOOGLE_MAPS_API_KEY>
 ```
 
 ### **Backend .env:**
@@ -573,7 +573,7 @@ cd frontend
 npx expo start -c
 
 # 3. Test API key directly
-curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victoria&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 
 # 4. Enable Places API in Google Cloud Console
 # Go to: https://console.cloud.google.com/apis/library
@@ -601,7 +601,7 @@ curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Victori
 # Click: "Enable"
 
 # 2. Test API
-curl "https://maps.googleapis.com/maps/api/distancematrix/json?origins=6.4281,3.4219&destinations=6.4474,3.4700&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/distancematrix/json?origins=6.4281,3.4219&destinations=6.4474,3.4700&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 
 # 3. Check Expo console for errors
 ```
@@ -671,10 +671,10 @@ cd backend
 3. **Test APIs Individually:**
 ```bash
 # Places API
-curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Lagos&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/place/autocomplete/json?input=Lagos&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 
 # Distance Matrix API
-curl "https://maps.googleapis.com/maps/api/distancematrix/json?origins=6.5244,3.3792&destinations=6.4474,3.4700&key=GOOGLE_MAPS_KEY_REDACTED"
+curl "https://maps.googleapis.com/maps/api/distancematrix/json?origins=6.5244,3.3792&destinations=6.4474,3.4700&key=<REDACTED_GOOGLE_MAPS_API_KEY>"
 
 # Expected: JSON responses with data
 # If error: API not enabled or key invalid
