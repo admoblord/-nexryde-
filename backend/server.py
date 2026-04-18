@@ -42,6 +42,7 @@ from smart_route_planner import route_planner_router
 # Import Map Service (Cost Controlled)
 from map_service import map_router
 from places_service import places_router
+from safety_data_service import safety_data_router
 
 # Import Call Service (Privacy Protected)
 from call_service import call_router
@@ -1423,6 +1424,7 @@ app.include_router(places_router)
 app.include_router(call_router)
 app.include_router(community_router)
 app.include_router(safety_router)
+app.include_router(safety_data_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
 app.include_router(trips_router)

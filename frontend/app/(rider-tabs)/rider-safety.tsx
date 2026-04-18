@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
+import { fetchRealCrimeData, type RealCrimeDataResponse } from '@/src/services/crimeSafetyData';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
 
 type Row = {
@@ -158,13 +159,42 @@ function quickBg(v: (typeof QUICK)[number]['variant']) {
 
 export default function RiderSafetyScreen() {
   const router = useRouter();
-  const { user, currentTrip } = useAppStore();
+  const { user, currentTrip, token } = useAppStore();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
+  const [crimeBrief, setCrimeBrief] = useState<RealCrimeDataResponse | null>(null);
+  const [crimeLoading, setCrimeLoading] = useState(false);
 
   const effectiveTripId = useMemo(() => currentTrip?.id || activeTripId || null, [currentTrip?.id, activeTripId]);
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      setCrimeLoading(true);
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        let lat = 6.5244;
+        let lng = 3.3792;
+        if (perm.status === 'granted') {
+          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          lat = pos.coords.latitude;
+          lng = pos.coords.longitude;
+        }
+        const data = await fetchRealCrimeData(lat, lng);
+        if (!cancelled) setCrimeBrief(data);
+      } catch {
+        if (!cancelled) setCrimeBrief(null);
+      } finally {
+        if (!cancelled) setCrimeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   useEffect(() => {
     const fetchActiveTrip = async () => {
@@ -239,6 +269,52 @@ export default function RiderSafetyScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <View style={styles.intelCard}>
+          <View style={styles.intelHeader}>
+            <Ionicons name="map" size={18} color={COLORS.info} />
+            <Text style={styles.intelTitle}>Area intelligence</Text>
+          </View>
+          {crimeLoading ? (
+            <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginVertical: 8 }} />
+          ) : crimeBrief ? (
+            <>
+              <Text style={styles.intelMeta}>
+                {crimeBrief.city} · Night/day risk:{' '}
+                <Text
+                  style={{
+                    fontWeight: '900',
+                    color:
+                      crimeBrief.time_risk_level === 'high'
+                        ? COLORS.error
+                        : crimeBrief.time_risk_level === 'moderate'
+                          ? COLORS.warning
+                          : COLORS.success,
+                  }}
+                >
+                  {crimeBrief.time_risk_level.toUpperCase()}
+                </Text>
+              </Text>
+              {crimeBrief.nearby_high_risk_zones?.length ? (
+                <Text style={styles.intelBody} numberOfLines={3}>
+                  Hotspots near you:{' '}
+                  {crimeBrief.nearby_high_risk_zones
+                    .map((z) => `${z.area} (${z.distance_km != null ? `${z.distance_km} km` : 'near'})`)
+                    .join(' · ')}
+                </Text>
+              ) : (
+                <Text style={styles.intelBody}>No mapped high-risk anchors within ~10 km of this pin.</Text>
+              )}
+              <Text style={styles.intelAdvice} numberOfLines={4}>
+                {crimeBrief.general_advice}
+              </Text>
+            </>
+          ) : (
+            <Text style={styles.intelBody}>
+              {token ? 'Could not load area snapshot. Try again later.' : 'Sign in to load live area intelligence.'}
+            </Text>
+          )}
+        </View>
+
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
@@ -349,6 +425,45 @@ const styles = StyleSheet.create({
   scroll: {
     padding: SPACING.lg,
     paddingBottom: SPACING.huge,
+  },
+  intelCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    ...SHADOWS.sm,
+  },
+  intelHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: SPACING.xs,
+  },
+  intelTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  intelMeta: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: COLORS.lightTextSecondary,
+    marginBottom: 6,
+  },
+  intelBody: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
+    lineHeight: 20,
+    marginBottom: 6,
+  },
+  intelAdvice: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.lightTextMuted,
+    lineHeight: 18,
   },
   quickLabel: {
     fontSize: FONT_SIZE.xs,

@@ -15,17 +15,29 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { AreaBoySafety, AreaSafetyReport, useAreaBoySafety } from '@/src/services/areaBoySafety';
 import * as Location from 'expo-location';
 import { BACKEND_URL } from '@/src/services/api';
+import { fetchRealCrimeData, type RealCrimeDataResponse } from '@/src/services/crimeSafetyData';
 
 export default function RiderSafetyCheckScreen() {
   const router = useRouter();
   const { areaSafety, loading, checkAreaSafety } = useAreaBoySafety();
-  
+  const [crimeIntel, setCrimeIntel] = useState<RealCrimeDataResponse | null>(null);
+  const [crimeLoading, setCrimeLoading] = useState(false);
+
   const [searchQuery, setSearchQuery] = useState('');
   const [resolving, setResolving] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
 
   const handleCheckArea = async (lat: number, lng: number, name: string) => {
     await checkAreaSafety(lat, lng, name);
+    setCrimeLoading(true);
+    try {
+      const snap = await fetchRealCrimeData(lat, lng);
+      setCrimeIntel(snap);
+    } catch {
+      setCrimeIntel(null);
+    } finally {
+      setCrimeLoading(false);
+    }
   };
 
   const handleSearchArea = async () => {
@@ -177,6 +189,47 @@ export default function RiderSafetyCheckScreen() {
                 </View>
               </View>
             </View>
+          </View>
+        )}
+
+        {(crimeLoading || crimeIntel) && (
+          <View style={styles.crimeCard}>
+            <Text style={styles.crimeTitle}>Metro crime context</Text>
+            {crimeLoading ? (
+              <Text style={styles.crimeMuted}>Loading hotspot snapshot…</Text>
+            ) : crimeIntel ? (
+              <>
+                <Text style={styles.crimeLine}>
+                  {crimeIntel.city} · Time-of-day risk:{' '}
+                  <Text style={{ fontWeight: '900', color: COLORS.accentBlue }}>{crimeIntel.time_risk_level}</Text>
+                </Text>
+                {crimeIntel.nearby_high_risk_zones?.length ? (
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={styles.crimeSubhead}>Anchors near this pin</Text>
+                    {crimeIntel.nearby_high_risk_zones.map((z) => (
+                      <Text key={z.area} style={styles.crimeBullet}>
+                        • {z.area}
+                        {z.distance_km != null ? ` (~${z.distance_km} km)` : ''} — {z.risk}
+                      </Text>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={styles.crimeMuted}>No mapped high-risk anchors within ~10 km.</Text>
+                )}
+                {crimeIntel.nearby_safe_zones?.length ? (
+                  <View style={{ marginTop: 8 }}>
+                    <Text style={styles.crimeSubhead}>Lower-risk anchors nearby</Text>
+                    {crimeIntel.nearby_safe_zones.map((z) => (
+                      <Text key={z.area} style={styles.crimeBulletMuted}>
+                        • {z.area}
+                        {z.note ? ` — ${z.note}` : ''}
+                      </Text>
+                    ))}
+                  </View>
+                ) : null}
+                <Text style={styles.crimeAdvice}>{crimeIntel.general_advice}</Text>
+              </>
+            ) : null}
           </View>
         )}
 
@@ -374,6 +427,56 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: '700',
     color: COLORS.lightTextMuted,
+  },
+  crimeCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  crimeTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.sm,
+  },
+  crimeLine: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  crimeSubhead: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.lightTextMuted,
+    textTransform: 'uppercase',
+    marginBottom: 4,
+  },
+  crimeBullet: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextPrimary,
+    lineHeight: 20,
+  },
+  crimeBulletMuted: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    lineHeight: 20,
+  },
+  crimeMuted: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextMuted,
+  },
+  crimeAdvice: {
+    marginTop: SPACING.md,
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    lineHeight: 18,
   },
   tipsCard: {
     backgroundColor: COLORS.white,

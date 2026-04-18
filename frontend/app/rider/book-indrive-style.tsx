@@ -10,6 +10,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, getWalletMe, getRiderPreferences, updateRiderPreferences, getAvailableDrivers } from '@/src/services/api';
+import { fetchRouteSafety, type RouteSafetyResponse } from '@/src/services/crimeSafetyData';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
@@ -77,6 +78,7 @@ export default function BookInDriveStyle() {
   const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet'>('cash');
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
+  const [routeSafety, setRouteSafety] = useState<RouteSafetyResponse | null>(null);
   const [nearbyDrivers, setNearbyDrivers] = useState<Array<{
     driver_id: string;
     name?: string;
@@ -656,17 +658,11 @@ export default function BookInDriveStyle() {
           routes = [];
         }
         const first = routes[0];
-        // #region agent log
-        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:handleCalculateFare',message:'routes before setOptimizedRoute',data:{routeCount:routes.length,hasFirst:!!first},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-        // #endregion
         setOptimizedRoute(first ? TrafficAI.normalizeTrafficRoute(first) : null);
       } else {
         Alert.alert('Fare Error', toStr(data?.detail || data?.message, 'Could not calculate fare. Please try again.'));
       }
     } catch (error: any) {
-      // #region agent log
-      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:handleCalculateFare',message:'handleCalculateFare catch',data:{err:String(error?.message||error)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
-      // #endregion
       Alert.alert('Connection Error', toStr(error, 'Network error. Check your connection and try again.'));
     } finally {
       calculateInFlightRef.current = false;
@@ -681,18 +677,10 @@ export default function BookInDriveStyle() {
       return;
     }
     const run = async () => {
-      // #region agent log
-      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices scheduled',data:{pLat:pickupCoords?.lat,pLng:pickupCoords?.lng,dLat:destinationCoords?.lat,dLng:destinationCoords?.lng,vehicle:selectedVehicle},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-      // #endregion
       try {
         await calculateAllVehiclePrices();
-        // #region agent log
-        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices ok',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
-      } catch (e) {
-        // #region agent log
-        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices error',data:{err:String((e as Error)?.message||e)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
-        // #endregion
+      } catch {
+        /* fare matrix best-effort */
       }
     };
     const timer = setTimeout(run, 400);
@@ -700,6 +688,50 @@ export default function BookInDriveStyle() {
       clearTimeout(timer);
     };
   }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng, selectedVehicle, availableVehicles]);
+
+  useEffect(() => {
+    if (!token) {
+      setRouteSafety(null);
+      return;
+    }
+    const pLat = pickupCoords?.lat ?? currentLocation?.lat;
+    const pLng = pickupCoords?.lng ?? currentLocation?.lng;
+    const dLat = destinationCoords?.lat;
+    const dLng = destinationCoords?.lng;
+    if (
+      !Number.isFinite(Number(pLat)) ||
+      !Number.isFinite(Number(pLng)) ||
+      !Number.isFinite(Number(dLat)) ||
+      !Number.isFinite(Number(dLng))
+    ) {
+      setRouteSafety(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const snap = await fetchRouteSafety({
+          pickup_lat: Number(pLat),
+          pickup_lng: Number(pLng),
+          dropoff_lat: Number(dLat),
+          dropoff_lng: Number(dLng),
+        });
+        if (!cancelled) setRouteSafety(snap);
+      })();
+    }, 550);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    token,
+    pickupCoords?.lat,
+    pickupCoords?.lng,
+    destinationCoords?.lat,
+    destinationCoords?.lng,
+    currentLocation?.lat,
+    currentLocation?.lng,
+  ]);
 
   const findOffers = async () => {
     if (offerInFlightRef.current) return;
@@ -1026,9 +1058,6 @@ export default function BookInDriveStyle() {
           ) : (
             (() => {
               const RideMap = require('@/src/components/RideMap.native').default;
-              // #region agent log
-              fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:mapBranch',message:'render RideMap branch',data:{plat:Number(pickupCoords.lat),plng:Number(pickupCoords.lng),dlat:Number(destinationCoords.lat),dlng:Number(destinationCoords.lng),nearby:nearbyDrivers.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
-              // #endregion
               return (
                 <RideMap
                   mapRef={null}
@@ -1180,6 +1209,48 @@ export default function BookInDriveStyle() {
               ))}
             </View>
           )}
+
+          {pickupCoords && destinationCoords && routeSafety ? (
+            <View style={s.routeSafetyCard}>
+              <View style={s.routeSafetyHeader}>
+                <Ionicons name="shield-half-outline" size={18} color={COLORS.yellow} />
+                <Text style={s.routeSafetyTitle}>Route safety · {routeSafety.city}</Text>
+              </View>
+              <Text style={s.routeSafetyRisk}>
+                Corridor risk:{' '}
+                <Text
+                  style={{
+                    fontWeight: '900',
+                    color:
+                      routeSafety.route_risk_level === 'high'
+                        ? COLORS.red
+                        : routeSafety.route_risk_level === 'moderate'
+                          ? COLORS.yellow
+                          : COLORS.green,
+                  }}
+                >
+                  {routeSafety.route_risk_level.toUpperCase()}
+                </Text>
+              </Text>
+              {routeSafety.risk_zones_on_route?.length ? (
+                <>
+                  <Text style={s.routeSafetySub}>Anchors near this pickup–drop corridor:</Text>
+                  {routeSafety.risk_zones_on_route.slice(0, 5).map((z) => (
+                    <Text key={z.area} style={s.routeSafetyBullet}>
+                      • {z.area} ({z.risk})
+                    </Text>
+                  ))}
+                </>
+              ) : (
+                <Text style={s.routeSafetySub}>No mapped high-risk anchors in this corridor box.</Text>
+              )}
+              {routeSafety.safety_tips?.length ? (
+                <Text style={s.routeSafetyTips} numberOfLines={4}>
+                  {routeSafety.safety_tips.join(' · ')}
+                </Text>
+              ) : null}
+            </View>
+          ) : null}
 
           {/* Vehicle */}
           <TouchableOpacity style={[s.vehicleCard, !veh && s.vehicleCardPrompt]} onPress={() => setShowVehicleModal(true)} accessibilityLabel="Select vehicle type" accessibilityRole="button">
@@ -1394,11 +1465,6 @@ export default function BookInDriveStyle() {
               placeholder={editingField === 'pickup' ? 'Enter pickup...' : 'Enter destination...'}
               value={editingField === 'pickup' ? pickup : destination}
               onChangeText={(text) => {
-                if (editingField === 'destination' && (text.length === 2 || text.length === 3 || text.length % 10 === 0)) {
-                  // #region agent log
-                  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:LocationAutocomplete',message:'destination onChangeText',data:{len:text.length},timestamp:Date.now(),hypothesisId:'T4'})}).catch(()=>{});
-                  // #endregion
-                }
                 editingField === 'pickup' ? setPickup(text) : setDestination(text);
               }}
               onPlaceSelected={async (loc) => {
@@ -1418,9 +1484,6 @@ export default function BookInDriveStyle() {
                     setDestination(desc);
                     if (coords) setDestinationCoords(coords);
                   }
-                  // #region agent log
-                  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:onPlaceSelected',message:'place applied',data:{field,hasCoords:!!coords,descLen:desc.length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-                  // #endregion
                   setShowLocationModal(false);
                 } catch {
                   Alert.alert('Location', 'Could not load that place. Try another suggestion or type the address again.');
@@ -1664,6 +1727,21 @@ const s = StyleSheet.create({
   vehIcon: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   vehName: { fontSize: 16, fontWeight: '800', color: COLORS.white },
   vehDesc: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
+  routeSafetyCard: {
+    backgroundColor: '#1E293B',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.35)',
+    gap: 6,
+  },
+  routeSafetyHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeSafetyTitle: { fontSize: 14, fontWeight: '900', color: COLORS.white },
+  routeSafetyRisk: { fontSize: 13, fontWeight: '700', color: COLORS.muted },
+  routeSafetySub: { fontSize: 12, fontWeight: '700', color: COLORS.dim, marginTop: 4 },
+  routeSafetyBullet: { fontSize: 12, fontWeight: '600', color: '#E2E8F0', lineHeight: 18 },
+  routeSafetyTips: { fontSize: 11, fontWeight: '600', color: COLORS.dim, marginTop: 6, lineHeight: 16 },
   fareSection: { gap: 18 },
   aiRouteCard: {
     backgroundColor: '#10213A',
