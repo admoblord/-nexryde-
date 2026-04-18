@@ -20,6 +20,17 @@ BASE_URL = (
     or 'https://nexryde-backend-993913300770.us-central1.run.app'
 ).rstrip('/')
 
+
+def _presets_headers():
+    """Chat presets are public on servers with updated path policy; otherwise use any JWT."""
+    try:
+        from tests.integration_utils import bearer_headers, register_rider
+
+        _uid, tok, _p = register_rider(BASE_URL)
+        return bearer_headers(tok)
+    except Exception:
+        return {}
+
 # Test data constants
 TEST_TRIP_ID = "test-call-trip"
 TEST_RIDER_ID = "test_rider_call"
@@ -33,7 +44,7 @@ class TestChatPresets:
     
     def test_get_rider_presets(self):
         """GET /api/chat/presets/rider - Should return rider preset messages"""
-        response = requests.get(f"{BASE_URL}/api/chat/presets/rider")
+        response = requests.get(f"{BASE_URL}/api/chat/presets/rider", headers=_presets_headers(), timeout=15)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         
         data = response.json()
@@ -50,7 +61,7 @@ class TestChatPresets:
     
     def test_get_driver_presets(self):
         """GET /api/chat/presets/driver - Should return driver preset messages"""
-        response = requests.get(f"{BASE_URL}/api/chat/presets/driver")
+        response = requests.get(f"{BASE_URL}/api/chat/presets/driver", headers=_presets_headers(), timeout=15)
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         
         data = response.json()
@@ -67,7 +78,9 @@ class TestChatPresets:
     
     def test_get_invalid_role_presets_defaults_to_rider(self):
         """GET /api/chat/presets/invalid - Should return rider presets as default"""
-        response = requests.get(f"{BASE_URL}/api/chat/presets/invalid_role")
+        response = requests.get(
+            f"{BASE_URL}/api/chat/presets/invalid_role", headers=_presets_headers(), timeout=15
+        )
         assert response.status_code == 200, f"Expected 200, got {response.status_code}"
         
         data = response.json()

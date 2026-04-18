@@ -14,6 +14,14 @@ export type RecordingType = 'audio' | 'video' | 'both';
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopped';
 export type IncidentType = 'accident' | 'harassment' | 'theft' | 'dispute' | 'other';
 
+export interface RecordingLocationSample {
+  latitude: number;
+  longitude: number;
+  speedKph?: number | null;
+  heading?: number | null;
+  timestamp: number;
+}
+
 export interface RideRecording {
   id: string;
   tripId: string;
@@ -34,6 +42,10 @@ export interface RideRecording {
     startLocation: string;
     endLocation: string;
     fare: number;
+    lastKnownLocation?: RecordingLocationSample | null;
+    routePoints?: RecordingLocationSample[];
+    maxObservedSpeedKph?: number;
+    lastUpdatedAt?: number;
   };
 }
 
@@ -62,6 +74,30 @@ export interface RecordingSettings {
 export class RideRecordingService {
   private static readonly AUTO_DELETE_DAYS = 7;
   private static readonly MAX_STORAGE_GB = 2;
+  private static readonly RECORDING_OPTIONS: any = {
+    android: {
+      extension: '.m4a',
+      outputFormat: 2,
+      audioEncoder: 3,
+      sampleRate: 44100,
+      numberOfChannels: 2,
+      bitRate: 128000,
+    },
+    ios: {
+      extension: '.m4a',
+      audioQuality: 0,
+      sampleRate: 44100,
+      numberOfChannels: 2,
+      bitRate: 128000,
+      linearPCMBitDepth: 16,
+      linearPCMIsBigEndian: false,
+      linearPCMIsFloat: false,
+    },
+    web: {
+      mimeType: 'audio/webm',
+      bitsPerSecond: 128000,
+    },
+  };
   
   /**
    * Start recording
@@ -88,26 +124,7 @@ export class RideRecordingService {
       
       // Start recording
       const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync({
-        android: {
-          extension: '.m4a',
-          outputFormat: Audio.RECORDING_OPTION_ANDROID_OUTPUT_FORMAT_MPEG_4,
-          audioEncoder: Audio.RECORDING_OPTION_ANDROID_AUDIO_ENCODER_AAC,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-        },
-        ios: {
-          extension: '.m4a',
-          audioQuality: Audio.RECORDING_OPTION_IOS_AUDIO_QUALITY_HIGH,
-          sampleRate: 44100,
-          numberOfChannels: 2,
-          bitRate: 128000,
-          linearPCMBitDepth: 16,
-          linearPCMIsBigEndian: false,
-          linearPCMIsFloat: false,
-        },
-      });
+      await recording.prepareToRecordAsync(this.RECORDING_OPTIONS);
       
       await recording.startAsync();
       
@@ -131,6 +148,10 @@ export class RideRecordingService {
           startLocation: 'Unknown',
           endLocation: 'Unknown',
           fare: 0,
+          lastKnownLocation: null,
+          routePoints: [],
+          maxObservedSpeedKph: 0,
+          lastUpdatedAt: Date.now(),
         },
       };
       
@@ -207,8 +228,8 @@ export class RideRecordingService {
       
       // Add to index
       const index = await this.getRecordingIndex();
-      index.push(recording.id);
-      await AsyncStorage.setItem('@recording_index', JSON.stringify(index));
+      const nextIndex = index.includes(recording.id) ? index : [...index, recording.id];
+      await AsyncStorage.setItem('@recording_index', JSON.stringify(nextIndex));
     } catch (error) {
       console.error('Failed to save recording metadata:', error);
     }
@@ -260,6 +281,66 @@ export class RideRecordingService {
       console.error('Failed to get all recordings:', error);
       return [];
     }
+  }
+
+  /**
+   * Get one recording by id
+   */
+  static async getRecording(recordingId: string): Promise<RideRecording | null> {
+    return await this.getRecordingMetadata(recordingId);
+  }
+
+  static async updateRecordingContext(
+    recordingId: string,
+    updates: Partial<RideRecording['metadata']>
+  ): Promise<RideRecording | null> {
+    const recording = await this.getRecordingMetadata(recordingId);
+    if (!recording) return null;
+
+    const updated: RideRecording = {
+      ...recording,
+      metadata: {
+        ...recording.metadata,
+        ...updates,
+        lastUpdatedAt: Date.now(),
+      },
+    };
+    await this.saveRecordingMetadata(updated);
+    return updated;
+  }
+
+  static async appendLocationSample(
+    recordingId: string,
+    sample: RecordingLocationSample
+  ): Promise<RideRecording | null> {
+    const recording = await this.getRecordingMetadata(recordingId);
+    if (!recording) return null;
+
+    const existingPoints = Array.isArray(recording.metadata.routePoints)
+      ? recording.metadata.routePoints
+      : [];
+    const speedKph = typeof sample.speedKph === 'number' && Number.isFinite(sample.speedKph)
+      ? Math.max(0, sample.speedKph)
+      : 0;
+    const updatedPoints = [...existingPoints, sample].slice(-120);
+    const coordinateLabel = `${sample.latitude.toFixed(5)}, ${sample.longitude.toFixed(5)}`;
+    const updated: RideRecording = {
+      ...recording,
+      metadata: {
+        ...recording.metadata,
+        startLocation:
+          recording.metadata.startLocation && recording.metadata.startLocation !== 'Unknown'
+            ? recording.metadata.startLocation
+            : coordinateLabel,
+        endLocation: coordinateLabel,
+        lastKnownLocation: sample,
+        routePoints: updatedPoints,
+        maxObservedSpeedKph: Math.max(recording.metadata.maxObservedSpeedKph || 0, speedKph),
+        lastUpdatedAt: Date.now(),
+      },
+    };
+    await this.saveRecordingMetadata(updated);
+    return updated;
   }
   
   /**
@@ -416,6 +497,10 @@ export const useRideRecording = () => {
       setRecording(result.recording);
       setRecordingId(result.recordingId);
       setStatus('recording');
+      const started = await RideRecordingService.getRecording(result.recordingId);
+      if (started) {
+        setCurrentRecording(started);
+      }
       
       // Notify other party
       if (settings.notifyOtherParty) {
@@ -455,6 +540,28 @@ export const useRideRecording = () => {
   ) => {
     return await RideRecordingService.reportIncident(recordingId, reportedBy, incidentType, description);
   }, []);
+
+  const updateRecordingContext = useCallback(async (
+    activeRecordingId: string,
+    updates: Partial<RideRecording['metadata']>
+  ) => {
+    const updated = await RideRecordingService.updateRecordingContext(activeRecordingId, updates);
+    if (updated && currentRecording?.id === activeRecordingId) {
+      setCurrentRecording(updated);
+    }
+    return updated;
+  }, [currentRecording?.id]);
+
+  const appendLocationSample = useCallback(async (
+    activeRecordingId: string,
+    sample: RecordingLocationSample
+  ) => {
+    const updated = await RideRecordingService.appendLocationSample(activeRecordingId, sample);
+    if (updated && currentRecording?.id === activeRecordingId) {
+      setCurrentRecording(updated);
+    }
+    return updated;
+  }, [currentRecording?.id]);
   
   /**
    * Load recordings
@@ -504,6 +611,8 @@ export const useRideRecording = () => {
     startRecording,
     stopRecording,
     reportIncident,
+    updateRecordingContext,
+    appendLocationSample,
     loadRecordings,
     deleteRecording,
     cleanupExpired,

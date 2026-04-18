@@ -1,5 +1,5 @@
 """Support Router - SOS/Safety, Family, Trip Sharing, Messaging, Lost & Found, Rider Prefs, Audio, Insurance, Fraud, Matching, Multi-Language."""
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -7,9 +7,12 @@ import logging
 import os
 import uuid
 import math
+import base64
+import hashlib
 from openai import OpenAI
 
 import httpx
+from cryptography.fernet import Fernet
 
 from database import db
 from shield_network import broadcast_sos_to_nearby_nexryde_drivers
@@ -23,6 +26,8 @@ TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
 TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+POLICE_ALERT_NUMBERS = [n.strip() for n in (os.environ.get("NEXRYDE_POLICE_ALERT_NUMBERS", "")).split(",") if n.strip()]
+MAX_TRIP_VIDEO_BYTES = 25 * 1024 * 1024  # 25MB guard for in-DB payload storage
 
 SUPPORTED_LANGUAGES = [
     {"code": "en", "name": "English", "flag": "🇬🇧"},
@@ -48,6 +53,12 @@ class SOSRequest(BaseModel):
     location_lng: float
     auto_triggered: bool = False
 
+
+class PoliceConnectRequest(BaseModel):
+    trip_id: str
+    location_lat: float
+    location_lng: float
+
 class SafetyResponseRequest(BaseModel):
     check_id: str
     response: str
@@ -66,6 +77,7 @@ class SOSAlert(BaseModel):
     status: str = "active"
     emergency_contacts_notified: list = []
     admin_notified: bool = True
+    police_station_map_url: Optional[str] = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 class RiderPreferencesUpdate(BaseModel):
@@ -74,6 +86,8 @@ class RiderPreferencesUpdate(BaseModel):
     temperature: Optional[str] = None
     conversation: Optional[str] = None
     special_needs: Optional[str] = None
+    estate_gate_code: Optional[str] = Field(default=None, max_length=64)
+    estate_name: Optional[str] = Field(default=None, max_length=120)
 
 class SavedRouteRequest(BaseModel):
     name: str
@@ -112,6 +126,17 @@ class TripIssueReportRequest(BaseModel):
     description: str
 
 
+class DriverWitnessReportRequest(BaseModel):
+    trip_id: str
+    incident_type: str  # crime | accident | medical | fire | violence | other
+    description: str = Field(..., min_length=12, max_length=2000)
+    location_lat: Optional[float] = None
+    location_lng: Optional[float] = None
+    occurred_at: Optional[str] = None
+    anonymous: bool = True
+    evidence_notes: Optional[str] = Field(default=None, max_length=600)
+
+
 class SupportBotRequest(BaseModel):
     message: str
     user_id: Optional[str] = None
@@ -129,6 +154,71 @@ class RadioStation(BaseModel):
     is_active: bool = True
     sort_order: int = 0
 
+
+def _prefs_fernet() -> Fernet:
+    raw = (os.environ.get("RIDER_PREFS_FERNET_KEY") or os.environ.get("JWT_SECRET") or "nexryde-rider-prefs-dev").encode()
+    key = base64.urlsafe_b64encode(hashlib.sha256(raw).digest())
+    return Fernet(key)
+
+
+def _encrypt_pref_secret(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    clean = value.strip()
+    if not clean:
+        return None
+    return _prefs_fernet().encrypt(clean.encode()).decode()
+
+
+def _decrypt_pref_secret(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+
+
+def _normalize_phone(raw: str) -> str:
+    value = (raw or "").strip().replace(" ", "")
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if not digits:
+        return ""
+    if value.startswith("+"):
+        return f"+{digits}"
+    if digits.startswith("0"):
+        return f"+234{digits[1:]}"
+    if digits.startswith("234"):
+        return f"+{digits}"
+    return f"+234{digits}"
+    try:
+        return _prefs_fernet().decrypt(value.encode()).decode()
+    except Exception:
+        return None
+
+
+async def _log_trip_event_safe(trip_id: str, event_type: str, actor_id: str, data: Optional[dict] = None) -> None:
+    """Best-effort event logger from support router without failing caller."""
+    try:
+        created_at = datetime.now(timezone.utc).isoformat()
+        event_payload = {
+            "trip_id": trip_id,
+            "event_type": event_type,
+            "actor_id": actor_id,
+            "data": data or {},
+            "created_at": created_at,
+        }
+        event_hash = hashlib.sha256(str(event_payload).encode()).hexdigest()
+        await db.trip_events.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "trip_id": trip_id,
+                "event_type": event_type,
+                "actor_id": actor_id,
+                "data": data or {},
+                "created_at": created_at,
+                "event_hash": event_hash,
+            }
+        )
+    except Exception as e:
+        logger.warning("support trip event log failed: %s", e)
+
 # ==================== SOS & SAFETY ====================
 
 @support_router.post("/sos/trigger")
@@ -144,7 +234,19 @@ async def trigger_sos(request: SOSRequest, http_request: Request):
     emergency_contacts = user.get("emergency_contacts", []) if user else []
     user_name = user.get("name", "A user") if user else "A user"
     user_role = "driver" if actor_id == trip.get("driver_id") else "rider"
-    sos = SOSAlert(trip_id=request.trip_id, user_id=user_id, user_role=user_role, location={"lat": request.location_lat, "lng": request.location_lng}, auto_triggered=request.auto_triggered, emergency_contacts_notified=[c["phone"] for c in emergency_contacts])
+    police_station_map_url = (
+        f"https://www.google.com/maps/search/?api=1&query=police+station&query_place_id=&center="
+        f"{request.location_lat},{request.location_lng}"
+    )
+    sos = SOSAlert(
+        trip_id=request.trip_id,
+        user_id=user_id,
+        user_role=user_role,
+        location={"lat": request.location_lat, "lng": request.location_lng},
+        auto_triggered=request.auto_triggered,
+        emergency_contacts_notified=[c["phone"] for c in emergency_contacts],
+        police_station_map_url=police_station_map_url,
+    )
     await db.sos_alerts.insert_one(sos.model_dump() if hasattr(sos, "model_dump") else sos.dict())
     await db.trips.update_one({"id": request.trip_id}, {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.now(timezone.utc)}})
     contacts_notified = 0
@@ -177,7 +279,89 @@ async def trigger_sos(request: SOSRequest, http_request: Request):
         "contacts_notified": contacts_notified,
         "total_contacts": len(emergency_contacts),
         "support_notified": True,
+        "police_station_map_url": police_station_map_url,
         "nearby_driver_alerts_sent": nearby_driver_alerts,
+    }
+
+
+@support_router.post("/sos/police-connect")
+async def one_touch_police_connect(request: PoliceConnectRequest, http_request: Request):
+    actor_id = require_authenticated(http_request)
+    trip = await db.trips.find_one({"id": request.trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if actor_id != trip.get("driver_id"):
+        raise HTTPException(status_code=403, detail="Only the assigned driver can use Police Connect")
+
+    driver = await db.users.find_one({"id": actor_id}, {"_id": 0, "id": 1, "name": 1, "phone": 1}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": actor_id},
+        {"_id": 0, "vehicle_model": 1, "vehicle_plate": 1, "vehicle_color": 1},
+    ) or {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    maps_query = f"https://www.google.com/maps/search/?api=1&query=police+station+near+{request.location_lat},{request.location_lng}"
+    dial_number = "+234199"
+    dial_uri = f"tel:{dial_number}"
+    alert_id = str(uuid.uuid4())
+
+    alert_payload = {
+        "id": alert_id,
+        "type": "one_touch_police_connect",
+        "status": "active",
+        "trip_id": request.trip_id,
+        "driver_id": actor_id,
+        "triggered_at": now_iso,
+        "location": {"lat": request.location_lat, "lng": request.location_lng},
+        "police_station_map_url": maps_query,
+        "driver_details": {
+            "name": driver.get("name", "Driver"),
+            "phone": driver.get("phone"),
+            "vehicle_model": profile.get("vehicle_model"),
+            "vehicle_plate": profile.get("vehicle_plate"),
+            "vehicle_color": profile.get("vehicle_color"),
+        },
+    }
+    await db.sos_alerts.insert_one(alert_payload)
+    await db.trips.update_one(
+        {"id": request.trip_id},
+        {"$set": {"police_connect_triggered": True, "police_connect_triggered_at": now_iso}},
+    )
+
+    sms_sent = 0
+    if TERMII_API_KEY and POLICE_ALERT_NUMBERS:
+        message = (
+            "NEXRYDE POLICE CONNECT ALERT\n"
+            f"Driver: {driver.get('name', 'Driver')}\n"
+            f"Vehicle: {profile.get('vehicle_model', 'Vehicle')} / {profile.get('vehicle_plate', 'N/A')}\n"
+            f"Trip: {request.trip_id}\n"
+            f"Location: https://maps.google.com/?q={request.location_lat},{request.location_lng}"
+        )
+        async with httpx.AsyncClient() as http_client:
+            for number in POLICE_ALERT_NUMBERS:
+                try:
+                    payload = {
+                        "api_key": TERMII_API_KEY,
+                        "to": number.lstrip("+"),
+                        "from": TERMII_FROM_ID,
+                        "channel": "dnd",
+                        "type": "plain",
+                        "sms": message,
+                    }
+                    resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
+                    if resp.status_code == 200:
+                        sms_sent += 1
+                except Exception as e:
+                    logger.warning("Police connect SMS failed for %s: %s", number, e)
+
+    return {
+        "success": True,
+        "message": "Police Connect activated",
+        "alert_id": alert_id,
+        "dial_uri": dial_uri,
+        "dial_number": dial_number,
+        "nearest_police_station_map_url": maps_query,
+        "structured_alert": alert_payload,
+        "police_sms_sent": sms_sent,
     }
 
 @support_router.post("/sos/{sos_id}/resolve")
@@ -433,6 +617,117 @@ async def get_trip_issues(trip_id: str, request: Request):
     ).sort("created_at", -1).to_list(50)
     return {"success": True, "trip_id": trip_id, "issues": issues}
 
+
+@support_router.post("/support/driver-witness/report")
+async def submit_driver_witness_report(request: DriverWitnessReportRequest, http_request: Request):
+    actor_id = require_authenticated(http_request)
+    trip = await db.trips.find_one({"id": request.trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if actor_id != trip.get("driver_id"):
+        raise HTTPException(status_code=403, detail="Only the assigned driver can submit witness report")
+
+    driver = await db.users.find_one({"id": actor_id}, {"_id": 0, "id": 1, "name": 1, "phone": 1}) or {}
+    driver_profile = await db.driver_profiles.find_one(
+        {"user_id": actor_id},
+        {"_id": 0, "vehicle_model": 1, "vehicle_plate": 1, "vehicle_color": 1},
+    ) or {}
+    now_iso = datetime.now(timezone.utc).isoformat()
+    public_driver_identity = {
+        "driver_alias": f"driver_{str(actor_id)[-6:]}",
+        "vehicle_model": driver_profile.get("vehicle_model"),
+        "vehicle_plate": driver_profile.get("vehicle_plate"),
+        "vehicle_color": driver_profile.get("vehicle_color"),
+    }
+    full_driver_identity = {
+        **public_driver_identity,
+        "driver_id": actor_id,
+        "driver_name": driver.get("name"),
+        "driver_phone": driver.get("phone"),
+    }
+    witness_report = {
+        "id": str(uuid.uuid4()),
+        "trip_id": request.trip_id,
+        "reporter_role": "driver",
+        "reporter_id": actor_id,
+        "anonymous": bool(request.anonymous),
+        "incident_type": (request.incident_type or "other").strip().lower(),
+        "description": request.description.strip(),
+        "evidence_notes": (request.evidence_notes or "").strip() or None,
+        "location": {
+            "lat": request.location_lat,
+            "lng": request.location_lng,
+        },
+        "occurred_at": request.occurred_at or now_iso,
+        "trip_context": {
+            "status": trip.get("status"),
+            "pickup": trip.get("pickup_location"),
+            "dropoff": trip.get("dropoff_location"),
+            "driver_id": trip.get("driver_id"),
+            "rider_id": trip.get("rider_id"),
+        },
+        "authority_payload": {
+            "report_id": None,  # filled after insert
+            "incident_type": (request.incident_type or "other").strip().lower(),
+            "description": request.description.strip(),
+            "occurred_at": request.occurred_at or now_iso,
+            "location": {"lat": request.location_lat, "lng": request.location_lng},
+            "trip_id": request.trip_id,
+            "driver_identity": public_driver_identity if request.anonymous else full_driver_identity,
+        },
+        "retaliation_protection": {
+            "enabled": True,
+            "status": "active",
+            "shielded_reporter_identity": bool(request.anonymous),
+        },
+        "authority_forwarding_status": "queued",
+        "created_at": now_iso,
+    }
+
+    await db.driver_witness_reports.insert_one(witness_report)
+    report_id = witness_report["id"]
+    await db.driver_witness_reports.update_one(
+        {"id": report_id},
+        {"$set": {"authority_payload.report_id": report_id}},
+    )
+    await db.authority_forward_queue.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "source": "driver_witness_programme",
+            "report_id": report_id,
+            "trip_id": request.trip_id,
+            "status": "pending",
+            "payload": {**witness_report["authority_payload"], "report_id": report_id},
+            "created_at": now_iso,
+            "last_attempt_at": None,
+            "attempt_count": 0,
+        }
+    )
+    reward_points = 25
+    await db.users.update_one(
+        {"id": actor_id},
+        {"$inc": {"safety_points": reward_points, "trust_score": 1.5}},
+    )
+    await _log_trip_event_safe(
+        request.trip_id,
+        "driver_witness_report_submitted",
+        actor_id,
+        {
+            "report_id": report_id,
+            "incident_type": witness_report["incident_type"],
+            "anonymous": bool(request.anonymous),
+            "reward_points": reward_points,
+        },
+    )
+    return {
+        "success": True,
+        "report_id": report_id,
+        "authority_forwarding_status": "queued",
+        "retaliation_protection": witness_report["retaliation_protection"],
+        "reward_points_earned": reward_points,
+        "message": "Witness report submitted securely. Nexryde queued it for authority forwarding.",
+    }
+
 # ==================== MULTI-LANGUAGE ====================
 
 @support_router.get("/languages")
@@ -469,11 +764,14 @@ async def add_family_member(family_id: str, phone: str, name: str, relationship:
         raise HTTPException(status_code=403, detail="Only family owner can add members")
     if len(family["members"]) >= 10:
         raise HTTPException(status_code=400, detail="Family has reached maximum 10 members")
-    member_user = await db.users.find_one({"phone": phone})
+    normalized_phone = _normalize_phone(phone)
+    if not normalized_phone:
+        raise HTTPException(status_code=400, detail="Invalid phone number")
+    member_user = await db.users.find_one({"phone": normalized_phone})
     member_id = member_user["id"] if member_user else f"pending-{phone}"
     if member_user and member_user.get("family_id"):
         raise HTTPException(status_code=400, detail="User already belongs to a family")
-    new_member = {"user_id": member_id, "phone": phone, "name": name, "relationship": relationship, "role": "member", "joined_at": datetime.now(timezone.utc), "is_pending": member_user is None}
+    new_member = {"user_id": member_id, "phone": normalized_phone, "name": name, "relationship": relationship, "role": "member", "joined_at": datetime.now(timezone.utc), "is_pending": member_user is None}
     await db.families.update_one({"id": family_id}, {"$push": {"members": new_member}})
     if member_user:
         inherited_trust = min(family.get("trust_score", 100.0), member_user.get("trust_score", 100.0))
@@ -505,12 +803,13 @@ async def remove_family_member(family_id: str, member_phone: str, request: Reque
         raise HTTPException(status_code=404, detail="Family not found")
     if actor_id != family.get("owner_id"):
         raise HTTPException(status_code=403, detail="Only family owner can remove members")
-    member_to_remove = next((m for m in family["members"] if m.get("phone") == member_phone), None)
+    normalized_phone = _normalize_phone(member_phone)
+    member_to_remove = next((m for m in family["members"] if _normalize_phone(str(m.get("phone") or "")) == normalized_phone), None)
     if not member_to_remove:
         raise HTTPException(status_code=404, detail="Member not found")
     if member_to_remove.get("role") == "owner":
         raise HTTPException(status_code=400, detail="Cannot remove family owner")
-    await db.families.update_one({"id": family_id}, {"$pull": {"members": {"phone": member_phone}}})
+    await db.families.update_one({"id": family_id}, {"$pull": {"members": {"phone": member_to_remove.get("phone")}}})
     if not member_to_remove.get("is_pending"):
         await db.users.update_one({"id": member_to_remove["user_id"]}, {"$unset": {"family_id": "", "family_role": ""}})
     return {"message": "Member removed from family"}
@@ -525,11 +824,12 @@ async def book_for_family_member(family_id: str, booker_id: str, member_phone: s
         raise HTTPException(status_code=404, detail="Family not found")
     if not any(m["user_id"] == booker_id for m in family["members"]):
         raise HTTPException(status_code=403, detail="Not authorized to book for this family")
-    member = next((m for m in family["members"] if m.get("phone") == member_phone), None)
+    normalized_phone = _normalize_phone(member_phone)
+    member = next((m for m in family["members"] if _normalize_phone(str(m.get("phone") or "")) == normalized_phone), None)
     if not member:
         raise HTTPException(status_code=404, detail="Member not found in family")
     trip_id = str(uuid.uuid4())
-    trip = {"id": trip_id, "rider_id": member.get("user_id", f"family-{member_phone}"), "rider_phone": member_phone, "rider_name": member.get("name"), "booked_by": booker_id, "family_id": family_id, "is_family_booking": True, "pickup_location": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address}, "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address}, "status": "pending", "created_at": datetime.now(timezone.utc), "fare": 0}
+    trip = {"id": trip_id, "rider_id": member.get("user_id", f"family-{normalized_phone}"), "rider_phone": normalized_phone, "rider_name": member.get("name"), "booked_by": booker_id, "family_id": family_id, "is_family_booking": True, "pickup_location": {"lat": pickup_lat, "lng": pickup_lng, "address": pickup_address}, "dropoff_location": {"lat": dropoff_lat, "lng": dropoff_lng, "address": dropoff_address}, "status": "pending", "created_at": datetime.now(timezone.utc), "fare": 0}
     await db.trips.insert_one(trip)
     for m in family["members"]:
         if m["user_id"] != booker_id:
@@ -631,6 +931,98 @@ async def stop_trip_recording(trip_id: str, request: Request):
     await db.trips.update_one({"id": trip_id}, {"$set": {"recording_enabled": False, "recording_stopped_at": datetime.now(timezone.utc)}})
     return {"message": "Recording stopped", "trip_id": trip_id}
 
+
+@support_router.post("/trips/{trip_id}/recordings/upload")
+async def upload_trip_recording_video(
+    trip_id: str,
+    request: Request,
+    video: UploadFile = File(...),
+    duration_seconds: float = Form(default=0),
+    started_at: Optional[str] = Form(default=None),
+    stopped_at: Optional[str] = Form(default=None),
+    source: str = Form(default="mobile_app"),
+):
+    actor_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if actor_id not in {trip.get("rider_id"), trip.get("driver_id")}:
+        raise HTTPException(status_code=403, detail="Not authorized for this trip")
+
+    content_type = (video.content_type or "").lower()
+    if content_type and not content_type.startswith("video/"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a video")
+
+    blob = await video.read()
+    if not blob:
+        raise HTTPException(status_code=400, detail="Video file is empty")
+    if len(blob) > MAX_TRIP_VIDEO_BYTES:
+        raise HTTPException(status_code=413, detail="Video too large. Max allowed is 25MB")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    role = "driver" if actor_id == trip.get("driver_id") else "rider"
+    recording_doc = {
+        "id": str(uuid.uuid4()),
+        "trip_id": trip_id,
+        "uploader_id": actor_id,
+        "uploader_role": role,
+        "filename": video.filename or f"trip-video-{trip_id}.mp4",
+        "mime_type": content_type or "video/mp4",
+        "size_bytes": len(blob),
+        "video_base64": base64.b64encode(blob).decode("utf-8"),
+        "duration_seconds": max(0, float(duration_seconds or 0)),
+        "started_at": started_at,
+        "stopped_at": stopped_at,
+        "source": source.strip() or "mobile_app",
+        "trip_status": trip.get("status"),
+        "created_at": now_iso,
+        "admin_review_status": "pending",
+    }
+    await db.trip_recordings.insert_one(recording_doc)
+    await db.trips.update_one(
+        {"id": trip_id},
+        {
+            "$set": {
+                "recording_enabled": False,
+                "recording_stopped_at": datetime.now(timezone.utc),
+                "last_recording_upload_at": now_iso,
+            }
+        },
+    )
+
+    return {
+        "success": True,
+        "recording_id": recording_doc["id"],
+        "trip_id": trip_id,
+        "size_bytes": recording_doc["size_bytes"],
+        "duration_seconds": recording_doc["duration_seconds"],
+    }
+
+
+@support_router.get("/support/trips/{trip_id}/recordings")
+async def list_trip_recordings_for_participants(trip_id: str, request: Request):
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    rows = await db.trip_recordings.find(
+        {"trip_id": trip_id},
+        {"_id": 0, "video_base64": 0},
+    ).sort("created_at", -1).to_list(50)
+    return {"success": True, "trip_id": trip_id, "recordings": rows}
+
+
+@support_router.get("/admin/trip-recordings")
+async def list_trip_recordings_for_admin(request: Request, trip_id: Optional[str] = None, limit: int = 100):
+    await require_admin_request(request)
+    safe_limit = max(1, min(limit, 200))
+    query = {"trip_id": trip_id} if trip_id else {}
+    rows = await db.trip_recordings.find(
+        query,
+        {"_id": 0, "video_base64": 0},
+    ).sort("created_at", -1).to_list(safe_limit)
+    return {"success": True, "count": len(rows), "recordings": rows}
+
 # ==================== INSURANCE ====================
 
 @support_router.get("/trips/{trip_id}/insurance")
@@ -673,17 +1065,30 @@ async def get_rider_preferences(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
     prefs = await db.rider_preferences.find_one({"user_id": user_id}, {"_id": 0})
     if not prefs:
-        prefs = {"user_id": user_id, "preferred_vehicle": "economy", "preferred_music": "any", "temperature": "normal", "conversation": "moderate", "special_needs": None, "saved_routes": []}
+        prefs = {"user_id": user_id, "preferred_vehicle": "economy", "preferred_music": "any", "temperature": "normal", "conversation": "moderate", "special_needs": None, "saved_routes": [], "estate_name": None, "estate_gate_code": None, "has_estate_gate_code": False}
+        return prefs
+    prefs["estate_gate_code"] = _decrypt_pref_secret(prefs.get("estate_gate_code_cipher"))
+    prefs["has_estate_gate_code"] = bool(prefs.get("estate_gate_code"))
+    prefs.pop("estate_gate_code_cipher", None)
     return prefs
 
 @support_router.put("/rider/preferences/{user_id}")
 async def update_rider_preferences(user_id: str, request: RiderPreferencesUpdate, http_request: Request):
     verify_owner_strict(http_request, user_id)
     update_data = {k: v for k, v in request.dict().items() if v is not None}
+    if "estate_gate_code" in update_data:
+        update_data["estate_gate_code_cipher"] = _encrypt_pref_secret(update_data.pop("estate_gate_code"))
+    if "estate_name" in update_data and update_data["estate_name"] is not None:
+        update_data["estate_name"] = update_data["estate_name"].strip() or None
     if update_data:
         await db.rider_preferences.update_one({"user_id": user_id}, {"$set": update_data}, upsert=True)
     prefs = await db.rider_preferences.find_one({"user_id": user_id}, {"_id": 0})
-    return prefs or {"user_id": user_id}
+    if not prefs:
+        return {"user_id": user_id}
+    prefs["estate_gate_code"] = _decrypt_pref_secret(prefs.get("estate_gate_code_cipher"))
+    prefs["has_estate_gate_code"] = bool(prefs.get("estate_gate_code"))
+    prefs.pop("estate_gate_code_cipher", None)
+    return prefs
 
 @support_router.post("/rider/preferences/{user_id}/routes")
 async def save_route(user_id: str, route: SavedRouteRequest, request: Request):
@@ -786,6 +1191,81 @@ async def get_radio_stations():
         {"_id": 0}
     ).sort("sort_order", 1).to_list(100)
     return {"stations": rows}
+
+
+@support_router.get("/support/contacts")
+async def get_support_contacts():
+    police_numbers = [n.strip() for n in (os.environ.get("NEXRYDE_PUBLIC_POLICE_NUMBERS", "+234199")).split(",") if n.strip()]
+    return {
+        "support_phone": "+2348089297811",
+        "support_email": "support@nexryde.com",
+        "nigerian_police_numbers": police_numbers,
+        "emergency_line": "+234199",
+    }
+
+
+@support_router.get("/notifications/feature-announcements")
+async def get_feature_announcements(request: Request):
+    """Company-curated in-app feature updates for rider/driver notification center."""
+    actor_id = require_authenticated(request)
+    user = await db.users.find_one({"id": actor_id}, {"_id": 0, "role": 1})
+    role = (user or {}).get("role", "rider")
+    rows = await db.feature_announcements.find(
+        {
+            "is_active": True,
+            "$or": [
+                {"audience": "all"},
+                {"audience": role},
+            ],
+        },
+        {"_id": 0},
+    ).sort("created_at", -1).to_list(200)
+
+    if not rows:
+        now_iso = datetime.now(timezone.utc).isoformat()
+        rows = [
+            {
+                "id": "feat-schedule-booking",
+                "title": "Scheduled Rides in Booking",
+                "message": "You can now schedule rides directly from booking and manage upcoming rides quickly.",
+                "feature_route": "/rider/schedule",
+                "audience": "rider",
+                "version": "2026.4",
+                "created_at": now_iso,
+                "is_active": True,
+            },
+            {
+                "id": "feat-live-driver-state",
+                "title": "Live Driver Movement Status",
+                "message": "Track if your driver is moving or paused in real-time on the trip map.",
+                "feature_route": "/rider/tracking",
+                "audience": "rider",
+                "version": "2026.4",
+                "created_at": now_iso,
+                "is_active": True,
+            },
+            {
+                "id": "feat-stop-safety-check",
+                "title": "Auto Stop Safety Check",
+                "message": "If a trip stops abnormally, riders receive a safety prompt and drivers can share stop reasons.",
+                "feature_route": "/(rider-tabs)/rider-safety",
+                "audience": "all",
+                "version": "2026.4",
+                "created_at": now_iso,
+                "is_active": True,
+            },
+            {
+                "id": "feat-nigeria-scan",
+                "title": "Nationwide Area Safety Scan",
+                "message": "Area safety check now scans unsafe zones across Nigerian cities, not only Lagos.",
+                "feature_route": "/rider/safety-check",
+                "audience": "all",
+                "version": "2026.4",
+                "created_at": now_iso,
+                "is_active": True,
+            },
+        ]
+    return {"success": True, "announcements": rows}
 
 # ==================== SMART MATCHING ====================
 

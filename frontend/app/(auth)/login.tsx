@@ -17,6 +17,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as SecureStore from 'expo-secure-store';
+import * as ImagePicker from 'expo-image-picker';
 import { useAppStore } from '@/src/store/appStore';
 import { saveUserSession, getUserSession } from '@/utils/authStorage';
 import { BACKEND_URL } from '@/src/services/api';
@@ -52,6 +54,14 @@ export default function LoginScreen() {
   const [emailLoading, setEmailLoading] = useState(false);
   const [biometricReady, setBiometricReady] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
+  const [deviceId, setDeviceId] = useState<string>('');
+  const [fortressChallengeId, setFortressChallengeId] = useState<string | null>(null);
+  const [fortressMaskedPhone, setFortressMaskedPhone] = useState<string>('');
+  const [fortressPhoneInput, setFortressPhoneInput] = useState('');
+  const [fortressPinInput, setFortressPinInput] = useState('');
+  const [fortressFaceImage, setFortressFaceImage] = useState<string>('');
+  const [fortressLoading, setFortressLoading] = useState(false);
+  const [pinSetupRequired, setPinSetupRequired] = useState(false);
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
 
   useEffect(() => {
@@ -69,6 +79,21 @@ export default function LoginScreen() {
       }
     };
     void checkBiometricLoginAvailability();
+  }, []);
+
+  useEffect(() => {
+    const ensureDeviceId = async () => {
+      const key = 'nexryde_device_id';
+      const existing = await SecureStore.getItemAsync(key);
+      if (existing) {
+        setDeviceId(existing);
+        return;
+      }
+      const generated = `dev_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      await SecureStore.setItemAsync(key, generated);
+      setDeviceId(generated);
+    };
+    void ensureDeviceId();
   }, []);
   
   const getBackendUrl = () => BACKEND_URL;
@@ -165,7 +190,7 @@ export default function LoginScreen() {
       const res = await fetch(`${getBackendUrl()}/api/auth/email-signin`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
+        body: JSON.stringify({ email: normalizedEmail, device_id: deviceId || undefined }),
         signal: controller.signal,
       });
 
@@ -175,6 +200,18 @@ export default function LoginScreen() {
 
       if (!res.ok) {
         Alert.alert("Email sign-in failed", data?.detail || data?.message || text || "Please try again.");
+        return;
+      }
+
+      if (data?.fortress_required) {
+        setFortressChallengeId(String(data.challenge_id || ''));
+        setFortressMaskedPhone(String(data.masked_phone || ''));
+        setPinSetupRequired(Boolean(data.pin_setup_required));
+        setFortressFaceImage('');
+        Alert.alert(
+          'Driver Account Fortress',
+          'New device detected. Complete face scan, PIN, and registered phone verification to continue.'
+        );
         return;
       }
 
@@ -231,6 +268,60 @@ export default function LoginScreen() {
     } finally {
       clearTimeout(t);
       setEmailLoading(false);
+    }
+  };
+
+  const handleCaptureFortressFace = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (permission.status !== 'granted') {
+      Alert.alert('Permission needed', 'Camera permission is required for fortress face scan.');
+      return;
+    }
+    const capture = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: false,
+      quality: 0.7,
+      base64: true,
+      cameraType: ImagePicker.CameraType.front,
+    });
+    if (capture.canceled || !capture.assets?.[0]?.base64) return;
+    setFortressFaceImage(`data:image/jpeg;base64,${capture.assets[0].base64}`);
+  };
+
+  const handleVerifyFortress = async () => {
+    if (!fortressChallengeId) return;
+    if (!fortressPhoneInput.trim() || !fortressPinInput.trim() || !fortressFaceImage) {
+      Alert.alert('Incomplete', 'Phone, PIN, and face scan are all required.');
+      return;
+    }
+    setFortressLoading(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/auth/driver-fortress/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          challenge_id: fortressChallengeId,
+          phone: fortressPhoneInput.trim(),
+          pin: fortressPinInput.trim(),
+          face_image: fortressFaceImage,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert('Fortress verification failed', data?.detail || 'Please try again.');
+        return;
+      }
+      const resolvedToken = data?.token || data?.user?.token || null;
+      setUser(data.user);
+      setToken(resolvedToken);
+      setIsAuthenticated(true);
+      await saveUserSession({ ...data.user, token: resolvedToken });
+      setFortressChallengeId(null);
+      await routeVerifiedUser(data.user, resolvedToken);
+    } catch {
+      Alert.alert('Connection error', 'Could not verify fortress challenge.');
+    } finally {
+      setFortressLoading(false);
     }
   };
 
@@ -358,6 +449,50 @@ export default function LoginScreen() {
                   </LinearGradient>
                 </TouchableOpacity>
               </View>
+
+              {fortressChallengeId ? (
+                <View style={styles.emailContainer}>
+                  <Text style={styles.emailLabel}>Driver Account Fortress</Text>
+                  <Text style={styles.helpText}>
+                    Verify registered phone {fortressMaskedPhone || ''}, PIN, and live face on this new device.
+                  </Text>
+                  <TextInput
+                    style={styles.emailInput}
+                    placeholder="Registered phone (+234...)"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={fortressPhoneInput}
+                    onChangeText={setFortressPhoneInput}
+                    keyboardType="phone-pad"
+                    autoCapitalize="none"
+                  />
+                  <TextInput
+                    style={styles.emailInput}
+                    placeholder={pinSetupRequired ? 'Create account PIN (4-8 digits)' : 'Driver account PIN'}
+                    placeholderTextColor={COLORS.textMuted}
+                    value={fortressPinInput}
+                    onChangeText={setFortressPinInput}
+                    keyboardType="number-pad"
+                    secureTextEntry
+                  />
+                  <TouchableOpacity style={styles.googleButton} onPress={() => void handleCaptureFortressFace()}>
+                    <Ionicons name="scan-outline" size={20} color={COLORS.white} />
+                    <Text style={styles.googleButtonText}>
+                      {fortressFaceImage ? 'Face Captured' : 'Capture Face Scan'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.loginButton, fortressLoading && styles.loginButtonDisabled]}
+                    onPress={() => void handleVerifyFortress()}
+                    disabled={fortressLoading}
+                  >
+                    {fortressLoading ? (
+                      <ActivityIndicator color={COLORS.white} />
+                    ) : (
+                      <Text style={styles.loginButtonText}>Complete Fortress Verification</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              ) : null}
 
               {biometricReady && (
                 <TouchableOpacity
@@ -659,6 +794,33 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     color: COLORS.white,
     fontSize: 15,
+  },
+  emailLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#E2E8F0',
+    marginBottom: 2,
+  },
+  helpText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#94A3B8',
+    lineHeight: 18,
+  },
+  loginButton: {
+    borderRadius: 16,
+    backgroundColor: COLORS.green,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  loginButtonDisabled: {
+    opacity: 0.55,
+  },
+  loginButtonText: {
+    color: COLORS.white,
+    fontSize: 16,
+    fontWeight: '800',
   },
   googleButtonContent: {
     flexDirection: 'row',

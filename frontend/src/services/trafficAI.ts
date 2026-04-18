@@ -37,6 +37,8 @@ export interface TrafficRoute {
   fuelConsumption: number; // liters
   aiScore: number; // 0-100 (best route)
   timeSavedVsAlternative?: number; // seconds
+  /** ETA in whole minutes when the optimizer sets it (rider tracking). */
+  estimatedTimeMinutes?: number;
 }
 
 export interface TrafficPrediction {
@@ -121,6 +123,44 @@ export class TrafficAI {
     }
   }
 
+  /** Coerce API / partial objects into a safe TrafficRoute (avoids render crashes). */
+  static normalizeTrafficRoute(raw: unknown): TrafficRoute | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const r = raw as Record<string, unknown>;
+    const levels = ['light', 'moderate', 'heavy', 'severe'] as const;
+    const levelRaw = String(r.trafficLevel ?? r.traffic_level ?? 'light').toLowerCase();
+    const trafficLevel = (levels as readonly string[]).includes(levelRaw)
+      ? (levelRaw as (typeof levels)[number])
+      : 'light';
+    const trafficDelay = Number(r.trafficDelay ?? r.traffic_delay ?? 0);
+    const aiScore = Number(r.aiScore ?? r.ai_score ?? 70);
+    const distance = Number(r.distance ?? 0);
+    const durationWithoutTraffic = Number(r.durationWithoutTraffic ?? r.duration_without_traffic ?? 0);
+    const durationWithTraffic = Number(r.durationWithTraffic ?? r.duration_with_traffic ?? 0);
+    const hotspots = Array.isArray(r.hotspots) ? (r.hotspots as TrafficHotspot[]) : [];
+    return {
+      id: String(r.id || 'route'),
+      polyline: String(r.polyline || ''),
+      distance: Number.isFinite(distance) ? Math.max(0, distance) : 0,
+      durationWithoutTraffic: Number.isFinite(durationWithoutTraffic) ? Math.max(0, durationWithoutTraffic) : 0,
+      durationWithTraffic: Number.isFinite(durationWithTraffic) ? Math.max(0, durationWithTraffic) : 0,
+      trafficDelay: Number.isFinite(trafficDelay) ? Math.max(0, trafficDelay) : 0,
+      trafficLevel,
+      hotspots,
+      toll: Boolean(r.toll),
+      tollCost:
+        r.tollCost != null && Number.isFinite(Number(r.tollCost)) ? Number(r.tollCost) : undefined,
+      fuelConsumption: Number.isFinite(Number(r.fuelConsumption ?? r.fuel_consumption))
+        ? Number(r.fuelConsumption ?? r.fuel_consumption)
+        : 0,
+      aiScore: Number.isFinite(aiScore) ? Math.min(100, Math.max(0, Math.round(aiScore))) : 70,
+      timeSavedVsAlternative:
+        r.timeSavedVsAlternative != null && Number.isFinite(Number(r.timeSavedVsAlternative))
+          ? Number(r.timeSavedVsAlternative)
+          : undefined,
+    };
+  }
+
   /**
    * Get AI-optimized routes with traffic analysis
    */
@@ -134,18 +174,35 @@ export class TrafficAI {
       prioritizeTime?: boolean;
     }
   ): Promise<TrafficRoute[]> {
+    const ola = Number(origin.latitude);
+    const olo = Number(origin.longitude);
+    const dla = Number(destination.latitude);
+    const dlo = Number(destination.longitude);
+    if (![ola, olo, dla, dlo].every(Number.isFinite)) {
+      return [];
+    }
+    const originN = { latitude: ola, longitude: olo };
+    const destinationN = { latitude: dla, longitude: dlo };
     try {
       const response = await fetch(`${BACKEND_URL}/api/traffic/optimize-routes`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ origin, destination, preferences }),
+        body: JSON.stringify({ origin: originN, destination: destinationN, preferences }),
       });
-      if (!response.ok) return [];
-      const data = await response.json();
-      return Array.isArray(data?.routes) ? data.routes : [];
+      if (!response.ok) {
+        return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
+      }
+      const data = await response.json().catch(() => ({}));
+      if (Array.isArray(data?.routes) && data.routes.length > 0) {
+        const cleaned = (data.routes as unknown[])
+          .map((row) => this.normalizeTrafficRoute(row))
+          .filter((x): x is TrafficRoute => x != null);
+        if (cleaned.length) return cleaned;
+      }
+      return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
     } catch (error) {
       console.error('Failed to get optimized routes:', error);
-      return [];
+      return await this.buildFallbackOptimizedRoutes(originN, destinationN, preferences);
     }
   }
 
@@ -204,16 +261,21 @@ export class TrafficAI {
    * Calculate time saved by using AI route vs standard route
    */
   static calculateTimeSaved(aiRoute: TrafficRoute, standardDuration: number): number {
-    return Math.max(0, standardDuration - aiRoute.durationWithTraffic);
+    const std = Number(standardDuration);
+    const dwt = Number(aiRoute?.durationWithTraffic);
+    if (!Number.isFinite(std) || !Number.isFinite(dwt)) return 0;
+    return Math.max(0, std - dwt);
   }
 
   /**
    * Get traffic level from delay minutes
    */
   static getTrafficLevel(delayMinutes: number): 'light' | 'moderate' | 'heavy' | 'severe' {
-    if (delayMinutes < 5) return 'light';
-    if (delayMinutes < 15) return 'moderate';
-    if (delayMinutes < 30) return 'heavy';
+    const m = Number(delayMinutes);
+    if (!Number.isFinite(m) || m < 0) return 'light';
+    if (m < 5) return 'light';
+    if (m < 15) return 'moderate';
+    if (m < 30) return 'heavy';
     return 'severe';
   }
 
@@ -221,7 +283,9 @@ export class TrafficAI {
    * Format delay time for display
    */
   static formatDelay(delaySeconds: number): string {
-    const minutes = Math.round(delaySeconds / 60);
+    const sec = Number(delaySeconds);
+    if (!Number.isFinite(sec)) return 'No delay';
+    const minutes = Math.round(sec / 60);
     if (minutes < 1) return 'No delay';
     if (minutes === 1) return '1 min delay';
     if (minutes < 60) return `${minutes} mins delay`;
@@ -235,6 +299,72 @@ export class TrafficAI {
    */
   static getTrafficColor(level: 'light' | 'moderate' | 'heavy' | 'severe'): string {
     return this.TRAFFIC_COLORS[level];
+  }
+
+  private static async buildFallbackOptimizedRoutes(
+    origin: { latitude: number; longitude: number },
+    destination: { latitude: number; longitude: number },
+    preferences?: {
+      avoidTolls?: boolean;
+      avoidHighways?: boolean;
+      prioritizeFuel?: boolean;
+      prioritizeTime?: boolean;
+    }
+  ): Promise<TrafficRoute[]> {
+    if (
+      ![origin.latitude, origin.longitude, destination.latitude, destination.longitude].every((n) =>
+        Number.isFinite(Number(n))
+      )
+    ) {
+      return [];
+    }
+    const midpoint = {
+      latitude: (origin.latitude + destination.latitude) / 2,
+      longitude: (origin.longitude + destination.longitude) / 2,
+    };
+    const hotspots = await this.getTrafficStatus(midpoint.latitude, midpoint.longitude, 8000);
+    const distanceMeters = this.calculateDistance(origin, destination);
+    const baseDurationSeconds = Math.max(300, Math.round((distanceMeters / 1000 / 28) * 3600));
+    const totalDelaySeconds = hotspots.reduce(
+      (sum, hotspot) => sum + Math.max(0, hotspot.delayMinutes) * 60,
+      0
+    );
+    const trafficLevel = this.getTrafficLevel(totalDelaySeconds / 60);
+
+    const fastestRoute: TrafficRoute = {
+      id: 'fallback-fastest',
+      polyline: '',
+      distance: distanceMeters,
+      durationWithoutTraffic: baseDurationSeconds,
+      durationWithTraffic: baseDurationSeconds + totalDelaySeconds,
+      trafficDelay: totalDelaySeconds,
+      trafficLevel,
+      hotspots,
+      toll: !preferences?.avoidTolls,
+      tollCost: preferences?.avoidTolls ? 0 : 500,
+      fuelConsumption: Number(((distanceMeters / 1000) * 0.09).toFixed(2)),
+      aiScore: Math.max(55, 100 - Math.round(totalDelaySeconds / 60)),
+      timeSavedVsAlternative: Math.max(0, Math.round(totalDelaySeconds * 0.35)),
+    };
+
+    const alternativeDelaySeconds = totalDelaySeconds + (preferences?.prioritizeTime ? 0 : 8 * 60);
+    const alternativeRoute: TrafficRoute = {
+      id: 'fallback-alternative',
+      polyline: '',
+      distance: Math.round(distanceMeters * 1.08),
+      durationWithoutTraffic: Math.round(baseDurationSeconds * 1.08),
+      durationWithTraffic: Math.round(baseDurationSeconds * 1.08) + alternativeDelaySeconds,
+      trafficDelay: alternativeDelaySeconds,
+      trafficLevel: this.getTrafficLevel(alternativeDelaySeconds / 60),
+      hotspots,
+      toll: false,
+      tollCost: 0,
+      fuelConsumption: Number((((distanceMeters * 1.08) / 1000) * 0.085).toFixed(2)),
+      aiScore: Math.max(40, fastestRoute.aiScore - 12),
+      timeSavedVsAlternative: 0,
+    };
+
+    return [fastestRoute, alternativeRoute];
   }
 
   private static generateAlertsFromHotspots(
@@ -280,11 +410,16 @@ export class TrafficAI {
     point1: { latitude: number; longitude: number },
     point2: { latitude: number; longitude: number }
   ): number {
+    const la1 = Number(point1.latitude);
+    const lo1 = Number(point1.longitude);
+    const la2 = Number(point2.latitude);
+    const lo2 = Number(point2.longitude);
+    if (![la1, lo1, la2, lo2].every(Number.isFinite)) return 0;
     const R = 6371000; // Earth's radius in meters
-    const dLat = this.toRad(point2.latitude - point1.latitude);
-    const dLon = this.toRad(point2.longitude - point1.longitude);
-    const lat1 = this.toRad(point1.latitude);
-    const lat2 = this.toRad(point2.latitude);
+    const dLat = this.toRad(la2 - la1);
+    const dLon = this.toRad(lo2 - lo1);
+    const lat1 = this.toRad(la1);
+    const lat2 = this.toRad(la2);
 
     const a =
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +

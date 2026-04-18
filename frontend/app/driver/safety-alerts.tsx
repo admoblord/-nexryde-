@@ -131,6 +131,13 @@ export default function DriverSafetyAlertsScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
         }
       >
+        <View style={styles.guidanceBanner}>
+          <Ionicons name="shield-checkmark" size={18} color="#0F766E" />
+          <Text style={styles.guidanceText}>
+            Review active zones before going offline or taking unfamiliar routes. Use reports for urgent field intelligence, not routine traffic updates.
+          </Text>
+        </View>
+
         {/* Critical Alerts Banner */}
         {getCriticalAlerts().length > 0 && (
           <View style={styles.criticalBanner}>
@@ -154,7 +161,7 @@ export default function DriverSafetyAlertsScreen() {
 
         {/* Safety Status Summary */}
         <View style={styles.summaryCard}>
-          <Text style={styles.sectionTitle}>📊 Danger Zone Summary</Text>
+          <Text style={styles.sectionTitle}>Danger zone summary</Text>
           <View style={styles.summaryGrid}>
             <SummaryItem
               icon="warning"
@@ -186,7 +193,7 @@ export default function DriverSafetyAlertsScreen() {
         {/* Active Danger Zones */}
         {getActiveDangerZones().length > 0 && (
           <View style={styles.dangerSection}>
-            <Text style={styles.sectionTitle}>⚠️ Active Danger Zones ({getActiveDangerZones().length})</Text>
+            <Text style={styles.sectionTitle}>Active danger zones ({getActiveDangerZones().length})</Text>
             <Text style={styles.sectionSubtitle}>
               Dangerous areas right now - AVOID or proceed with extreme caution
             </Text>
@@ -199,7 +206,7 @@ export default function DriverSafetyAlertsScreen() {
         {/* Live Safety Alerts */}
         {safetyAlerts.length > 0 && (
           <View style={styles.alertsSection}>
-            <Text style={styles.sectionTitle}>🚨 Live Safety Alerts</Text>
+            <Text style={styles.sectionTitle}>Live safety alerts</Text>
             {safetyAlerts.map((alert) => (
               <AlertCard key={alert.id} alert={alert} />
             ))}
@@ -208,7 +215,7 @@ export default function DriverSafetyAlertsScreen() {
 
         {/* Safety Tips */}
         <View style={styles.tipsCard}>
-          <Text style={styles.tipsTitle}>💡 Nigerian Driver Safety Tips</Text>
+          <Text style={styles.tipsTitle}>Nigerian driver safety tips</Text>
           <SafetyTip
             icon="lock-closed"
             text="ALWAYS lock doors and close windows in traffic, especially at night"
@@ -393,7 +400,7 @@ const DangerZoneCard = ({ zone }: { zone: DangerZone }) => {
         <StatItem icon="time" text={AreaBoySafety.formatActiveTime(zone.activeTime)} />
         <StatItem icon="people" text={`${zone.verifiedReports} reports`} />
         <StatItem icon="sparkles" text={`${zone.aiConfidence}% AI`} />
-        <StatItem icon="star" text={`${zone.communityRating.toFixed(1)}★`} />
+        <StatItem icon="star" text={`${Number(zone.communityRating || 0).toFixed(1)}★`} />
       </View>
 
       {zone.safeAlternatives && zone.safeAlternatives.length > 0 && (
@@ -436,7 +443,7 @@ const AlertCard = ({ alert }: { alert: SafetyAlert }) => {
         <View style={styles.alertMeta}>
           <Ionicons name="location" size={14} color={COLORS.lightTextMuted} />
           <Text style={styles.alertMetaText}>
-            {(alert.distance / 1000).toFixed(1)}km away
+            {(Number(alert.distance || 0) / 1000).toFixed(1)}km away
           </Text>
         </View>
         <View style={styles.alertAction}>
@@ -510,6 +517,24 @@ const styles = StyleSheet.create({
   content: {
     padding: SPACING.lg,
     paddingBottom: SPACING.xxl * 2,
+  },
+  guidanceBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.sm,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+  },
+  guidanceText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    lineHeight: 20,
+    color: '#115E59',
   },
   
   criticalBanner: {

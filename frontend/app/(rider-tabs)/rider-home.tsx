@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,63 +8,79 @@ import {
   Dimensions,
   Animated,
   StatusBar,
-  Image,
   Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguage } from '@/src/i18n/LanguageContext';
-import { SupportedLanguage } from '@/src/i18n/translations';
+import { SupportedLanguage, SUPPORTED_LANGUAGES } from '@/src/i18n/translations';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, getDriverOfMonth, voteDriverOfMonth } from '@/src/services/api';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
+import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
+import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
+import { COLORS } from '@/src/constants/theme';
+import { HOME_PALETTE } from '@/src/constants/designSystem';
 
 const { width } = Dimensions.get('window');
 
-// NEXRYDE BRAND COLORS - ASIAN DESIGN
-const COLORS = {
-  primary: '#22E180', // NEXRYDE Green
-  primaryDark: '#1BC770',
-  secondary: '#6366F1', // Indigo
-  secondaryDark: '#4F46E5',
-  background: '#F8FAFC',
-  surface: '#FFFFFF',
-  text: '#0F172A',
-  textSecondary: '#64748B',
-  border: '#E2E8F0',
-  warning: '#F59E0B',
-  danger: '#EF4444',
-  cardShadow: 'rgba(0, 0, 0, 0.04)',
-};
+const ICON_EMERGENCY = '#EF4444';
+const ICON_SUPPORT = '#F97316';
+const FEAT_LIVE = '#2563EB';
+const FEAT_SAFETY = '#F59E0B';
 
 export default function ModernRiderHome() {
   const router = useRouter();
-  const { user, currentTrip } = useAppStore();
+  const { user, token, currentTrip, setCurrentTrip } = useAppStore();
+  const firstName =
+    (user?.name && String(user.name).trim().split(/\s+/)[0]) || 'there';
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
   const [showLangPicker, setShowLangPicker] = useState(false);
-  const { language, setLanguage, availableLanguages, t } = useLanguage();
-
-  const PRIORITY_FEATURES = [
-    { id: 'book', label: t.home.bookRide, subtitle: t.home.whereTo, icon: 'car', route: '/rider/book', gradient: [COLORS.primary, COLORS.primaryDark], size: 'large' },
-    { id: 'trips', label: t.home.myTrips, subtitle: t.ride.distance, icon: 'time', route: '/(rider-tabs)/rider-trips', gradient: [COLORS.secondary, COLORS.secondaryDark], size: 'small' },
-    { id: 'wallet', label: t.home.wallet, subtitle: t.wallet.payment, icon: 'wallet', route: '/(rider-tabs)/rider-wallet', gradient: [COLORS.warning, '#F97316'], size: 'small' },
-  ];
+  const [featureHubOpen, setFeatureHubOpen] = useState(false);
+  const { language, setLanguage, t } = useLanguage();
+  const [driverOfMonth, setDriverOfMonth] = useState<any>(null);
+  const [votingDriverId, setVotingDriverId] = useState<string | null>(null);
 
   const QUICK_FEATURES = [
-    { id: 'safety', label: t.safety.emergencySOS.split(' ')[0] || 'Safety', icon: 'shield-checkmark-outline', route: '/(rider-tabs)/rider-safety', color: COLORS.danger },
-    { id: 'support', label: t.home.support, icon: 'help-circle-outline', route: '/support', color: COLORS.warning },
-    { id: 'trips-quick', label: t.tabs.trips.split(' ')[0] || 'Trips', icon: 'time-outline', route: '/(rider-tabs)/rider-trips', color: COLORS.secondary },
-    { id: 'receipts', label: t.home.receipts, icon: 'receipt-outline', route: '/(rider-tabs)/rider-trips', color: COLORS.primary },
+    {
+      id: 'emergency',
+      label: t.home.emergency,
+      icon: 'warning' as const,
+      route: '/(rider-tabs)/rider-safety',
+      bg: ICON_EMERGENCY,
+    },
+    {
+      id: 'police',
+      label: 'Police & help',
+      icon: 'shield' as const,
+      route: '/support',
+      bg: ICON_SUPPORT,
+    },
+    {
+      id: 'witness',
+      label: 'Witness',
+      icon: 'eye' as const,
+      route: '/rider/share-trip',
+      bg: COLORS.accentGreen,
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      icon: 'settings' as const,
+      route: '/settings',
+      bg: '#475569',
+    },
   ];
 
+  /** Secondary shortcuts — share-trip lives under Quick “Witness”; wallet in hub. */
   const ALL_FEATURES = [
-    { id: 'favorites', label: 'My Drivers', icon: 'heart', route: '/rider/favorite-drivers', color: COLORS.danger },
-    { id: 'tracking', label: t.home.liveTrack, icon: 'navigate', route: '/rider/tracking', color: COLORS.secondary },
-    { id: 'share-trip', label: t.home.shareTrip, icon: 'share-social', route: '/rider/share-trip', color: COLORS.primary },
-    { id: 'security-code', label: t.home.security, icon: 'lock-closed', route: '/rider/security-code', color: COLORS.warning },
+    { id: 'tracking', label: t.home.liveTrack, icon: 'navigate' as const, route: '/rider/tracking', bg: FEAT_LIVE },
+    { id: 'safety-center', label: 'Safety Center', icon: 'shield-checkmark' as const, route: '/(rider-tabs)/rider-safety', bg: FEAT_SAFETY },
+    { id: 'stories', label: 'Stories', icon: 'book' as const, route: '/stories', bg: HOME_PALETTE.heroPurple },
   ];
 
   useEffect(() => {
@@ -92,8 +108,53 @@ export default function ModernRiderHome() {
     enforceRiderVerification();
   }, [router, user?.id, user?.role]);
 
+  useEffect(() => {
+    const loadDriverOfMonth = async () => {
+      try {
+        const res = await getDriverOfMonth();
+        setDriverOfMonth(res.data || null);
+      } catch (error) {
+        console.log('Driver of the month load failed:', error);
+      }
+    };
+    loadDriverOfMonth();
+  }, []);
+
   const normalizedCurrentTripStatus = normalizeTripStatus(currentTrip?.status, (currentTrip as any)?.payment_status);
   const showResumeChip = Boolean(currentTrip?.id && isActiveTripStatus(normalizedCurrentTripStatus));
+
+  const riderTripWsEnabled = Boolean(
+    user?.id &&
+      token &&
+      currentTrip?.id &&
+      ['pending', 'pending_driver_offers', 'accepted', 'arrived', 'ongoing', 'pending_payment'].includes(
+        normalizedCurrentTripStatus
+      )
+  );
+
+  const handleRiderHomeTripWs = useCallback(
+    (msg: RiderTripWsMessage) => {
+      const t = (msg.trip || {}) as Record<string, any>;
+      const norm = normalizeTripStatus(msg.status, t.payment_status);
+      const prev = useAppStore.getState().currentTrip;
+      if (!prev || String(prev.id) !== String(msg.trip_id)) return;
+      setCurrentTrip({
+        ...prev,
+        status: norm as typeof prev.status,
+        driver_id: (t.driver_id as string) || prev.driver_id,
+        fare: t.fare != null ? Number(t.fare) : prev.fare,
+      });
+    },
+    [setCurrentTrip]
+  );
+
+  useRiderTripRealtime({
+    riderId: user?.id,
+    token,
+    enabled: riderTripWsEnabled,
+    watchTripId: currentTrip?.id ?? null,
+    onTripUpdate: handleRiderHomeTripWs,
+  });
   const resumeStatusLabel =
     normalizedCurrentTripStatus === 'pending' || normalizedCurrentTripStatus === 'pending_driver_offers'
       ? 'Finding drivers'
@@ -107,26 +168,55 @@ export default function ModernRiderHome() {
               ? 'Payment pending'
               : 'Active trip';
 
+  const handleVoteDriverOfMonth = useCallback(
+    async (driverId: string) => {
+      if (!user?.id) {
+        router.push('/(auth)/login' as any);
+        return;
+      }
+      try {
+        setVotingDriverId(driverId);
+        const res = await voteDriverOfMonth(user.id, driverId);
+        setDriverOfMonth(res.data || null);
+      } catch (error: any) {
+        Alert.alert('Vote unavailable', error?.response?.data?.detail || 'You may have already voted this month.');
+      } finally {
+        setVotingDriverId(null);
+      }
+    },
+    [router, user?.id]
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.background} />
+      <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
       
       {/* HEADER */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.greeting}>{t.common.hello}!</Text>
-          <Text style={styles.userName}>{t.home.whereTo}</Text>
+        <View style={{ flex: 1, marginRight: 8 }}>
+          <Text style={styles.greeting}>
+            {t.common.hello}, {firstName}!
+          </Text>
+          <Text style={styles.subtitle}>{t.home.whereTo}</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <TouchableOpacity
+            onPress={() => setFeatureHubOpen(true)}
+            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
+            accessibilityLabel="Open feature hub"
+            accessibilityRole="button"
+          >
+            <Ionicons name="menu" size={24} color={COLORS.lightTextPrimary} />
+          </TouchableOpacity>
           <TouchableOpacity 
             onPress={() => setShowLangPicker(true)}
             style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
           >
-            <Text style={{ fontSize: 18 }}>{availableLanguages.find(l => l.code === language)?.flag || '🌐'}</Text>
+            <Text style={{ fontSize: 18 }}>{SUPPORTED_LANGUAGES.find(l => l.code === language)?.flag || '🌐'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.profileButton} onPress={() => router.push('/(rider-tabs)/rider-profile' as any)} accessibilityLabel="Open profile" accessibilityRole="button">
             <LinearGradient
-              colors={[COLORS.primary, COLORS.primaryDark]}
+              colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
               style={styles.profileGradient}
             >
               <Ionicons name="person" size={24} color="#FFF" />
@@ -154,7 +244,7 @@ export default function ModernRiderHome() {
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
           <View style={{ marginHorizontal: 20, backgroundColor: '#FFF', borderRadius: 16, padding: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 }}>
             <Text style={{ fontSize: 13, fontWeight: '800', color: '#6B7280', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
-            {availableLanguages.map((lang) => (
+            {SUPPORTED_LANGUAGES.map((lang) => (
               <TouchableOpacity
                 key={lang.code}
                 onPress={() => { setLanguage(lang.code as SupportedLanguage); setShowLangPicker(false); }}
@@ -165,7 +255,7 @@ export default function ModernRiderHome() {
                   <Text style={{ fontSize: 15, fontWeight: '700', color: '#111827' }}>{lang.nativeName}</Text>
                   <Text style={{ fontSize: 12, color: '#9CA3AF' }}>{lang.name}</Text>
                 </View>
-                {language === lang.code && <Ionicons name="checkmark-circle" size={22} color={COLORS.primary} />}
+                {language === lang.code && <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />}
               </TouchableOpacity>
             ))}
           </View>
@@ -173,8 +263,14 @@ export default function ModernRiderHome() {
       </Modal>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* PRIORITY ACTIONS - HERO SECTION */}
-        <Animated.View style={[styles.heroSection, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
+        {/* PRIORITY ACTIONS — full-bleed green hero, then two equal cards */}
+        <Animated.View
+          style={[
+            styles.heroSection,
+            styles.heroSectionBleed,
+            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+          ]}
+        >
           <TouchableOpacity
             style={styles.heroCard}
             onPress={() => router.push('/rider/book' as any)}
@@ -183,95 +279,167 @@ export default function ModernRiderHome() {
             accessibilityRole="button"
           >
             <LinearGradient
-              colors={PRIORITY_FEATURES[0].gradient}
+              colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
               style={styles.heroGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
               <View style={styles.heroContent}>
                 <View style={styles.heroIcon}>
-                  <Ionicons name={PRIORITY_FEATURES[0].icon as any} size={32} color="#FFF" />
+                  <Ionicons name="car-sport" size={36} color="#FFF" />
                 </View>
-                <View>
-                  <Text style={styles.heroTitle}>{PRIORITY_FEATURES[0].label}</Text>
-                  <Text style={styles.heroSubtitle}>{PRIORITY_FEATURES[0].subtitle}</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.heroTitle}>{t.home.bookRide}</Text>
+                  <Text style={styles.heroSubtitle}>{t.home.whereTo}</Text>
                 </View>
               </View>
-              <Ionicons name="arrow-forward-circle" size={40} color="rgba(255,255,255,0.9)" />
+              <Ionicons name="arrow-forward-circle" size={44} color="rgba(255,255,255,0.95)" />
             </LinearGradient>
           </TouchableOpacity>
 
           <View style={styles.heroRow}>
-            {PRIORITY_FEATURES.slice(1).map((feature) => (
-              <TouchableOpacity
-                key={feature.id}
-                style={styles.heroSmallCard}
-                onPress={() => router.push(feature.route as any)}
-                activeOpacity={0.9}
-                accessibilityLabel={feature.label}
-                accessibilityRole="button"
-              >
-                <LinearGradient
-                  colors={feature.gradient}
-                  style={styles.heroSmallGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <Ionicons name={feature.icon as any} size={28} color="#FFF" />
-                  <Text style={styles.heroSmallTitle}>{feature.label}</Text>
-                  <Text style={styles.heroSmallSubtitle}>{feature.subtitle}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            ))}
+            <TouchableOpacity
+              style={[styles.heroSmallCard, { backgroundColor: HOME_PALETTE.heroPurple }]}
+              onPress={() => router.push('/(rider-tabs)/rider-trips' as any)}
+              activeOpacity={0.9}
+              accessibilityLabel={t.home.myTrips}
+              accessibilityRole="button"
+            >
+              <View style={styles.heroSmallInner}>
+                <Ionicons name="time" size={30} color="#FFF" />
+                <Text style={styles.heroSmallTitle}>{t.home.myTrips}</Text>
+                <Text style={styles.heroSmallSubtitle}>{t.ride.distance}</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.heroSmallCard, { backgroundColor: HOME_PALETTE.heroOrange }]}
+              onPress={() => setFeatureHubOpen(true)}
+              activeOpacity={0.9}
+              accessibilityLabel={t.home.allFeatures}
+              accessibilityRole="button"
+            >
+              <View style={styles.heroSmallInner}>
+                <Ionicons name="grid" size={30} color="#FFF" />
+                <Text style={styles.heroSmallTitle}>{t.home.allFeatures}</Text>
+                <Text style={styles.heroSmallSubtitle}>Wallet, schedule & more</Text>
+              </View>
+            </TouchableOpacity>
           </View>
         </Animated.View>
 
         {/* QUICK ACCESS - ICON ROW */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>Quick Access</Text>
+          <Text style={styles.sectionTitle}>{t.home.quickAccess}</Text>
           <View style={styles.quickGrid}>
             {QUICK_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
                 style={styles.quickCard}
                 onPress={() => router.push(feature.route as any)}
-                activeOpacity={0.7}
+                activeOpacity={0.85}
                 accessibilityLabel={feature.label}
                 accessibilityRole="button"
               >
-                <View style={[styles.quickIcon, { backgroundColor: feature.color + '15' }]}>
-                  <Ionicons name={feature.icon as any} size={28} color={feature.color} />
+                <View style={[styles.quickIcon, { backgroundColor: feature.bg }]}>
+                  <Ionicons name={feature.icon as any} size={26} color="#FFF" />
                 </View>
-                <Text style={styles.quickLabel}>{feature.label}</Text>
+                <Text style={styles.quickLabel} numberOfLines={2}>
+                  {feature.label}
+                </Text>
               </TouchableOpacity>
             ))}
           </View>
         </Animated.View>
 
+        {driverOfMonth?.featured_driver ? (
+          <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitleInline}>Driver of the Month</Text>
+              <Text style={styles.seeAll}>{driverOfMonth.month_key}</Text>
+            </View>
+            <View style={styles.driverOfMonthCard}>
+              <LinearGradient colors={['#111827', '#1F2937']} style={styles.driverOfMonthHero}>
+                <View style={styles.driverOfMonthBadge}>
+                  <Ionicons name="trophy" size={16} color="#92400E" />
+                  <Text style={styles.driverOfMonthBadgeText}>Featured winner</Text>
+                </View>
+                <Text style={styles.driverOfMonthTitle}>{driverOfMonth.featured_driver.name}</Text>
+                <Text style={styles.driverOfMonthSubtitle}>{driverOfMonth.subtitle}</Text>
+                <View style={styles.driverOfMonthStats}>
+                  <View style={styles.driverOfMonthStat}>
+                    <Text style={styles.driverOfMonthStatValue}>{driverOfMonth.featured_driver.votes}</Text>
+                    <Text style={styles.driverOfMonthStatLabel}>Votes</Text>
+                  </View>
+                  <View style={styles.driverOfMonthStat}>
+                    <Text style={styles.driverOfMonthStatValue}>
+                      {Number(driverOfMonth?.featured_driver?.rating ?? 0).toFixed(1)}
+                    </Text>
+                    <Text style={styles.driverOfMonthStatLabel}>Rating</Text>
+                  </View>
+                  <View style={styles.driverOfMonthStat}>
+                    <Text style={styles.driverOfMonthStatValue}>{driverOfMonth.featured_driver.trip_count}</Text>
+                    <Text style={styles.driverOfMonthStatLabel}>Trips</Text>
+                  </View>
+                </View>
+              </LinearGradient>
+
+              <View style={styles.driverOfMonthBody}>
+                <Text style={styles.driverOfMonthReward}>
+                  Winner gets ₦{Number(driverOfMonth.cash_bonus || 0).toLocaleString()} cash bonus and a trophy delivered home.
+                </Text>
+                <Text style={styles.driverOfMonthHook}>{driverOfMonth.social_hook}</Text>
+                <View style={styles.driverOfMonthCandidateList}>
+                  {driverOfMonth.candidates?.slice(0, 3).map((candidate: any, index: number) => (
+                    <View key={candidate.driver_id} style={styles.driverOfMonthCandidate}>
+                      <View style={styles.driverOfMonthCandidateMeta}>
+                        <Text style={styles.driverOfMonthCandidateRank}>#{index + 1}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.driverOfMonthCandidateName}>{candidate.name}</Text>
+                          <Text style={styles.driverOfMonthCandidateInfo}>
+                            {candidate.votes} votes . {Number(candidate?.rating ?? 0).toFixed(1)} stars
+                          </Text>
+                        </View>
+                      </View>
+                      <TouchableOpacity
+                        style={styles.driverOfMonthVoteBtn}
+                        disabled={votingDriverId === candidate.driver_id}
+                        onPress={() => handleVoteDriverOfMonth(candidate.driver_id)}
+                      >
+                        <Text style={styles.driverOfMonthVoteBtnText}>
+                          {votingDriverId === candidate.driver_id ? 'Voting...' : 'Vote'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            </View>
+          </Animated.View>
+        ) : null}
+
         {/* RECENT TRIPS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent Trips</Text>
+            <Text style={styles.sectionTitleInline}>{t.home.recentTrips}</Text>
             <TouchableOpacity onPress={() => router.push('/(rider-tabs)/rider-trips' as any)}>
-              <Text style={styles.seeAll}>View All</Text>
+              <Text style={styles.seeAll}>{t.common.viewAll}</Text>
             </TouchableOpacity>
           </View>
           
           <View style={styles.tripsCard}>
             <View style={styles.emptyState}>
-              <View style={[styles.emptyIcon, { backgroundColor: COLORS.primary + '15' }]}>
-                <Ionicons name="car-outline" size={48} color={COLORS.primary} />
+              <View style={[styles.emptyIcon, { backgroundColor: COLORS.accentGreen }]}>
+                <Ionicons name="car-sport" size={40} color="#FFF" />
               </View>
               <Text style={styles.emptyTitle}>No trips yet</Text>
-              <Text style={styles.emptyText}>Book your first ride to get started</Text>
               <TouchableOpacity 
                 style={styles.emptyButton}
                 onPress={() => router.push('/rider/book' as any)}
-                accessibilityLabel="Book your first ride"
+                accessibilityLabel="Book now"
                 accessibilityRole="button"
               >
                 <LinearGradient
-                  colors={[COLORS.primary, COLORS.primaryDark]}
+                  colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
                   style={styles.emptyButtonGradient}
                 >
                   <Text style={styles.emptyButtonText}>Book Now</Text>
@@ -283,19 +451,19 @@ export default function ModernRiderHome() {
 
         {/* ALL FEATURES GRID - COMPLETE ACCESS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>All Features</Text>
+          <Text style={styles.sectionTitle}>{t.home.allFeatures}</Text>
           <View style={styles.allFeaturesGrid}>
             {ALL_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
                 style={styles.featureCard}
                 onPress={() => router.push(feature.route as any)}
-                activeOpacity={0.7}
+                activeOpacity={0.85}
                 accessibilityLabel={feature.label}
                 accessibilityRole="button"
               >
-                <View style={[styles.featureIcon, { backgroundColor: feature.color + '15' }]}>
-                  <Ionicons name={feature.icon as any} size={24} color={feature.color} />
+                <View style={[styles.featureIcon, { backgroundColor: feature.bg }]}>
+                  <Ionicons name={feature.icon as any} size={24} color="#FFF" />
                 </View>
                 <Text style={styles.featureLabel} numberOfLines={2}>{feature.label}</Text>
               </TouchableOpacity>
@@ -303,6 +471,8 @@ export default function ModernRiderHome() {
           </View>
         </Animated.View>
       </ScrollView>
+
+      <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="rider" />
     </SafeAreaView>
   );
 }
@@ -310,7 +480,7 @@ export default function ModernRiderHome() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.background,
+    backgroundColor: COLORS.gray50,
   },
   header: {
     flexDirection: 'row',
@@ -320,24 +490,24 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   greeting: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 4,
+    letterSpacing: 0.2,
+  },
+  subtitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: COLORS.textSecondary,
-    marginBottom: 4,
-    letterSpacing: 0.3,
-  },
-  userName: {
-    fontSize: 28,
-    fontWeight: '900',
-    color: COLORS.text,
-    letterSpacing: 0.5,
+    color: COLORS.lightTextSecondary,
+    letterSpacing: 0.2,
   },
   profileButton: {
     width: 48,
     height: 48,
     borderRadius: 24,
     overflow: 'hidden',
-    shadowColor: COLORS.cardShadow,
+    shadowColor: HOME_PALETTE.cardShadowColor,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 8,
@@ -375,8 +545,13 @@ const styles = StyleSheet.create({
   heroSection: {
     marginTop: 8,
   },
+  heroSectionBleed: {
+    marginHorizontal: -20,
+  },
   heroCard: {
-    height: 150,
+    minHeight: 196,
+    width: '100%',
+    alignSelf: 'stretch',
     borderRadius: 28,
     overflow: 'hidden',
     marginBottom: 14,
@@ -401,50 +576,52 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   heroIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    backgroundColor: 'rgba(255,255,255,0.3)',
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(255,255,255,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 18,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.4)',
+    borderColor: 'rgba(255,255,255,0.45)',
   },
   heroTitle: {
-    fontSize: 26,
+    fontSize: 28,
     fontWeight: '900',
     color: '#FFF',
-    marginBottom: 4,
     letterSpacing: 0.5,
     textShadowColor: 'rgba(0,0,0,0.2)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 3,
   },
   heroSubtitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: 'rgba(255,255,255,0.95)',
-    letterSpacing: 0.3,
+    marginTop: 6,
+    fontSize: 14,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.9)',
   },
   heroRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 20,
   },
   heroSmallCard: {
-    width: (width - 52) / 2,
-    height: 130,
+    flex: 1,
+    minWidth: 0,
+    minHeight: 132,
     borderRadius: 24,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.18,
     shadowRadius: 12,
     elevation: 6,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.3)',
+    borderColor: 'rgba(255,255,255,0.25)',
   },
-  heroSmallGradient: {
+  heroSmallInner: {
     flex: 1,
     padding: 20,
     justifyContent: 'center',
@@ -474,17 +651,25 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
+    marginTop: 4,
   },
   sectionTitle: {
     fontSize: 22,
     fontWeight: '900',
-    color: COLORS.text,
+    color: COLORS.lightTextPrimary,
     marginBottom: 16,
+    letterSpacing: 0.5,
+  },
+  sectionTitleInline: {
+    fontSize: 22,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 0,
     letterSpacing: 0.5,
   },
   seeAll: {
     fontSize: 15,
-    color: COLORS.primary,
+    color: COLORS.accentGreen,
     fontWeight: '800',
     letterSpacing: 0.3,
   },
@@ -497,32 +682,168 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quickIcon: {
-    width: 68,
-    height: 68,
-    borderRadius: 22,
+    width: 64,
+    height: 64,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.5)',
+    borderColor: 'rgba(255,255,255,0.35)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
+    shadowOpacity: 0.12,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 4,
   },
   quickLabel: {
     fontSize: 13,
     fontWeight: '700',
-    color: COLORS.text,
+    color: COLORS.lightTextPrimary,
     textAlign: 'center',
     letterSpacing: 0.2,
   },
+  driverOfMonthCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: HOME_PALETTE.cardShadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 1,
+    shadowRadius: 10,
+    elevation: 3,
+  },
+  driverOfMonthHero: {
+    padding: 20,
+  },
+  driverOfMonthBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    marginBottom: 12,
+  },
+  driverOfMonthBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#92400E',
+  },
+  driverOfMonthTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+    color: '#FFF',
+    marginBottom: 6,
+  },
+  driverOfMonthSubtitle: {
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.82)',
+  },
+  driverOfMonthStats: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 16,
+  },
+  driverOfMonthStat: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    padding: 12,
+  },
+  driverOfMonthStatValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  driverOfMonthStatLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.75)',
+    textTransform: 'uppercase',
+    marginTop: 4,
+  },
+  driverOfMonthBody: {
+    padding: 18,
+  },
+  driverOfMonthReward: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    lineHeight: 20,
+  },
+  driverOfMonthHook: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+  driverOfMonthCandidateList: {
+    marginTop: 16,
+    gap: 12,
+  },
+  driverOfMonthCandidate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  driverOfMonthCandidateMeta: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  driverOfMonthCandidateRank: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    backgroundColor: COLORS.accentGreenSoft,
+    color: COLORS.accentGreenDark,
+    fontSize: 13,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingTop: 8,
+  },
+  driverOfMonthCandidateName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  driverOfMonthCandidateInfo: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    marginTop: 2,
+  },
+  driverOfMonthVoteBtn: {
+    backgroundColor: COLORS.accentGreen,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  driverOfMonthVoteBtnText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#FFF',
+  },
   tripsCard: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.white,
     borderRadius: 20,
     padding: 32,
-    shadowColor: COLORS.cardShadow,
+    shadowColor: HOME_PALETTE.cardShadowColor,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 8,
@@ -542,14 +863,8 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '700',
-    color: COLORS.text,
+    color: COLORS.lightTextPrimary,
     marginBottom: 8,
-  },
-  emptyText: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
-    textAlign: 'center',
-    marginBottom: 20,
   },
   emptyButton: {
     borderRadius: 12,
@@ -565,10 +880,10 @@ const styles = StyleSheet.create({
     color: '#FFF',
   },
   moreList: {
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.white,
     borderRadius: 20,
     overflow: 'hidden',
-    shadowColor: COLORS.cardShadow,
+    shadowColor: HOME_PALETTE.cardShadowColor,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 1,
     shadowRadius: 8,
@@ -579,13 +894,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: COLORS.border,
+    borderBottomColor: COLORS.lightBorder,
   },
   moreIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: COLORS.primary + '15',
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -594,7 +909,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 15,
     fontWeight: '600',
-    color: COLORS.text,
+    color: COLORS.lightTextPrimary,
   },
   // ALL FEATURES GRID
   allFeaturesGrid: {
@@ -626,7 +941,7 @@ const styles = StyleSheet.create({
   featureLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: COLORS.text,
+    color: COLORS.lightTextPrimary,
     textAlign: 'center',
     letterSpacing: 0.2,
     lineHeight: 14,

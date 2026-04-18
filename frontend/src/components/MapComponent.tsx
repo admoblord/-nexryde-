@@ -37,7 +37,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             <View style={styles.locationRow}>
               <View style={styles.pickupDot} />
               <Text style={styles.locationText} numberOfLines={1}>
-                {pickup.address || `${pickup.latitude.toFixed(4)}, ${pickup.longitude.toFixed(4)}`}
+                {pickup.address ||
+                  (Number.isFinite(pickup.latitude) && Number.isFinite(pickup.longitude)
+                    ? `${pickup.latitude.toFixed(4)}, ${pickup.longitude.toFixed(4)}`
+                    : 'Pickup')}
               </Text>
             </View>
           </View>
@@ -48,7 +51,10 @@ export const MapComponent: React.FC<MapComponentProps> = ({
             <View style={styles.locationRow}>
               <View style={styles.destDot} />
               <Text style={styles.locationText} numberOfLines={1}>
-                {dropoff.address || `${dropoff.latitude.toFixed(4)}, ${dropoff.longitude.toFixed(4)}`}
+                {dropoff.address ||
+                  (Number.isFinite(dropoff.latitude) && Number.isFinite(dropoff.longitude)
+                    ? `${dropoff.latitude.toFixed(4)}, ${dropoff.longitude.toFixed(4)}`
+                    : 'Destination')}
               </Text>
             </View>
           </View>

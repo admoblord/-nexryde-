@@ -14,6 +14,7 @@ import {
   Dimensions,
   ScrollView,
   Platform,
+  ViewStyle,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -126,8 +127,8 @@ export const VoiceAssistantButton: React.FC<VoiceAssistantButtonProps> = ({
   };
   
   // Position styles
-  const getPositionStyle = () => {
-    const base = { position: 'absolute' as const, bottom: 100 };
+  const getPositionStyle = (): ViewStyle => {
+    const base: ViewStyle = { position: 'absolute', bottom: 100 };
     switch (position) {
       case 'bottom-center':
         return { ...base, alignSelf: 'center' };

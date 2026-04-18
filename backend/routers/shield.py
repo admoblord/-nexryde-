@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from auth_guard import require_authenticated, verify_trip_participant
 from database import db
+from push_notifications import send_push_notification
 
 logger = logging.getLogger("server")
 shield_router = APIRouter(prefix="/api/shield", tags=["NEXRYDE Shield"])
@@ -52,6 +53,14 @@ class TripAudioUpload(BaseModel):
     mime_type: str = Field(default="audio/aac", max_length=80)
 
 
+class InvisibleShieldActivationBody(BaseModel):
+    expected_arrival_minutes: Optional[int] = Field(default=None, ge=5, le=240)
+
+
+class InvisibleShieldConfirmBody(BaseModel):
+    safe: bool = True
+
+
 def _other_party_id(trip: dict, uid: str) -> Optional[str]:
     rid, did = trip.get("rider_id"), trip.get("driver_id")
     if uid == rid:
@@ -59,6 +68,22 @@ def _other_party_id(trip: dict, uid: str) -> Optional[str]:
     if uid == did:
         return rid
     return None
+
+
+def _invisible_shield_payload(trip: dict) -> dict:
+    mode = dict(trip.get("invisible_shield_mode") or {})
+    return {
+        "active": bool(mode.get("active")),
+        "armed_at": mode.get("armed_at"),
+        "armed_by": mode.get("armed_by"),
+        "expected_arrival_at": mode.get("expected_arrival_at"),
+        "confirm_deadline_at": mode.get("confirm_deadline_at"),
+        "confirmed_safe_at": mode.get("confirmed_safe_at"),
+        "auto_escalated_at": mode.get("auto_escalated_at"),
+        "server_audio_uploaded": bool(mode.get("server_audio_uploaded")),
+        "server_audio_expires_at": mode.get("server_audio_expires_at"),
+        "safety_team_alerted": bool(mode.get("safety_team_alerted")),
+    }
 
 
 @shield_router.post("/disputes")
@@ -189,6 +214,125 @@ async def shield_recording_consent(trip_id: str, body: RecordingConsentBody, req
         "shield_recording_active": dual,
     }
 
+
+@shield_router.put("/trips/{trip_id}/invisible-mode")
+async def activate_invisible_shield_mode(trip_id: str, body: InvisibleShieldActivationBody, request: Request):
+    uid = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    if uid != trip.get("rider_id"):
+        raise HTTPException(status_code=403, detail="Only the rider can activate Invisible Shield Mode")
+    if trip.get("status") not in {"accepted", "arrived", "ongoing", "pending_payment"}:
+        raise HTTPException(status_code=400, detail="Invisible Shield Mode is only available for active trips")
+
+    now = datetime.now(timezone.utc)
+    duration_mins = max(5, int(body.expected_arrival_minutes or trip.get("duration_mins") or 20))
+    expected_arrival_at = None
+    confirm_deadline_at = None
+    if trip.get("status") in {"ongoing", "pending_payment"}:
+        expected_dt = now + timedelta(minutes=duration_mins)
+        expected_arrival_at = expected_dt.isoformat()
+        confirm_deadline_at = (expected_dt + timedelta(minutes=10)).isoformat()
+
+    mode = {
+        "active": True,
+        "armed_at": now.isoformat(),
+        "armed_by": uid,
+        "expected_arrival_at": expected_arrival_at,
+        "confirm_deadline_at": confirm_deadline_at,
+        "confirmed_safe_at": None,
+        "auto_escalated_at": None,
+        "server_audio_uploaded": False,
+        "server_audio_expires_at": None,
+        "last_server_audio_at": None,
+        "safety_team_alerted": False,
+        "emergency_contacts_notified": 0,
+    }
+    await db.trips.update_one({"id": trip_id}, {"$set": {"invisible_shield_mode": mode}})
+    if trip.get("driver_id"):
+        await send_push_notification(
+            trip["driver_id"],
+            "Trip Protection Enabled",
+            "Nexryde late-night trip protection is active for this ride.",
+            {"type": "invisible_shield_mode", "trip_id": trip_id},
+        )
+    updated = await db.trips.find_one({"id": trip_id}, {"_id": 0, "invisible_shield_mode": 1})
+    return {"success": True, "invisible_shield_mode": _invisible_shield_payload(updated or {})}
+
+
+@shield_router.post("/trips/{trip_id}/invisible-mode/audio")
+async def upload_invisible_shield_audio(trip_id: str, body: TripAudioUpload, request: Request):
+    uid = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    if uid != trip.get("rider_id"):
+        raise HTTPException(status_code=403, detail="Only the rider can upload Invisible Shield audio")
+    mode = dict(trip.get("invisible_shield_mode") or {})
+    if not mode.get("active"):
+        raise HTTPException(status_code=400, detail="Invisible Shield Mode is not active for this trip")
+
+    try:
+        raw = base64.b64decode(body.audio_base64, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid base64 audio payload")
+    if len(raw) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=400, detail="Audio file too large (max 4MB)")
+
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=AUDIO_TTL_HOURS)
+    blob = _fernet().encrypt(raw)
+    doc = {
+        "id": str(uuid.uuid4()),
+        "trip_id": trip_id,
+        "uploaded_by": uid,
+        "mime_type": body.mime_type[:80],
+        "cipher_blob": blob,
+        "created_at": now,
+        "expires_at": expires_at,
+        "mode": "invisible_shield",
+    }
+    await db.shield_trip_audio.replace_one({"trip_id": trip_id, "uploaded_by": uid}, doc, upsert=True)
+    mode["server_audio_uploaded"] = True
+    mode["server_audio_expires_at"] = expires_at.isoformat()
+    mode["last_server_audio_at"] = now.isoformat()
+    await db.trips.update_one({"id": trip_id}, {"$set": {"invisible_shield_mode": mode}})
+    return {
+        "success": True,
+        "audio_id": doc["id"],
+        "expires_at": expires_at.isoformat(),
+        "invisible_shield_mode": _invisible_shield_payload({"invisible_shield_mode": mode}),
+    }
+
+
+@shield_router.post("/trips/{trip_id}/invisible-mode/confirm-safe")
+async def confirm_invisible_shield_safe_arrival(trip_id: str, body: InvisibleShieldConfirmBody, request: Request):
+    uid = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    if uid != trip.get("rider_id"):
+        raise HTTPException(status_code=403, detail="Only the rider can confirm safe arrival")
+    mode = dict(trip.get("invisible_shield_mode") or {})
+    if not mode.get("active"):
+        raise HTTPException(status_code=400, detail="Invisible Shield Mode is not active")
+    if not body.safe:
+        raise HTTPException(status_code=400, detail="Use SOS or support escalation if you are not safe")
+
+    now = datetime.now(timezone.utc).isoformat()
+    mode["confirmed_safe_at"] = now
+    mode["active"] = False
+    await db.trips.update_one({"id": trip_id}, {"$set": {"invisible_shield_mode": mode}})
+    await db.shield_trip_audio.delete_many({"trip_id": trip_id, "uploaded_by": uid})
+    return {
+        "success": True,
+        "message": "Safe arrival confirmed. Invisible Shield audio was deleted from secure storage.",
+        "invisible_shield_mode": _invisible_shield_payload({"invisible_shield_mode": mode}),
+    }
 
 @shield_router.post("/trips/{trip_id}/audio")
 async def shield_upload_trip_audio(trip_id: str, body: TripAudioUpload, request: Request):

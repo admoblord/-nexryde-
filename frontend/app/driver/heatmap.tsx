@@ -21,6 +21,7 @@ interface HeatZone {
   intensity: number;
   name: string;
   surge: number;
+  demand_level?: 'low' | 'medium' | 'high';
 }
 
 export default function DriverHeatmapScreen() {

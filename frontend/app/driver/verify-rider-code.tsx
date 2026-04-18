@@ -14,16 +14,19 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, verifyTripBiometricLock } from '@/src/services/api';
+import { BiometricScanner } from '@/src/components/tier1';
 
 export default function VerifyRiderCodeScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const trip_id = params.trip_id as string;
+  const driver_id = params.driver_id as string;
   
   const [code, setCode] = useState(['', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [attempts, setAttempts] = useState(0);
+  const [driverBiometricReady, setDriverBiometricReady] = useState(false);
   const inputRefs = useRef<(TextInput | null)[]>([]);
 
   const verifyLiveFaceAndStart = async () => {
@@ -72,7 +75,7 @@ export default function VerifyRiderCodeScreen() {
       Alert.alert('Ride Started', 'Live face verification successful. Trip is now in progress.', [
         {
           text: 'OK',
-          onPress: () => router.replace('/driver/trips'),
+          onPress: () => router.replace('/(driver-tabs)/driver-trips'),
         },
       ]);
     } catch (error) {
@@ -116,6 +119,10 @@ export default function VerifyRiderCodeScreen() {
     setLoading(true);
 
     try {
+      if (!driverBiometricReady) {
+        Alert.alert('Biometric required', 'Driver biometric trip lock must be completed before verifying the rider code.');
+        return;
+      }
       const response = await fetch(
         `${BACKEND_URL}/api/trips/${trip_id}/verify-security-code`,
         {
@@ -210,7 +217,9 @@ export default function VerifyRiderCodeScreen() {
             {code.map((digit, index) => (
               <TextInput
                 key={index}
-                ref={(ref) => (inputRefs.current[index] = ref)}
+                ref={(ref) => {
+                  inputRefs.current[index] = ref;
+                }}
                 style={styles.codeInput}
                 value={digit}
                 onChangeText={(value) => handleCodeInput(value, index)}
@@ -234,9 +243,25 @@ export default function VerifyRiderCodeScreen() {
           <View style={styles.infoCard}>
             <Ionicons name="warning" size={20} color={COLORS.warning} />
             <Text style={styles.infoText}>
-              After code verification, a live driver selfie is mandatory before ride start.
+              Driver biometric plus live face check are mandatory before ride start.
             </Text>
           </View>
+
+          <BiometricScanner
+            title="Driver biometric trip lock"
+            subtitle="Use your fingerprint or face unlock. Trip start stays locked until both rider and driver have verified."
+            confirmLabel={driverBiometricReady ? 'Biometric confirmed' : 'Verify my biometric'}
+            onSuccess={async () => {
+              try {
+                await verifyTripBiometricLock(trip_id);
+                setDriverBiometricReady(true);
+                Alert.alert('Biometric recorded', 'Driver side of the trip lock is complete. You can now verify the rider code.');
+              } catch (error: any) {
+                Alert.alert('Biometric lock', error?.response?.data?.detail || 'Could not record biometric lock.');
+              }
+            }}
+            onFailure={(msg) => Alert.alert('Biometric check', msg)}
+          />
 
           {/* Attempts Counter */}
           {attempts > 0 && (
@@ -251,7 +276,7 @@ export default function VerifyRiderCodeScreen() {
           <TouchableOpacity
             style={[styles.verifyButton, loading && styles.verifyButtonDisabled]}
             onPress={() => verifyCode(code.join(''))}
-            disabled={loading || code.join('').length !== 4}
+            disabled={loading || code.join('').length !== 4 || !driverBiometricReady}
           >
             {loading ? (
               <ActivityIndicator color={COLORS.white} />
@@ -416,6 +441,6 @@ const styles = StyleSheet.create({
   helpText: {
     fontSize: FONT_SIZE.sm,
     color: 'rgba(255,255,255,0.8)',
-    textDecoration: 'underline',
+    textDecorationLine: 'underline',
   },
 });

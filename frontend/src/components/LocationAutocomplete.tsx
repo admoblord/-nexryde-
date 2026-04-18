@@ -3,7 +3,7 @@ import {
   View,
   Text,
   TextInput,
-  FlatList,
+  ScrollView,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -22,6 +22,30 @@ interface Prediction {
   main_text?: string;
   secondary_text?: string;
 }
+
+const normalizePrediction = (p: any, index: number): Prediction => {
+  const mainText = p?.structured_formatting?.main_text || p?.main_text || '';
+  const secondaryText = p?.structured_formatting?.secondary_text || p?.secondary_text || '';
+  const description =
+    typeof p?.description === 'string' && p.description.trim().length > 0
+      ? p.description
+      : [mainText, secondaryText].filter(Boolean).join(', ');
+  const placeId =
+    (typeof p?.place_id === 'string' && p.place_id) ||
+    (typeof p?.placeId === 'string' && p.placeId) ||
+    `prediction-${index}-${description || 'unknown'}`;
+  return {
+    ...p,
+    place_id: placeId,
+    description: description || 'Selected location',
+    structured_formatting: {
+      main_text: mainText || description || 'Location',
+      secondary_text: secondaryText || '',
+    },
+    main_text: mainText || description || 'Location',
+    secondary_text: secondaryText || '',
+  };
+};
 
 interface LocationAutocompleteProps {
   value: string;
@@ -49,7 +73,16 @@ export default function LocationAutocomplete({
   const [predictions, setPredictions] = useState<Prediction[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const debounceTimeout = useRef<NodeJS.Timeout | null>(null);
+  const debounceTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+  const activeRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     // Debounce search
@@ -58,6 +91,9 @@ export default function LocationAutocomplete({
     }
 
     if (value.length >= 2) {
+      // #region agent log
+      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:valueEffect',message:'debounce fetch scheduled',data:{len:value.length},timestamp:Date.now(),hypothesisId:'T1'})}).catch(()=>{});
+      // #endregion
       debounceTimeout.current = setTimeout(() => {
         fetchPredictions(value);
       }, 300);
@@ -79,6 +115,11 @@ export default function LocationAutocomplete({
       return;
     }
 
+    const requestId = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = requestId;
+    // #region agent log
+    fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'fetch start',data:{inputLen:input.length,requestId},timestamp:Date.now(),hypothesisId:'T2'})}).catch(()=>{});
+    // #endregion
     setIsLoading(true);
     try {
       // Use backend proxy to avoid CORS issues
@@ -87,56 +128,80 @@ export default function LocationAutocomplete({
       )}&components=country:${countryCode}`;
 
       const response = await fetch(url);
-      const data = await response.json();
+      let data: any = {};
+      try {
+        data = await response.json();
+      } catch {
+        data = {};
+      }
+      if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
 
       if (data.status === 'OK') {
-        const normalized = (data.predictions || []).map((p: any) => ({
-          ...p,
-          structured_formatting: p.structured_formatting || {
-            main_text: p.main_text || p.description || '',
-            secondary_text: p.secondary_text || '',
-          },
-        }));
+        const normalized = (data.predictions || []).map((p: any, index: number) =>
+          normalizePrediction(p, index)
+        );
+        // #region agent log
+        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'OK before setPredictions',data:{count:normalized.length,requestId},timestamp:Date.now(),hypothesisId:'T2'})}).catch(()=>{});
+        // #endregion
         setPredictions(normalized);
         setShowSuggestions(true);
+        // #region agent log
+        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'OK after showSuggestions true',data:{count:normalized.length},timestamp:Date.now(),hypothesisId:'T3'})}).catch(()=>{});
+        // #endregion
       } else if (data.status === 'ZERO_RESULTS') {
         setPredictions([]);
         setShowSuggestions(false);
       } else {
         console.error('Google Places API error:', data.status, data.error_message);
         setPredictions([]);
+        setShowSuggestions(false);
       }
     } catch (error) {
       console.error('Error fetching predictions:', error);
+      if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
       setPredictions([]);
+      setShowSuggestions(false);
     } finally {
-      setIsLoading(false);
+      if (mountedRef.current && requestId === activeRequestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleSelectPlace = (prediction: Prediction) => {
-    onChangeText(prediction.description);
+    const safeDescription =
+      prediction.description ||
+      prediction.main_text ||
+      prediction.structured_formatting?.main_text ||
+      'Selected location';
+    onChangeText(safeDescription);
     onPlaceSelected({
-      description: prediction.description,
-      placeId: prediction.place_id,
+      description: safeDescription,
+      placeId: prediction.place_id || '',
     });
+    // #region agent log
+    fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:handleSelectPlace',message:'prediction tapped',data:{descLen:safeDescription.length,placeIdLen:(prediction.place_id||'').length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+    // #endregion
     setPredictions([]);
     setShowSuggestions(false);
     Keyboard.dismiss();
   };
 
-  const renderPrediction = ({ item }: { item: Prediction }) => (
-    <TouchableOpacity
-      style={styles.predictionItem}
-      onPress={() => handleSelectPlace(item)}
-    >
-      <Ionicons name="location-outline" size={20} color="#22E180" style={styles.locationIcon} />
-      <View style={styles.predictionText}>
-        <Text style={styles.mainText}>{item.structured_formatting?.main_text || item.main_text || item.description}</Text>
-        <Text style={styles.secondaryText}>{item.structured_formatting?.secondary_text || item.secondary_text || ''}</Text>
-      </View>
-    </TouchableOpacity>
-  );
+  const renderPrediction = ({ item }: { item: Prediction }) => {
+    if (!item) return null;
+    return (
+      <TouchableOpacity
+        style={styles.predictionItem}
+        onPress={() => handleSelectPlace(item)}
+      >
+        <Ionicons name="location-outline" size={20} color="#22E180" style={styles.locationIcon} />
+        <View style={styles.predictionText}>
+          <Text style={styles.mainText}>{item.structured_formatting?.main_text || item.main_text || item.description}</Text>
+          <Text style={styles.secondaryText}>{item.structured_formatting?.secondary_text || item.secondary_text || ''}</Text>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
     <View style={[styles.container, style]}>
@@ -166,14 +231,18 @@ export default function LocationAutocomplete({
 
       {showSuggestions && predictions.length > 0 && (
         <View style={styles.suggestionsContainer}>
-          <FlatList
-            data={predictions}
-            renderItem={renderPrediction}
-            keyExtractor={(item) => item.place_id}
+          <ScrollView
             keyboardShouldPersistTaps="handled"
-            style={styles.list}
             nestedScrollEnabled
-          />
+            style={styles.list}
+            bounces={false}
+          >
+            {predictions.slice(0, 20).map((item, index) => (
+              <View key={item.place_id || `prediction-${index}`}>
+                {renderPrediction({ item })}
+              </View>
+            ))}
+          </ScrollView>
         </View>
       )}
     </View>

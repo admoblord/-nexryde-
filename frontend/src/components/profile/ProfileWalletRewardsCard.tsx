@@ -24,9 +24,11 @@ type ThemeColors = {
 type Props = {
   userId: string | undefined;
   colors: ThemeColors;
+  /** Rider: top-up in Wallet tab. Driver: subscription + earnings (no duplicate passenger wallet flows). */
+  variant?: 'rider' | 'driver';
 };
 
-export function ProfileWalletRewardsCard({ userId, colors }: Props) {
+export function ProfileWalletRewardsCard({ userId, colors, variant = 'rider' }: Props) {
   const router = useRouter();
   const [balance, setBalance] = useState<number | null>(null);
   const [rewardsLine, setRewardsLine] = useState('Invite friends — earn bonus credit');
@@ -92,18 +94,34 @@ export function ProfileWalletRewardsCard({ userId, colors }: Props) {
       <View style={styles.ctaRow}>
         <TouchableOpacity
           style={[styles.ctaPrimary, { backgroundColor: COLORS.accent }]}
-          onPress={() => router.push('/wallet')}
+          onPress={() =>
+            router.push(
+              (variant === 'driver' ? '/driver/subscription' : '/(rider-tabs)/rider-wallet') as any
+            )
+          }
           activeOpacity={0.85}
         >
-          <Ionicons name="add-circle-outline" size={20} color={COLORS.white} />
-          <Text style={styles.ctaPrimaryText}>Add money</Text>
+          <Ionicons
+            name={variant === 'driver' ? 'card-outline' : 'add-circle-outline'}
+            size={20}
+            color={COLORS.white}
+          />
+          <Text style={styles.ctaPrimaryText}>
+            {variant === 'driver' ? 'Subscription' : 'Add money'}
+          </Text>
         </TouchableOpacity>
         <TouchableOpacity
           style={[styles.ctaSecondary, { borderColor: colors.border }]}
-          onPress={() => router.push('/wallet')}
+          onPress={() =>
+            router.push(
+              (variant === 'driver' ? '/(driver-tabs)/driver-earnings' : '/(rider-tabs)/rider-wallet') as any
+            )
+          }
           activeOpacity={0.85}
         >
-          <Text style={[styles.ctaSecondaryText, { color: colors.text }]}>View wallet</Text>
+          <Text style={[styles.ctaSecondaryText, { color: colors.text }]}>
+            {variant === 'driver' ? 'Earnings' : 'Wallet'}
+          </Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
         </TouchableOpacity>
       </View>

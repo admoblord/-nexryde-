@@ -203,7 +203,7 @@ export default function AIAssistantScreen() {
           <View style={styles.dataCard}>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={16} color={COLORS.accent} />
-              <Text style={styles.ratingValue}>{item.data.rating?.toFixed(1)}</Text>
+              <Text style={styles.ratingValue}>{Number(item.data?.rating ?? 0).toFixed(1)}</Text>
             </View>
           </View>
         )}

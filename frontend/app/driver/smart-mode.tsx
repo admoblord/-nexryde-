@@ -16,6 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
 
 interface SmartModeSettings {
   enabled: boolean;
@@ -29,6 +30,20 @@ interface SmartModeSettings {
   preferredAreas: string[];
   autoRejectAfterHours: boolean;
   maxWaitTime: number; // seconds before auto-accept
+}
+
+interface SalaryModePlan {
+  enabled: boolean;
+  monthly_income_target: number;
+  achieved_this_month: number;
+  remaining_to_target: number;
+  days_left_in_month: number;
+  required_daily_average: number;
+  expected_by_today: number;
+  pace_gap: number;
+  projected_month_end: number;
+  dispatch_priority_boost: number;
+  status: 'inactive' | 'on_track' | 'behind';
 }
 
 export default function SmartModeScreen() {
@@ -55,6 +70,19 @@ export default function SmartModeScreen() {
     average: 0,
     projected: 0,
   });
+  const [salaryMode, setSalaryMode] = useState<SalaryModePlan>({
+    enabled: false,
+    monthly_income_target: 350000,
+    achieved_this_month: 0,
+    remaining_to_target: 350000,
+    days_left_in_month: 30,
+    required_daily_average: 0,
+    expected_by_today: 0,
+    pace_gap: 0,
+    projected_month_end: 0,
+    dispatch_priority_boost: 1,
+    status: 'inactive',
+  });
 
   useEffect(() => {
     loadSettings();
@@ -64,11 +92,9 @@ export default function SmartModeScreen() {
   const loadSettings = async () => {
     if (!user?.id) return;
     try {
-      const { BACKEND_URL } = require('@/src/services/api');
-      const res = await fetch(`${BACKEND_URL}/api/smart-mode/settings/${user.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data?.settings) setSettings((prev: any) => ({ ...prev, ...data.settings }));
+      const res = await getDriverSalaryMode(user.id);
+      if (res.data?.salary_mode) {
+        setSalaryMode((prev) => ({ ...prev, ...res.data.salary_mode }));
       }
     } catch { /* keep defaults */ }
   };
@@ -90,10 +116,16 @@ export default function SmartModeScreen() {
   };
 
   const saveSettings = async () => {
+    if (!user?.id) return;
     try {
-      // TODO: Save to backend
-      // await updateSmartModeSettings(user?.id, settings);
-      Alert.alert('Settings Saved!', 'Smart Mode preferences updated successfully.');
+      const res = await updateDriverSalaryMode(user.id, {
+        enabled: salaryMode.enabled,
+        monthly_income_target: salaryMode.monthly_income_target,
+      });
+      if (res.data?.salary_mode) {
+        setSalaryMode((prev) => ({ ...prev, ...res.data.salary_mode }));
+      }
+      Alert.alert('Settings Saved!', 'Driver Salary Mode is active and now helps pace trips toward your monthly target.');
     } catch (error) {
       Alert.alert('Error', 'Failed to save settings. Please try again.');
     }
@@ -138,6 +170,13 @@ export default function SmartModeScreen() {
     const multiplier = 1 + (acceptanceRate / 100);
     return Math.round(earnings.average * multiplier);
   };
+
+  const targetPreset = Math.round(salaryMode.monthly_income_target / 5000) * 5000;
+  const salaryHeadline = salaryMode.enabled
+    ? salaryMode.status === 'behind'
+      ? `Behind target by ₦${salaryMode.pace_gap.toLocaleString()}`
+      : `On track for ₦${salaryMode.projected_month_end.toLocaleString()}`
+    : 'Turn on salary mode for predictable monthly income';
 
   return (
     <SafeAreaView style={styles.container}>
@@ -223,6 +262,77 @@ export default function SmartModeScreen() {
             </View>
           </View>
         )}
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>💼 Driver Salary Mode</Text>
+          <View style={styles.salaryCard}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingRowLeft}>
+                <Text style={styles.settingLabel}>Income predictability</Text>
+                <Text style={styles.settingDesc}>
+                  Set your monthly target and Nexryde boosts dispatch when you fall behind pace.
+                </Text>
+              </View>
+              <Switch
+                value={salaryMode.enabled}
+                onValueChange={(value) => setSalaryMode((prev) => ({ ...prev, enabled: value }))}
+                trackColor={{ false: COLORS.gray300, true: COLORS.accentGreen }}
+                thumbColor={COLORS.white}
+              />
+            </View>
+
+            <View style={styles.divider} />
+            <View style={styles.settingHeader}>
+              <Text style={styles.settingLabel}>Monthly income target</Text>
+              <Text style={styles.settingValue}>₦{targetPreset.toLocaleString()}</Text>
+            </View>
+            <Slider
+              style={styles.slider}
+              minimumValue={50000}
+              maximumValue={1500000}
+              step={5000}
+              value={targetPreset}
+              onValueChange={(value) => setSalaryMode((prev) => ({ ...prev, monthly_income_target: value }))}
+              minimumTrackTintColor={COLORS.accentPurple}
+              maximumTrackTintColor={COLORS.gray300}
+              thumbTintColor={COLORS.accentPurple}
+            />
+            <Text style={styles.settingHint}>
+              Nexryde will use this target to shape monthly dispatch priority for you.
+            </Text>
+
+            <View style={styles.salaryStatusRow}>
+              <View style={styles.salaryMetric}>
+                <Text style={styles.salaryMetricLabel}>This month</Text>
+                <Text style={styles.salaryMetricValue}>₦{Number(salaryMode.achieved_this_month || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.salaryMetric}>
+                <Text style={styles.salaryMetricLabel}>Still needed</Text>
+                <Text style={styles.salaryMetricValue}>₦{Number(salaryMode.remaining_to_target || 0).toLocaleString()}</Text>
+              </View>
+            </View>
+
+            <View style={styles.salaryStatusRow}>
+              <View style={styles.salaryMetric}>
+                <Text style={styles.salaryMetricLabel}>Daily pace</Text>
+                <Text style={styles.salaryMetricValue}>₦{Number(salaryMode.required_daily_average || 0).toLocaleString()}</Text>
+              </View>
+              <View style={styles.salaryMetric}>
+                <Text style={styles.salaryMetricLabel}>Dispatch boost</Text>
+                <Text style={styles.salaryMetricValue}>{Number(salaryMode.dispatch_priority_boost || 1).toFixed(2)}x</Text>
+              </View>
+            </View>
+
+            <View style={styles.salaryBanner}>
+              <Ionicons
+                name={salaryMode.status === 'behind' ? 'trending-up' : 'shield-checkmark'}
+                size={18}
+                color={salaryMode.status === 'behind' ? COLORS.warning : COLORS.accentGreen}
+              />
+              <Text style={styles.salaryBannerText}>{salaryHeadline}</Text>
+            </View>
+          </View>
+        </View>
 
         {/* Acceptance Rate Preview */}
         <View style={styles.previewCard}>
@@ -400,6 +510,7 @@ export default function SmartModeScreen() {
             <AIFeature icon="checkmark-done" text="Auto-accepts rides meeting your criteria" />
             <AIFeature icon="close-circle" text="Auto-rejects rides below your standards" />
             <AIFeature icon="trending-up" text="Learns from your preferences over time" />
+            <AIFeature icon="wallet" text="Salary Mode raises your dispatch priority when you are behind monthly target" />
           </View>
         </View>
 
@@ -692,6 +803,13 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
   },
+  salaryCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.accentPurple + '20',
+  },
   settingHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -737,6 +855,43 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: COLORS.lightBorder,
     marginVertical: SPACING.md,
+  },
+  salaryStatusRow: {
+    flexDirection: 'row',
+    gap: SPACING.md,
+    marginTop: SPACING.md,
+  },
+  salaryMetric: {
+    flex: 1,
+    backgroundColor: COLORS.lightSurface,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+  },
+  salaryMetricLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: COLORS.lightTextMuted,
+    marginBottom: 4,
+  },
+  salaryMetricValue: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+  },
+  salaryBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginTop: SPACING.md,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: COLORS.accentPurpleSoft,
+  },
+  salaryBannerText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.accentPurpleDark,
   },
   
   // AI Card

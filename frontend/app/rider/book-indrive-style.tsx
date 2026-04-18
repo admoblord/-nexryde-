@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
-  ScrollView, Modal, TextInput,
+  ScrollView, Modal, TextInput, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -9,7 +9,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, getWalletMe, getRiderPreferences, updateRiderPreferences, getAvailableDrivers } from '@/src/services/api';
+import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
+import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
+import MapComponent from '@/src/components/MapComponent';
 
 const COLORS = {
   bg: '#0B1120',
@@ -33,10 +36,17 @@ const VEHICLES = [
   { id: 'premium', name: 'Premium', icon: 'rocket', time: '5-6 min', desc: 'Luxury', color: '#9333EA' },
 ];
 
+const RIDE_PREFERENCE_OPTIONS = [
+  { id: 'quiet_ride', label: 'Quiet Ride', icon: 'volume-mute' as const },
+  { id: 'chatty_driver', label: 'Chatty Driver', icon: 'chatbubbles' as const },
+  { id: 'music_on', label: 'Music On', icon: 'musical-notes' as const },
+  { id: 'cold_ac', label: 'AC Must Be Cold', icon: 'snow' as const },
+];
+
 export default function BookInDriveStyle() {
   const router = useRouter();
   const params = useLocalSearchParams<{ requestedDriverId?: string; driverName?: string }>();
-  const { user, setCurrentTrip } = useAppStore();
+  const { user, token, setCurrentTrip } = useAppStore();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
 
@@ -60,6 +70,257 @@ export default function BookInDriveStyle() {
   const [searchingForDriver, setSearchingForDriver] = useState(false);
   const [tripId, setTripId] = useState<string | null>(null);
   const [driverFound, setDriverFound] = useState<any>(null);
+  const driverPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const calculateInFlightRef = useRef(false);
+  const offerInFlightRef = useRef(false);
+  const navigationInFlightRef = useRef(false);
+  const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet'>('cash');
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
+  const [nearbyDrivers, setNearbyDrivers] = useState<Array<{
+    driver_id: string;
+    name?: string;
+    lat: number;
+    lng: number;
+    status?: string;
+    vehicle?: string;
+  }>>([]);
+  const [scheduledRides, setScheduledRides] = useState<Array<{
+    id: string;
+    pickup_address: string;
+    dropoff_address: string;
+    scheduled_time: string;
+    ride_type?: string;
+  }>>([]);
+  const [ridePreferences, setRidePreferences] = useState<string[]>([]);
+  const [estateName, setEstateName] = useState('');
+  const [estateGateCode, setEstateGateCode] = useState('');
+  const [savingGateCode, setSavingGateCode] = useState(false);
+  const availableVehicles = React.useMemo(() => {
+    const base = [...VEHICLES];
+    if (String(user?.gender || '').toLowerCase() === 'female') {
+      base.push({
+        id: 'female_only',
+        name: 'Women Only',
+        icon: 'woman',
+        time: '6-9 min',
+        desc: 'Female driver only',
+        color: '#EC4899',
+      });
+    }
+    return base;
+  }, [user?.gender]);
+
+  const clearDriverPoll = useCallback(() => {
+    if (driverPollRef.current) {
+      clearInterval(driverPollRef.current);
+      driverPollRef.current = null;
+    }
+  }, []);
+
+  const openScheduleRide = () => {
+    if (navigationInFlightRef.current) return;
+    if (!pickup?.trim() || !destination?.trim()) {
+      Alert.alert('Add route first', 'Choose pickup and destination before scheduling a ride.');
+      return;
+    }
+    const pLat = pickupCoords?.lat || currentLocation?.lat;
+    const pLng = pickupCoords?.lng || currentLocation?.lng;
+    const dLat = destinationCoords?.lat;
+    const dLng = destinationCoords?.lng;
+    if (!pLat || !pLng || !dLat || !dLng) {
+      Alert.alert('Pin locations', 'Use search suggestions or GPS so we can save the scheduled trip correctly.');
+      return;
+    }
+    navigationInFlightRef.current = true;
+    router.push({
+      pathname: '/rider/schedule',
+      params: {
+        pickup,
+        dropoff: destination,
+        pickupLat: String(pLat),
+        pickupLng: String(pLng),
+        dropoffLat: String(dLat),
+        dropoffLng: String(dLng),
+        rideType: selectedVehicle || 'economy',
+        fareEstimate: String(currentFare || 0),
+      },
+    } as any);
+    setTimeout(() => {
+      navigationInFlightRef.current = false;
+    }, 800);
+  };
+
+  const toggleRidePreference = (preferenceId: string) => {
+    setRidePreferences((prev) =>
+      prev.includes(preferenceId)
+        ? prev.filter((item) => item !== preferenceId)
+        : [...prev, preferenceId]
+    );
+  };
+
+  const tripPaymentMethod = useCallback(() => (ridePaymentMethod === 'wallet' ? 'wallet' : 'cash'), [ridePaymentMethod]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setWalletBalance(null);
+      return;
+    }
+    (async () => {
+      try {
+        const w = await getWalletMe(1);
+        setWalletBalance(Number(w.data?.balance ?? 0));
+      } catch {
+        setWalletBalance(null);
+      }
+    })();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    (async () => {
+      try {
+        const res = await getRiderPreferences(user.id);
+        setEstateName(String(res.data?.estate_name || ''));
+        setEstateGateCode(String(res.data?.estate_gate_code || ''));
+      } catch {}
+    })();
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) {
+      setScheduledRides([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${encodeURIComponent(user.id)}`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        const rides = Array.isArray(data?.scheduled_rides) ? data.scheduled_rides : [];
+        setScheduledRides(rides.slice(0, 2));
+      } catch {
+        setScheduledRides([]);
+      }
+    })();
+  }, [user?.id]);
+
+  useEffect(() => {
+    const lat = pickupCoords?.lat || currentLocation?.lat;
+    const lng = pickupCoords?.lng || currentLocation?.lng;
+    if (!lat || !lng) {
+      setNearbyDrivers([]);
+      return;
+    }
+    let cancelled = false;
+    const run = async () => {
+      try {
+        const res = await getAvailableDrivers({
+          lat,
+          lng,
+          vehicle_type: selectedVehicle || undefined,
+        });
+        const rows = Array.isArray(res.data?.drivers) ? res.data.drivers : [];
+        if (cancelled) return;
+        setNearbyDrivers(
+          rows
+            .map((d: any) => ({
+              driver_id: String(d.driver_id || ''),
+              name: String(d.name || 'Driver'),
+              lat: Number(d.current_location?.lat),
+              lng: Number(d.current_location?.lng),
+              status: d.is_online ? 'online' : 'offline',
+              vehicle: d.vehicle_model || d.vehicle_type || 'Car',
+            }))
+            .filter((d: any) => Number.isFinite(d.lat) && Number.isFinite(d.lng))
+            .slice(0, 25),
+        );
+      } catch {
+        if (!cancelled) setNearbyDrivers([]);
+      }
+    };
+    void run();
+    const timer = setInterval(run, 20000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [pickupCoords?.lat, pickupCoords?.lng, currentLocation?.lat, currentLocation?.lng, selectedVehicle]);
+
+  /** Instant path when backend pushes trip_update over WebSocket (replaces slow polling). */
+  const applyAcceptedFromRealtime = useCallback(
+    (id: string, t: Record<string, any>, statusStr: string) => {
+      clearDriverPoll();
+      const norm =
+        statusStr === 'arrived' ? 'arrived' : statusStr === 'ongoing' ? 'ongoing' : 'accepted';
+      const pl = t?.pickup_location;
+      const dl = t?.dropoff_location;
+      setCurrentTrip({
+        id,
+        rider_id: user?.id || '',
+        driver_id: t?.driver_id || null,
+        pickup_location:
+          pl && typeof pl === 'object'
+            ? {
+                lat: Number(pl.lat),
+                lng: Number(pl.lng),
+                address: String(pl.address || ''),
+              }
+            : {
+                lat: pickupCoords?.lat || currentLocation?.lat || 0,
+                lng: pickupCoords?.lng || currentLocation?.lng || 0,
+                address: pickup,
+              },
+        dropoff_location:
+          dl && typeof dl === 'object'
+            ? {
+                lat: Number(dl.lat),
+                lng: Number(dl.lng),
+                address: String(dl.address || ''),
+              }
+            : {
+                lat: destinationCoords?.lat || 0,
+                lng: destinationCoords?.lng || 0,
+                address: destination,
+              },
+        distance_km: Number(t?.distance_km ?? fareDetails?.distance_km ?? 0),
+        duration_mins: Number(t?.duration_mins ?? fareDetails?.duration_mins ?? 0),
+        fare: Number(t?.fare ?? t?.offered_fare ?? currentFare ?? 0),
+        surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
+        status: norm as 'accepted' | 'arrived' | 'ongoing',
+        payment_method: (t?.payment_method as string) || tripPaymentMethod(),
+        payment_status: 'pending',
+        rider_rating: null,
+        driver_rating: null,
+        created_at: new Date().toISOString(),
+        accepted_at: new Date().toISOString(),
+        started_at: null,
+        completed_at: null,
+      });
+      setDriverFound({
+        driver_id: t?.driver_id,
+        name: t?.driver_name || 'Driver',
+        rating: 4.5,
+        vehicle: t?.vehicle_model || 'Vehicle',
+        plate: t?.vehicle_plate || '',
+        color: t?.vehicle_color || '',
+      });
+    },
+    [
+      user?.id,
+      pickupCoords,
+      destinationCoords,
+      currentLocation,
+      pickup,
+      destination,
+      fareDetails,
+      currentFare,
+      setCurrentTrip,
+      clearDriverPoll,
+      tripPaymentMethod,
+    ]
+  );
 
   const inferCity = (pickupText: string, destinationText: string): string => {
     const combined = `${pickupText || ''} ${destinationText || ''}`.toLowerCase();
@@ -117,19 +378,25 @@ export default function BookInDriveStyle() {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (!mounted) return;
         const { latitude, longitude } = loc.coords;
+        const latN = Number(latitude);
+        const lngN = Number(longitude);
+        if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+          if (mounted) setGpsStatus('error');
+          return;
+        }
 
-        let address = `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`;
+        let address = `${latN.toFixed(4)}, ${lngN.toFixed(4)}`;
         try {
-          const res = await fetch(`${BACKEND_URL}/api/places/geocode?lat=${latitude}&lng=${longitude}`);
+          const res = await fetch(`${BACKEND_URL}/api/places/geocode?lat=${latN}&lng=${lngN}`);
           const data = await res.json();
           if (data?.address) address = data.address;
           else if (data?.formatted_address) address = data.formatted_address;
         } catch {}
 
         if (!mounted) return;
-        setCurrentLocation({ lat: latitude, lng: longitude, address });
+        setCurrentLocation({ lat: latN, lng: lngN, address });
         setPickup(address);
-        setPickupCoords({ lat: latitude, lng: longitude });
+        setPickupCoords({ lat: latN, lng: lngN });
         setGpsStatus('locked');
       } catch {
         if (mounted) setGpsStatus('error');
@@ -140,11 +407,15 @@ export default function BookInDriveStyle() {
   }, []);
 
   const fetchPlaceDetails = async (placeId: string) => {
+    const id = String(placeId || '').trim();
+    if (!id) return null;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(placeId)}`);
-      const data = await res.json();
-      if (data?.latitude && data?.longitude) {
-        return { description: data.address || '', lat: data.latitude, lng: data.longitude };
+      const res = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(id)}`);
+      const data = await res.json().catch(() => ({}));
+      const lat = Number(data?.latitude);
+      const lng = Number(data?.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        return { description: String(data.address || data.formatted_address || '').trim() || '', lat, lng };
       }
     } catch {}
     return null;
@@ -154,12 +425,14 @@ export default function BookInDriveStyle() {
     try {
       const query = encodeURIComponent(address.trim());
       const res = await fetch(`${BACKEND_URL}/api/places/geocode-address?address=${query}`);
-      const data = await res.json();
-      if (res.ok && data?.latitude && data?.longitude) {
+      const data = await res.json().catch(() => ({}));
+      const lat = Number(data?.latitude);
+      const lng = Number(data?.longitude);
+      if (res.ok && Number.isFinite(lat) && Number.isFinite(lng)) {
         return {
-          lat: data.latitude as number,
-          lng: data.longitude as number,
-          address: data.address || address,
+          lat,
+          lng,
+          address: String(data.address || address || '').trim() || address,
         };
       }
     } catch {}
@@ -201,7 +474,7 @@ export default function BookInDriveStyle() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       throw new Error(toStr(data?.detail, 'Could not calculate fare'));
     }
@@ -239,7 +512,7 @@ export default function BookInDriveStyle() {
       'lagos';
 
     const results = await Promise.all(
-      VEHICLES.map(async (vehicle) => {
+      availableVehicles.map(async (vehicle) => {
         try {
           const data = await requestFareEstimate({
             pickup_lat: pLat!,
@@ -286,6 +559,7 @@ export default function BookInDriveStyle() {
   };
 
   const handleCalculateFare = async (vehicleOverride?: string) => {
+    if (calculateInFlightRef.current) return;
     if (!pickup || !destination) {
       Alert.alert('Missing', 'Please select pickup and destination');
       return;
@@ -296,6 +570,7 @@ export default function BookInDriveStyle() {
       setShowVehicleModal(true);
       return;
     }
+    calculateInFlightRef.current = true;
     setIsLoading(true);
     try {
       let pLat = pickupCoords?.lat || currentLocation?.lat;
@@ -370,12 +645,31 @@ export default function BookInDriveStyle() {
       if (Number.isFinite(computedFare) && computedFare > 0) {
         setCurrentFare(Math.round(computedFare));
         setFareDetails({ ...data, service_type: serviceType, city: inferredCity });
+        let routes: TrafficRoute[] = [];
+        try {
+          routes = await TrafficAI.getOptimizedRoutes(
+            { latitude: pLat, longitude: pLng },
+            { latitude: dLat, longitude: dLng },
+            { prioritizeTime: true, avoidTolls: false }
+          );
+        } catch {
+          routes = [];
+        }
+        const first = routes[0];
+        // #region agent log
+        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:handleCalculateFare',message:'routes before setOptimizedRoute',data:{routeCount:routes.length,hasFirst:!!first},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+        // #endregion
+        setOptimizedRoute(first ? TrafficAI.normalizeTrafficRoute(first) : null);
       } else {
         Alert.alert('Fare Error', toStr(data?.detail || data?.message, 'Could not calculate fare. Please try again.'));
       }
     } catch (error: any) {
+      // #region agent log
+      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:handleCalculateFare',message:'handleCalculateFare catch',data:{err:String(error?.message||error)},timestamp:Date.now(),hypothesisId:'H4'})}).catch(()=>{});
+      // #endregion
       Alert.alert('Connection Error', toStr(error, 'Network error. Check your connection and try again.'));
     } finally {
+      calculateInFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -383,20 +677,32 @@ export default function BookInDriveStyle() {
   useEffect(() => {
     if (!pickupCoords?.lat || !pickupCoords?.lng || !destinationCoords?.lat || !destinationCoords?.lng) {
       setFareMatrix({});
+      setOptimizedRoute(null);
       return;
     }
     const run = async () => {
+      // #region agent log
+      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices scheduled',data:{pLat:pickupCoords?.lat,pLng:pickupCoords?.lng,dLat:destinationCoords?.lat,dLng:destinationCoords?.lng,vehicle:selectedVehicle},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+      // #endregion
       try {
         await calculateAllVehiclePrices();
-      } catch {}
+        // #region agent log
+        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices ok',data:{},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+      } catch (e) {
+        // #region agent log
+        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:fareMatrixEffect',message:'calculateAllVehiclePrices error',data:{err:String((e as Error)?.message||e)},timestamp:Date.now(),hypothesisId:'H1'})}).catch(()=>{});
+        // #endregion
+      }
     };
     const timer = setTimeout(run, 400);
     return () => {
       clearTimeout(timer);
     };
-  }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng, selectedVehicle]);
+  }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng, selectedVehicle, availableVehicles]);
 
   const findOffers = async () => {
+    if (offerInFlightRef.current) return;
     if (!user?.id) { Alert.alert('Login', 'Please login to request a ride.'); return; }
     if (!selectedVehicle) { Alert.alert('Select Vehicle', 'Please select a vehicle type first.'); setShowVehicleModal(true); return; }
     const MIN_FARE = 100;
@@ -415,6 +721,25 @@ export default function BookInDriveStyle() {
       Alert.alert('Locations', 'Choose pickup and destination.');
       return;
     }
+    const payMethod = tripPaymentMethod();
+    if (payMethod === 'wallet') {
+      let bal = walletBalance ?? 0;
+      try {
+        const w = await getWalletMe(1);
+        bal = Number(w.data?.balance ?? 0);
+        setWalletBalance(bal);
+      } catch {
+        /* use cached balance */
+      }
+      if (bal + 1e-6 < currentFare) {
+        Alert.alert(
+          'Insufficient balance',
+          `You need at least ₦${currentFare.toLocaleString()} in your wallet. Top up in Wallet or pay with cash.`,
+        );
+        return;
+      }
+    }
+    offerInFlightRef.current = true;
     setIsLoading(true);
     try {
       const pLat = pickupCoords?.lat || currentLocation?.lat || 0;
@@ -445,13 +770,14 @@ export default function BookInDriveStyle() {
           dropoff_address: destination.trim(),
           service_type: normalizedService,
           city,
-          payment_method: 'cash',
+          payment_method: payMethod,
           offered_fare: currentFare,
           recommended_fare:
             Number(fareDetails?.base_price || fareDetails?.total_fare || 0) || undefined,
           fare_estimate_id: fareDetails?.estimate_id || undefined,
           trip_type: 'intra',
           preferred_driver_id: requestedDriverId || undefined,
+          ride_preferences: ridePreferences,
         }),
       });
       const result = await res.json().catch(() => ({}));
@@ -466,6 +792,7 @@ export default function BookInDriveStyle() {
     } catch {
       Alert.alert('Error', 'Could not reach server.');
     } finally {
+      offerInFlightRef.current = false;
       setIsLoading(false);
     }
   };
@@ -481,10 +808,27 @@ export default function BookInDriveStyle() {
     } catch {}
   };
 
+  const handleSaveGateCode = async () => {
+    if (!user?.id) return;
+    setSavingGateCode(true);
+    try {
+      await updateRiderPreferences(user.id, {
+        estate_name: estateName.trim() || null,
+        estate_gate_code: estateGateCode.trim() || null,
+      });
+      Alert.alert('Saved', 'Your estate gate code will auto-share with the driver for 10 minutes after arrival.');
+    } catch {
+      Alert.alert('Error', 'Could not save estate gate code.');
+    } finally {
+      setSavingGateCode(false);
+    }
+  };
+
   const pollForDriver = (id: string | null) => {
     if (!id) return;
+    clearDriverPoll();
     let attempts = 0;
-    const interval = setInterval(async () => {
+    driverPollRef.current = setInterval(async () => {
       attempts++;
       try {
         const res = await fetch(`${BACKEND_URL}/api/trips/${id}/status`, {
@@ -492,7 +836,7 @@ export default function BookInDriveStyle() {
         });
         const data = await res.json();
         if (data.success && ['accepted', 'arrived', 'ongoing'].includes(data.status) && data.driver_info) {
-          clearInterval(interval);
+          clearDriverPoll();
           setCurrentTrip({
             id,
             rider_id: user?.id || '',
@@ -512,7 +856,7 @@ export default function BookInDriveStyle() {
             fare: Number(currentFare || 0),
             surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
             status: data.status === 'arrived' ? 'arrived' : data.status === 'ongoing' ? 'ongoing' : 'accepted',
-            payment_method: 'cash',
+            payment_method: (data.payment_method as string) || tripPaymentMethod(),
             payment_status: 'pending',
             rider_rating: null,
             driver_rating: null,
@@ -525,7 +869,7 @@ export default function BookInDriveStyle() {
         }
       } catch {}
       if (attempts >= 30) {
-        clearInterval(interval);
+        clearDriverPoll();
         try {
           const finalRes = await fetch(`${BACKEND_URL}/api/trips/${id}/status`, {
             headers: getAuthHeaders(),
@@ -551,7 +895,7 @@ export default function BookInDriveStyle() {
               fare: Number(currentFare || 0),
               surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
               status: finalData.status === 'arrived' ? 'arrived' : finalData.status === 'ongoing' ? 'ongoing' : 'accepted',
-              payment_method: 'cash',
+              payment_method: (finalData.payment_method as string) || tripPaymentMethod(),
               payment_status: 'pending',
               rider_rating: null,
               driver_rating: null,
@@ -569,16 +913,57 @@ export default function BookInDriveStyle() {
         setTripId(null);
         Alert.alert('No Drivers', 'Try increasing your fare or try again later.');
       }
-    }, 3000);
+    }, 6000);
   };
 
+  useEffect(() => () => clearDriverPoll(), [clearDriverPoll]);
+
+  const handleRiderTripWs = useCallback(
+    (msg: RiderTripWsMessage) => {
+      const id = String(msg.trip_id || '');
+      if (!id || !tripId || id !== tripId) return;
+      const st = String(msg.status || '');
+      const t = (msg.trip || {}) as Record<string, any>;
+      if (st === 'cancelled') {
+        clearDriverPoll();
+        setSearchingForDriver(false);
+        setTripId(null);
+        setDriverFound(null);
+        setCurrentTrip(null);
+        Alert.alert('Trip cancelled', 'This ride request was cancelled.');
+        return;
+      }
+      if (st === 'completed' || st === 'pending_payment') {
+        clearDriverPoll();
+        setSearchingForDriver(false);
+        setDriverFound(null);
+        setTripId(null);
+        router.replace({ pathname: '/rider/trip-receipt', params: { tripId: id } } as any);
+        return;
+      }
+      if (['accepted', 'arrived', 'ongoing'].includes(st) && t.driver_id) {
+        applyAcceptedFromRealtime(id, t, st);
+      }
+    },
+    [tripId, clearDriverPoll, setCurrentTrip, applyAcceptedFromRealtime, router]
+  );
+
+  useRiderTripRealtime({
+    riderId: user?.id,
+    token,
+    enabled: Boolean(searchingForDriver && tripId && user?.id && token),
+    watchTripId: tripId,
+    onTripUpdate: handleRiderTripWs,
+  });
+
   const cancelSearch = async () => {
+    clearDriverPoll();
     await cancelPendingTrip(tripId);
     setSearchingForDriver(false);
     setDriverFound(null);
     setTripId(null);
   };
-  const veh = selectedVehicle ? VEHICLES.find(v => v.id === selectedVehicle) : null;
+  const veh = selectedVehicle ? availableVehicles.find(v => v.id === selectedVehicle) : null;
 
   const smartMinUi = fareDetails?.min_price != null ? Math.round(Number(fareDetails.min_price)) : null;
   const smartMaxUi = fareDetails?.max_price != null ? Math.round(Number(fareDetails.max_price)) : null;
@@ -590,17 +975,86 @@ export default function BookInDriveStyle() {
         : null;
   const priorityMatch =
     smartBaseUi != null && smartBaseUi > 0 && currentFare >= smartBaseUi * 0.95;
+  const nearbyOnlineCount = nearbyDrivers.filter((d) => d.status === 'online').length;
+  const liveEtaLabel = veh?.time || 'ETA pending';
+  const liveDriverLabel =
+    nearbyOnlineCount > 0
+      ? `${nearbyOnlineCount} nearby driver${nearbyOnlineCount > 1 ? 's' : ''}`
+      : nearbyDrivers.length > 0
+        ? `${nearbyDrivers.length} nearby (offline)`
+        : 'Searching nearby drivers';
+  const formatDistanceKm = (value: unknown) => {
+    const distance = Number(value);
+    if (!Number.isFinite(distance) || distance <= 0) return 'Route pending';
+    return `${distance.toFixed(1)} km route`;
+  };
+  const formatScheduledTime = (iso: string) => {
+    const dt = new Date(iso);
+    if (Number.isNaN(dt.getTime())) return 'Scheduled ride';
+    return dt.toLocaleString([], {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  };
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
       {/* MAP SECTION */}
       <View style={s.mapArea}>
-        <View style={s.mapPlaceholder}>
-          <Ionicons name="map" size={56} color={COLORS.dim} />
-          <Text style={s.mapText}>
-            {pickupCoords && destinationCoords ? `${fareDetails?.distance_km?.toFixed(1) || '—'} km route` : 'Select locations to view route'}
-          </Text>
-        </View>
+        {pickupCoords && destinationCoords ? (
+          Platform.OS === 'web' ? (
+            <MapComponent
+              style={s.mapPlaceholder}
+              pickup={{
+                latitude: pickupCoords.lat,
+                longitude: pickupCoords.lng,
+                address: pickup,
+              }}
+              dropoff={{
+                latitude: destinationCoords.lat,
+                longitude: destinationCoords.lng,
+                address: destination,
+              }}
+              routeCoordinates={[
+                { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
+                { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+              ]}
+            />
+          ) : (
+            (() => {
+              const RideMap = require('@/src/components/RideMap.native').default;
+              // #region agent log
+              fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:mapBranch',message:'render RideMap branch',data:{plat:Number(pickupCoords.lat),plng:Number(pickupCoords.lng),dlat:Number(destinationCoords.lat),dlng:Number(destinationCoords.lng),nearby:nearbyDrivers.length},timestamp:Date.now(),hypothesisId:'H5'})}).catch(()=>{});
+              // #endregion
+              return (
+                <RideMap
+                  mapRef={null}
+                  pickupCoords={pickupCoords}
+                  destinationCoords={destinationCoords}
+                  routePolyline={[
+                    { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
+                    { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+                  ]}
+                  pickup={pickup}
+                  destination={destination}
+                  nearbyDrivers={nearbyDrivers}
+                />
+              );
+            })()
+          )
+        ) : (
+          <View style={s.mapPlaceholder}>
+            <Ionicons name="map" size={56} color={COLORS.dim} />
+            <Text style={s.mapText}>
+              {pickupCoords && destinationCoords
+                ? formatDistanceKm(fareDetails?.distance_km)
+                : 'Select locations to view route'}
+            </Text>
+          </View>
+        )}
 
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
@@ -640,6 +1094,93 @@ export default function BookInDriveStyle() {
       {/* BOTTOM SHEET */}
       <View style={s.sheet}>
         <ScrollView contentContainerStyle={s.sheetContent} showsVerticalScrollIndicator={false}>
+          <View style={s.experienceHero}>
+            <View>
+              <Text style={s.experienceHeroTitle}>Quick Actions + Live Info</Text>
+              <Text style={s.experienceHeroSub}>Nearby drivers, ETA, and one-tap trip controls.</Text>
+            </View>
+
+            <View style={s.heroStatRow}>
+              <View style={s.heroStatCard}>
+                <Ionicons name="pulse-outline" size={14} color={COLORS.green} />
+                <Text style={s.heroStatLabel}>Nearby Drivers</Text>
+                <Text style={s.heroStatValue} numberOfLines={1}>{liveDriverLabel}</Text>
+              </View>
+              <View style={s.heroStatCard}>
+                <Ionicons name="time-outline" size={14} color={COLORS.blue} />
+                <Text style={s.heroStatLabel}>Best ETA</Text>
+                <Text style={s.heroStatValue} numberOfLines={1}>{liveEtaLabel}</Text>
+              </View>
+            </View>
+
+            <View style={s.heroActionsRow}>
+              <TouchableOpacity
+                style={s.heroActionBtn}
+                onPress={openScheduleRide}
+                accessibilityLabel="Schedule ride from quick actions"
+                accessibilityRole="button"
+              >
+                <Ionicons name="calendar-clear-outline" size={15} color={COLORS.white} />
+                <Text style={s.heroActionText}>Schedule Ride</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.heroActionBtn}
+                onPress={() => router.push('/rider/split-fare')}
+                accessibilityLabel="Split fare from quick actions"
+                accessibilityRole="button"
+              >
+                <Ionicons name="people-outline" size={15} color={COLORS.white} />
+                <Text style={s.heroActionText}>Split Fare</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.heroActionBtn}
+                onPress={() => router.push('/rider/safety-check')}
+                accessibilityLabel="Open safety check from quick actions"
+                accessibilityRole="button"
+              >
+                <Ionicons name="shield-checkmark-outline" size={15} color={COLORS.white} />
+                <Text style={s.heroActionText}>Safety Check</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={s.scheduleShortcut}
+            onPress={openScheduleRide}
+            disabled={isLoading}
+            accessibilityLabel="Open schedule ride"
+            accessibilityRole="button"
+          >
+            <View style={s.scheduleShortcutIcon}>
+              <Ionicons name="calendar-clear-outline" size={18} color={COLORS.blue} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.scheduleShortcutTitle}>Schedule ride</Text>
+              <Text style={s.scheduleShortcutSub}>Set pickup, destination and choose your ride time.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+          </TouchableOpacity>
+
+          {scheduledRides.length > 0 && (
+            <View style={s.scheduledCard}>
+              <View style={s.scheduledHeader}>
+                <Text style={s.scheduledTitle}>Scheduled rides active</Text>
+                <TouchableOpacity onPress={() => router.push('/rider/schedule')}>
+                  <Text style={s.scheduledLink}>Manage</Text>
+                </TouchableOpacity>
+              </View>
+              {scheduledRides.map((ride) => (
+                <View key={ride.id} style={s.scheduledRow}>
+                  <Ionicons name="calendar-outline" size={15} color={COLORS.blue} />
+                  <Text style={s.scheduledText} numberOfLines={1}>
+                    {formatScheduledTime(ride.scheduled_time)}{' '}
+                    - {(ride.pickup_address || 'Pickup').slice(0, 24)}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
           {/* Vehicle */}
           <TouchableOpacity style={[s.vehicleCard, !veh && s.vehicleCardPrompt]} onPress={() => setShowVehicleModal(true)} accessibilityLabel="Select vehicle type" accessibilityRole="button">
             <View style={[s.vehIcon, { backgroundColor: (veh?.color || COLORS.dim) + '20' }]}>
@@ -647,7 +1188,13 @@ export default function BookInDriveStyle() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[s.vehName, !veh && { color: COLORS.muted }]}>{veh ? veh.name : 'Select Vehicle Type'}</Text>
-              <Text style={s.vehDesc}>{veh ? `${veh.time} • ${veh.desc}` : 'Tap to choose Standard, Comfort, XL or Premium'}</Text>
+              <Text style={s.vehDesc}>
+                {veh
+                  ? `${veh.time} • ${veh.desc}`
+                  : String(user?.gender || '').toLowerCase() === 'female'
+                    ? 'Tap to choose Standard, Comfort, XL, Premium or Women Only'
+                    : 'Tap to choose Standard, Comfort, XL or Premium'}
+              </Text>
             </View>
             <Ionicons name="chevron-down" size={20} color={veh ? COLORS.muted : COLORS.green} />
           </TouchableOpacity>
@@ -655,6 +1202,26 @@ export default function BookInDriveStyle() {
           {/* Fare / Calculate */}
           {currentFare > 0 ? (
             <View style={s.fareSection}>
+              {optimizedRoute ? (
+                <View style={s.aiRouteCard}>
+                  <View style={s.aiRouteHeader}>
+                    <Ionicons name="navigate-circle" size={20} color={COLORS.blue} />
+                    <Text style={s.aiRouteTitle}>AI Route Optimisation</Text>
+                  </View>
+                  <Text style={s.aiRouteText}>
+                    Fastest route selected for current Lagos/Nigerian traffic conditions:{' '}
+                    {TrafficAI.formatDelay(Number(optimizedRoute.trafficDelay))}
+                    {optimizedRoute.timeSavedVsAlternative
+                      ? ` saved versus a slower alternative.`
+                      : '.'}
+                  </Text>
+                  <Text style={s.aiRouteMeta}>
+                    Traffic level:{' '}
+                    {String(optimizedRoute.trafficLevel || 'light').toUpperCase()} • AI score{' '}
+                    {Number.isFinite(Number(optimizedRoute.aiScore)) ? Math.round(Number(optimizedRoute.aiScore)) : 0}/100
+                  </Text>
+                </View>
+              ) : null}
               {smartBaseUi != null && smartBaseUi > 0 && (
                 <View style={{ marginBottom: 10, gap: 4 }}>
                   <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: '700' }}>
@@ -704,10 +1271,102 @@ export default function BookInDriveStyle() {
                   <Text style={s.fareBtnText}>+</Text>
                 </TouchableOpacity>
               </View>
+              <View>
+                <Text style={s.paySectionLabel}>Pay with</Text>
+                <View style={s.payRow}>
+                  <TouchableOpacity
+                    style={[s.payChip, ridePaymentMethod === 'cash' && s.payChipOn]}
+                    onPress={() => setRidePaymentMethod('cash')}
+                    accessibilityLabel="Pay with cash"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="cash" size={20} color={ridePaymentMethod === 'cash' ? COLORS.green : COLORS.dim} />
+                    <Text style={[s.payChipText, ridePaymentMethod === 'cash' && s.payChipTextOn]}>Cash</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[s.payChip, ridePaymentMethod === 'wallet' && s.payChipOn]}
+                    onPress={() => setRidePaymentMethod('wallet')}
+                    accessibilityLabel="Pay with wallet"
+                    accessibilityRole="button"
+                  >
+                    <Ionicons name="wallet" size={20} color={ridePaymentMethod === 'wallet' ? COLORS.green : COLORS.dim} />
+                    <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
+                  </TouchableOpacity>
+                </View>
+                <Text style={s.payHint}>
+                  {ridePaymentMethod === 'wallet'
+                    ? walletBalance != null
+                      ? `Balance ₦${walletBalance.toLocaleString()} — charged when you confirm after the trip`
+                      : 'Loading balance…'
+                    : 'Pay the driver in person'}
+                </Text>
+              </View>
+              <View>
+                <Text style={s.paySectionLabel}>Ride mood</Text>
+                <Text style={s.preferenceHint}>Tell the driver how you want the ride to feel.</Text>
+                <View style={s.preferenceRow}>
+                  {RIDE_PREFERENCE_OPTIONS.map((option) => {
+                    const active = ridePreferences.includes(option.id);
+                    return (
+                      <TouchableOpacity
+                        key={option.id}
+                        style={[s.preferenceChip, active && s.preferenceChipOn]}
+                        onPress={() => toggleRidePreference(option.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={option.label}
+                      >
+                        <Ionicons
+                          name={option.icon}
+                          size={16}
+                          color={active ? COLORS.green : COLORS.muted}
+                        />
+                        <Text style={[s.preferenceChipText, active && s.preferenceChipTextOn]}>
+                          {option.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+              <View>
+                <Text style={s.paySectionLabel}>Estate gate code</Text>
+                <Text style={s.preferenceHint}>Auto-shares with the driver for 10 minutes after they arrive at your estate gate.</Text>
+                <View style={s.gateCard}>
+                  <TextInput
+                    value={estateName}
+                    onChangeText={setEstateName}
+                    placeholder="Estate or apartment name"
+                    placeholderTextColor={COLORS.dim}
+                    style={s.gateInput}
+                  />
+                  <TextInput
+                    value={estateGateCode}
+                    onChangeText={setEstateGateCode}
+                    placeholder="Gate code"
+                    placeholderTextColor={COLORS.dim}
+                    style={s.gateInput}
+                    autoCapitalize="characters"
+                  />
+                  <TouchableOpacity style={s.gateSaveBtn} onPress={handleSaveGateCode} disabled={savingGateCode}>
+                    <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.white} />
+                    <Text style={s.gateSaveBtnText}>{savingGateCode ? 'Saving...' : 'Save Gate Code'}</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
               <TouchableOpacity style={s.findBtn} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
                 <LinearGradient colors={[COLORS.lime, '#9CD900']} style={s.btnGrad}>
                   {isLoading ? <ActivityIndicator color={COLORS.bg} /> : <Text style={s.findBtnText}>Find offers</Text>}
                 </LinearGradient>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.scheduleRideBtn}
+                onPress={openScheduleRide}
+                disabled={isLoading}
+                accessibilityLabel="Schedule this ride"
+                accessibilityRole="button"
+              >
+                <Ionicons name="calendar-outline" size={18} color={COLORS.white} />
+                <Text style={s.scheduleRideBtnText}>Schedule for later</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -734,19 +1393,38 @@ export default function BookInDriveStyle() {
             <LocationAutocomplete
               placeholder={editingField === 'pickup' ? 'Enter pickup...' : 'Enter destination...'}
               value={editingField === 'pickup' ? pickup : destination}
-              onChangeText={(text) => { editingField === 'pickup' ? setPickup(text) : setDestination(text); }}
-              onPlaceSelected={async (loc) => {
-                const details = await fetchPlaceDetails(loc.placeId);
-                const desc = details?.description || loc.description;
-                const coords = details ? { lat: details.lat, lng: details.lng } : null;
-                if (editingField === 'pickup') {
-                  setPickup(desc);
-                  if (coords) setPickupCoords(coords);
-                } else {
-                  setDestination(desc);
-                  if (coords) setDestinationCoords(coords);
+              onChangeText={(text) => {
+                if (editingField === 'destination' && (text.length === 2 || text.length === 3 || text.length % 10 === 0)) {
+                  // #region agent log
+                  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:LocationAutocomplete',message:'destination onChangeText',data:{len:text.length},timestamp:Date.now(),hypothesisId:'T4'})}).catch(()=>{});
+                  // #endregion
                 }
-                setShowLocationModal(false);
+                editingField === 'pickup' ? setPickup(text) : setDestination(text);
+              }}
+              onPlaceSelected={async (loc) => {
+                try {
+                  const field = editingField;
+                  const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
+                  const details = loc?.placeId ? await fetchPlaceDetails(loc.placeId) : null;
+                  const desc = String(details?.description || rawDesc || '').trim() || 'Selected location';
+                  const coords =
+                    details && Number.isFinite(details.lat) && Number.isFinite(details.lng)
+                      ? { lat: details.lat, lng: details.lng }
+                      : null;
+                  if (field === 'pickup') {
+                    setPickup(desc);
+                    if (coords) setPickupCoords(coords);
+                  } else {
+                    setDestination(desc);
+                    if (coords) setDestinationCoords(coords);
+                  }
+                  // #region agent log
+                  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'book-indrive-style.tsx:onPlaceSelected',message:'place applied',data:{field,hasCoords:!!coords,descLen:desc.length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
+                  // #endregion
+                  setShowLocationModal(false);
+                } catch {
+                  Alert.alert('Location', 'Could not load that place. Try another suggestion or type the address again.');
+                }
               }}
               apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''}
               placeholderTextColor="#64748B"
@@ -775,7 +1453,7 @@ export default function BookInDriveStyle() {
         <View style={s.vehModalBg}>
           <View style={s.vehModalContent}>
             <Text style={s.vehModalTitle}>Select Vehicle</Text>
-            {VEHICLES.map(v => (
+            {availableVehicles.map(v => (
               <TouchableOpacity key={v.id} style={[s.vehOption, selectedVehicle === v.id && s.vehOptionActive]}
                 onPress={() => {
                   setSelectedVehicle(v.id);
@@ -841,7 +1519,9 @@ export default function BookInDriveStyle() {
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                     <Ionicons name="star" size={16} color="#F59E0B" />
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>{driverFound.rating?.toFixed(1)}</Text>
+                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>
+                      {Number(driverFound?.rating ?? 0).toFixed(1)}
+                    </Text>
                   </View>
                 </View>
                 <TouchableOpacity
@@ -884,21 +1564,209 @@ const s = StyleSheet.create({
   locText: { flex: 1, fontSize: 14, fontWeight: '600', color: COLORS.white },
   gpsBadge: { flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 10, backgroundColor: 'rgba(14,165,233,0.15)', borderRadius: 8, marginTop: 4, gap: 6 },
   gpsText: { fontSize: 11, fontWeight: '800', color: COLORS.green, textTransform: 'uppercase', letterSpacing: 0.8 },
-  sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, marginTop: -24, paddingTop: 8 },
-  sheetContent: { padding: 20, paddingBottom: 40 },
-  vehicleCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.card, borderRadius: 20, padding: 16, marginBottom: 16, gap: 12 },
+  sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
+  sheetContent: { padding: 20, paddingBottom: 56 },
+  experienceHero: {
+    backgroundColor: '#101B2E',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.22)',
+    padding: 14,
+    marginBottom: 14,
+    gap: 10,
+  },
+  experienceHeroTitle: { color: COLORS.white, fontSize: 16, fontWeight: '900' },
+  experienceHeroSub: { color: COLORS.muted, fontSize: 12, marginTop: 4, maxWidth: 280, lineHeight: 18 },
+  heroStatRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+  heroStatCard: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  heroStatLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
+  heroStatValue: { color: COLORS.white, fontSize: 12, fontWeight: '800' },
+  heroActionsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 6,
+  },
+  heroActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.3)',
+    backgroundColor: 'rgba(35,47,66,0.65)',
+    paddingVertical: 9,
+    paddingHorizontal: 6,
+  },
+  heroActionText: { color: COLORS.white, fontSize: 11, fontWeight: '800' },
+  scheduleShortcut: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.18)',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+  },
+  scheduleShortcutIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor: 'rgba(14,165,233,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduleShortcutTitle: { color: COLORS.white, fontSize: 14, fontWeight: '900' },
+  scheduleShortcutSub: { color: COLORS.muted, fontSize: 12, marginTop: 2 },
+  scheduledCard: {
+    backgroundColor: '#10213A',
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(14,165,233,0.25)',
+    marginBottom: 14,
+    gap: 8,
+  },
+  scheduledHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  scheduledTitle: { fontSize: 13, fontWeight: '900', color: COLORS.white },
+  scheduledLink: { fontSize: 12, fontWeight: '800', color: COLORS.blue },
+  scheduledRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  scheduledText: { flex: 1, fontSize: 12, fontWeight: '700', color: '#D6E4F0' },
+  vehicleCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 20,
+    padding: 16,
+    marginBottom: 16,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.16)',
+  },
   vehicleCardPrompt: { borderWidth: 1.5, borderColor: COLORS.green, borderStyle: 'dashed' },
   vehIcon: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   vehName: { fontSize: 16, fontWeight: '800', color: COLORS.white },
   vehDesc: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
-  fareSection: { gap: 16 },
+  fareSection: { gap: 18 },
+  aiRouteCard: {
+    backgroundColor: '#10213A',
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(14,165,233,0.25)',
+  },
+  aiRouteHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
+  aiRouteTitle: { fontSize: 14, fontWeight: '900', color: COLORS.white },
+  aiRouteText: { fontSize: 13, color: '#D6E4F0', lineHeight: 18 },
+  aiRouteMeta: { fontSize: 12, color: COLORS.blue, fontWeight: '700', marginTop: 6 },
   fareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
   fareBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.cardLight, alignItems: 'center', justifyContent: 'center' },
   fareBtnText: { fontSize: 24, fontWeight: '800', color: COLORS.white },
   fareAmount: { fontSize: 32, fontWeight: '900', color: COLORS.lime },
-  findBtn: { borderRadius: 16, overflow: 'hidden' },
-  btnGrad: { paddingVertical: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 16 },
+  paySectionLabel: { fontSize: 12, fontWeight: '700', color: COLORS.muted, marginBottom: 8 },
+  payRow: { flexDirection: 'row', gap: 10 },
+  payChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderRadius: 14,
+    backgroundColor: COLORS.cardLight,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  payChipOn: { borderColor: COLORS.green, backgroundColor: 'rgba(0,212,106,0.12)' },
+  payChipText: { fontSize: 14, fontWeight: '800', color: COLORS.muted },
+  payChipTextOn: { color: COLORS.white },
+  payHint: { fontSize: 11, color: COLORS.dim, marginTop: 8, lineHeight: 15 },
+  preferenceHint: { fontSize: 11, color: COLORS.dim, marginTop: 2, marginBottom: 10, lineHeight: 15 },
+  preferenceRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  preferenceChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: COLORS.cardLight,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  preferenceChipOn: {
+    borderColor: COLORS.green,
+    backgroundColor: 'rgba(0,212,106,0.12)',
+  },
+  preferenceChipText: { fontSize: 12, fontWeight: '700', color: COLORS.muted },
+  preferenceChipTextOn: { color: COLORS.white },
+  gateCard: {
+    backgroundColor: COLORS.cardLight,
+    borderRadius: 16,
+    padding: 12,
+    gap: 10,
+  },
+  gateInput: {
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  gateSaveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: COLORS.blue,
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
+  gateSaveBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.white },
+  findBtn: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    shadowColor: COLORS.lime,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    elevation: 10,
+  },
+  btnGrad: { paddingVertical: 19, alignItems: 'center', justifyContent: 'center', borderRadius: 18 },
   findBtnText: { fontSize: 18, fontWeight: '900', color: COLORS.bg },
+  scheduleRideBtn: {
+    marginTop: 12,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.45)',
+    backgroundColor: '#17263F',
+    paddingVertical: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  scheduleRideBtnText: { fontSize: 15, fontWeight: '800', color: COLORS.white },
   calcBtn: { borderRadius: 16, overflow: 'hidden' },
   calcBtnText: { fontSize: 18, fontWeight: '800', color: COLORS.white },
   modalContainer: { flex: 1, backgroundColor: COLORS.bg },

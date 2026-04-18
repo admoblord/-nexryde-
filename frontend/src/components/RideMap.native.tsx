@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 
 const COLORS = {
@@ -7,6 +7,32 @@ const COLORS = {
   brandBlue: '#0EA5E9',
   red: '#EF4444',
 };
+
+function parseCoordPair(
+  coords: { lat?: unknown; lng?: unknown } | null | undefined
+): { lat: number; lng: number } | null {
+  if (!coords) return null;
+  const lat = Number(coords.lat);
+  const lng = Number(coords.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (Math.abs(lat) > 90 || Math.abs(lng) > 180) return null;
+  return { lat, lng };
+}
+
+function sanitizePolyline(raw: unknown): { latitude: number; longitude: number }[] {
+  if (!Array.isArray(raw)) return [];
+  const out: { latitude: number; longitude: number }[] = [];
+  for (const p of raw) {
+    const o = p && typeof p === 'object' ? (p as Record<string, unknown>) : null;
+    if (!o) continue;
+    const lat = Number(o.latitude ?? o.lat);
+    const lng = Number(o.longitude ?? o.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (Math.abs(lat) > 90 || Math.abs(lng) > 180) continue;
+    out.push({ latitude: lat, longitude: lng });
+  }
+  return out;
+}
 
 interface RideMapProps {
   mapRef: any;
@@ -17,6 +43,7 @@ interface RideMapProps {
   destination: string;
   nearbyDrivers?: Array<{
     driver_id: string;
+    name?: string;
     lat: number;
     lng: number;
     status?: string;
@@ -24,6 +51,7 @@ interface RideMapProps {
   }>;
   activeDriverLocation?: { lat: number; lng: number } | null;
   activeDriverMoving?: boolean;
+  activeDriverMeta?: { name?: string; vehicle?: string; plate?: string } | null;
 }
 
 export default function RideMap({
@@ -36,15 +64,39 @@ export default function RideMap({
   nearbyDrivers = [],
   activeDriverLocation = null,
   activeDriverMoving = false,
+  activeDriverMeta = null,
 }: RideMapProps) {
+  const pickupLL = parseCoordPair(pickupCoords);
+  const destLL = parseCoordPair(destinationCoords);
+  const lineCoords = useMemo(() => sanitizePolyline(routePolyline), [routePolyline]);
+  const activeLL = parseCoordPair(activeDriverLocation ?? undefined);
+
+  const pickupLabel = String(pickup ?? '');
+  const destLabel = String(destination ?? '');
+
+  if (!pickupLL || !destLL) {
+    return (
+      <View style={[styles.mapContainer, styles.fallback]}>
+        <Text style={styles.fallbackText}>Map needs valid pickup and destination.</Text>
+      </View>
+    );
+  }
+
+  const mapKey = `booking-map-${pickupLL.lat}-${pickupLL.lng}-${destLL.lat}-${destLL.lng}`;
+
+  // #region agent log
+  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'RideMap.native.tsx:MapView',message:'RideMap mounting MapView',data:{linePts:lineCoords.length,drivers:nearbyDrivers.length,mapKeyLen:mapKey.length},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
+  // #endregion
+
   return (
     <View style={styles.mapContainer}>
       <MapView
+        key={mapKey}
         ref={mapRef}
         style={styles.map}
         initialRegion={{
-          latitude: pickupCoords.lat,
-          longitude: pickupCoords.lng,
+          latitude: pickupLL.lat,
+          longitude: pickupLL.lng,
           latitudeDelta: 0.05,
           longitudeDelta: 0.05,
         }}
@@ -55,54 +107,69 @@ export default function RideMap({
         {/* Pickup Marker */}
         <Marker
           coordinate={{
-            latitude: pickupCoords.lat,
-            longitude: pickupCoords.lng,
+            latitude: pickupLL.lat,
+            longitude: pickupLL.lng,
           }}
           title="Pickup"
-          description={pickup}
+          description={pickupLabel}
           pinColor={COLORS.brandGreen}
         />
 
         {/* Destination Marker */}
         <Marker
           coordinate={{
-            latitude: destinationCoords.lat,
-            longitude: destinationCoords.lng,
+            latitude: destLL.lat,
+            longitude: destLL.lng,
           }}
           title="Destination"
-          description={destination}
+          description={destLabel}
           pinColor={COLORS.red}
         />
 
         {/* Route Polyline */}
-        {routePolyline.length > 0 && (
+        {lineCoords.length > 0 && (
           <Polyline
-            coordinates={routePolyline}
+            coordinates={lineCoords}
             strokeColor={COLORS.brandBlue}
             strokeWidth={4}
           />
         )}
 
         {/* Nearby available drivers */}
-        {nearbyDrivers.map((driver) => (
-          <Marker
-            key={`nearby-${driver.driver_id}`}
-            coordinate={{ latitude: driver.lat, longitude: driver.lng }}
-            title={driver.vehicle || 'Available driver'}
-            description={driver.status || 'available'}
-            pinColor={driver.status === 'on_trip' ? '#9CA3AF' : COLORS.brandBlue}
-          />
-        ))}
+        {nearbyDrivers.map((driver, index) => {
+          const d = parseCoordPair({ lat: driver.lat, lng: driver.lng });
+          if (!d) return null;
+          const keyId = driver.driver_id ? String(driver.driver_id) : `idx-${index}`;
+          return (
+            <Marker
+              key={`nearby-${keyId}`}
+              coordinate={{ latitude: d.lat, longitude: d.lng }}
+              title={
+                driver.name
+                  ? `${String(driver.name)} • ${String(driver.vehicle || 'Car')}`
+                  : String(driver.vehicle || 'Available driver')
+              }
+              description={String(driver.status || 'available nearby')}
+              pinColor={driver.status === 'on_trip' ? '#9CA3AF' : COLORS.brandBlue}
+            />
+          );
+        })}
 
         {/* Assigned driver marker */}
-        {activeDriverLocation && (
+        {activeLL && (
           <Marker
             coordinate={{
-              latitude: activeDriverLocation.lat,
-              longitude: activeDriverLocation.lng,
+              latitude: activeLL.lat,
+              longitude: activeLL.lng,
             }}
-            title="Your driver"
-            description={activeDriverMoving ? 'Moving' : 'Not moving'}
+            title={
+              activeDriverMeta?.name
+                ? `${String(activeDriverMeta.name)} • ${String(activeDriverMeta.vehicle || 'Car')}`
+                : 'Your driver'
+            }
+            description={`${activeDriverMoving ? 'Moving' : 'Paused'}${
+              activeDriverMeta?.plate ? ` • ${String(activeDriverMeta.plate)}` : ''
+            }`}
             pinColor={activeDriverMoving ? COLORS.brandGreen : '#F59E0B'}
           />
         )}
@@ -121,5 +188,16 @@ const styles = StyleSheet.create({
   map: {
     width: '100%',
     height: '100%',
+  },
+  fallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1E293B',
+  },
+  fallbackText: {
+    color: '#94A3B8',
+    fontSize: 13,
+    textAlign: 'center',
+    paddingHorizontal: 16,
   },
 });

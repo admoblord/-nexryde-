@@ -127,6 +127,18 @@ const styles = StyleSheet.create({
   },
   heroTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '700', color: COLORS.white, marginTop: SPACING.md },
   heroSubtitle: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.8)', marginTop: SPACING.xs },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.xxl,
+  },
+  loadingText: {
+    marginTop: SPACING.md,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray600,
+    textAlign: 'center',
+  },
   suggestionCard: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -19,6 +19,7 @@ import {
   removeFavoriteDriver,
   checkFavoriteDriver,
   confirmTripPayment,
+  getTripBlackBox,
 } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 
@@ -57,6 +58,8 @@ export default function TripReceiptScreen() {
   const [isFavorite, setIsFavorite] = useState(false);
   const [savingFavorite, setSavingFavorite] = useState(false);
   const [confirmingPayment, setConfirmingPayment] = useState(false);
+  const [blackBox, setBlackBox] = useState<any>(null);
+  const [loadingBlackBox, setLoadingBlackBox] = useState(false);
 
   useEffect(() => {
     const run = async () => {
@@ -68,6 +71,17 @@ export default function TripReceiptScreen() {
         const res = await getTrip(params.tripId);
         const tripData = res.data || null;
         setTrip(tripData);
+        if (params.tripId) {
+          setLoadingBlackBox(true);
+          try {
+            const blackBoxRes = await getTripBlackBox(params.tripId);
+            setBlackBox(blackBoxRes.data?.black_box || null);
+          } catch (e) {
+            console.log('Failed to load black box:', e);
+          } finally {
+            setLoadingBlackBox(false);
+          }
+        }
         if (tripData?.driver_id && user?.id) {
           try {
             const favRes = await checkFavoriteDriver(user.id, tripData.driver_id);
@@ -106,7 +120,12 @@ export default function TripReceiptScreen() {
       timeFare: Number(trip.time_fee || 0),
       trafficFare: Number(trip.traffic_fee || 0),
       total: Number(trip.fare || 0),
-      paymentMethod: trip.payment_method || 'Cash',
+      paymentMethod:
+        trip.payment_method === 'wallet'
+          ? 'Wallet'
+          : trip.payment_method === 'cash'
+            ? 'Cash'
+            : trip.payment_method || 'Cash',
       paymentStatus: trip.payment_status || 'pending',
       bankName: trip.driver_bank_name || '',
       accountNumber: trip.driver_account_number || '',
@@ -186,6 +205,29 @@ export default function TripReceiptScreen() {
     }
   };
 
+  const handleShareBlackBox = async () => {
+    if (!blackBox) return;
+    try {
+      await Share.share({
+        message:
+          `NEXRYDE Trip Forensics Report\n\n` +
+          `Trip ID: ${blackBox.trip_id}\n` +
+          `Issuer: ${blackBox.certification?.issuer}\n` +
+          `Jurisdiction: ${blackBox.certification?.jurisdiction}\n` +
+          `Record Hash: ${blackBox.certification?.record_hash}\n` +
+          `Signature: ${blackBox.certification?.record_signature}\n` +
+          `Driver: ${blackBox.driver_identity?.name || 'Driver'}\n` +
+          `Vehicle: ${blackBox.driver_identity?.vehicle_model || 'Vehicle'} ${blackBox.driver_identity?.vehicle_plate || ''}\n` +
+          `Route points captured: ${blackBox.route_summary?.recorded_route_points || 0}\n` +
+          `30-second forensic points: ${blackBox.route_summary?.forensic_route_points || 0}\n` +
+          `Timeline events: ${Array.isArray(blackBox.timeline) ? blackBox.timeline.length : 0}\n\n` +
+          `This record is tamper-evident and intended for police, insurance, and legal review.`,
+      });
+    } catch {
+      Alert.alert('Error', 'Could not share the Black Box record');
+    }
+  };
+
   if (loading) {
     return (
       <SafeAreaView style={styles.container}>
@@ -247,6 +289,65 @@ export default function TripReceiptScreen() {
           </View>
         </View>
 
+        <View style={styles.blackBoxCard}>
+          <View style={styles.blackBoxHeader}>
+            <View style={styles.blackBoxIcon}>
+              <Ionicons name="shield-checkmark" size={22} color={COLORS.info} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.blackBoxTitle}>Nexryde Black Shield</Text>
+              <Text style={styles.blackBoxText}>
+                Official tamper-evident forensics report with GPS points every 30 seconds, speed trail, timestamps, route history, and driver identity confirmation.
+              </Text>
+            </View>
+          </View>
+          {loadingBlackBox ? (
+            <ActivityIndicator size="small" color={COLORS.info} />
+          ) : blackBox ? (
+            <>
+              <View style={styles.blackBoxGrid}>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>Record hash</Text>
+                  <Text style={styles.blackBoxMetricValue}>{String(blackBox.certification?.record_hash || '').slice(0, 14)}...</Text>
+                </View>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>GPS points</Text>
+                  <Text style={styles.blackBoxMetricValue}>{Number(blackBox.route_summary?.recorded_route_points || 0)}</Text>
+                </View>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>30s forensic points</Text>
+                  <Text style={styles.blackBoxMetricValue}>{Number(blackBox.route_summary?.forensic_route_points || 0)}</Text>
+                </View>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>Timeline events</Text>
+                  <Text style={styles.blackBoxMetricValue}>{Array.isArray(blackBox.timeline) ? blackBox.timeline.length : 0}</Text>
+                </View>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>Comms digest</Text>
+                  <Text style={styles.blackBoxMetricValue}>
+                    {String(blackBox.communications_integrity?.communication_digest || '').slice(0, 12) || 'n/a'}
+                  </Text>
+                </View>
+                <View style={styles.blackBoxMetric}>
+                  <Text style={styles.blackBoxMetricLabel}>Face match</Text>
+                  <Text style={styles.blackBoxMetricValue}>
+                    {blackBox.driver_identity?.face_verified_at_start ? 'Verified' : 'Pending'}
+                  </Text>
+                </View>
+              </View>
+              <Text style={styles.blackBoxFootnote}>
+                Black Shield is tamper-evident and immutable. Third-party legal access requires a court-order token.
+              </Text>
+              <TouchableOpacity style={styles.blackBoxBtn} onPress={handleShareBlackBox}>
+                <Ionicons name="document-text-outline" size={18} color={COLORS.white} />
+                <Text style={styles.blackBoxBtnText}>Share Forensics Summary</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <Text style={styles.blackBoxText}>Official record not available yet for this trip.</Text>
+          )}
+        </View>
+
         <View style={styles.statsRow}>
           <View style={styles.statItem}>
             <Ionicons name="navigate" size={20} color={COLORS.primary} />
@@ -266,7 +367,9 @@ export default function TripReceiptScreen() {
             <Text style={styles.driverName}>{view.driverName}</Text>
             <View style={styles.driverMeta}>
               <Ionicons name="star" size={14} color={COLORS.accent} />
-              <Text style={styles.driverRating}>{view.driverRating ? view.driverRating.toFixed(1) : 'N/A'}</Text>
+              <Text style={styles.driverRating}>
+                {view.driverRating != null ? Number(view.driverRating).toFixed(1) : 'N/A'}
+              </Text>
               <Text style={styles.driverCar}>{view.vehicle}{view.plate ? ` • ${view.plate}` : ''}</Text>
             </View>
           </View>
@@ -376,6 +479,33 @@ const styles = StyleSheet.create({
   receiptId: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray600 },
   receiptDate: { fontSize: FONT_SIZE.sm, color: COLORS.gray500, marginTop: 2 },
   routeCard: { backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.md },
+  blackBoxCard: { backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.md },
+  blackBoxHeader: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.md },
+  blackBoxIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.infoSoft,
+  },
+  blackBoxTitle: { fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.gray800, marginBottom: 4 },
+  blackBoxText: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600, lineHeight: 20 },
+  blackBoxGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginBottom: SPACING.md },
+  blackBoxMetric: { width: '48%', backgroundColor: COLORS.gray50, borderRadius: BORDER_RADIUS.lg, padding: SPACING.md },
+  blackBoxMetricLabel: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: COLORS.gray500, textTransform: 'uppercase' },
+  blackBoxMetricValue: { fontSize: FONT_SIZE.sm, fontWeight: '900', color: COLORS.gray800, marginTop: SPACING.xs },
+  blackBoxFootnote: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600, lineHeight: 20, marginBottom: SPACING.md },
+  blackBoxBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.info,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+  },
+  blackBoxBtnText: { color: COLORS.white, fontWeight: '800', fontSize: FONT_SIZE.sm },
   routePoint: { flexDirection: 'row', alignItems: 'flex-start' },
   routeDot: { width: 12, height: 12, borderRadius: 6, marginTop: 4 },
   routeInfo: { marginLeft: SPACING.md, flex: 1 },

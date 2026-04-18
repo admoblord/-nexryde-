@@ -17,6 +17,13 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { TrafficAI, TrafficPrediction, useTrafficAI } from '@/src/services/trafficAI';
 import { BACKEND_URL } from '@/src/services/api';
 
+type SearchedLocation = {
+  name: string;
+  lat: number;
+  lng: number;
+  prediction?: TrafficPrediction;
+};
+
 export default function RiderTrafficStatusScreen() {
   const router = useRouter();
   const { hotspots, loading, fetchTrafficStatus } = useTrafficAI();
@@ -24,7 +31,7 @@ export default function RiderTrafficStatusScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [predictions, setPredictions] = useState<TrafficPrediction[]>([]);
-  const [searchedLocation, setSearchedLocation] = useState<any>(null);
+  const [searchedLocation, setSearchedLocation] = useState<SearchedLocation | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
 
   // Popular Lagos locations for predictions
@@ -83,7 +90,7 @@ export default function RiderTrafficStatusScreen() {
         ]);
         
         setSearchedLocation({
-          name: location.formatted_address,
+          name: geocodeData.formatted_address || searchQuery,
           lat,
           lng,
           prediction: prediction[0],
@@ -110,9 +117,9 @@ export default function RiderTrafficStatusScreen() {
     const severe = hotspots.filter(h => h.severity === 'severe').length;
     const high = hotspots.filter(h => h.severity === 'high').length;
     
-    if (severe > 2) return { level: 'Poor', color: '#FF0000', icon: 'close-circle' };
-    if (high > 3 || severe > 0) return { level: 'Moderate', color: '#FFB800', icon: 'alert-circle' };
-    return { level: 'Good', color: '#00D084', icon: 'checkmark-circle' };
+    if (severe > 2) return { level: 'Poor', color: '#FF0000', icon: 'close-circle' as any };
+    if (high > 3 || severe > 0) return { level: 'Moderate', color: '#FFB800', icon: 'alert-circle' as any };
+    return { level: 'Good', color: '#00D084', icon: 'checkmark-circle' as any };
   };
 
   const summary = getTrafficSummary();
@@ -219,13 +226,21 @@ export default function RiderTrafficStatusScreen() {
                   <Text style={styles.searchResultLabel}>Traffic Status:</Text>
                   <Text style={[
                     styles.searchResultValue,
-                    { color: searchedLocation.prediction.severity === 'low' ? COLORS.success : 
-                             searchedLocation.prediction.severity === 'medium' ? COLORS.warning : COLORS.danger }
+                    {
+                      color:
+                        searchedLocation.prediction.predictedLevel === 'light'
+                          ? COLORS.success
+                          : searchedLocation.prediction.predictedLevel === 'moderate'
+                            ? COLORS.warning
+                            : COLORS.danger,
+                    }
                   ]}>
-                    {searchedLocation.prediction.severity.toUpperCase()}
+                    {searchedLocation.prediction.predictedLevel.toUpperCase()}
                   </Text>
                   <Text style={styles.searchResultDesc}>
-                    {searchedLocation.prediction.description}
+                    {searchedLocation.prediction.factors.length > 0
+                      ? searchedLocation.prediction.factors.join(', ')
+                      : 'Live prediction available for this area.'}
                   </Text>
                 </View>
               )}
@@ -365,7 +380,7 @@ const PredictionCard = ({ prediction }: { prediction: TrafficPrediction }) => {
           <Text style={styles.levelText}>Now: {prediction.currentLevel}</Text>
         </View>
         
-        <Ionicons name={change.name} size={20} color={change.color} />
+        <Ionicons name={change.name as any} size={20} color={change.color} />
         
         <View style={styles.predictionLevel}>
           <View style={[styles.levelDot, { backgroundColor: TrafficAI.getTrafficColor(prediction.predictedLevel) }]} />
@@ -385,7 +400,7 @@ const PredictionCard = ({ prediction }: { prediction: TrafficPrediction }) => {
 const HotspotSummaryItem = ({ count, label, icon, color }: any) => (
   <View style={styles.hotspotSummaryItem}>
     <View style={[styles.hotspotIconCircle, { backgroundColor: color + '20' }]}>
-      <Ionicons name={icon} size={24} color={color} />
+      <Ionicons name={icon as any} size={24} color={color} />
     </View>
     <Text style={[styles.hotspotCount, { color }]}>{count}</Text>
     <Text style={styles.hotspotLabel}>{label}</Text>
@@ -409,7 +424,7 @@ const RouteStatusItem = ({ name, level, delay }: any) => (
 
 const TipItem = ({ icon, text }: any) => (
   <View style={styles.tipItem}>
-    <Ionicons name={icon} size={20} color={COLORS.accentBlue} />
+    <Ionicons name={icon as any} size={20} color={COLORS.accentBlue} />
     <Text style={styles.tipText}>{text}</Text>
   </View>
 );

@@ -39,7 +39,7 @@ export default function FareBreakdownScreen() {
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
             >
-              <Text style={styles.totalLabel}>Total Fare</Text>
+              <Text style={styles.heroTotalLabel}>Total Fare</Text>
               <Text style={styles.totalAmount}>{CURRENCY}2,220</Text>
               <View style={styles.adjustedBadge}>
                 <Text style={styles.adjustedText}>Adjusted from {CURRENCY}2000</Text>
@@ -92,7 +92,7 @@ export default function FareBreakdownScreen() {
               <Text style={styles.adjustmentValue}>+{CURRENCY}200</Text>
             </View>
             <View style={[styles.detailRow, styles.totalRow]}>
-              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.detailsTotalLabel}>Total</Text>
               <Text style={styles.totalValue}>{CURRENCY}2,220</Text>
             </View>
           </View>
@@ -170,7 +170,7 @@ const styles = StyleSheet.create({
     padding: SPACING.xl,
     alignItems: 'center',
   },
-  totalLabel: {
+  heroTotalLabel: {
     fontSize: FONT_SIZE.sm,
     color: 'rgba(255,255,255,0.8)',
     marginBottom: SPACING.xs,
@@ -302,7 +302,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
     paddingTop: SPACING.md,
   },
-  totalLabel: {
+  detailsTotalLabel: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
     color: COLORS.lightTextPrimary,

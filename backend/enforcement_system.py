@@ -113,6 +113,30 @@ VIOLATION_CONFIG = {
         },
         "role": "driver",
     },
+    "speed_spike": {
+        "description": "Driver exceeded 100 km/h during an active trip",
+        "threshold": 1,
+        "window_hours": 24 * 365,
+        "penalty": "warning",
+        "strikes": 1,
+        "escalation": {
+            1: {"action": "warning", "message": "Critical overspeed detected. Slow down immediately. This incident is now on your safety record."},
+            2: {"action": "warning", "message": "Second speed spike recorded. One more and your account will be suspended automatically."},
+            3: {"action": "suspend_24h", "message": "Third speed spike recorded. Your account has been suspended automatically for rider safety."},
+        },
+        "role": "driver",
+    },
+    "gps_spoofing": {
+        "description": "GPS spoofing or impossible route manipulation detected",
+        "threshold": 1,
+        "window_hours": 24 * 365,
+        "penalty": "suspend_7d",
+        "strikes": 3,
+        "escalation": {
+            1: {"action": "suspend_7d", "message": "GPS spoofing was detected on your account. Your driver account is suspended pending investigation."},
+        },
+        "role": "driver",
+    },
     "fraud": {
         "description": "Fraudulent activity detected",
         "threshold": 1,
@@ -296,6 +320,18 @@ async def check_user_status(user_id: str):
 
     if user.get("is_deactivated"):
         return {"allowed": False, "reason": "Account deactivated", "message": "Your account has been permanently deactivated due to policy violations. Contact support@nexryde.com to appeal."}
+    if user.get("role") == "driver" and user.get("ghost_driver_lock", {}).get("active"):
+        return {
+            "allowed": False,
+            "reason": "Ghost driver lock",
+            "message": "Ghost Driver Protection is active. Reconfirm identity to unlock your account.",
+        }
+    if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
+        return {
+            "allowed": False,
+            "reason": "SIM swap lock",
+            "message": "SIM Swap Protection is active. Complete secondary identity reconfirmation to unlock your account.",
+        }
 
     # Hard verification/compliance gates for drivers.
     if user.get("role") == "driver":

@@ -199,7 +199,7 @@ export default function DriverTermsScreen() {
             <Text style={styles.paragraph}>
               For questions or support:{'\n'}
               • Email: support@nexryde.com{'\n'}
-              • Phone: +234 810 889 9392{'\n'}
+              • Phone: +234 808 929 7811{'\n'}
               • In-app chat support available 24/7{'\n'}
               • Visit: https://nexryde-backend-993913300770.us-central1.run.app/support-page
             </Text>

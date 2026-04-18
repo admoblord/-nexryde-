@@ -9,6 +9,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { BiometricScanner } from '@/src/components/tier1';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 type DocKey = 'nin' | 'drivers_license' | 'passport_photo' | 'vehicle_registration'
@@ -44,6 +45,7 @@ export default function DriverDocumentsScreen() {
   const [docs, setDocs] = useState<Record<string, string | null>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
   const [verifying, setVerifying] = useState(false);
+  const [biometricVerified, setBiometricVerified] = useState(false);
 
   const CAMERA_ONLY_KEYS: DocKey[] = ['vehicle_interior', 'vehicle_ac', 'vehicle_front'];
 
@@ -120,6 +122,10 @@ export default function DriverDocumentsScreen() {
     const missingExpiry = expiryDocsWithDate.filter(d => docs[d.key] && (!expiry[d.key] || expiry[d.key].length < 7));
     if (missingExpiry.length > 0) {
       Alert.alert('Expiry Dates Required', `Please enter expiry date for: ${missingExpiry.map(d => d.label).join(', ')}`);
+      return;
+    }
+    if (!biometricVerified) {
+      Alert.alert('Biometric confirmation required', 'Confirm your device biometrics before submitting driver verification.');
       return;
     }
 
@@ -267,16 +273,29 @@ export default function DriverDocumentsScreen() {
             <Ionicons name="lock-closed" size={14} color={COLORS.accentGreen} />
             <Text style={st.noteText}>Your documents are encrypted and only used for verification</Text>
           </View>
+
+          <View style={st.biometricCard}>
+            <BiometricScanner
+              title="Confirm biometrics before submission"
+              subtitle="This reduces fraudulent onboarding and protects your driver account setup."
+              confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify biometric'}
+              onSuccess={() => {
+                setBiometricVerified(true);
+                Alert.alert('Biometric confirmed', 'You can now submit your driver verification package.');
+              }}
+              onFailure={(msg) => Alert.alert('Biometric check', msg)}
+            />
+          </View>
         </ScrollView>
 
         <View style={st.bottom}>
           <TouchableOpacity
-            style={[st.submitBtn, (!allRequiredUploaded || !allExpiriesFilled) && st.submitDisabled]}
+            style={[st.submitBtn, (!allRequiredUploaded || !allExpiriesFilled || !biometricVerified) && st.submitDisabled]}
             onPress={handleSubmit}
-            disabled={!allRequiredUploaded || !allExpiriesFilled || verifying}
+            disabled={!allRequiredUploaded || !allExpiriesFilled || !biometricVerified || verifying}
           >
             <LinearGradient
-              colors={allRequiredUploaded && allExpiriesFilled
+              colors={allRequiredUploaded && allExpiriesFilled && biometricVerified
                 ? [COLORS.accentGreen, COLORS.accentBlue]
                 : [COLORS.lightBorder, COLORS.lightBorder]}
               style={st.submitGrad}
@@ -284,7 +303,7 @@ export default function DriverDocumentsScreen() {
             >
               {verifying
                 ? <ActivityIndicator color={COLORS.white} />
-                : <Text style={[st.submitText, (!allRequiredUploaded || !allExpiriesFilled) && st.submitTextOff]}>
+                : <Text style={[st.submitText, (!allRequiredUploaded || !allExpiriesFilled || !biometricVerified) && st.submitTextOff]}>
                     Submit for Verification
                   </Text>
               }
@@ -332,7 +351,7 @@ const st = StyleSheet.create({
   docStatus: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextSecondary, marginTop: 2 },
   expiryRow: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    paddingHorizontal: SPACING.md, paddingBottom: SPACING.md, paddingTop: 0,
+    paddingHorizontal: SPACING.md, paddingBottom: SPACING.md,
     borderTopWidth: 1, borderTopColor: COLORS.lightBorder,
     marginHorizontal: SPACING.sm,
     paddingTop: SPACING.sm,
@@ -347,6 +366,9 @@ const st = StyleSheet.create({
     marginTop: SPACING.lg, gap: SPACING.xs,
   },
   noteText: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextSecondary },
+  biometricCard: {
+    marginTop: SPACING.lg,
+  },
   bottom: {
     backgroundColor: COLORS.white, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.lg,
     borderTopWidth: 1, borderTopColor: COLORS.lightBorder,

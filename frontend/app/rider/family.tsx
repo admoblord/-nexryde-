@@ -62,6 +62,16 @@ export default function FamilyModeScreen() {
     loadFamily();
   }, [user?.id]);
 
+  const normalizePhone = (value: string) => {
+    const clean = (value || '').trim();
+    const digits = clean.replace(/\D/g, '');
+    if (!digits) return '';
+    if (clean.startsWith('+')) return `+${digits}`;
+    if (digits.startsWith('0')) return `+234${digits.slice(1)}`;
+    if (digits.startsWith('234')) return `+${digits}`;
+    return `+234${digits}`;
+  };
+
   const loadFamily = async () => {
     if (!user?.id) {
       setInitialLoading(false);
@@ -99,8 +109,13 @@ export default function FamilyModeScreen() {
       Alert.alert('Success', 'Family created! You can now add members.');
       setShowCreateModal(false);
       setNewFamilyName('');
-      // Update user's family_id in local state
-      await loadFamily();
+      const familyId = String(res.data?.family_id || '');
+      if (familyId) {
+        const familyRes = await getFamily(familyId);
+        setFamily(familyRes.data);
+      } else {
+        await loadFamily();
+      }
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to create family');
     } finally {
@@ -116,7 +131,12 @@ export default function FamilyModeScreen() {
     
     setLoading(true);
     try {
-      await addFamilyMember(family.id, newMember.phone, newMember.name, newMember.relationship);
+      const normalizedPhone = normalizePhone(newMember.phone);
+      if (!normalizedPhone) {
+        Alert.alert('Error', 'Enter a valid phone number');
+        return;
+      }
+      await addFamilyMember(family.id, normalizedPhone, newMember.name, newMember.relationship);
       Alert.alert('Success', `${newMember.name} added to your family`);
       setShowAddModal(false);
       setNewMember({ name: '', phone: '', relationship: '' });
@@ -201,7 +221,7 @@ export default function FamilyModeScreen() {
           text: 'Book',
           onPress: () => {
             router.push({
-              pathname: '/rider/book',
+              pathname: '/rider/book-indrive-style',
               params: { 
                 forFamily: 'true',
                 familyName: member.name,
@@ -297,7 +317,7 @@ export default function FamilyModeScreen() {
                   </Text>
                 </View>
                 <View style={styles.trustScoreBadge}>
-                  <Text style={styles.trustScoreText}>{family.trust_score?.toFixed(0)}%</Text>
+                  <Text style={styles.trustScoreText}>{Number(family?.trust_score ?? 0).toFixed(0)}%</Text>
                   <Text style={styles.trustScoreLabel}>Trust</Text>
                 </View>
               </View>
@@ -476,7 +496,7 @@ export default function FamilyModeScreen() {
             
             <TextInput
               style={styles.input}
-              placeholder="Phone Number"
+              placeholder="Phone Number (e.g. 080..., +234...)"
               placeholderTextColor={COLORS.gray400}
               keyboardType="phone-pad"
               value={newMember.phone}

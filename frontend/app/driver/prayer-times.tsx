@@ -14,6 +14,7 @@ import {
   Dimensions,
   Linking,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -139,8 +140,9 @@ const DriverPrayerTimesScreen = () => {
       <ScrollView
         style={styles.content}
         showsVerticalScrollIndicator={false}
-        refreshing={refreshing}
-        onRefresh={handleRefresh}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={() => void handleRefresh()} />
+        }
       >
         {/* Status Banner */}
         {isPraying && (
@@ -228,7 +230,7 @@ const DriverPrayerTimesScreen = () => {
                       <View style={styles.prayerTimeContainer}>
                         <Text style={styles.prayerTime}>{prayer.time}</Text>
                         {prayer.isActive && (
-                          <View style={styles.activebadge}>
+                          <View style={styles.activeBadge}>
                             <Text style={styles.activeBadgeText}>NOW</Text>
                           </View>
                         )}
@@ -369,10 +371,12 @@ const DriverPrayerTimesScreen = () => {
                   </View>
                 </View>
                 <Switch
-                  value={settings.notificationSound}
-                  onValueChange={(value) => saveSettings({ notificationSound: value })}
+                  value={settings.notificationSound === 'default'}
+                  onValueChange={(value) =>
+                    saveSettings({ notificationSound: value ? 'default' : 'silent' })
+                  }
                   trackColor={{ false: '#3e3e3e', true: COLORS.purple }}
-                  thumbColor={settings.notificationSound ? COLORS.white : '#f4f3f4'}
+                  thumbColor={settings.notificationSound === 'default' ? COLORS.white : '#f4f3f4'}
                 />
               </View>
               

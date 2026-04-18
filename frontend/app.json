@@ -10,6 +10,7 @@
     "newArchEnabled": true,
     "extra": {
       "router": {},
+      "BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
       "eas": {
         "projectId": "342aff56-5e09-4363-b8b6-12ab1cdec11f"
       }

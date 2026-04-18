@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -16,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { PredictiveMaintenanceAI, type MaintenanceAlert } from '@/src/services/predictiveMaintenance';
 
 interface DrivingSession {
   startTime: Date;
@@ -60,12 +62,15 @@ export default function DriverWellnessScreen() {
     breaksTaken: 0,
     wellnessScore: 0,
   });
+  const [trackedMileageKm, setTrackedMileageKm] = useState(0);
+  const [lastServiceDate, setLastServiceDate] = useState<number>(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const [lastServiceMileageKm, setLastServiceMileageKm] = useState(0);
 
   // Show rest modal
   const [showRestModal, setShowRestModal] = useState(false);
   const [showBreakSuggestions, setShowBreakSuggestions] = useState(false);
 
-  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     loadWellnessData();
@@ -94,13 +99,53 @@ export default function DriverWellnessScreen() {
       const data = await res.json();
       const hours = data?.hours_worked || data?.online_hours || 0;
       const trips = data?.total_trips || 0;
+      const distanceKm = Number(data?.summary?.total_distance_km || data?.total_distance_km || 0);
       setWeeklyStats({
         totalDrivingTime: Math.round(hours * 60),
         averageSessionTime: trips > 0 ? Math.round((hours * 60) / Math.max(trips, 1)) : 0,
         breaksTaken: Math.max(0, Math.floor(hours / 2)),
         wellnessScore: Math.min(100, Math.max(0, hours < 50 ? 90 : hours < 80 ? 70 : 50)),
       });
+      setTrackedMileageKm(distanceKm);
     } catch { /* keep defaults */ }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    const loadVehicleHealthBaseline = async () => {
+      try {
+        const stored = await AsyncStorage.getItem(`@vehicle_health_${user.id}`);
+        if (!stored || !active) return;
+        const parsed = JSON.parse(stored) as {
+          lastServiceDate?: number;
+          lastServiceMileageKm?: number;
+        };
+        if (typeof parsed.lastServiceDate === 'number') {
+          setLastServiceDate(parsed.lastServiceDate);
+        }
+        if (typeof parsed.lastServiceMileageKm === 'number') {
+          setLastServiceMileageKm(parsed.lastServiceMileageKm);
+        }
+      } catch {
+        /* keep defaults */
+      }
+    };
+    void loadVehicleHealthBaseline();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const persistVehicleHealthBaseline = async (date: number, mileageKm: number) => {
+    if (!user?.id) return;
+    await AsyncStorage.setItem(
+      `@vehicle_health_${user.id}`,
+      JSON.stringify({
+        lastServiceDate: date,
+        lastServiceMileageKm: mileageKm,
+      })
+    );
   };
 
   const startDrivingTimer = () => {
@@ -198,6 +243,21 @@ export default function DriverWellnessScreen() {
 
   const wellnessScore = calculateWellnessScore();
   const wellnessLevel = getWellnessLevel(wellnessScore);
+  const maintenanceMileage = Math.max(0, trackedMileageKm - lastServiceMileageKm);
+  const maintenanceInsight = PredictiveMaintenanceAI.analyzeVehicle(
+    maintenanceMileage,
+    lastServiceDate,
+    Number(weeklyStats.averageSessionTime || 0) + breakHistory.length * 10
+  );
+  const nextMaintenanceAlert: MaintenanceAlert | null = maintenanceInsight.alerts[0] || null;
+
+  const markServiceComplete = async () => {
+    const now = Date.now();
+    setLastServiceDate(now);
+    setLastServiceMileageKm(trackedMileageKm);
+    await persistVehicleHealthBaseline(now, trackedMileageKm);
+    Alert.alert('Vehicle service updated', 'Maintenance reminder has been reset based on your current tracked mileage.');
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -321,6 +381,60 @@ export default function DriverWellnessScreen() {
               color={wellnessLevel.color}
             />
           </View>
+        </View>
+
+        <View style={styles.maintenanceCard}>
+          <View style={styles.maintenanceHeader}>
+            <View>
+              <Text style={styles.cardTitle}>🔧 Vehicle Health Reminder</Text>
+              <Text style={styles.maintenanceSubtext}>
+                Tracked mileage since last service: {maintenanceMileage.toLocaleString()} km
+              </Text>
+            </View>
+            <View style={styles.maintenanceScorePill}>
+              <Text style={styles.maintenanceScoreText}>{Math.max(0, Math.round(maintenanceInsight.health.overall))}%</Text>
+            </View>
+          </View>
+
+          {nextMaintenanceAlert ? (
+            <View style={styles.maintenanceAlertBox}>
+              <View style={styles.maintenanceAlertRow}>
+                <Ionicons
+                  name={nextMaintenanceAlert.severity === 'urgent' || nextMaintenanceAlert.severity === 'critical' ? 'warning' : 'build'}
+                  size={18}
+                  color={nextMaintenanceAlert.severity === 'urgent' || nextMaintenanceAlert.severity === 'critical' ? COLORS.error : COLORS.warning}
+                />
+                <Text style={styles.maintenanceAlertTitle}>{nextMaintenanceAlert.message}</Text>
+              </View>
+              <Text style={styles.maintenanceAlertText}>
+                {nextMaintenanceAlert.recommendation} • Estimated cost: N{nextMaintenanceAlert.estimatedCost.toLocaleString()}
+              </Text>
+              <Text style={styles.maintenanceAlertMeta}>
+                Based on tracked mileage and recent driving activity.
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.maintenanceAlertBox}>
+              <View style={styles.maintenanceAlertRow}>
+                <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                <Text style={styles.maintenanceAlertTitle}>Vehicle health looks good</Text>
+              </View>
+              <Text style={styles.maintenanceAlertText}>
+                No service reminder is due right now. We will keep monitoring your tracked mileage.
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.maintenanceMetrics}>
+            <WeeklyMetric label="Engine" value={`${Math.round(maintenanceInsight.health.engine)}%`} icon="speedometer" />
+            <WeeklyMetric label="Brakes" value={`${Math.round(maintenanceInsight.health.brakes)}%`} icon="disc" />
+            <WeeklyMetric label="Tires" value={`${Math.round(maintenanceInsight.health.tires)}%`} icon="ellipse" />
+          </View>
+
+          <TouchableOpacity style={styles.maintenanceButton} onPress={() => void markServiceComplete()}>
+            <Ionicons name="checkmark-done-circle" size={18} color={COLORS.white} />
+            <Text style={styles.maintenanceButtonText}>Mark service as completed</Text>
+          </TouchableOpacity>
         </View>
 
         {/* Break Suggestions */}
@@ -717,6 +831,86 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.sm,
+  },
+  maintenanceCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+  },
+  maintenanceHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  maintenanceSubtext: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextMuted,
+    marginTop: 4,
+  },
+  maintenanceScorePill: {
+    backgroundColor: COLORS.accentBlueSoft,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+  },
+  maintenanceScoreText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '900',
+    color: COLORS.accentBlue,
+  },
+  maintenanceAlertBox: {
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  maintenanceAlertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.xs,
+    marginBottom: SPACING.xs,
+  },
+  maintenanceAlertTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+  },
+  maintenanceAlertText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    lineHeight: 20,
+  },
+  maintenanceAlertMeta: {
+    marginTop: SPACING.xs,
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: COLORS.lightTextMuted,
+  },
+  maintenanceMetrics: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.md,
+  },
+  maintenanceButton: {
+    backgroundColor: COLORS.accentBlue,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: SPACING.xs,
+  },
+  maintenanceButtonText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '900',
+    color: COLORS.white,
   },
   statItem: {
     flex: 1,

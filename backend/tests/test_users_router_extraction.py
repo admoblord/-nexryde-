@@ -6,9 +6,12 @@ import pytest
 import requests
 import os
 import uuid
+import urllib.parse
 import websockets
 import asyncio
 import json
+
+from tests.integration_utils import bearer_headers, random_ng_phone
 
 BASE_URL = (
     os.environ.get('NEXRYDE_BACKEND_URL')
@@ -33,13 +36,16 @@ class TestHealthEndpoint:
 class TestUsersRouterPreferences:
     """Test user preferences endpoint from extracted users.py router"""
     
-    def test_get_preferences_existing_user(self):
-        """GET /api/users/{user_id}/preferences - should return theme and language prefs"""
-        test_user_id = f"TEST_user_{uuid.uuid4().hex[:8]}"
-        response = requests.get(f"{BASE_URL}/api/users/{test_user_id}/preferences", timeout=10)
+    def test_get_preferences_existing_user(self, integration_rider):
+        """GET /api/users/{user_id}/preferences — requires Bearer matching user_id."""
+        uid = integration_rider["id"]
+        response = requests.get(
+            f"{BASE_URL}/api/users/{uid}/preferences",
+            headers=bearer_headers(integration_rider["token"]),
+            timeout=10,
+        )
         assert response.status_code == 200, f"Get preferences failed: {response.text}"
         data = response.json()
-        # Should return default prefs for non-existent user
         assert "theme" in data, f"Missing theme in response: {data}"
         assert "language" in data, f"Missing language in response: {data}"
         assert data["theme"] in ["light", "dark", "auto"], f"Invalid theme value: {data['theme']}"
@@ -49,60 +55,43 @@ class TestUsersRouterPreferences:
 class TestUsersRouterEmergencyContacts:
     """Test emergency contacts endpoint from extracted users.py router"""
     
-    def test_get_emergency_contacts_nonexistent_user(self):
-        """GET /api/users/{user_id}/emergency-contacts - should return 404 for non-existent user"""
-        test_user_id = f"TEST_user_{uuid.uuid4().hex[:8]}"
-        response = requests.get(f"{BASE_URL}/api/users/{test_user_id}/emergency-contacts", timeout=10)
-        # Should return 404 as user doesn't exist
-        assert response.status_code == 404, f"Expected 404, got {response.status_code}: {response.text}"
-        print("✅ Emergency contacts returns 404 for non-existent user (correct)")
-    
-    def test_emergency_contacts_structure(self):
-        """Test emergency contacts endpoint returns proper structure"""
-        # First create a user to test with
-        phone = f"+234700{uuid.uuid4().hex[:7]}"
-        try:
-            register_response = requests.post(f"{BASE_URL}/auth/register", json={
-                "phone": phone,
-                "name": "TEST_EmergencyContactUser",
-                "role": "rider"
-            }, timeout=10)
-            
-            if register_response.status_code in [200, 201] and register_response.text:
-                user_data = register_response.json()
-                user_id = user_data.get("user", {}).get("id") or user_data.get("id")
-                
-                if user_id:
-                    # Now get emergency contacts
-                    response = requests.get(f"{BASE_URL}/api/users/{user_id}/emergency-contacts", timeout=10)
-                    assert response.status_code == 200, f"Get emergency contacts failed: {response.text}"
-                    data = response.json()
-                    assert "contacts" in data, f"Missing contacts array in response: {data}"
-                    assert isinstance(data["contacts"], list), f"Contacts should be array: {data}"
-                    print(f"✅ Emergency contacts returned for user: {len(data['contacts'])} contacts")
-                    return
-            
-            # Fallback: Test endpoint responds properly (404 for missing user is valid)
-            test_user_id = "existing_test_user"
-            response = requests.get(f"{BASE_URL}/api/users/{test_user_id}/emergency-contacts", timeout=10)
-            # 404 or 200 are both valid responses
-            assert response.status_code in [200, 404], f"Unexpected status: {response.status_code}"
-            print(f"✅ Emergency contacts endpoint responding correctly: {response.status_code}")
-        except Exception as e:
-            # Test the endpoint is at least responding
-            test_user_id = "test_user_fallback"
-            response = requests.get(f"{BASE_URL}/api/users/{test_user_id}/emergency-contacts", timeout=10)
-            assert response.status_code in [200, 404], f"Endpoint failed: {response.status_code}"
-            print(f"✅ Emergency contacts endpoint responding: {response.status_code}")
+    def test_get_emergency_contacts_wrong_user_forbidden(self, integration_rider):
+        """Another user's id with this token must not be allowed."""
+        other_id = f"other_{uuid.uuid4().hex[:10]}"
+        response = requests.get(
+            f"{BASE_URL}/api/users/{other_id}/emergency-contacts",
+            headers=bearer_headers(integration_rider["token"]),
+            timeout=10,
+        )
+        assert response.status_code == 403, f"Expected 403, got {response.status_code}: {response.text}"
+        print("✅ Emergency contacts rejects cross-user access (correct)")
+
+    def test_emergency_contacts_structure(self, integration_rider):
+        """Authenticated owner gets contacts list (possibly empty)."""
+        uid = integration_rider["id"]
+        response = requests.get(
+            f"{BASE_URL}/api/users/{uid}/emergency-contacts",
+            headers=bearer_headers(integration_rider["token"]),
+            timeout=10,
+        )
+        assert response.status_code == 200, f"Get emergency contacts failed: {response.text}"
+        data = response.json()
+        assert "contacts" in data, f"Missing contacts array in response: {data}"
+        assert isinstance(data["contacts"], list), f"Contacts should be array: {data}"
+        print(f"✅ Emergency contacts returned for user: {len(data['contacts'])} contacts")
 
 
 class TestUsersRouterNotifications:
     """Test notifications endpoint from extracted users.py router"""
     
-    def test_get_notifications_structure(self):
+    def test_get_notifications_structure(self, integration_rider):
         """GET /api/users/{user_id}/notifications - should return notifications array"""
-        test_user_id = f"TEST_user_{uuid.uuid4().hex[:8]}"
-        response = requests.get(f"{BASE_URL}/api/users/{test_user_id}/notifications", timeout=10)
+        uid = integration_rider["id"]
+        response = requests.get(
+            f"{BASE_URL}/api/users/{uid}/notifications",
+            headers=bearer_headers(integration_rider["token"]),
+            timeout=10,
+        )
         assert response.status_code == 200, f"Get notifications failed: {response.text}"
         data = response.json()
         assert "notifications" in data, f"Missing notifications in response: {data}"
@@ -142,14 +131,19 @@ class TestChatRouterStillWorks:
         assert len(data["presets"]) > 0, f"Presets should not be empty: {data}"
         print(f"✅ Chat presets (rider) still working: {len(data['presets'])} presets")
     
-    def test_chat_ai_endpoint(self):
+    def test_chat_ai_endpoint(self, integration_rider):
         """POST /api/chat/ai - should still work for AI chat"""
-        test_user_id = f"TEST_user_{uuid.uuid4().hex[:8]}"
-        response = requests.post(f"{BASE_URL}/api/chat/ai", json={
-            "user_id": test_user_id,
-            "message": "Hello, test message for refactoring verification",
-            "user_role": "rider"
-        }, timeout=30)
+        uid = integration_rider["id"]
+        response = requests.post(
+            f"{BASE_URL}/api/chat/ai",
+            json={
+                "user_id": uid,
+                "message": "Hello, test message for refactoring verification",
+                "user_role": "rider",
+            },
+            headers=bearer_headers(integration_rider["token"]),
+            timeout=30,
+        )
         if response.status_code == 404:
             pytest.skip("AI chat endpoint not deployed in current backend build")
         assert response.status_code == 200, f"AI chat failed: {response.text}"
@@ -164,11 +158,13 @@ class TestAuthStillWorks:
     """Verify auth endpoints still work after refactoring"""
     
     def test_send_otp(self):
-        """POST /auth/send-otp - should still work"""
-        test_phone = f"+234800{uuid.uuid4().hex[:7]}"
-        response = requests.post(f"{BASE_URL}/auth/send-otp", json={
-            "phone": test_phone
-        }, timeout=10)
+        """POST /api/auth/send-otp - should still work"""
+        test_phone = random_ng_phone()
+        response = requests.post(
+            f"{BASE_URL}/api/auth/send-otp",
+            json={"phone": test_phone},
+            timeout=10,
+        )
         # Should return 200 (success) or appropriate status
         assert response.status_code in [200, 201, 400, 500], f"Unexpected status: {response.status_code}"
         print(f"✅ Send OTP endpoint responding: status {response.status_code}")
@@ -194,25 +190,27 @@ class TestWebSocketChatStillWorks:
     """Verify WebSocket chat still works after users extraction"""
     
     @pytest.mark.asyncio
-    async def test_websocket_connection(self):
-        """WS /api/ws/chat/{trip_id}/{user_id} - should still connect"""
-        test_trip_id = f"TEST_trip_{uuid.uuid4().hex[:8]}"
-        test_user_id = f"TEST_user_{uuid.uuid4().hex[:8]}"
-        
-        # Convert https to wss
+    async def test_websocket_connection(self, integration_rider_with_trip):
+        """WS /api/ws/chat/{trip_id}/{user_id}?token= — requires JWT + trip participant."""
+        trip_id = integration_rider_with_trip.get("trip_id")
+        if not trip_id:
+            pytest.skip(
+                f"No trip created for WS test (status={integration_rider_with_trip.get('trip_create_status')})"
+            )
+        uid = integration_rider_with_trip["id"]
+        token = integration_rider_with_trip["token"]
         ws_base = BASE_URL.replace("https://", "wss://").replace("http://", "ws://")
-        ws_url = f"{ws_base}/api/ws/chat/{test_trip_id}/{test_user_id}"
-        
+        q = urllib.parse.urlencode({"token": token})
+        ws_url = f"{ws_base}/api/ws/chat/{trip_id}/{uid}?{q}"
+
         try:
-            # Use open_timeout instead of timeout for websockets 14+
-            async with websockets.connect(ws_url, open_timeout=10, close_timeout=5) as ws:
-                # Should receive connected message
-                response = await asyncio.wait_for(ws.recv(), timeout=5)
+            async with websockets.connect(ws_url, open_timeout=15, close_timeout=5) as ws:
+                response = await asyncio.wait_for(ws.recv(), timeout=10)
                 data = json.loads(response)
                 assert data.get("type") == "connected", f"Expected connected type: {data}"
-                assert data.get("trip_id") == test_trip_id, f"Wrong trip_id: {data}"
-                assert data.get("user_id") == test_user_id, f"Wrong user_id: {data}"
-                print(f"✅ WebSocket chat still working: connected to trip {test_trip_id}")
+                assert data.get("trip_id") == trip_id, f"Wrong trip_id: {data}"
+                assert data.get("user_id") == uid, f"Wrong user_id: {data}"
+                print(f"✅ WebSocket chat still working: connected to trip {trip_id}")
         except Exception as e:
             pytest.fail(f"WebSocket connection failed: {e}")
 

@@ -199,7 +199,9 @@ export default function DriverDetailsScreen() {
                 <Text style={styles.driverName}>{driver.name}</Text>
                 <View style={styles.ratingRow}>
                   <Ionicons name="star" size={18} color={COLORS.accent} />
-                  <Text style={styles.ratingText}>{driver.rating ? driver.rating.toFixed(1) : 'N/A'}</Text>
+                  <Text style={styles.ratingText}>
+                    {driver.rating != null ? Number(driver.rating).toFixed(1) : 'N/A'}
+                  </Text>
                   <Text style={styles.tripsText}>• {driver.totalTrips} trips</Text>
                 </View>
                 <Text style={styles.experienceText}>🚗 {driver.yearsActive} years active</Text>
@@ -217,12 +219,18 @@ export default function DriverDetailsScreen() {
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
               <Ionicons name="star" size={20} color={COLORS.accent} />
-              <Text style={[styles.statValue, { color: colors.text }]}>{driver.rating ? driver.rating.toFixed(1) : 'N/A'}</Text>
+              <Text style={[styles.statValue, { color: colors.text }]}>
+                {driver.rating != null ? Number(driver.rating).toFixed(1) : 'N/A'}
+              </Text>
               <Text style={[styles.statLabel, { color: colors.textMuted }]}>Rating</Text>
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <VerificationBadge verified={allVerified} label={allVerified ? 'Verified' : 'Pending'} />
+              <VerificationBadge
+                type="verified"
+                status={allVerified ? 'verified' : 'pending'}
+                showLabel={false}
+              />
             </View>
           </View>
         </View>

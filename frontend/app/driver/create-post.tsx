@@ -10,9 +10,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { api } from '@/src/services/api';
+import api from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
-import { theme } from '@/src/constants/theme';
+import { COLORS } from '@/src/constants/theme';
 
 export default function CreatePostScreen() {
   const router = useRouter();
@@ -93,7 +93,7 @@ export default function CreatePostScreen() {
                 <Ionicons
                   name={type.icon as any}
                   size={20}
-                  color={postType === type.id ? '#fff' : theme.colors.primary}
+                    color={postType === type.id ? '#fff' : COLORS.primary}
                 />
                 <Text
                   style={[
@@ -126,7 +126,7 @@ export default function CreatePostScreen() {
 
         {/* Tips */}
         <View style={styles.tipsCard}>
-          <Ionicons name="information-circle" size={20} color={theme.colors.primary} />
+          <Ionicons name="information-circle" size={20} color={COLORS.primary} />
           <Text style={styles.tipsText}>
             Share your experiences, tips, questions, or achievements with the NexRyde community!
           </Text>
@@ -158,7 +158,7 @@ const styles = StyleSheet.create({
   postButton: {
     fontSize: 16,
     fontWeight: '700',
-    color: theme.colors.primary,
+    color: COLORS.primary,
   },
   postButtonDisabled: {
     color: '#ccc',
@@ -188,17 +188,17 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     borderWidth: 2,
-    borderColor: theme.colors.primary,
+    borderColor: COLORS.primary,
     backgroundColor: '#fff',
   },
   typeOptionActive: {
-    backgroundColor: theme.colors.primary,
-    borderColor: theme.colors.primary,
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
   },
   typeLabel: {
     fontSize: 14,
     fontWeight: '600',
-    color: theme.colors.primary,
+    color: COLORS.primary,
     marginLeft: 6,
   },
   typeLabelActive: {
@@ -222,7 +222,7 @@ const styles = StyleSheet.create({
   },
   tipsCard: {
     flexDirection: 'row',
-    backgroundColor: `${theme.colors.primary}10`,
+    backgroundColor: `${COLORS.primary}10`,
     padding: 16,
     borderRadius: 12,
     marginBottom: 24,

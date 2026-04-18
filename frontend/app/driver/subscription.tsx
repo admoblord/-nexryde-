@@ -6,23 +6,31 @@ import {
   TouchableOpacity,
   ScrollView,
   Modal,
-  TextInput,
   Alert,
   ActivityIndicator,
-  Image,
   Animated,
   Dimensions,
-  Clipboard,
   Platform,
+  Linking,
+  AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as ImagePicker from 'expo-image-picker';
+import * as Clipboard from 'expo-clipboard';
 import { useAppStore } from '@/src/store/appStore';
-import { getSubscriptionConfig, createVirtualAccount, getDriverSubscriptionStatus } from '@/src/services/api';
+import {
+  getSubscriptionConfig,
+  createVirtualAccount,
+  getDriverSubscriptionStatus,
+  initiateSubscriptionCheckout,
+  verifyPendingSubscriptionCheckout,
+  formatApiDetail,
+  messageFromAxiosError,
+} from '@/src/services/api';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import axios from 'axios';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -71,16 +79,15 @@ export default function SubscriptionScreen() {
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState<PricingData | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
-  const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-  const [selectedTier, setSelectedTier] = useState<'city_rider' | 'road_warrior' | null>(null);
-  const [paymentScreenshot, setPaymentScreenshot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [paymentReference, setPaymentReference] = useState('');
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [virtualAccount, setVirtualAccount] = useState<VirtualAccountDetails | null>(null);
+  /** Latest Squad subscription checkout ref (ref avoids stale interval closures). */
+  const pendingSubCheckoutRef = useRef<string | null>(null);
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastKnownStatusRef = useRef<string | null>(null);
+  const confirmPendingCheckoutRef = useRef<(opts?: { silent?: boolean }) => Promise<void>>(async () => {});
   
   // Animations
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
@@ -163,9 +170,18 @@ export default function SubscriptionScreen() {
 
   const ensureStatusPolling = () => {
     if (statusPollRef.current) return;
-    statusPollRef.current = setInterval(() => {
-      fetchSubscriptionStatus();
-    }, 10000);
+    statusPollRef.current = setInterval(async () => {
+      if (lastKnownStatusRef.current === 'pending_payment') {
+        try {
+          await verifyPendingSubscriptionCheckout(
+            pendingSubCheckoutRef.current || undefined,
+          );
+        } catch {
+          /* non-fatal */
+        }
+      }
+      await fetchSubscriptionStatus();
+    }, 16000);
   };
 
   const fetchSubscriptionStatus = async () => {
@@ -187,15 +203,17 @@ export default function SubscriptionScreen() {
       // Map API response to expected format
       const normalizedStatus: SubscriptionStatus['status'] = data.status || 'expired';
       const tier = data.tier || (data.subscription_active ? 'city_rider' : 'none');
-      if (data.virtual_account?.account_number) {
+      if (data.virtual_account?.account_number && data.virtual_account?.bank_name) {
         setVirtualAccount({
           account_number: data.virtual_account.account_number,
-          bank_name: data.virtual_account.bank_name || 'SQUAD',
+          bank_name: data.virtual_account.bank_name,
           account_name: data.virtual_account.account_name || user?.name || 'Nexryde Driver',
           reference: data.virtual_account.reference,
           status: data.virtual_account.status,
           amount_expected: data.virtual_account.amount_expected,
         });
+      } else {
+        setVirtualAccount(null);
       }
       setSubscription({
         tier,
@@ -260,21 +278,131 @@ export default function SubscriptionScreen() {
         tier,
       });
       const data = response.data || {};
-      
-      if (data.account_number) {
-        setVirtualAccount(data);
+      const acct = data.account_number != null ? String(data.account_number).trim() : '';
+      const bank = data.bank_name != null ? String(data.bank_name).trim() : '';
+
+      if (acct && bank) {
+        setVirtualAccount(data as VirtualAccountDetails);
         ensureStatusPolling();
         Alert.alert(
           'Virtual Account Ready',
-          `Transfer exactly ₦${amount.toLocaleString()} to:\n${data.bank_name}\n${data.account_number}\n\nActivation is automatic once payment is confirmed.`,
+          `Transfer exactly ₦${amount.toLocaleString()} to:\n${bank}\n${acct}\n\nCard / bank checkout is the fastest option. If you use this transfer account, activation is automatic once payment is confirmed.`,
           [{ text: 'OK', onPress: () => fetchSubscriptionStatus() }]
         );
+      } else {
+        setVirtualAccount(null);
+        Alert.alert(
+          'Bank transfer',
+          'Unable to generate bank account. Please try again or use card payment.',
+        );
       }
-    } catch (error) {
-      Alert.alert('Error', 'Could not create virtual account right now');
+    } catch (error: unknown) {
+      const msg =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      Alert.alert(
+        'Bank transfer',
+        typeof msg === 'string' && msg.trim()
+          ? msg
+          : 'Unable to generate bank account. Please try again or use card payment.',
+      );
     }
     setSubmitting(false);
   };
+
+  const payWithSquadCheckout = async (tier: 'city_rider' | 'road_warrior') => {
+    if (!user?.id) {
+      Alert.alert('Error', 'Please login first');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const response = await initiateSubscriptionCheckout(tier);
+      const data = response.data || {};
+      if (data.transaction_ref) {
+        pendingSubCheckoutRef.current = String(data.transaction_ref);
+      }
+      ensureStatusPolling();
+      if (data.checkout_url && typeof data.checkout_url === 'string') {
+        const can = await Linking.canOpenURL(data.checkout_url);
+        if (can) {
+          await Linking.openURL(data.checkout_url);
+          Alert.alert(
+            'Complete payment',
+            'Finish payment in the browser. When you return, we activate your plan automatically (or tap “Verify payment” below if needed).',
+          );
+        } else {
+          Alert.alert('Open checkout', `Copy this reference in Squad: ${data.transaction_ref || ''}`);
+        }
+      } else {
+        Alert.alert(
+          'Checkout started',
+          `Reference: ${data.transaction_ref || '—'}\nAmount (kobo): ${data.amount_kobo ?? '—'}\nUse Squad SDK with your public key if no link was returned.`,
+        );
+      }
+      await fetchSubscriptionStatus();
+    } catch (error: unknown) {
+      const msg =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'Could not start card / bank checkout. Try again or use transfer account details.';
+      Alert.alert('Checkout', String(msg));
+    }
+    setSubmitting(false);
+  };
+
+  const confirmPendingCheckout = async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) setSubmitting(true);
+    try {
+      const response = await verifyPendingSubscriptionCheckout(
+        pendingSubCheckoutRef.current || undefined,
+      );
+      const data = response.data as Record<string, unknown>;
+      if (data.verified && (data.activated || data.duplicate || data.subscription_active)) {
+        pendingSubCheckoutRef.current = null;
+        if (!silent) {
+          Alert.alert('Success', 'Subscription active. Payment confirmed with Squad.');
+        }
+        await fetchSubscriptionStatus();
+      } else {
+        const vr = data.verify_result as Record<string, unknown> | undefined;
+        const reason =
+          data.detail === 'amount_mismatch'
+            ? 'Amount mismatch. If Squad shows success, try again in a minute or contact support.'
+            : typeof vr?.reason === 'string'
+              ? vr.reason
+              : 'Payment not confirmed yet. Try again shortly.';
+        if (!silent) Alert.alert('Not yet confirmed', reason);
+      }
+    } catch (e: unknown) {
+      if (!silent) {
+        const msg = axios.isAxiosError(e)
+          ? formatApiDetail(e.response?.data?.detail) || messageFromAxiosError(e, '')
+          : '';
+        Alert.alert(
+          'Verify',
+          msg || 'No pending checkout or Squad has not confirmed payment yet.',
+        );
+      }
+    } finally {
+      if (!silent) setSubmitting(false);
+    }
+  };
+
+  confirmPendingCheckoutRef.current = confirmPendingCheckout;
+
+  useEffect(() => {
+    let t: ReturnType<typeof setTimeout> | undefined;
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active' && pendingSubCheckoutRef.current) {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => void confirmPendingCheckoutRef.current({ silent: true }), 900);
+      }
+    });
+    return () => {
+      if (t) clearTimeout(t);
+      sub.remove();
+    };
+  }, []);
 
   const upgradeToRoadWarrior = async () => {
     if (!user?.id) return;
@@ -305,106 +433,10 @@ export default function SubscriptionScreen() {
     setSubmitting(false);
   };
 
-  const openPaymentModal = (tier: 'city_rider' | 'road_warrior') => {
-    setSelectedTier(tier);
-    setShowPaymentModal(true);
-  };
-
-  const copyToClipboard = (text: string, field: string) => {
-    Clipboard.setString(text);
+  const copyToClipboard = async (text: string, field: string) => {
+    await Clipboard.setStringAsync(text);
     setCopiedField(field);
     setTimeout(() => setCopiedField(null), 2000);
-  };
-
-  const pickImage = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.5,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets[0].base64) {
-      setPaymentScreenshot(`data:image/jpeg;base64,${result.assets[0].base64}`);
-    }
-  };
-
-  const takePhoto = async () => {
-    const { status } = await ImagePicker.requestCameraPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera permission is required');
-      return;
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      allowsEditing: false,
-      quality: 0.5,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets[0].base64) {
-      setPaymentScreenshot(`data:image/jpeg;base64,${result.assets[0].base64}`);
-    }
-  };
-
-  const submitPayment = async () => {
-    if (!paymentScreenshot || !selectedTier) {
-      Alert.alert('Error', 'Please upload a payment screenshot');
-      return;
-    }
-    if (!paymentReference.trim()) {
-      Alert.alert('Reference required', 'Enter your transfer reference so payment can be verified instantly.');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const tierPrice = selectedTier === 'city_rider' 
-        ? pricing?.city_rider.current_price 
-        : pricing?.road_warrior.current_price;
-
-      const response = await fetch(`${BACKEND_URL}/api/subscriptions/${user?.id}/submit-payment`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          driver_id: user?.id,
-          screenshot: paymentScreenshot,
-          amount: tierPrice,
-          payment_reference: paymentReference,
-          tier: selectedTier,
-        }),
-      });
-      
-      const data = await response.json();
-      
-      if (response.ok) {
-        setShowPaymentModal(false);
-        setPaymentScreenshot(null);
-        setPaymentReference('');
-        setSelectedTier(null);
-
-        if (data.status === 'active') {
-          stopStatusPolling();
-          Alert.alert(
-            'Payment Confirmed!',
-            'Your payment has been verified and your subscription is active. You can now start accepting ride requests.',
-            [{ text: 'Start Driving', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
-          );
-          return;
-        }
-
-        Alert.alert('Payment Submitted!', 'Your payment is being verified now. We will move you to dashboard once confirmed.');
-        ensureStatusPolling();
-        setTimeout(async () => {
-          await fetchSubscriptionStatus();
-        }, 2000);
-      } else {
-        Alert.alert('Error', data.detail || 'Failed to submit payment');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Something went wrong');
-    }
-    setSubmitting(false);
   };
 
   const getTierBadgeConfig = (tier: string) => {
@@ -474,6 +506,13 @@ export default function SubscriptionScreen() {
           showsVerticalScrollIndicator={false} 
           contentContainerStyle={styles.scrollContent}
         >
+          <View style={styles.flowBanner}>
+            <Ionicons name="flash" size={18} color="#00D084" />
+            <Text style={styles.flowBannerText}>
+              Recommended: use card / bank checkout for the fastest activation. Transfer account details remain available below as fallback.
+            </Text>
+          </View>
+
           {/* Current Subscription Badge */}
           {subscription && subscription.tier !== 'none' && (
             <Animated.View style={[styles.currentTierCard, { opacity: fadeAnim }]}>
@@ -582,7 +621,7 @@ export default function SubscriptionScreen() {
                       ) : (
                         <>
                           <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Get City Rider Virtual Account</Text>
+                          <Text style={styles.selectButtonText}>Get City Rider fallback transfer details</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -688,7 +727,7 @@ export default function SubscriptionScreen() {
                       ) : (
                         <>
                           <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Get Road Warrior Virtual Account</Text>
+                          <Text style={styles.selectButtonText}>Get Road Warrior fallback transfer details</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -707,38 +746,48 @@ export default function SubscriptionScreen() {
               >
                 <Ionicons name="card" size={20} color="#FFFFFF" />
               </LinearGradient>
-              <Text style={styles.bankTitle}>Virtual Account Details</Text>
+              <Text style={styles.bankTitle}>Payment activation</Text>
             </View>
             
             <View style={styles.bankDetailsContainer}>
-              <BankDetailRow 
-                label="Bank Name" 
-                value={virtualAccount?.bank_name || 'SQUAD'}
-                copied={copiedField === 'bank'}
-                onCopy={() => copyToClipboard(virtualAccount?.bank_name || 'SQUAD', 'bank')}
-              />
-              <BankDetailRow 
-                label="Account Name" 
-                value={virtualAccount?.account_name || (user?.name || 'Nexryde Driver')}
-                copied={copiedField === 'name'}
-                onCopy={() => copyToClipboard(virtualAccount?.account_name || (user?.name || 'Nexryde Driver'), 'name')}
-              />
-              <BankDetailRow 
-                label="Account Number" 
-                value={virtualAccount?.account_number || 'Tap a tier below to generate account'}
-                copied={copiedField === 'number'}
-                onCopy={() => copyToClipboard(virtualAccount?.account_number || '', 'number')}
-                highlight
-              />
+              {virtualAccount?.account_number && virtualAccount?.bank_name ? (
+                <>
+                  <BankDetailRow
+                    label="Bank Name"
+                    value={virtualAccount.bank_name}
+                    copied={copiedField === 'bank'}
+                    onCopy={() => copyToClipboard(virtualAccount.bank_name, 'bank')}
+                  />
+                  <BankDetailRow
+                    label="Account Name"
+                    value={virtualAccount.account_name || user?.name || 'Nexryde Driver'}
+                    copied={copiedField === 'name'}
+                    onCopy={() =>
+                      copyToClipboard(virtualAccount.account_name || user?.name || 'Nexryde Driver', 'name')
+                    }
+                  />
+                  <BankDetailRow
+                    label="Account Number"
+                    value={virtualAccount.account_number}
+                    copied={copiedField === 'number'}
+                    onCopy={() => copyToClipboard(virtualAccount.account_number, 'number')}
+                    highlight
+                  />
+                </>
+              ) : (
+                <Text style={styles.stepText}>
+                  Recommended: pay with card / bank checkout below for the fastest activation. You can also generate transfer details if needed.
+                </Text>
+              )}
             </View>
 
             <View style={styles.stepsContainer}>
-              <Text style={styles.stepsTitle}>How to Activate (Automatic)</Text>
+              <Text style={styles.stepsTitle}>How activation works</Text>
               {[
-                'Tap your tier button below to generate a unique virtual account',
-                'Transfer the exact plan amount to that account',
-                'Wait for automatic verification via Squad webhook',
-                'Status updates to Active instantly after confirmation',
+                'Preferred: tap a Pay button below to complete card / bank checkout',
+                'Fallback: generate a transfer account only if you need bank transfer details',
+                'Pay the exact plan amount for your selected tier',
+                'Your status updates automatically once Squad confirms payment',
               ].map((step, index) => (
                 <View key={index} style={styles.stepRow}>
                   <View style={styles.stepNumber}>
@@ -755,7 +804,7 @@ export default function SubscriptionScreen() {
                 onPress={() => startTrial('city_rider')}
               >
                 <Ionicons name="card-outline" size={18} color="#00D084" />
-                <Text style={styles.proofActionText}>Get City Rider Virtual Account</Text>
+                <Text style={styles.proofActionText}>City Rider transfer details</Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -763,9 +812,37 @@ export default function SubscriptionScreen() {
                 onPress={() => startTrial('road_warrior')}
               >
                 <Ionicons name="card-outline" size={18} color="#FFD700" />
-                <Text style={styles.proofActionText}>Get Road Warrior Virtual Account</Text>
+                <Text style={styles.proofActionText}>Road Warrior transfer details</Text>
               </TouchableOpacity>
             </View>
+
+            <View style={[styles.proofActionsRow, { marginTop: 10 }]}>
+              <TouchableOpacity
+                style={styles.proofActionButton}
+                onPress={() => payWithSquadCheckout('city_rider')}
+                disabled={submitting}
+              >
+                <Ionicons name="open-outline" size={18} color="#818CF8" />
+                <Text style={styles.proofActionText}>Pay City Rider now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.proofActionButton}
+                onPress={() => payWithSquadCheckout('road_warrior')}
+                disabled={submitting}
+              >
+                <Ionicons name="open-outline" size={18} color="#818CF8" />
+                <Text style={styles.proofActionText}>Pay Road Warrior now</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TouchableOpacity
+              style={[styles.proofActionButton, { marginTop: 10, alignSelf: 'center' }]}
+              onPress={() => void confirmPendingCheckout()}
+              disabled={submitting}
+            >
+              <Ionicons name="refresh" size={18} color="#94A3B8" />
+              <Text style={[styles.proofActionText, { color: '#94A3B8' }]}>Verify card / bank payment</Text>
+            </TouchableOpacity>
           </Animated.View>
 
           {/* Crypto Payment Coming Soon */}
@@ -806,97 +883,6 @@ export default function SubscriptionScreen() {
           <View style={{ height: 40 }} />
         </ScrollView>
 
-        {/* Payment Modal */}
-        <Modal visible={showPaymentModal} animationType="slide" presentationStyle="pageSheet">
-          <View style={styles.modalContainer}>
-            <LinearGradient
-              colors={['#0F172A', '#1E293B']}
-              style={StyleSheet.absoluteFill}
-            />
-            
-            <SafeAreaView style={{ flex: 1 }}>
-              <View style={styles.modalHeader}>
-                <TouchableOpacity 
-                  style={styles.modalCloseButton}
-                  onPress={() => setShowPaymentModal(false)}
-                >
-                  <Ionicons name="close" size={24} color="#FFFFFF" />
-                </TouchableOpacity>
-                <Text style={styles.modalTitle}>Submit Payment</Text>
-                <View style={{ width: 40 }} />
-              </View>
-
-              <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
-                <Text style={styles.modalSectionTitle}>Payment Screenshot</Text>
-                
-                {paymentScreenshot ? (
-                  <View style={styles.screenshotPreview}>
-                    <Image source={{ uri: paymentScreenshot }} style={styles.screenshotImage} />
-                    <TouchableOpacity 
-                      style={styles.removeImageButton}
-                      onPress={() => setPaymentScreenshot(null)}
-                    >
-                      <Ionicons name="close-circle" size={32} color="#EF4444" />
-                    </TouchableOpacity>
-                  </View>
-                ) : (
-                  <View style={styles.uploadOptionsContainer}>
-                    <TouchableOpacity style={styles.uploadOption} onPress={takePhoto}>
-                      <LinearGradient
-                        colors={['rgba(99, 102, 241, 0.2)', 'rgba(99, 102, 241, 0.05)']}
-                        style={styles.uploadOptionGradient}
-                      >
-                        <Ionicons name="camera" size={36} color="#6366F1" />
-                        <Text style={styles.uploadOptionText}>Take Photo</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity style={styles.uploadOption} onPress={pickImage}>
-                      <LinearGradient
-                        colors={['rgba(139, 92, 246, 0.2)', 'rgba(139, 92, 246, 0.05)']}
-                        style={styles.uploadOptionGradient}
-                      >
-                        <Ionicons name="images" size={36} color="#8B5CF6" />
-                        <Text style={styles.uploadOptionText}>From Gallery</Text>
-                      </LinearGradient>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                <Text style={styles.modalSectionTitle}>Reference (Required for instant verification)</Text>
-                <TextInput
-                  style={styles.referenceInput}
-                  placeholder="Transaction reference..."
-                  placeholderTextColor="#64748B"
-                  value={paymentReference}
-                  onChangeText={setPaymentReference}
-                />
-
-                <TouchableOpacity 
-                  style={[
-                    styles.submitButton,
-                    !paymentScreenshot && styles.submitButtonDisabled
-                  ]}
-                  onPress={submitPayment}
-                  disabled={!paymentScreenshot || submitting}
-                >
-                  {submitting ? (
-                    <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <LinearGradient
-                      colors={paymentScreenshot ? ['#00D084', '#00C853'] : ['#475569', '#475569']}
-                      style={styles.submitButtonGradient}
-                    >
-                      <Ionicons name="paper-plane" size={20} color="#FFFFFF" />
-                      <Text style={styles.submitButtonText}>Submit for Verification</Text>
-                    </LinearGradient>
-                  )}
-                </TouchableOpacity>
-              </ScrollView>
-            </SafeAreaView>
-          </View>
-        </Modal>
-
         {/* Upgrade Modal */}
         <Modal visible={showUpgradeModal} animationType="fade" transparent>
           <View style={styles.upgradeModalOverlay}>
@@ -920,7 +906,7 @@ export default function SubscriptionScreen() {
                         color={subscription.upgrade_requirements.rating_met ? "#00C853" : "#EF4444"} 
                       />
                       <Text style={styles.requirementText}>
-                        Rating: {subscription.upgrade_requirements.current_rating.toFixed(1)}/4.5 ⭐
+                        Rating: {Number(subscription.upgrade_requirements.current_rating || 0).toFixed(1)}/4.5 ⭐
                       </Text>
                     </View>
                     <View style={styles.requirementRow}>
@@ -1046,6 +1032,24 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 16,
     paddingTop: 8,
+  },
+  flowBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: 'rgba(15, 23, 42, 0.78)',
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 132, 0.25)',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 16,
+  },
+  flowBannerText: {
+    flex: 1,
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '700',
+    color: '#E2E8F0',
   },
   
   // Current Tier Card

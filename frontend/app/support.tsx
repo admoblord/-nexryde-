@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Linking, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -11,7 +11,7 @@ try {
   ExpoSpeechRecognitionModule = speechMod.ExpoSpeechRecognitionModule || null;
   useSpeechRecognitionEvent = speechMod.useSpeechRecognitionEvent || ((_n: string, _c: any) => {});
 } catch {}
-import { askSupportVoiceBot, reportTripIssue } from '@/src/services/api';
+import { askSupportVoiceBot, getSupportContacts, reportTripIssue } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 
 function SupportVoiceHandler({
@@ -74,19 +74,38 @@ export default function SupportScreen() {
   ]);
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
+  const [supportPhone, setSupportPhone] = useState('+2348089297811');
+  const [supportEmail, setSupportEmail] = useState('support@nexryde.com');
+  const [policeLines, setPoliceLines] = useState<string[]>(['+234199']);
+
+  useEffect(() => {
+    const loadContacts = async () => {
+      try {
+        const res = await getSupportContacts();
+        if (res.data?.support_phone) setSupportPhone(res.data.support_phone);
+        if (res.data?.support_email) setSupportEmail(res.data.support_email);
+        if (Array.isArray(res.data?.nigerian_police_numbers) && res.data.nigerian_police_numbers.length > 0) {
+          setPoliceLines(res.data.nigerian_police_numbers);
+        }
+      } catch (e) {
+        console.log('Failed to load support contacts', e);
+      }
+    };
+    void loadContacts();
+  }, []);
 
   const contactOptions = [
-    { icon: 'call', label: 'Call Support', value: '+234 810 889 9392', action: () => Linking.openURL('tel:+2348108899392') },
-    { icon: 'mail', label: 'Email Us', value: 'support@nexryde.com', action: () => Linking.openURL('mailto:support@nexryde.com') },
+    { icon: 'call', label: 'Call Support', value: supportPhone, action: () => Linking.openURL(`tel:${supportPhone}`) },
+    { icon: 'mail', label: 'Email Us', value: supportEmail, action: () => Linking.openURL(`mailto:${supportEmail}`) },
+    { icon: 'shield-checkmark', label: 'Nigerian Police Emergency', value: policeLines[0] || '+234199', action: () => Linking.openURL(`tel:${policeLines[0] || '+234199'}`) },
   ];
 
-  const quickPrompts = useMemo(
-    () => [
-      'Driver stopped and I feel unsafe',
-      'OTP not coming to my phone',
-      'I was charged wrongly for a trip',
-      'How do I report an emergency?',
-    ],
+  const voiceReplyEnglish = useMemo(
+    () => ['I need help with my trip', 'Payment or fare looks wrong'],
+    []
+  );
+  const voiceReplyPidgin = useMemo(
+    () => ['Abeg help me, my trip get wahala', 'Dem charge me too much for this ride'],
     []
   );
   const prefilledTripId = (params.tripId as string) || currentTrip?.id || '';
@@ -231,16 +250,31 @@ export default function SupportScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={COLORS.gray900} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Help & Support</Text>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>Help & Support</Text>
+            <Text style={styles.headerSubtitle}>Fast support for trips, payments, safety and disputes.</Text>
+          </View>
           <View style={styles.placeholder} />
         </View>
 
         <ScrollView style={styles.content}>
-          <Text style={styles.sectionTitle}>Contact Us</Text>
+          <View style={styles.heroCard}>
+            <View style={styles.heroIcon}>
+              <Ionicons name="headset" size={24} color={COLORS.accentGreen} />
+            </View>
+            <View style={styles.heroTextWrap}>
+              <Text style={styles.heroTitle}>Support Center</Text>
+              <Text style={styles.heroText}>
+                Start with the assistant for quick help, then escalate to direct support or Shield when you need a human review.
+              </Text>
+            </View>
+          </View>
+
+          <Text style={styles.sectionTitle}>Direct contact</Text>
           {contactOptions.map((option, index) => (
             <TouchableOpacity key={index} style={styles.contactCard} onPress={option.action}>
               <View style={styles.contactIcon}>
-                <Ionicons name={option.icon} size={24} color={COLORS.accentGreen} />
+                <Ionicons name={option.icon as any} size={24} color={COLORS.accentGreen} />
               </View>
               <View style={styles.contactInfo}>
                 <Text style={styles.contactLabel}>{option.label}</Text>
@@ -269,10 +303,19 @@ export default function SupportScreen() {
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
 
-          <Text style={styles.sectionTitle}>Support Voice Bot (Pidgin + English)</Text>
+          <Text style={styles.sectionTitle}>Instant assistant</Text>
           <View style={styles.messageCard}>
+            <Text style={styles.chipLangLabel}>English</Text>
             <View style={styles.quickPromptWrap}>
-              {quickPrompts.map((prompt) => (
+              {voiceReplyEnglish.map((prompt) => (
+                <TouchableOpacity key={prompt} style={styles.quickPrompt} onPress={() => sendToBot(prompt)}>
+                  <Text style={styles.quickPromptText}>{prompt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[styles.chipLangLabel, { marginTop: SPACING.sm }]}>Pidgin</Text>
+            <View style={styles.quickPromptWrap}>
+              {voiceReplyPidgin.map((prompt) => (
                 <TouchableOpacity key={prompt} style={styles.quickPrompt} onPress={() => sendToBot(prompt)}>
                   <Text style={styles.quickPromptText}>{prompt}</Text>
                 </TouchableOpacity>
@@ -295,7 +338,7 @@ export default function SupportScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Send Message / Voice</Text>
+          <Text style={styles.sectionTitle}>Send message or voice</Text>
           <View style={styles.messageCard}>
             <TextInput
               style={styles.messageInput}
@@ -320,7 +363,7 @@ export default function SupportScreen() {
             </View>
           </View>
 
-          <Text style={styles.sectionTitle}>Report Trip Issue</Text>
+          <Text style={styles.sectionTitle}>Report trip issue</Text>
           <View style={styles.messageCard}>
             <Text style={styles.issueMeta}>
               Trip: {prefilledTripId || 'No trip selected'}
@@ -371,10 +414,56 @@ const styles = StyleSheet.create({
     borderBottomColor: COLORS.gray200,
   },
   backButton: { padding: SPACING.xs },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: SPACING.sm,
+  },
   headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.gray900 },
+  headerSubtitle: {
+    marginTop: 2,
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.gray600,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
   placeholder: { width: 40 },
   content: { flex: 1, padding: SPACING.lg },
   sectionTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.gray900, marginBottom: SPACING.md, marginTop: SPACING.lg },
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.md,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray200,
+    marginBottom: SPACING.sm,
+  },
+  heroIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: COLORS.accentGreenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroTextWrap: {
+    flex: 1,
+  },
+  heroTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+    color: COLORS.gray900,
+    marginBottom: 4,
+  },
+  heroText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray600,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
   contactCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -399,6 +488,13 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.white,
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
+  },
+  chipLangLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.gray600,
+    marginBottom: SPACING.xs,
+    letterSpacing: 0.3,
   },
   quickPromptWrap: {
     flexDirection: 'row',

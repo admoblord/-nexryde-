@@ -4,7 +4,7 @@ import { getActiveTrip } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 
-const POLL_MS = 10000;
+const POLL_MS = 22000;
 
 export default function useActiveTripCoordinator() {
   const user = useAppStore((s) => s.user);

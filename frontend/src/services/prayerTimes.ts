@@ -13,6 +13,8 @@ import { BACKEND_URL } from '@/src/services/api';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
@@ -31,14 +33,23 @@ export interface PrayerSettings {
   notificationsEnabled: boolean;
   alertMinutesBefore: number;
   vibration: boolean;
+  autoPauseRides: boolean;
+  pauseDuration: number;
+  alertBefore: number;
+  showMosqueLocations: boolean;
+  notificationSound: 'default' | 'silent';
 }
 
 export interface Mosque {
+  id?: string;
   name: string;
   address: string;
   latitude: number;
   longitude: number;
   distance: number;
+  hasWudu?: boolean;
+  hasParking?: boolean;
+  capacity?: number;
 }
 
 const DEFAULT_SETTINGS: PrayerSettings = {
@@ -46,6 +57,11 @@ const DEFAULT_SETTINGS: PrayerSettings = {
   notificationsEnabled: false,
   alertMinutesBefore: 10,
   vibration: true,
+  autoPauseRides: false,
+  pauseDuration: 15,
+  alertBefore: 10,
+  showMosqueLocations: true,
+  notificationSound: 'default',
 };
 
 export function usePrayerTimes() {
@@ -216,6 +232,7 @@ export function usePrayerTimes() {
               data: { prayerName: prayer.name, prayerTime: prayer.time },
             },
             trigger: {
+              type: Notifications.SchedulableTriggerInputTypes.DATE as Notifications.SchedulableTriggerInputTypes.DATE,
               date: new Date(alertTime),
             },
           });
@@ -241,10 +258,14 @@ export function usePrayerTimes() {
       
       if (results.length > 0) {
         const mosques: Mosque[] = results.slice(0, 10).map((place: any) => ({
+          id: place.id || place.place_id || place.name,
           name: place.name || place.displayName?.text || 'Mosque',
           address: place.vicinity || place.formattedAddress || '',
           latitude: place.geometry?.location?.lat || place.location?.latitude || 0,
           longitude: place.geometry?.location?.lng || place.location?.longitude || 0,
+          hasWudu: Boolean(place.hasWudu),
+          hasParking: Boolean(place.hasParking),
+          capacity: typeof place.capacity === 'number' ? place.capacity : undefined,
           distance: calculateDistance(
             location.lat,
             location.lng,

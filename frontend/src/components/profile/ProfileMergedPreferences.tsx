@@ -18,7 +18,7 @@ import {
 } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { useLanguage } from '@/src/i18n/LanguageContext';
-import type { SupportedLanguage } from '@/src/i18n/translations';
+import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '@/src/i18n/translations';
 import {
   getUser,
   getUserPreferences,
@@ -34,7 +34,7 @@ type ThemePref = 'light' | 'dark' | 'auto';
 export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const { user } = useAppStore();
   const { colors } = useThemeColors();
-  const { language, setLanguage, availableLanguages } = useLanguage();
+  const { language, setLanguage } = useLanguage();
 
   const [loading, setLoading] = useState(true);
   const [themePref, setThemePref] = useState<ThemePref>('auto');
@@ -189,7 +189,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
           setEmailEnabled(channels.email);
         }
         const serverLang = pref.language as SupportedLanguage | undefined;
-        const codes: SupportedLanguage[] = ['en', 'pcm', 'yo', 'ig', 'ha'];
+        const codes: SupportedLanguage[] = ['en', 'yo', 'ig', 'ha', 'pcm'];
         if (serverLang && codes.includes(serverLang)) {
           await setLanguage(serverLang);
         }
@@ -209,7 +209,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   }, [user?.id, showFemaleDriverRow, setLanguage]);
 
   const currentLang =
-    availableLanguages.find((l) => l.code === language) || availableLanguages[0];
+    SUPPORTED_LANGUAGES.find((l) => l.code === language) || SUPPORTED_LANGUAGES[0];
 
   if (loading) {
     return (
@@ -297,6 +297,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
             <Text style={[styles.menuText, { color: colors.text, marginLeft: SPACING.md }]}>Language</Text>
             <Text style={[styles.menuSubtext, { marginLeft: SPACING.md, color: colors.textMuted }]}>
               {currentLang.flag} {currentLang.nativeName}
+              {currentLang.code === 'en' ? ' · UK' : ''}
             </Text>
           </View>
           <Ionicons
@@ -307,24 +308,34 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
         </TouchableOpacity>
         {showLanguages && (
           <View style={styles.languageList}>
-            {availableLanguages.map((lang) => {
+            {SUPPORTED_LANGUAGES.map((lang) => {
               const active = lang.code === language;
               return (
                 <TouchableOpacity
                   key={lang.code}
                   style={[styles.languageItem, active && styles.languageItemActive]}
                   onPress={() => selectLanguage(lang.code)}
+                  accessibilityLabel={`${lang.nativeName}`}
                 >
                   <Text style={styles.languageFlag}>{lang.flag}</Text>
-                  <Text
-                    style={[
-                      styles.languageName,
-                      { color: active ? COLORS.accent : colors.text },
-                    ]}
-                  >
-                    {lang.nativeName}
-                  </Text>
-                  {active && <Ionicons name="checkmark-circle" size={20} color={COLORS.accent} />}
+                  <View style={styles.languageTextCol}>
+                    <Text
+                      style={[
+                        styles.languageName,
+                        { color: active ? COLORS.accentGreen : colors.text },
+                      ]}
+                    >
+                      {lang.nativeName}
+                    </Text>
+                    {lang.code === 'en' ? (
+                      <Text style={[styles.languageSub, { color: colors.textMuted }]}>United Kingdom</Text>
+                    ) : lang.name !== lang.nativeName ? (
+                      <Text style={[styles.languageSub, { color: colors.textMuted }]}>{lang.name}</Text>
+                    ) : (
+                      <Text style={[styles.languageSub, { color: colors.textMuted }]}>Nigeria</Text>
+                    )}
+                  </View>
+                  {active && <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />}
                 </TouchableOpacity>
               );
             })}
@@ -333,7 +344,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
       </View>
 
       <View style={[styles.themeBlock, { borderBottomColor: COLORS.gray100 }]}>
-        <Text style={[styles.themeLabel, { color: colors.text }]}>Theme</Text>
+        <Text style={[styles.themeLabel, { color: colors.text }]}>Theme (Light, Dark, Auto)</Text>
         <View style={styles.themeRow}>
           {(
             [
@@ -348,20 +359,20 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
                 key={key}
                 style={[
                   styles.themeChip,
-                  { borderColor: active ? COLORS.accent : colors.border, backgroundColor: colors.surface },
-                  active && { backgroundColor: COLORS.accentSoft },
+                  { borderColor: active ? COLORS.accentGreen : colors.border, backgroundColor: colors.surface },
+                  active && { backgroundColor: COLORS.accentGreenSoft },
                 ]}
                 onPress={() => applyTheme(key)}
               >
                 <Ionicons
                   name={icon}
                   size={18}
-                  color={active ? COLORS.accent : colors.textMuted}
+                  color={active ? COLORS.accentGreen : colors.textMuted}
                 />
                 <Text
                   style={[
                     styles.themeChipText,
-                    { color: active ? COLORS.accent : colors.textSecondary },
+                    { color: active ? COLORS.accentGreen : colors.textSecondary },
                   ]}
                 >
                   {label}
@@ -453,16 +464,25 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray50,
   },
   languageItemActive: {
-    backgroundColor: COLORS.accentSoft,
+    backgroundColor: COLORS.accentGreenSoft,
+    borderWidth: 2,
+    borderColor: COLORS.accentGreen,
   },
   languageFlag: {
-    fontSize: 20,
-    marginRight: SPACING.sm,
+    fontSize: 22,
+    marginRight: SPACING.md,
+  },
+  languageTextCol: {
+    flex: 1,
   },
   languageName: {
-    flex: 1,
     fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+  },
+  languageSub: {
+    fontSize: FONT_SIZE.xs,
     fontWeight: '600',
+    marginTop: 2,
   },
   themeBlock: {
     padding: SPACING.md,

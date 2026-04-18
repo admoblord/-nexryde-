@@ -6,6 +6,9 @@
     "preview": {
       "distribution": "internal",
       "node": "20.19.4",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app"
+      },
       "android": {
         "buildType": "apk"
       }
@@ -13,6 +16,9 @@
     "production": {
       "distribution": "store",
       "node": "20.19.4",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app"
+      },
       "android": {
         "buildType": "app-bundle"
       }

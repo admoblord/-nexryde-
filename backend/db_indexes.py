@@ -29,6 +29,17 @@ async def ensure_indexes(db):
         # Subscriptions
         await db.subscriptions.create_index("driver_id")
         await db.subscriptions.create_index([("driver_id", 1), ("status", 1)])
+        await db.subscription_payment_intents.create_index("transaction_ref", unique=True, sparse=True)
+        await db.subscription_payment_intents.create_index([("driver_id", 1), ("status", 1), ("created_at", -1)])
+
+        await db.wallet_payment_intents.create_index("transaction_ref", unique=True, sparse=True)
+        await db.wallet_payment_intents.create_index([("user_id", 1), ("status", 1), ("created_at", -1)])
+        await db.wallet_virtual_accounts.create_index("user_id")
+        await db.wallet_virtual_accounts.create_index([("reference", 1)], sparse=True)
+        await db.wallet_virtual_accounts.create_index([("account_number", 1)], sparse=True)
+
+        await db.squad_webhook_dlq.create_index("id", unique=True)
+        await db.squad_webhook_dlq.create_index([("status", 1), ("created_at", -1)])
         
         # OTP records
         await db.otp_records.create_index("phone")

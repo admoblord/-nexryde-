@@ -70,6 +70,19 @@ export interface Trip {
   accepted_at: string | null;
   started_at: string | null;
   completed_at: string | null;
+  /** Rider estate gate auto-share (driver trip UI). */
+  estate_gate_access?: {
+    available?: boolean;
+    gate_code?: string;
+    estate_name?: string;
+  };
+  geo_fence_trip_lock?: Record<string, unknown> | null;
+  speed_spike_alert?: Record<string, unknown> | null;
+  gps_spoofing_alert?: Record<string, unknown> | null;
+  invisible_shield_mode?: Record<string, unknown> | null;
+  safe_arrival_check?: Record<string, unknown> | null;
+  rider_face_verified_at_pickup?: boolean;
+  face_verified_at_start?: boolean;
 }
 
 export interface Location {

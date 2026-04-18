@@ -32,10 +32,12 @@ export default function SplashScreen() {
   
   // ✅ SAFE STORE ACCESS WITH ERROR HANDLING
   const [storeError, setStoreError] = useState<Error | null>(null);
-  let setUser, setIsAuthenticated, setToken;
+  let setUser: ((user: any) => void) | undefined;
+  let setIsAuthenticated: ((value: boolean) => void) | undefined;
+  let setToken: ((token: string | null) => void) | undefined;
   
   try {
-    const store = useAppStore();
+    const store = useAppStore() as any;
     setUser = store.setUser;
     setIsAuthenticated = store.setIsAuthenticated;
     setToken = store.setToken;
@@ -136,7 +138,9 @@ export default function SplashScreen() {
             if (setIsAuthenticated) setIsAuthenticated(true);
             
             // Enforce full verification on restore (no shortcut access).
-            const authHeaders = userData.token ? { Authorization: `Bearer ${userData.token}` } : {};
+            const authHeaders: Record<string, string> = userData.token
+              ? { Authorization: `Bearer ${userData.token}` }
+              : {};
             setTimeout(async () => {
               try {
                 if (userData.role === 'driver') {
@@ -310,7 +314,8 @@ export default function SplashScreen() {
         </View>
 
         {/* Subtitle */}
-        <Text style={styles.subtitle}>Nigeria's #1 Ride-Hailing Platform</Text>
+        <Text style={styles.subtitle}>Safe and reliable rides, every day.</Text>
+        <Text style={styles.subtitleNote}>Service availability may vary by city.</Text>
 
         {/* Features Row - More Visible */}
         <View style={styles.featuresContainer}>
@@ -517,11 +522,20 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   subtitle: {
-    color: COLORS.textSecondary,
-    fontSize: 16,
+    color: COLORS.white,
+    fontSize: 19,
+    fontWeight: '700',
+    marginBottom: 8,
+    letterSpacing: 0.2,
+    textAlign: 'center',
+  },
+  subtitleNote: {
+    color: COLORS.textMuted,
+    fontSize: 13,
     fontWeight: '500',
-    marginBottom: 40,
-    letterSpacing: 0.5,
+    marginBottom: 34,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   featuresContainer: {
     flexDirection: 'row',

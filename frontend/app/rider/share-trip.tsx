@@ -9,59 +9,42 @@ import {
   Share,
   Linking,
   Platform,
-  Clipboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
+import * as Clipboard from 'expo-clipboard';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface EmergencyContact {
-  name: string;
-  phone: string;
-  relationship: string;
-}
+import { useEmergencyContacts } from '@/src/hooks/useEmergencyContacts';
 
 export default function ShareTripScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user, currentTrip } = useAppStore();
-  
   const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const [emergencyContacts, setEmergencyContacts] = useState<EmergencyContact[]>([]);
+  const { contacts: emergencyContacts, loading: loadingContacts, refresh: refreshEmergencyContacts } = useEmergencyContacts(user?.id);
   const [shareLink, setShareLink] = useState('');
   const [tracking, setTracking] = useState(false);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const locationSubscription = React.useRef<Location.LocationSubscription | null>(null);
+  const tripMeta = currentTrip as (typeof currentTrip & {
+    driver?: { name?: string };
+    vehicle?: { plate?: string };
+  }) | null;
 
   useEffect(() => {
-    loadEmergencyContacts();
+    void refreshEmergencyContacts();
     generateShareLink();
-    startLocationTracking();
+    void startLocationTracking();
     return () => {
       if (locationSubscription.current) {
         locationSubscription.current.remove();
       }
     };
-  }, []);
-
-  const loadEmergencyContacts = async () => {
-    try {
-      const raw = await AsyncStorage.getItem('emergency_contacts');
-      const parsed = raw ? JSON.parse(raw) : [];
-      if (Array.isArray(parsed)) {
-        setEmergencyContacts(parsed);
-      } else {
-        setEmergencyContacts([]);
-      }
-    } catch {
-      setEmergencyContacts([]);
-    }
-  };
+  }, [refreshEmergencyContacts]);
 
   const generateShareLink = () => {
     const tripId = currentTrip?.id || params.tripId;
@@ -104,8 +87,8 @@ export default function ShareTripScreen() {
     }
   };
 
-  const handleShareViaSMS = async (contact: EmergencyContact) => {
-    const message = `Track my NEXRYDE trip: ${shareLink}\nDriver: ${currentTrip?.driver?.name || 'Unknown'}\nVehicle: ${currentTrip?.vehicle?.plate || 'Unknown'}`;
+  const handleShareViaSMS = async (contact: { name: string; phone: string; relationship: string }) => {
+    const message = `Track my NEXRYDE trip: ${shareLink}\nDriver: ${tripMeta?.driver?.name || 'Unknown'}\nVehicle: ${tripMeta?.vehicle?.plate || 'Unknown'}`;
     
     try {
       const smsUrl = Platform.OS === 'ios'
@@ -113,7 +96,7 @@ export default function ShareTripScreen() {
         : `sms:${contact.phone}?body=${encodeURIComponent(message)}`;
       
       await Linking.openURL(smsUrl);
-      setSharedWith([...sharedWith, contact.name]);
+      setSharedWith((prev) => (prev.includes(contact.name) ? prev : [...prev, contact.name]));
       Alert.alert('Success', `Opening SMS to ${contact.name}...`);
     } catch (error) {
       Alert.alert('Error', 'Failed to open SMS');
@@ -123,8 +106,8 @@ export default function ShareTripScreen() {
   const handleShareToAll = async () => {
     const message = `🚨 I'm taking a ride with NEXRYDE. Track me live: ${shareLink}
 
-🚗 Driver: ${currentTrip?.driver?.name || 'Unknown'}
-🚙 Vehicle: ${currentTrip?.vehicle?.plate || 'Unknown'}
+🚗 Driver: ${tripMeta?.driver?.name || 'Unknown'}
+🚙 Vehicle: ${tripMeta?.vehicle?.plate || 'Unknown'}
 📞 My Phone: ${user?.phone || 'N/A'}
 
 ⏰ ${new Date().toLocaleString()}`;
@@ -145,7 +128,7 @@ export default function ShareTripScreen() {
       Alert.alert('No Active Trip', 'Start a trip to generate a real tracking link.');
       return;
     }
-    Clipboard.setString(shareLink);
+    void Clipboard.setStringAsync(shareLink);
     Alert.alert('Link Copied!', 'Trip tracking link copied to clipboard');
   };
 
@@ -237,11 +220,11 @@ export default function ShareTripScreen() {
             <Text style={styles.cardTitle}>📍 Current Trip</Text>
             <View style={styles.tripDetail}>
               <Ionicons name="person" size={18} color={COLORS.lightTextMuted} />
-              <Text style={styles.tripDetailText}>Driver: {currentTrip.driver?.name || 'Unknown'}</Text>
+              <Text style={styles.tripDetailText}>Driver: {tripMeta?.driver?.name || 'Unknown'}</Text>
             </View>
             <View style={styles.tripDetail}>
               <Ionicons name="car" size={18} color={COLORS.lightTextMuted} />
-              <Text style={styles.tripDetailText}>Vehicle: {currentTrip.vehicle?.plate || 'Unknown'}</Text>
+              <Text style={styles.tripDetailText}>Vehicle: {tripMeta?.vehicle?.plate || 'Unknown'}</Text>
             </View>
             <View style={styles.tripDetail}>
               <Ionicons name="time" size={18} color={COLORS.lightTextMuted} />
@@ -314,7 +297,7 @@ export default function ShareTripScreen() {
           ) : (
             <View style={styles.emptyContacts}>
               <Ionicons name="person-add-outline" size={48} color={COLORS.gray400} />
-              <Text style={styles.emptyText}>No emergency contacts</Text>
+              <Text style={styles.emptyText}>{loadingContacts ? 'Loading contacts...' : 'No emergency contacts'}</Text>
               <TouchableOpacity 
                 style={styles.addContactBtn}
                 onPress={() => router.push('/(rider-tabs)/rider-safety')}

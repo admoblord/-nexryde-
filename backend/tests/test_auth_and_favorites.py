@@ -25,10 +25,10 @@ class TestAuthFlow:
         r = requests.get(f"{BASE_URL}/api/health", timeout=10)
         assert r.status_code == 200
 
-    def test_protected_endpoint_without_token_passes_through(self):
+    def test_protected_endpoint_without_token_rejected(self):
         fake_id = f"fake_{RUN_ID}"
         r = requests.get(f"{BASE_URL}/api/users/{fake_id}", timeout=10)
-        assert r.status_code in (404, 200)
+        assert r.status_code == 401
 
     def test_protected_endpoint_rejected_with_bad_token(self):
         fake_id = f"fake_{RUN_ID}"

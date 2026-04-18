@@ -13,22 +13,80 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { AreaBoySafety, AreaSafetyReport, useAreaBoySafety } from '@/src/services/areaBoySafety';
+import * as Location from 'expo-location';
+import { BACKEND_URL } from '@/src/services/api';
 
 export default function RiderSafetyCheckScreen() {
   const router = useRouter();
   const { areaSafety, loading, checkAreaSafety } = useAreaBoySafety();
   
   const [searchQuery, setSearchQuery] = useState('');
+  const [resolving, setResolving] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
 
   const handleCheckArea = async (lat: number, lng: number, name: string) => {
     await checkAreaSafety(lat, lng, name);
   };
 
+  const handleSearchArea = async () => {
+    const query = searchQuery.trim();
+    if (query.length < 2 || resolving) return;
+    setResolving(true);
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/places/geocode-address?address=${encodeURIComponent(`${query}, Nigeria`)}`,
+      );
+      const data = await res.json();
+      if (res.ok && data?.latitude && data?.longitude) {
+        await handleCheckArea(Number(data.latitude), Number(data.longitude), data.address || query);
+      } else {
+        const fallback = popularAreas.find((a) => a.name.toLowerCase().includes(query.toLowerCase()));
+        if (fallback) {
+          await handleCheckArea(fallback.lat, fallback.lng, fallback.name);
+        }
+      }
+    } catch {
+      const fallback = popularAreas.find((a) => a.name.toLowerCase().includes(query.toLowerCase()));
+      if (fallback) {
+        await handleCheckArea(fallback.lat, fallback.lng, fallback.name);
+      }
+    } finally {
+      setResolving(false);
+    }
+  };
+
+  const handleUseCurrentLocation = async () => {
+    if (locationLoading) return;
+    setLocationLoading(true);
+    try {
+      const permission = await Location.requestForegroundPermissionsAsync();
+      if (permission.status !== 'granted') {
+        setLocationLoading(false);
+        return;
+      }
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      const { latitude, longitude } = loc.coords;
+      let name = `Current location (${latitude.toFixed(3)}, ${longitude.toFixed(3)})`;
+      try {
+        const res = await fetch(
+          `${BACKEND_URL}/api/places/geocode?lat=${encodeURIComponent(String(latitude))}&lng=${encodeURIComponent(String(longitude))}`,
+        );
+        const data = await res.json();
+        if (data?.address) name = data.address;
+      } catch {}
+      await handleCheckArea(latitude, longitude, name);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
   const popularAreas = [
-    { name: 'Yaba', lat: 6.5244, lng: 3.3792 },
-    { name: 'Victoria Island', lat: 6.4541, lng: 3.3947 },
-    { name: 'Lekki', lat: 6.4281, lng: 3.4219 },
-    { name: 'Ikeja', lat: 6.5027, lng: 3.3748 },
+    { name: 'Lagos', lat: 6.5244, lng: 3.3792 },
+    { name: 'Abuja', lat: 9.0765, lng: 7.3986 },
+    { name: 'Port Harcourt', lat: 4.8156, lng: 7.0498 },
+    { name: 'Kano', lat: 12.0022, lng: 8.5920 },
+    { name: 'Ibadan', lat: 7.3775, lng: 3.9470 },
+    { name: 'Enugu', lat: 6.4499, lng: 7.5000 },
   ];
 
   return (
@@ -52,32 +110,30 @@ export default function RiderSafetyCheckScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.searchCard}>
-          <Text style={styles.sectionTitle}>🔍 Check Specific Area</Text>
+          <Text style={styles.sectionTitle}>🔍 Scan Any Area in Nigeria</Text>
           <View style={styles.searchBox}>
             <Ionicons name="search" size={20} color={COLORS.lightTextMuted} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search location (e.g., Yaba, Lekki)..."
+              placeholder="Search location (city, district, landmark)..."
               placeholderTextColor={COLORS.lightTextMuted}
               value={searchQuery}
               onChangeText={setSearchQuery}
               returnKeyType="search"
-              onSubmitEditing={() => {
-                if (searchQuery.trim().length >= 2) {
-                  const match = popularAreas.find(a => a.name.toLowerCase().includes(searchQuery.toLowerCase()));
-                  if (match) {
-                    handleCheckArea(match.lat, match.lng, match.name);
-                  } else {
-                    handleCheckArea(6.5244, 3.3792, searchQuery.trim());
-                  }
-                }
-              }}
+              onSubmitEditing={() => void handleSearchArea()}
             />
+            {resolving ? <Ionicons name="sync" size={18} color={COLORS.accentBlue} /> : null}
           </View>
+          <TouchableOpacity style={styles.currentLocBtn} onPress={() => void handleUseCurrentLocation()}>
+            <Ionicons name="navigate-outline" size={18} color={COLORS.accentBlue} />
+            <Text style={styles.currentLocText}>
+              {locationLoading ? 'Scanning around you...' : 'Use my current location'}
+            </Text>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.popularSection}>
-          <Text style={styles.sectionTitle}>📍 Popular Areas</Text>
+          <Text style={styles.sectionTitle}>📍 Major Nigerian Cities</Text>
           <View style={styles.areaGrid}>
             {popularAreas.map((area) => (
               <TouchableOpacity
@@ -199,6 +255,24 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
+  },
+  currentLocBtn: {
+    marginTop: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    alignSelf: 'flex-start',
+    borderRadius: BORDER_RADIUS.full,
+    borderWidth: 1,
+    borderColor: COLORS.accentBlue,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.infoSoft,
+  },
+  currentLocText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: COLORS.accentBlue,
   },
   searchInput: {
     flex: 1,

@@ -51,6 +51,7 @@ __pycache__/
 *pyc*
 venv/
 .venv/
+.venv_deploy_test/
 
 # Development tools
 chainlit.md

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,12 +13,11 @@ import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
-import { deleteUserAccount, updateUser } from '@/src/services/api';
+import { deleteUserAccount, getUserTrustSummary, updateUser } from '@/src/services/api';
 import * as ImagePicker from 'expo-image-picker';
-import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMergedPreferences';
 import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
 import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
-import { ProfileWalletRewardsCard } from '@/src/components/profile/ProfileWalletRewardsCard';
+import { BiometricScanner, EmergencyButton, LoadingSpinner, UserCard } from '@/src/components/tier1';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
@@ -28,6 +27,44 @@ export default function DriverProfileScreen() {
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [profileImage, setProfileImage] = useState(user?.profile_image || null);
   const isDriverVerified = useMemo(() => Boolean(user?.is_verified), [user?.is_verified]);
+  const [trustSummary, setTrustSummary] = useState<null | {
+    nexryde_score: number;
+    rider_risk_score: number;
+    driver_safety_score: number | null;
+    score_tier: { key: string; label: string };
+    score_breakdown: {
+      service_quality: number;
+      punctuality: number;
+      verification: number;
+      payment_behavior: number;
+    };
+    unlocked_perks: string[];
+    priority_matching_enabled: boolean;
+    lower_fee_eligible: boolean;
+    premium_access_enabled: boolean;
+    verification_status: { account_verified: boolean; face_verified: boolean; nin_verified: boolean };
+  }>(null);
+  const [loadingTrust, setLoadingTrust] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadTrust = async () => {
+      if (!user?.id) return;
+      setLoadingTrust(true);
+      try {
+        const res = await getUserTrustSummary(user.id);
+        if (mounted) setTrustSummary(res.data);
+      } catch {
+        if (mounted) setTrustSummary(null);
+      } finally {
+        if (mounted) setLoadingTrust(false);
+      }
+    };
+    void loadTrust();
+    return () => {
+      mounted = false;
+    };
+  }, [user?.id]);
 
   const saveProfileImage = async (uri: string) => {
     setProfileImage(uri);
@@ -138,7 +175,10 @@ export default function DriverProfileScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.content, { paddingBottom: SPACING.lg }]}
+        contentContainerStyle={[
+          styles.content,
+          { paddingBottom: Math.max(insets.bottom, 24) + 100 },
+        ]}
         showsVerticalScrollIndicator={false}
       >
         <ProfileHeroCard
@@ -154,92 +194,168 @@ export default function DriverProfileScreen() {
         />
 
         <ProfileQuickActions
-          title="Quick actions"
+          title="Quick Actions"
           colors={colors}
           actions={[
             {
               key: 'edit',
               label: 'Edit Profile',
-              icon: 'create-outline',
-              iconColor: COLORS.gray700,
-              iconBg: COLORS.gray100,
+              icon: 'create',
+              iconColor: COLORS.white,
+              iconBg: '#2563EB',
               onPress: () => router.push('/edit-profile'),
             },
             {
               key: 'trips',
               label: 'Trip History',
-              icon: 'list-outline',
-              iconColor: COLORS.info,
-              iconBg: COLORS.infoSoft,
-              onPress: () => router.push('/(driver-tabs)/driver-trips' as any),
+              icon: 'list',
+              iconColor: COLORS.white,
+              iconBg: '#7C3AED',
+              onPress: () => router.push('/driver/trips' as any),
             },
             {
               key: 'vehicle',
               label: 'Vehicle',
-              icon: 'car-outline',
-              iconColor: COLORS.accent,
-              iconBg: COLORS.accentSoft,
+              icon: 'car-sport',
+              iconColor: COLORS.white,
+              iconBg: '#059669',
               onPress: () => router.push('/driver/vehicle'),
             },
             {
               key: 'bank',
               label: 'Bank & payouts',
-              icon: 'wallet-outline',
-              iconColor: COLORS.success,
-              iconBg: COLORS.successSoft,
+              icon: 'wallet',
+              iconColor: COLORS.white,
+              iconBg: '#CA8A04',
               onPress: () => router.push('/driver/bank'),
             },
             {
               key: 'docs',
               label: 'Documents',
-              icon: 'document-text-outline',
-              iconColor: COLORS.warning,
-              iconBg: COLORS.warningSoft,
+              icon: 'document-text',
+              iconColor: COLORS.white,
+              iconBg: '#EA580C',
               onPress: () => router.push('/driver/documents'),
             },
           ]}
         />
 
-        <ProfileWalletRewardsCard userId={user?.id} colors={colors} />
+        <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.subscriptionHeader}>
+            <View style={[styles.subscriptionIcon, { backgroundColor: '#CFFAFE' }]}>
+              <Ionicons name="business-outline" size={22} color="#0F766E" />
+            </View>
+            <View style={styles.subscriptionInfo}>
+              <Text style={[styles.subscriptionTitle, { color: colors.text }]}>Nexryde Wallet as a Bank</Text>
+              <Text style={[styles.subscriptionSubtext, { color: colors.textMuted }]}>
+                Driver mini-bank features like interest, transfers, bill pay, and airtime will land here.
+              </Text>
+            </View>
+            <View style={styles.scoreTierBadge}>
+              <Text style={styles.scoreTierBadgeText}>Coming Soon</Text>
+            </View>
+          </View>
+        </View>
+
+        {loadingTrust ? (
+          <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+            <LoadingSpinner label="Refreshing trust summary..." />
+          </View>
+        ) : trustSummary ? (
+          <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+            <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Tier 1 Trust</Text>
+            <UserCard
+              name={user?.name || 'Driver'}
+              role="driver"
+              image={profileImage}
+              rating={user?.rating || 5}
+              reviewCount={user?.total_trips || 0}
+              nexrydeScore={trustSummary.nexryde_score}
+              riderRiskScore={trustSummary.rider_risk_score}
+              driverSafetyScore={trustSummary.driver_safety_score}
+              verificationLabel={
+                trustSummary.verification_status.face_verified
+                  ? 'Face verified'
+                  : trustSummary.verification_status.nin_verified
+                    ? 'Identity verified'
+                    : 'Verification incomplete'
+              }
+            />
+            <BiometricScanner
+              title="Protect driver withdrawals"
+              subtitle="Use device biometrics before sensitive actions like payout access and safety confirmations."
+            />
+            <View style={[styles.scorePanel, { backgroundColor: colors.background }]}>
+              <View style={styles.scorePanelHeader}>
+                <View>
+                  <Text style={[styles.scorePanelTitle, { color: colors.text }]}>Nexryde Score</Text>
+                  <Text style={[styles.scorePanelSubtitle, { color: colors.textMuted }]}>
+                    {trustSummary.score_tier.label} tier improves matching quality and driver privileges.
+                  </Text>
+                </View>
+                <View style={styles.scoreTierBadge}>
+                  <Text style={styles.scoreTierBadgeText}>{trustSummary.score_tier.label}</Text>
+                </View>
+              </View>
+              <View style={styles.scoreBreakdownGrid}>
+                <View style={styles.scoreMetricCard}>
+                  <Text style={styles.scoreMetricLabel}>Service</Text>
+                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.service_quality)}</Text>
+                </View>
+                <View style={styles.scoreMetricCard}>
+                  <Text style={styles.scoreMetricLabel}>Punctuality</Text>
+                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.punctuality)}</Text>
+                </View>
+                <View style={styles.scoreMetricCard}>
+                  <Text style={styles.scoreMetricLabel}>Verification</Text>
+                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.verification)}</Text>
+                </View>
+                <View style={styles.scoreMetricCard}>
+                  <Text style={styles.scoreMetricLabel}>Payments</Text>
+                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.payment_behavior)}</Text>
+                </View>
+              </View>
+              <Text style={[styles.scorePerksTitle, { color: colors.text }]}>Unlocked perks</Text>
+              {trustSummary.unlocked_perks.map((perk) => (
+                <View key={perk} style={styles.scorePerkRow}>
+                  <Ionicons name="checkmark-circle" size={16} color={COLORS.accentGreen} />
+                  <Text style={[styles.scorePerkText, { color: colors.textMuted }]}>{perk}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Preferences</Text>
-          <ProfileMergedPreferences variant="driver" />
+          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/settings')}>
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreen }]}>
+              <Ionicons name="settings" size={20} color={COLORS.white} />
+            </View>
+            <Text style={[styles.menuText, { color: colors.text }]}>Settings</Text>
+            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+          </TouchableOpacity>
         </View>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety & trust</Text>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/tracking')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="navigate-outline" size={20} color={COLORS.info} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Live Tracking</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/share-trip')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentSoft }]}>
-              <Ionicons name="share-social-outline" size={20} color={COLORS.accent} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Share Trip</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/rider/security-code')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="lock-closed-outline" size={20} color={COLORS.gray600} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Security Code</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety & Trust</Text>
+          <EmergencyButton
+            label="Open Safety Center"
+            style={styles.emergencyBtn}
+            onPress={() => router.push('/driver/safety-alerts')}
+          />
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/driver/safety-alerts')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.success} />
+            <View style={[styles.menuIcon, { backgroundColor: '#F59E0B' }]}>
+              <Ionicons name="shield-checkmark" size={20} color={COLORS.white} />
             </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Safety Center</Text>
+            <View style={{ flex: 1, marginLeft: SPACING.md }}>
+              <Text style={[styles.menuText, { color: colors.text }]}>Safety Center</Text>
+              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Alerts, danger zones and emergency protection</Text>
+            </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/shield-disputes')}>
-            <View style={[styles.menuIcon, { backgroundColor: 'rgba(13, 148, 136, 0.15)' }]}>
-              <Ionicons name="ribbon-outline" size={20} color="#0D9488" />
+            <View style={[styles.menuIcon, { backgroundColor: '#0D9488' }]}>
+              <Ionicons name="ribbon" size={20} color={COLORS.white} />
             </View>
             <View style={{ flex: 1, marginLeft: SPACING.md }}>
               <Text style={[styles.menuText, { color: colors.text }]}>Nexryde Shield</Text>
@@ -250,53 +366,10 @@ export default function DriverProfileScreen() {
         </View>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Grow & stay active</Text>
-          <TouchableOpacity
-            style={[styles.subscriptionCard, { borderColor: colors.border }]}
-            onPress={() => router.push('/driver/subscription')}
-            activeOpacity={0.85}
-          >
-            <View style={styles.subscriptionHeader}>
-              <View
-                style={[
-                  styles.subscriptionIcon,
-                  { backgroundColor: subscription?.status === 'active' ? COLORS.successSoft : COLORS.warningSoft },
-                ]}
-              >
-                <Ionicons
-                  name={subscription?.status === 'active' ? 'checkmark-circle' : 'alert-circle'}
-                  size={24}
-                  color={subscription?.status === 'active' ? COLORS.success : COLORS.warning}
-                />
-              </View>
-              <View style={styles.subscriptionInfo}>
-                <Text style={[styles.subscriptionTitle, { color: colors.text }]}>
-                  {subscription?.status === 'active' ? 'Driver subscription' : 'Subscription required'}
-                </Text>
-                <Text style={[styles.subscriptionSubtext, { color: colors.textSecondary }]}>
-                  {subscription?.status === 'active'
-                    ? `Active · renews ${new Date(subscription.end_date).toLocaleDateString()}`
-                    : 'Subscribe to go online and accept rides'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/wallet')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.warningSoft }]}>
-              <Ionicons name="people-outline" size={20} color={COLORS.warning} />
-            </View>
-            <View style={{ flex: 1, marginLeft: SPACING.md }}>
-              <Text style={[styles.menuText, { color: colors.text }]}>Invite & Earn</Text>
-              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Referrals & rewards</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Mode & access</Text>
           <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => setShowSwitchModal(true)}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="swap-horizontal" size={20} color={COLORS.info} />
+            <View style={[styles.menuIcon, { backgroundColor: '#6366F1' }]}>
+              <Ionicons name="swap-horizontal" size={20} color={COLORS.white} />
             </View>
             <View style={{ flex: 1, marginLeft: SPACING.md }}>
               <Text style={[styles.menuText, { color: colors.text }]}>Switch to Rider Mode</Text>
@@ -316,24 +389,24 @@ export default function DriverProfileScreen() {
         </TouchableOpacity>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & legal</Text>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & Legal</Text>
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="help-circle-outline" size={20} color={COLORS.gray600} />
+            <View style={[styles.menuIcon, { backgroundColor: '#F97316' }]}>
+              <Ionicons name="help-circle" size={20} color={COLORS.white} />
             </View>
             <Text style={[styles.menuText, { color: colors.text }]}>Help & Support</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
           <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="document-text-outline" size={20} color={COLORS.gray600} />
+            <View style={[styles.menuIcon, { backgroundColor: '#8B5CF6' }]}>
+              <Ionicons name="document-text" size={20} color={COLORS.white} />
             </View>
             <Text style={[styles.menuText, { color: colors.text }]}>Privacy Policy</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/terms-of-service')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.gray100 }]}>
-              <Ionicons name="reader-outline" size={20} color={COLORS.gray600} />
+            <View style={[styles.menuIcon, { backgroundColor: '#0EA5E9' }]}>
+              <Ionicons name="reader" size={20} color={COLORS.white} />
             </View>
             <Text style={[styles.menuText, { color: colors.text }]}>Terms of Service</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
@@ -343,8 +416,8 @@ export default function DriverProfileScreen() {
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
           <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Account actions</Text>
           <TouchableOpacity style={[styles.menuItem, styles.menuItemLast, styles.deleteRow]} onPress={handleDeleteAccount}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.errorSoft }]}>
-              <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+            <View style={[styles.menuIcon, { backgroundColor: COLORS.error }]}>
+              <Ionicons name="trash" size={20} color={COLORS.white} />
             </View>
             <Text style={[styles.menuText, { color: COLORS.error }]}>Delete Account</Text>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
@@ -352,23 +425,17 @@ export default function DriverProfileScreen() {
         </View>
 
         <Text style={styles.versionText}>NEXRYDE Driver v1.0.0</Text>
-      </ScrollView>
 
-      <View
-        style={[
-          styles.logoutBar,
-          {
-            backgroundColor: colors.background,
-            borderTopColor: colors.border,
-            paddingBottom: Math.max(insets.bottom, SPACING.md),
-          },
-        ]}
-      >
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+        <TouchableOpacity
+          style={styles.logoutButtonScroll}
+          onPress={handleLogout}
+          accessibilityLabel="Logout"
+          accessibilityRole="button"
+        >
           <Ionicons name="log-out-outline" size={20} color={COLORS.error} />
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       <Modal visible={showSwitchModal} animationType="slide" transparent onRequestClose={() => setShowSwitchModal(false)}>
         <View style={styles.modalOverlay}>
@@ -419,6 +486,10 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
+  emergencyBtn: {
+    marginHorizontal: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
   subscriptionCard: {
     marginHorizontal: SPACING.md,
     marginBottom: SPACING.sm,
@@ -460,6 +531,75 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   menuSubtext: { fontSize: FONT_SIZE.sm, marginTop: 2 },
+  scorePanel: {
+    marginTop: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    gap: SPACING.md,
+  },
+  scorePanelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: SPACING.md,
+  },
+  scorePanelTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+  },
+  scorePanelSubtitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  scoreTierBadge: {
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: COLORS.primary,
+  },
+  scoreTierBadgeText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.white,
+    textTransform: 'uppercase',
+  },
+  scoreBreakdownGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: SPACING.sm,
+  },
+  scoreMetricCard: {
+    width: '48%',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.sm,
+  },
+  scoreMetricLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: COLORS.gray500,
+  },
+  scoreMetricValue: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: COLORS.gray900,
+    marginTop: 4,
+  },
+  scorePerksTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '900',
+  },
+  scorePerkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  scorePerkText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    flex: 1,
+  },
   linkRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -470,12 +610,7 @@ const styles = StyleSheet.create({
     ...SHADOWS.sm,
   },
   linkRowText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700' },
-  logoutBar: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.sm,
-  },
-  logoutButton: {
+  logoutButtonScroll: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -483,6 +618,8 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
     gap: SPACING.sm,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
   },
   logoutText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.error },
   versionText: { fontSize: FONT_SIZE.xs, color: COLORS.gray400, textAlign: 'center', marginBottom: SPACING.sm },

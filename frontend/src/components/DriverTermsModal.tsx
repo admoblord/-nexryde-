@@ -252,7 +252,7 @@ export default function DriverTermsModal({ visible, onAccept, onDecline }: Drive
             <Text style={styles.text}>
               For questions or concerns:{'\n'}
               Email: admoblordgroup@gmail.com{'\n'}
-              Phone: +234 810 889 9392{'\n'}
+              Phone: +234 808 929 7811{'\n'}
               Website: www.admoblordgroup.com
             </Text>
           </View>

@@ -1,13 +1,40 @@
 """Community router - Groups, Messages, Polls, Pinned Messages, Events."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from datetime import datetime, timedelta, timezone
 import uuid
 import logging
+from typing import Optional
 
+from auth_guard import require_authenticated
 from database import db
 
 logger = logging.getLogger('server')
 community_router = APIRouter(prefix="/api/community", tags=["Community"])
+
+
+def _story_time_cutoff(hours: int = 24) -> str:
+    return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+
+
+def _story_has_expired(story: dict) -> bool:
+    expires_at = story.get("expires_at")
+    if not expires_at:
+        return False
+    expires_iso = _as_iso(expires_at)
+    if not expires_iso:
+        return False
+    return expires_iso < datetime.now(timezone.utc).isoformat()
+
+
+def _as_iso(value: object) -> str:
+    if isinstance(value, datetime):
+        dt = value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat()
+    if isinstance(value, str):
+        return value
+    return ""
 
 
 # ==================== COMMUNITY GROUPS ====================
@@ -33,6 +60,147 @@ async def get_community_groups():
     except Exception as e:
         logger.error(f"Get groups error: {str(e)}")
         return {"success": True, "groups": []}
+
+
+# ==================== STORIES FEED ====================
+
+@community_router.get("/stories")
+async def get_nexryde_stories(limit: int = 30):
+    try:
+        lim = max(1, min(limit, 100))
+        stories = await db.community_stories.find(
+            {
+                "created_at": {"$gte": _story_time_cutoff(24 * 14)},
+                "visibility": "public",
+            },
+            {"_id": 0, "liked_by": 0},
+        ).sort("created_at", -1).limit(lim).to_list(length=lim)
+        return {"success": True, "stories": stories}
+    except Exception as e:
+        logger.error(f"Get stories error: {str(e)}")
+        return {"success": True, "stories": []}
+
+
+@community_router.get("/stories/groups")
+async def get_nexryde_story_groups(request: Request):
+    actor_id = require_authenticated(request)
+    cutoff = _story_time_cutoff(24)
+    try:
+        stories = await db.community_stories.find(
+            {"created_at": {"$gte": cutoff}, "visibility": "public"},
+            {"_id": 0, "id": 1, "user_id": 1, "user_name": 1, "user_role": 1, "created_at": 1},
+        ).sort("created_at", -1).to_list(500)
+        seen_rows = await db.community_story_seen.find(
+            {"viewer_id": actor_id},
+            {"_id": 0, "story_id": 1},
+        ).to_list(2000)
+        seen_ids = {row.get("story_id") for row in seen_rows}
+        grouped = {}
+        for s in stories:
+            sid = s.get("user_id")
+            if not sid:
+                continue
+            created_at = _as_iso(s.get("created_at"))
+            bucket = grouped.get(sid) or {
+                "user_id": sid,
+                "user_name": s.get("user_name") or "NEXRYDE User",
+                "user_role": s.get("user_role") or "rider",
+                "latest_story_at": created_at,
+                "unseen_count": 0,
+                "total_count": 0,
+            }
+            bucket["total_count"] += 1
+            if s.get("id") not in seen_ids:
+                bucket["unseen_count"] += 1
+            if created_at > (bucket.get("latest_story_at") or ""):
+                bucket["latest_story_at"] = created_at
+            grouped[sid] = bucket
+        groups = sorted(grouped.values(), key=lambda x: x.get("latest_story_at") or "", reverse=True)
+        return {"success": True, "groups": groups}
+    except Exception as e:
+        logger.error(f"Get story groups error: {str(e)}")
+        return {"success": True, "groups": []}
+
+
+@community_router.post("/stories")
+async def create_nexryde_story(request: Request, body: dict):
+    actor_id = require_authenticated(request)
+    text = str(body.get("text") or "").strip()
+    media_type = str(body.get("media_type") or "text").strip().lower()
+    media_url = str(body.get("media_url") or "").strip() or None
+    media_data = str(body.get("media_data") or "").strip() or None
+    if media_type not in {"text", "image", "video"}:
+        raise HTTPException(status_code=400, detail="media_type must be text, image or video")
+    has_media = bool(media_url or media_data)
+    if not has_media and len(text) < 8:
+        raise HTTPException(status_code=400, detail="Story is too short")
+    if len(text) > 280:
+        raise HTTPException(status_code=400, detail="Story is too long")
+    if media_data and len(media_data) > 8_000_000:
+        raise HTTPException(status_code=413, detail="Story media payload too large")
+
+    user = await db.users.find_one({"id": actor_id}, {"_id": 0, "id": 1, "name": 1, "role": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    try:
+        duration_ms = int(body.get("duration_ms") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="duration_ms must be a valid number")
+    if duration_ms < 0:
+        raise HTTPException(status_code=400, detail="duration_ms cannot be negative")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    story = {
+        "id": str(uuid.uuid4()),
+        "user_id": actor_id,
+        "user_name": user.get("name") or "NEXRYDE User",
+        "user_role": user.get("role") or "rider",
+        "text": text,
+        "media_type": media_type,
+        "media_url": media_url,
+        "media_data": media_data,
+        "duration_ms": duration_ms,
+        "trip_mood": str(body.get("trip_mood") or "").strip() or None,
+        "story_type": str(body.get("story_type") or "moment").strip() or "moment",
+        "visibility": "public",
+        "likes": 0,
+        "liked_by": [],
+        "created_at": now_iso,
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+    }
+    await db.community_stories.insert_one(story)
+    story.pop("liked_by", None)
+    return {"success": True, "story": story}
+
+
+@community_router.post("/stories/{story_id}/like")
+async def like_nexryde_story(story_id: str, request: Request):
+    actor_id = require_authenticated(request)
+    story = await db.community_stories.find_one({"id": story_id}, {"_id": 0})
+    if not story:
+        raise HTTPException(status_code=404, detail="Story not found")
+    if actor_id in (story.get("liked_by") or []):
+        raise HTTPException(status_code=400, detail="Already liked")
+    await db.community_stories.update_one(
+        {"id": story_id},
+        {"$inc": {"likes": 1}, "$push": {"liked_by": actor_id}},
+    )
+    return {"success": True, "message": "Story liked"}
+
+
+@community_router.post("/stories/{story_id}/seen")
+async def mark_nexryde_story_seen(story_id: str, request: Request):
+    actor_id = require_authenticated(request)
+    story = await db.community_stories.find_one({"id": story_id}, {"_id": 0, "id": 1, "expires_at": 1})
+    if not story or _story_has_expired(story):
+        raise HTTPException(status_code=404, detail="Story not found")
+    await db.community_story_seen.update_one(
+        {"story_id": story_id, "viewer_id": actor_id},
+        {"$set": {"seen_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True,
+    )
+    return {"success": True}
 
 
 @community_router.get("/groups/{group_id}/messages")

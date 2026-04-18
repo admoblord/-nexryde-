@@ -58,6 +58,7 @@ from routers.trips import trips_router, set_fare_estimate_store, set_shared_func
 from routers.auth import auth_router, send_otp as router_send_otp, ensure_otp_indexes
 from routers.bidding import bidding_router
 from routers.payments import payments_router, set_payments_shared_functions, set_payments_fare_estimate_store
+from routers.realtime_dispatch import realtime_dispatch_router
 from routers.voice import voice_router
 from enforcement_system import enforcement_router, record_violation, check_user_status
 from driver_compliance import compliance_router, start_compliance_background_tasks
@@ -89,6 +90,19 @@ EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
+
+
+@app.get("/")
+async def service_root():
+    """Minimal root for probes; REST API is under /api."""
+    return {"service": "nexryde-api", "api": "/api", "docs": "/docs"}
+
+
+@app.get("/health")
+async def service_health_liveness():
+    """Liveness without Mongo — Cloud Run can probe before deferred startup completes."""
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
@@ -1314,6 +1328,39 @@ async def root():
 async def health_check():
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
 
+
+@api_router.get("/health/ready")
+async def health_ready():
+    """Liveness: process up. Readiness: MongoDB ping (for orchestrators)."""
+    try:
+        await db.command("ping")
+        return {"status": "ready", "database": "ok", "timestamp": datetime.utcnow().isoformat()}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"database_unavailable: {exc}")
+
+
+@api_router.get("/health/ops")
+async def health_ops(request: Request):
+    """
+    Optional metrics for on-call (not in OpenAPI discovery noise).
+    Header: X-NEXRYDE-OPS-KEY must match env NEXRYDE_OPS_KEY. Wrong/missing key -> 404.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        dlq_pending = await db.squad_webhook_dlq.count_documents({"status": "pending"})
+        dlq_replayed = await db.squad_webhook_dlq.count_documents({"status": {"$in": ["replayed", "auto_replayed"]}})
+    except Exception:
+        dlq_pending = dlq_replayed = -1
+    return {
+        "squad_webhook_dlq_pending": dlq_pending,
+        "squad_webhook_dlq_replayed_total": dlq_replayed,
+        "realtime": "websocket",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
 @api_router.get("/route-cache/stats")
 async def route_cache_stats():
     """Monitor route cache savings — each DB hit = 1 saved Google API call (~$0.007)."""
@@ -1390,6 +1437,7 @@ set_ai_intelligence_db(db)
 
 from routers.chat import chat_router, start_call_session_cleanup_task
 app.include_router(chat_router)
+app.include_router(realtime_dispatch_router)
 
 from routers.users import users_router
 app.include_router(users_router)
@@ -1406,36 +1454,100 @@ app.include_router(support_router)
 from routers.shield import shield_router
 app.include_router(shield_router)
 
+# ==================== SQUAD WEBHOOK DLQ AUTO-RETRY ====================
+async def _squad_webhook_dlq_autoreplay_loop():
+    """Replay DLQ payloads after a short delay (transient DB errors). Disable: SQUAD_DLQ_AUTOREPLAY=0."""
+    if os.environ.get("SQUAD_DLQ_AUTOREPLAY", "1").lower() in ("0", "false", "no"):
+        return
+    await asyncio.sleep(90)
+    while True:
+        try:
+            from routers.payments import _process_squad_webhook_payload
+
+            cutoff = datetime.utcnow() - timedelta(minutes=2)
+            cursor = (
+                db.squad_webhook_dlq.find(
+                    {"status": "pending", "attempts": {"$lt": 8}, "created_at": {"$lt": cutoff}}
+                )
+                .sort("created_at", 1)
+                .limit(5)
+            )
+            async for doc in cursor:
+                did = doc.get("id")
+                pl = doc.get("payload")
+                if not isinstance(pl, dict) or not did:
+                    continue
+                try:
+                    result = await _process_squad_webhook_payload(pl)
+                    await db.squad_webhook_dlq.update_one(
+                        {"id": did},
+                        {
+                            "$set": {
+                                "status": "auto_replayed",
+                                "auto_result": result,
+                                "auto_at": datetime.now(timezone.utc).isoformat(),
+                            },
+                            "$inc": {"attempts": 1},
+                        },
+                    )
+                except Exception as exc:
+                    await db.squad_webhook_dlq.update_one(
+                        {"id": did},
+                        {
+                            "$set": {"last_auto_error": str(exc)[:500]},
+                            "$inc": {"attempts": 1},
+                        },
+                    )
+        except Exception:
+            logger.exception("squad_webhook_dlq_autoreplay_tick")
+        await asyncio.sleep(300)
+
+
 # ==================== SEED ON STARTUP ====================
+async def _deferred_startup():
+    """
+    Mongo seeding, indexes, background loops.
+    Runs in a task so lifespan returns quickly — Cloud Run requires the process to listen on PORT promptly.
+    """
+    try:
+        await ensure_otp_indexes()
+        from routers.admin import seed_promo_codes as _seed_promos
+
+        await _seed_promos()
+        # Restore driver community data if missing.
+        await seed_community_groups(db)
+        await cleanup_test_community_events(db)
+        await seed_community_content(db)
+        # Seed base safety zones used by safety/community alerts.
+        await seed_danger_zones(db)
+        # Create TTL index for persistent route cache (auto-delete after 48 hours as safety margin)
+        try:
+            await db.route_cache_v2.create_index("cached_at", expireAfterSeconds=48 * 3600)
+        except Exception:
+            pass
+        # Wire up shared functions for trips router
+        set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+        set_fare_estimate_store(fare_estimate_store)
+        set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+        set_payments_fare_estimate_store(fare_estimate_store)
+        # Start periodic cleanup for masked call relay sessions.
+        start_call_session_cleanup_task()
+        # Start recurring driver compliance checks.
+        start_compliance_background_tasks()
+        # Ensure MongoDB indexes for query performance.
+        from db_indexes import ensure_indexes
+
+        await ensure_indexes(db)
+        asyncio.create_task(_squad_webhook_dlq_autoreplay_loop())
+        logger.info("Deferred startup completed successfully")
+    except Exception:
+        logger.exception("Deferred startup failed")
+
+
 @app.on_event("startup")
 async def seed_promo_codes():
-    """Seed default promo codes"""
-    await ensure_otp_indexes()
-    from routers.admin import seed_promo_codes as _seed_promos
-    await _seed_promos()
-    # Restore driver community data if missing.
-    await seed_community_groups(db)
-    await cleanup_test_community_events(db)
-    await seed_community_content(db)
-    # Seed base safety zones used by safety/community alerts.
-    await seed_danger_zones(db)
-    # Create TTL index for persistent route cache (auto-delete after 48 hours as safety margin)
-    try:
-        await db.route_cache_v2.create_index("cached_at", expireAfterSeconds=48 * 3600)
-    except Exception:
-        pass
-    # Wire up shared functions for trips router
-    set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
-    set_fare_estimate_store(fare_estimate_store)
-    set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
-    set_payments_fare_estimate_store(fare_estimate_store)
-    # Start periodic cleanup for masked call relay sessions.
-    start_call_session_cleanup_task()
-    # Start recurring driver compliance checks.
-    start_compliance_background_tasks()
-    # Ensure MongoDB indexes for query performance.
-    from db_indexes import ensure_indexes
-    await ensure_indexes(db)
+    """Schedule heavy startup work; return immediately so the server can bind to PORT."""
+    asyncio.create_task(_deferred_startup())
 
 ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
 
@@ -1451,39 +1563,62 @@ app.add_middleware(
 from starlette.middleware.base import BaseHTTPMiddleware
 from security_advanced import verify_jwt_token
 
-PUBLIC_PATH_PREFIXES = (
-    "/api/auth/", "/api/health", "/api/places/", "/docs", "/openapi.json",
-    "/admin", "/api/fare/estimate", "/api/squad/",
-)
-
-PROTECTED_PATH_PREFIXES = (
-    "/api/trips/", "/api/users/", "/api/drivers/", "/api/subscriptions/", "/api/subscription/",
-    "/api/wallet/", "/api/sos/", "/api/chat/", "/api/admin/",
-    "/api/rides/", "/api/community/", "/api/safety/", "/api/shield/",
-)
+from nexryde_api_paths import api_path_is_protected, api_path_is_public
 
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         from starlette.responses import JSONResponse
         path = request.url.path
-        if request.method == "OPTIONS" or any(path.startswith(p) for p in PUBLIC_PATH_PREFIXES) or path == "/api/" or path == "/":
+        if request.method == "OPTIONS" or api_path_is_public(path):
             return await call_next(request)
+
+        protected = api_path_is_protected(path)
         auth_header = request.headers.get("authorization", "")
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+        raw_token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else ""
+        has_bearer = bool(raw_token)
+        admin_ns = path.startswith("/api/admin")
+
+        if protected:
+            if has_bearer:
+                try:
+                    payload = verify_jwt_token(raw_token)
+                    request.state.user_id = payload.get("sub")
+                    request.state.user_role = payload.get("role")
+                except Exception:
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Token expired or invalid"},
+                    )
+                return await call_next(request)
+            if admin_ns:
+                return await call_next(request)
+            return JSONResponse(status_code=401, content={"detail": "Authentication required"})
+
+        if has_bearer:
             try:
-                payload = verify_jwt_token(token)
+                payload = verify_jwt_token(raw_token)
                 request.state.user_id = payload.get("sub")
                 request.state.user_role = payload.get("role")
             except Exception:
-                if any(path.startswith(p) for p in PROTECTED_PATH_PREFIXES):
-                    return JSONResponse(
-                        status_code=401,
-                        content={"detail": "Token expired"},
-                    )
+                pass
         return await call_next(request)
 
+
+class ResponseTimingMiddleware(BaseHTTPMiddleware):
+    """Optional X-Response-Time-ms for profiling (set NEXRYDE_RESPONSE_TIME_HEADER=1)."""
+
+    async def dispatch(self, request: Request, call_next):
+        if request.method == "OPTIONS":
+            return await call_next(request)
+        t0 = time.perf_counter()
+        response = await call_next(request)
+        if os.environ.get("NEXRYDE_RESPONSE_TIME_HEADER", "").lower() in ("1", "true", "yes"):
+            response.headers["X-Response-Time-ms"] = str(int((time.perf_counter() - t0) * 1000))
+        return response
+
+
 app.add_middleware(AuthMiddleware)
+app.add_middleware(ResponseTimingMiddleware)
 
 # Mount admin static files (only if directory exists)
 if ADMIN_DIR.exists():

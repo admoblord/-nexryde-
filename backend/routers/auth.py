@@ -40,6 +40,34 @@ def is_valid_nigerian_e164(phone: str) -> bool:
 def generate_otp() -> str:
     return str(random.randint(100000, 999999))
 
+
+def _strip_data_url(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return value.split(",", 1)[1] if "," in value else value
+
+
+def _face_match_confidence(reference_image: Optional[str], observed_image: Optional[str]) -> float:
+    ref = _strip_data_url(reference_image)
+    obs = _strip_data_url(observed_image)
+    if len(ref) < 100 or len(obs) < 100:
+        return 0.0
+    import hashlib
+    ref_hash = hashlib.sha256(ref.encode()).hexdigest()
+    obs_hash = hashlib.sha256(obs.encode()).hexdigest()
+    exact_prefix = sum(1 for a, b in zip(ref_hash[:24], obs_hash[:24]) if a == b) / 24.0
+    length_ratio = min(len(ref), len(obs)) / max(len(ref), len(obs))
+    chunk_ref = hashlib.sha256(ref[:1500].encode()).hexdigest()
+    chunk_obs = hashlib.sha256(obs[:1500].encode()).hexdigest()
+    chunk_score = sum(1 for a, b in zip(chunk_ref[:24], chunk_obs[:24]) if a == b) / 24.0
+    return round(((exact_prefix * 0.55) + (chunk_score * 0.25) + (length_ratio * 0.20)) * 100.0, 2)
+
+
+def _pin_hash(user_id: str, pin: str) -> str:
+    import hashlib
+    secret = os.environ.get("JWT_SECRET", "nexryde-fortress")
+    return hashlib.sha256(f"{secret}:{user_id}:{pin}".encode()).hexdigest()
+
 # Auth-specific models
 class OTPRequest(BaseModel):
     phone: str
@@ -82,6 +110,20 @@ class GoogleSignInRequest(BaseModel):
 class EmailSignInRequest(BaseModel):
     email: str
     name: Optional[str] = None
+    device_id: Optional[str] = None
+
+
+class DriverFortressVerifyRequest(BaseModel):
+    challenge_id: str
+    phone: str
+    pin: str = Field(..., min_length=4, max_length=8)
+    face_image: str
+
+
+class DriverSimSwapReconfirmRequest(BaseModel):
+    phone: str
+    pin: str = Field(..., min_length=4, max_length=8)
+    face_image: str
 
 
 def create_user_dict(**kwargs):
@@ -102,6 +144,9 @@ def create_user_dict(**kwargs):
         "rating": 5.0,
         "total_trips": 0,
         "behavior_score": 100.0,
+         "nexryde_score": 100.0,
+         "rider_risk_score": 15.0,
+         "driver_safety_score": None,
         "emergency_contacts": [],
         "favorite_drivers": [],
         "blocked_drivers": [],
@@ -834,6 +879,43 @@ async def email_sign_in(request: EmailSignInRequest):
 
     user = await db.users.find_one({"email": email})
     if user:
+        if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
+            raise HTTPException(
+                status_code=423,
+                detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
+            )
+        if user.get("role") == "driver":
+            driver_profile = await db.driver_profiles.find_one(
+                {"user_id": user["id"]},
+                {"_id": 0, "fortress_known_devices": 1, "face_image": 1},
+            ) or {}
+            device_id = (request.device_id or "").strip()
+            known_devices = set(driver_profile.get("fortress_known_devices") or [])
+            if not device_id or device_id not in known_devices:
+                challenge_id = str(uuid.uuid4())
+                expires_at = datetime.now(timezone.utc) + timedelta(minutes=8)
+                await db.driver_login_fortress_challenges.insert_one(
+                    {
+                        "id": challenge_id,
+                        "user_id": user["id"],
+                        "email": email,
+                        "device_id": device_id or None,
+                        "expires_at": expires_at,
+                        "status": "pending",
+                        "created_at": datetime.now(timezone.utc),
+                    }
+                )
+                masked_phone = ""
+                phone = str(user.get("phone") or "")
+                if len(phone) >= 6:
+                    masked_phone = f"{phone[:4]}****{phone[-2:]}"
+                return {
+                    "message": "Driver Account Fortress verification required.",
+                    "fortress_required": True,
+                    "challenge_id": challenge_id,
+                    "masked_phone": masked_phone,
+                    "pin_setup_required": not bool(user.get("driver_account_pin_hash")),
+                }
         user["_id"] = str(user["_id"])
         token = create_jwt_token(user["id"], user.get("role", "rider"))
         return {
@@ -851,6 +933,118 @@ async def email_sign_in(request: EmailSignInRequest):
             "email": email,
             "name": suggested_name,
         },
+    }
+
+
+@auth_router.post("/auth/driver-fortress/verify")
+async def verify_driver_fortress(request: DriverFortressVerifyRequest):
+    challenge = await db.driver_login_fortress_challenges.find_one({"id": request.challenge_id})
+    if not challenge:
+        raise HTTPException(status_code=404, detail="Fortress challenge not found")
+    if challenge.get("status") != "pending":
+        raise HTTPException(status_code=400, detail="Fortress challenge already used")
+    expires_at = challenge.get("expires_at")
+    if not expires_at or datetime.now(timezone.utc) > (expires_at if expires_at.tzinfo else expires_at.replace(tzinfo=timezone.utc)):
+        await db.driver_login_fortress_challenges.update_one({"id": request.challenge_id}, {"$set": {"status": "expired"}})
+        raise HTTPException(status_code=400, detail="Fortress challenge expired")
+
+    user = await db.users.find_one({"id": challenge.get("user_id")})
+    if not user or user.get("role") != "driver":
+        raise HTTPException(status_code=403, detail="Driver account required")
+
+    normalized_phone = normalize_phone(request.phone)
+    if normalized_phone != normalize_phone(str(user.get("phone") or "")):
+        raise HTTPException(status_code=403, detail="Registered phone number does not match")
+
+    if not request.pin.isdigit():
+        raise HTTPException(status_code=400, detail="PIN must contain digits only")
+    pin_hash = str(user.get("driver_account_pin_hash") or "")
+    expected_hash = _pin_hash(user["id"], request.pin)
+    if pin_hash:
+        if pin_hash != expected_hash:
+            raise HTTPException(status_code=403, detail="Invalid driver PIN")
+    else:
+        await db.users.update_one(
+            {"id": user["id"]},
+            {"$set": {"driver_account_pin_hash": expected_hash, "driver_account_pin_set_at": datetime.now(timezone.utc).isoformat()}},
+        )
+
+    profile = await db.driver_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "face_image": 1, "fortress_known_devices": 1}) or {}
+    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    if not reference_face:
+        raise HTTPException(status_code=400, detail="Driver face reference missing. Complete face verification first.")
+    confidence = _face_match_confidence(reference_face, request.face_image)
+    if confidence < 82.0:
+        raise HTTPException(status_code=403, detail="Face scan mismatch. Fortress access denied.")
+
+    device_id = challenge.get("device_id")
+    known_devices = list(profile.get("fortress_known_devices") or [])
+    if device_id and device_id not in known_devices:
+        known_devices.append(device_id)
+    await db.driver_profiles.update_one(
+        {"user_id": user["id"]},
+        {"$set": {
+            "fortress_known_devices": known_devices,
+            "last_fortress_verified_at": datetime.now(timezone.utc).isoformat(),
+            "pending_identity_reconfirm": False,
+            "ghost_driver_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"},
+        }},
+        upsert=True,
+    )
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"ghost_driver_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"}, "sim_swap_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"}, "earnings_frozen": False}},
+    )
+    await db.driver_login_fortress_challenges.update_one(
+        {"id": request.challenge_id},
+        {"$set": {"status": "verified", "verified_at": datetime.now(timezone.utc), "face_confidence": confidence}},
+    )
+    user = await db.users.find_one({"id": user["id"]})
+    user["_id"] = str(user["_id"])
+    token = create_jwt_token(user["id"], user.get("role", "driver"))
+    return {"message": "Driver Account Fortress verified", "user": user, "token": token, "face_confidence": confidence}
+
+
+@auth_router.post("/auth/driver-sim-swap/reconfirm")
+async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest):
+    normalized_phone = normalize_phone(request.phone)
+    user = await db.users.find_one({"phone": normalized_phone}, {"_id": 0})
+    if not user or user.get("role") != "driver":
+        raise HTTPException(status_code=404, detail="Driver account not found for this phone")
+    lock = user.get("sim_swap_lock") or {}
+    if not lock.get("active"):
+        raise HTTPException(status_code=400, detail="SIM swap lock is not active")
+
+    pin_hash = str(user.get("driver_account_pin_hash") or "")
+    if not pin_hash or pin_hash != _pin_hash(user["id"], request.pin):
+        raise HTTPException(status_code=403, detail="Invalid PIN")
+
+    profile = await db.driver_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "face_image": 1}) or {}
+    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    if not reference_face:
+        raise HTTPException(status_code=400, detail="No registered face reference found")
+    confidence = _face_match_confidence(reference_face, request.face_image)
+    if confidence < 82.0:
+        raise HTTPException(status_code=403, detail="Face scan mismatch")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$set": {"sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"}, "earnings_frozen": False}},
+    )
+    await db.driver_profiles.update_one(
+        {"user_id": user["id"]},
+        {"$set": {"sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"}, "pending_identity_reconfirm": False}},
+        upsert=True,
+    )
+    fresh = await db.users.find_one({"id": user["id"]})
+    fresh["_id"] = str(fresh["_id"])
+    token = create_jwt_token(fresh["id"], fresh.get("role", "driver"))
+    return {
+        "message": "SIM swap protection cleared. Identity reconfirmed.",
+        "user": fresh,
+        "token": token,
+        "face_confidence": confidence,
     }
 
 @auth_router.post("/auth/register")

@@ -76,7 +76,7 @@ export default function RideBidScreen() {
 
   useEffect(() => {
     if (bidId) {
-      const interval = setInterval(fetchOffers, 3000);
+      const interval = setInterval(fetchOffers, 8000);
       return () => clearInterval(interval);
     }
   }, [bidId]);
@@ -185,7 +185,7 @@ export default function RideBidScreen() {
             <Text style={styles.driverName}>{item.driver_name}</Text>
             <View style={styles.ratingRow}>
               <Ionicons name="star" size={14} color={COLORS.orange} />
-              <Text style={styles.rating}>{item.driver_rating?.toFixed(1) || '4.8'}</Text>
+              <Text style={styles.rating}>{Number(item.driver_rating ?? 4.8).toFixed(1)}</Text>
               {item.vehicle_type && (
                 <Text style={styles.vehicleType}> • {item.vehicle_type}</Text>
               )}

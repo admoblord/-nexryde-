@@ -9,6 +9,7 @@ export const COLORS = {
   primary: '#0F172A',           // Deep rich navy
   primaryDark: '#020617',       // Darker navy - almost black
   primaryLight: '#1E293B',      // Lighter navy
+  primarySoft: 'rgba(15, 23, 42, 0.08)',
   
   // Accent Green - BRIGHTER & MORE VIBRANT
   accentGreen: '#22C55E',       // Vibrant green (brighter)
@@ -51,6 +52,7 @@ export const COLORS = {
   lightSurfaceAlt: '#F1F5F9',   // Slightly darker
   lightBorder: '#E2E8F0',       // Subtle border
   lightBorderStrong: '#CBD5E1', // Stronger border
+  border: '#E2E8F0',
   lightTextPrimary: '#0F172A',  // Rich black text (maximum contrast)
   lightTextSecondary: '#334155', // Dark gray (better readability)
   lightTextMuted: '#64748B',    // Medium gray
@@ -70,6 +72,7 @@ export const COLORS = {
   accentLight: '#4ADE80',
   accentDark: '#16A34A',
   accentSoft: 'rgba(34, 197, 94, 0.15)',
+  accentMuted: '#86EFAC',
   
   // Semantic Colors - BRIGHTER
   success: '#22C55E',           // Vibrant green

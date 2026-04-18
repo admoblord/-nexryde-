@@ -5,161 +5,308 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { BRAND, LAYOUT } from '@/src/constants/designSystem';
 
-export default function DriverSafetyScreen() {
+type Row = { label: string; desc: string; route: string; icon: React.ComponentProps<typeof Ionicons>['name']; tone: 'safe' | 'danger' | 'info' };
+
+const QUICK: { label: string; route: string; icon: React.ComponentProps<typeof Ionicons>['name']; variant: 'danger' | 'police' | 'witness' | 'neutral' }[] = [
+  { label: 'Emergency', route: '/driver/trips', icon: 'warning', variant: 'danger' },
+  { label: 'Police', route: '/driver/trips', icon: 'shield', variant: 'police' },
+  { label: 'Witness', route: '/driver/trips', icon: 'eye', variant: 'witness' },
+  { label: 'Settings', route: '/settings', icon: 'settings', variant: 'neutral' },
+];
+
+const SECTIONS: { title: string; rows: Row[] }[] = [
+  {
+    title: 'Verification',
+    rows: [
+      {
+        label: 'Driver verification',
+        desc: 'License, vehicle & identity checks',
+        route: '/driver/verification',
+        icon: 'checkmark-done',
+        tone: 'safe',
+      },
+      {
+        label: 'Rider security code',
+        desc: 'Confirm rider before starting trip',
+        route: '/driver/verify-rider-code',
+        icon: 'key',
+        tone: 'safe',
+      },
+      {
+        label: 'Documents',
+        desc: 'Upload or refresh verification files',
+        route: '/driver/documents',
+        icon: 'document-text',
+        tone: 'info',
+      },
+    ],
+  },
+  {
+    title: 'Emergency',
+    rows: [
+      {
+        label: 'Active trip tools',
+        desc: 'Police connect, witness report & SOS during a trip',
+        route: '/driver/trips',
+        icon: 'flash',
+        tone: 'danger',
+      },
+      {
+        label: 'Safety alerts & zones',
+        desc: 'Area risk map and community reports',
+        route: '/driver/safety-alerts',
+        icon: 'map',
+        tone: 'danger',
+      },
+      {
+        label: 'Support',
+        desc: '24/7 help and incident reporting',
+        route: '/support',
+        icon: 'headset',
+        tone: 'info',
+      },
+    ],
+  },
+  {
+    title: 'Recording & trip proof',
+    rows: [
+      {
+        label: 'Trip operations',
+        desc: 'Receipts, ratings & trip timeline',
+        route: '/driver/trips',
+        icon: 'car',
+        tone: 'info',
+      },
+      {
+        label: 'Story mode',
+        desc: 'Optional trip notes & media',
+        route: '/driver/story-mode',
+        icon: 'mic',
+        tone: 'info',
+      },
+    ],
+  },
+  {
+    title: 'Account security',
+    rows: [
+      {
+        label: 'Bank & earnings vault',
+        desc: 'Biometric withdrawals & locked savings',
+        route: '/driver/bank',
+        icon: 'finger-print',
+        tone: 'safe',
+      },
+      {
+        label: 'Subscription & access',
+        desc: 'Payment status for trip offers',
+        route: '/driver/subscription',
+        icon: 'card',
+        tone: 'info',
+      },
+      {
+        label: 'App settings',
+        desc: 'Privacy, notifications & device',
+        route: '/settings',
+        icon: 'options',
+        tone: 'info',
+      },
+    ],
+  },
+];
+
+function toneIconBg(tone: Row['tone']) {
+  switch (tone) {
+    case 'danger':
+      return COLORS.errorSoft;
+    case 'safe':
+      return COLORS.successSoft;
+    default:
+      return COLORS.infoSoft;
+  }
+}
+
+function toneIconColor(tone: Row['tone']) {
+  switch (tone) {
+    case 'danger':
+      return COLORS.error;
+    case 'safe':
+      return COLORS.success;
+    default:
+      return COLORS.info;
+  }
+}
+
+function quickBg(v: (typeof QUICK)[number]['variant']) {
+  switch (v) {
+    case 'danger':
+      return COLORS.error;
+    case 'police':
+      return BRAND.navyDeep;
+    case 'witness':
+      return COLORS.warning;
+    default:
+      return COLORS.gray700;
+  }
+}
+
+export default function DriverSafetyHubScreen() {
+  const router = useRouter();
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Driver Safety</Text>
-        <Text style={styles.headerSubtext}>Your protection is our priority</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.hero}>
+        <Text style={styles.heroTitle}>Safety & security</Text>
+        <Text style={styles.heroSub}>Critical tools in one place — verification, emergencies, and account protection.</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Risk Alert Button */}
-        <TouchableOpacity style={styles.riskButton} activeOpacity={0.8}
-          onPress={() => Alert.alert(
-            'Report Risk',
-            'Report an unsafe situation or passenger behavior?',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Report Now', style: 'destructive', onPress: () => Alert.alert('Reported', 'Safety team has been notified. Stay safe.') },
-            ]
-          )}
-        >
-          <Ionicons name="warning" size={32} color={COLORS.white} />
-          <Text style={styles.riskText}>Risk Alert</Text>
-          <Text style={styles.riskSubtext}>Report unsafe passenger</Text>
-        </TouchableOpacity>
 
-        {/* Safety Features */}
-        <Text style={styles.sectionTitle}>Driver Protection</Text>
-        <View style={styles.featuresList}>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Rider Verification</Text>
-              <Text style={styles.featureDesc}>Rider identity and trip activity checks help keep trips safer</Text>
-            </View>
-          </View>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="recording" size={24} color={COLORS.info} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Trip Recording</Text>
-              <Text style={styles.featureDesc}>Audio protection during rides</Text>
-            </View>
-          </View>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.accentSoft }]}>
-              <Ionicons name="time" size={24} color={COLORS.accent} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Fatigue Monitoring</Text>
-              <Text style={styles.featureDesc}>Break reminders for safety</Text>
-            </View>
-          </View>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.errorSoft }]}>
-              <Ionicons name="call" size={24} color={COLORS.error} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>24/7 Support</Text>
-              <Text style={styles.featureDesc}>Emergency assistance anytime</Text>
-            </View>
-          </View>
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={styles.quickLabel}>Quick access</Text>
+        <Text style={styles.quickHint}>Police & witness actions work during an active trip (open Trips).</Text>
+        <View style={styles.quickRow}>
+          {QUICK.map(q => (
+            <TouchableOpacity
+              key={q.label}
+              style={styles.quickBtn}
+              onPress={() => router.push(q.route as any)}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel={q.label}
+            >
+              <View style={[styles.quickIconWrap, { backgroundColor: quickBg(q.variant) }]}>
+                <Ionicons name={q.icon} size={22} color={COLORS.white} />
+              </View>
+              <Text style={styles.quickText} numberOfLines={2}>
+                {q.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
+
+        {SECTIONS.map(section => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            {section.rows.map(row => (
+              <TouchableOpacity
+                key={row.route + row.label}
+                style={styles.row}
+                onPress={() => router.push(row.route as any)}
+                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel={row.label}
+              >
+                <View style={[styles.rowIcon, { backgroundColor: toneIconBg(row.tone) }]}>
+                  <Ionicons name={row.icon} size={22} color={toneIconColor(row.tone)} />
+                </View>
+                <View style={styles.rowBody}>
+                  <Text style={styles.rowTitle}>{row.label}</Text>
+                  <Text style={styles.rowDesc}>{row.desc}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.lightTextMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-  },
-  header: {
-    backgroundColor: COLORS.primary,
+  container: { flex: 1, backgroundColor: COLORS.gray50 },
+  hero: {
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.lg,
+    backgroundColor: BRAND.navyDeep,
     borderBottomLeftRadius: BORDER_RADIUS.xxl,
     borderBottomRightRadius: BORDER_RADIUS.xxl,
   },
-  headerTitle: {
+  heroTitle: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
     color: COLORS.white,
   },
-  headerSubtext: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.gray400,
+  heroSub: {
     marginTop: SPACING.xs,
-  },
-  content: {
-    padding: SPACING.lg,
-  },
-  riskButton: {
-    backgroundColor: COLORS.warning,
-    borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.xl,
-    alignItems: 'center',
-    marginBottom: SPACING.xl,
-    ...SHADOWS.lg,
-  },
-  riskText: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.white,
-    marginTop: SPACING.sm,
-  },
-  riskSubtext: {
     fontSize: FONT_SIZE.sm,
-    color: 'rgba(255,255,255,0.8)',
-    marginTop: SPACING.xs,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 20,
   },
+  scroll: { padding: SPACING.lg, paddingBottom: SPACING.huge },
+  quickLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.lightTextMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  quickHint: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.lightTextSecondary,
+    marginTop: 4,
+    marginBottom: SPACING.sm,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.xl,
+  },
+  quickBtn: {
+    flex: 1,
+    alignItems: 'center',
+    minHeight: LAYOUT.touchMin + 8,
+  },
+  quickIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  quickText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    textAlign: 'center',
+  },
+  section: { marginBottom: SPACING.lg },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.md,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.sm,
   },
-  featuresList: {
-    gap: SPACING.md,
-  },
-  featureCard: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    minHeight: LAYOUT.touchMin + 6,
     ...SHADOWS.sm,
   },
-  featureIcon: {
-    width: 48,
-    height: 48,
+  rowIcon: {
+    width: 44,
+    height: 44,
     borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: SPACING.md,
   },
-  featureContent: {
-    marginLeft: SPACING.md,
-    flex: 1,
-  },
-  featureTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-  },
-  featureDesc: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-  },
+  rowBody: { flex: 1 },
+  rowTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
+  rowDesc: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.lightTextSecondary, marginTop: 2 },
 });

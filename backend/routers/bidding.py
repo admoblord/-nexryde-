@@ -45,6 +45,25 @@ class BidRequest(BaseModel):
     dropoff_address: str
     ride_type: str = "economy"
 
+
+class SplitFareRequest(BaseModel):
+    rider_id: str
+    phones: List[str]
+
+
+def _normalize_phone(raw: str) -> str:
+    value = (raw or "").strip().replace(" ", "")
+    digits = ''.join(ch for ch in value if ch.isdigit())
+    if not digits:
+        return ""
+    if value.startswith('+'):
+        return f"+{digits}"
+    if digits.startswith('0'):
+        return f"+234{digits[1:]}"
+    if digits.startswith('234'):
+        return f"+{digits}"
+    return f"+234{digits}"
+
 @bidding_router.post("/rides/bid/create")
 async def create_ride_bid(request: BidRequest, rider_id: str, http_request: Request):
     """Rider creates a bid request with their offered price"""
@@ -190,29 +209,81 @@ async def get_scheduled_rides(rider_id: str, request: Request):
     """Get scheduled rides"""
     verify_owner_strict(request, rider_id)
     rides = await db.scheduled_rides.find({"rider_id": rider_id, "status": "scheduled"}).to_list(50)
-    return {"scheduled_rides": [{"id": r["id"], "pickup_address": r["pickup"]["address"], 
-                                 "scheduled_time": r["scheduled_time"].isoformat()} for r in rides]}
+    return {
+        "scheduled_rides": [
+            {
+                "id": r["id"],
+                "pickup_address": (r.get("pickup") or {}).get("address", ""),
+                "dropoff_address": (r.get("dropoff") or {}).get("address", ""),
+                "pickup_lat": (r.get("pickup") or {}).get("lat"),
+                "pickup_lng": (r.get("pickup") or {}).get("lng"),
+                "dropoff_lat": (r.get("dropoff") or {}).get("lat"),
+                "dropoff_lng": (r.get("dropoff") or {}).get("lng"),
+                "scheduled_time": r["scheduled_time"].isoformat(),
+                "status": r.get("status", "scheduled"),
+                "ride_type": r.get("ride_type", "economy"),
+            }
+            for r in rides
+        ]
+    }
+
+
+@bidding_router.delete("/rides/scheduled/{ride_id}/cancel")
+async def cancel_scheduled_ride(ride_id: str, rider_id: str, request: Request):
+    """Cancel a scheduled ride."""
+    verify_owner_strict(request, rider_id)
+    scheduled = await db.scheduled_rides.find_one({"id": ride_id, "rider_id": rider_id})
+    if not scheduled:
+        raise HTTPException(status_code=404, detail="Scheduled ride not found")
+    if scheduled.get("status") != "scheduled":
+        raise HTTPException(status_code=400, detail="Scheduled ride can no longer be cancelled")
+
+    await db.scheduled_rides.update_one(
+        {"id": ride_id},
+        {
+            "$set": {
+                "status": "cancelled",
+                "cancelled_at": datetime.utcnow(),
+            }
+        },
+    )
+    return {"success": True, "ride_id": ride_id, "status": "cancelled"}
 
 
 @bidding_router.post("/rides/{trip_id}/split-fare")
-async def split_fare(trip_id: str, rider_id: str, phones: List[str], request: Request):
+async def split_fare(trip_id: str, body: SplitFareRequest, request: Request):
     """Split fare with friends"""
+    rider_id = body.rider_id
     verify_owner_strict(request, rider_id)
     trip = await db.trips.find_one({"id": trip_id, "rider_id": rider_id})
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
-    
-    per_person = round(trip.get("fare", 0) / (len(phones) + 1), 2)
+
+    normalized_phones = []
+    seen = set()
+    for raw in body.phones or []:
+        phone = _normalize_phone(raw)
+        if not phone or phone in seen:
+            continue
+        seen.add(phone)
+        normalized_phones.append(phone)
+    if not normalized_phones:
+        raise HTTPException(status_code=400, detail="Provide at least one valid phone number")
+    if len(normalized_phones) > 4:
+        raise HTTPException(status_code=400, detail="Maximum 4 split-fare participants")
+
+    per_person = round(trip.get("fare", 0) / (len(normalized_phones) + 1), 2)
     split = {
         "id": str(uuid.uuid4()),
         "trip_id": trip_id,
+        "rider_id": rider_id,
         "total_fare": trip.get("fare", 0),
         "per_person": per_person,
-        "participants": [{"phone": p, "paid": False} for p in phones],
+        "participants": [{"phone": p, "paid": False} for p in normalized_phones],
         "created_at": datetime.utcnow()
     }
     await db.split_fares.insert_one(split)
-    return {"split_id": split["id"], "per_person": per_person, "num_participants": len(phones) + 1}
+    return {"split_id": split["id"], "per_person": per_person, "num_participants": len(normalized_phones) + 1}
 
 
 class PackageRequest(BaseModel):

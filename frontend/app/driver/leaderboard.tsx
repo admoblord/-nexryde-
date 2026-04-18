@@ -101,7 +101,7 @@ export default function LeaderboardScreen() {
       {/* First Place */}
       <View style={[styles.topThreeItem, styles.topThreeItemFirst]}>
         <View style={styles.crownBadge}>
-          <Ionicons name="crown" size={24} color="#FFD700" />
+          <Ionicons name={"crown" as any} size={24} color="#FFD700" />
         </View>
         <View style={[styles.topThreeAvatar, styles.goldAvatar]}>
           <Text style={styles.topThreeAvatarText}>{leaderboard[0]?.name?.charAt(0)}</Text>

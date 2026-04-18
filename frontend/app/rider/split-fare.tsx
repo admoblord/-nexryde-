@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TextInput,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -15,18 +16,31 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Contacts from 'expo-contacts';
 import * as SMS from 'expo-sms';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
+import { splitFare } from '@/src/services/api';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function SplitFareScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const user = useAppStore((s) => s.user);
+  const currentTrip = useAppStore((s) => s.currentTrip);
   const [totalFare] = useState(params.fare ? Number(params.fare) : 5000);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFriends, setSelectedFriends] = useState<any[]>([]);
   const [deviceContacts, setDeviceContacts] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [manualPhone, setManualPhone] = useState('');
+  const tripId = String(params.tripId || currentTrip?.id || '');
+  const mountedRef = useRef(true);
+  const sendInFlightRef = useRef(false);
 
   useEffect(() => {
+    mountedRef.current = true;
     loadContacts();
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const loadContacts = async () => {
@@ -49,7 +63,7 @@ export default function SplitFareScreen() {
             }))
             .slice(0, 50); // Limit to 50 contacts
           
-          setDeviceContacts(formatted);
+          if (mountedRef.current) setDeviceContacts(formatted);
         }
       } else {
         Alert.alert('Permission Denied', 'Cannot access contacts without permission');
@@ -60,53 +74,82 @@ export default function SplitFareScreen() {
   };
 
   const toggleFriend = (contact: any) => {
-    const exists = selectedFriends.find(f => f.id === contact.id);
-    if (exists) {
-      setSelectedFriends(selectedFriends.filter(f => f.id !== contact.id));
-    } else {
-      if (selectedFriends.length < 4) {
-        setSelectedFriends([...selectedFriends, contact]);
-      } else {
+    setSelectedFriends((prev) => {
+      const exists = prev.find((f) => f.id === contact.id);
+      if (exists) return prev.filter((f) => f.id !== contact.id);
+      if (prev.length >= 4) {
         Alert.alert('Limit Reached', 'Maximum 4 people can split fare');
+        return prev;
       }
-    }
+      return [...prev, contact];
+    });
   };
 
   const splitAmount = Math.ceil(totalFare / (selectedFriends.length + 1));
 
+  const normalizePhone = (value: string) => {
+    const clean = (value || '').trim();
+    const digits = clean.replace(/\D/g, '');
+    if (!digits) return '';
+    if (clean.startsWith('+')) return `+${digits}`;
+    if (digits.startsWith('0')) return `+234${digits.slice(1)}`;
+    if (digits.startsWith('234')) return `+${digits}`;
+    return `+234${digits}`;
+  };
+
+  const addManualPhone = () => {
+    const normalized = normalizePhone(manualPhone);
+    if (!normalized) {
+      Alert.alert('Invalid number', 'Enter a valid phone number.');
+      return;
+    }
+    if (selectedFriends.some((f) => normalizePhone(f.phone) === normalized)) {
+      Alert.alert('Already added', 'This phone number is already selected.');
+      return;
+    }
+    if (selectedFriends.length >= 4) {
+      Alert.alert('Limit Reached', 'Maximum 4 people can split fare');
+      return;
+    }
+    setSelectedFriends((prev) => [
+      ...prev,
+      { id: `manual-${Date.now()}`, name: normalized, phone: normalized, avatar: '+' },
+    ]);
+    setManualPhone('');
+    setShowAddModal(false);
+  };
+
   const handleSendRequest = async () => {
+    if (sendInFlightRef.current) return;
     if (selectedFriends.length === 0) {
       Alert.alert('Select Friends', 'Please select at least one person to split fare with');
       return;
     }
 
+    sendInFlightRef.current = true;
     setLoading(true);
     try {
-      // Check if SMS is available
-      const isAvailable = await SMS.isAvailableAsync();
-      
-      if (isAvailable) {
-        const phoneNumbers = selectedFriends.map(f => f.phone);
-        const message = `🚗 NEXRYDE Split Fare Request!\n\nYou've been invited to split a ride fare of ${CURRENCY}${totalFare.toLocaleString()}.\n\nYour share: ${CURRENCY}${splitAmount.toLocaleString()}\nTotal people: ${selectedFriends.length + 1}\n\nAccept this request in the NEXRYDE app to confirm payment.`;
-
-        await SMS.sendSMSAsync(phoneNumbers, message);
-        
-        Alert.alert(
-          '✅ Request Sent!',
-          `SMS invitations sent to ${selectedFriends.length} ${selectedFriends.length === 1 ? 'person' : 'people'}. Each will pay ${CURRENCY}${splitAmount.toLocaleString()}.`,
-          [{ text: 'Done', onPress: () => router.back() }]
-        );
-      } else {
-        Alert.alert(
-          'SMS Not Available',
-          'SMS is not available on this device. Split fare requests will be sent via the app.',
-          [{ text: 'OK', onPress: () => router.back() }]
-        );
+      if (!tripId || !user?.id) {
+        Alert.alert('Trip Required', 'Open split fare from an active trip.');
+        return;
       }
+      const phoneNumbers = selectedFriends.map((f) => normalizePhone(f.phone)).filter(Boolean);
+      await splitFare(tripId, user.id, phoneNumbers);
+      const isSmsAvailable = await SMS.isAvailableAsync();
+      if (isSmsAvailable) {
+        const message = `NEXRYDE split fare request: total ${CURRENCY}${totalFare.toLocaleString()}, your share ${CURRENCY}${splitAmount.toLocaleString()}. Open NEXRYDE app to accept.`;
+        await SMS.sendSMSAsync(phoneNumbers, message);
+      }
+      Alert.alert(
+        'Split Request Sent',
+        `Request sent to ${phoneNumbers.length} participant${phoneNumbers.length > 1 ? 's' : ''}.`,
+        [{ text: 'Done', onPress: () => router.back() }]
+      );
     } catch (error) {
       console.error('Send SMS error:', error);
-      Alert.alert('Error', 'Failed to send split fare request. Please try again.');
+      Alert.alert('Error', 'Failed to create split fare request. Please try again.');
     } finally {
+      sendInFlightRef.current = false;
       setLoading(false);
     }
   };
@@ -194,17 +237,40 @@ export default function SplitFareScreen() {
         ))}
 
         {/* Add by Phone */}
-        <TouchableOpacity style={styles.addButton}>
+        <TouchableOpacity style={styles.addButton} onPress={() => setShowAddModal(true)}>
           <Ionicons name="add-circle" size={24} color={COLORS.primary} />
           <Text style={styles.addButtonText}>Add by Phone Number</Text>
         </TouchableOpacity>
 
         {/* Send Request Button */}
-        <TouchableOpacity style={styles.sendButton} onPress={handleSendRequest}>
+        <TouchableOpacity style={styles.sendButton} onPress={handleSendRequest} disabled={loading}>
           <Ionicons name="send" size={20} color={COLORS.white} />
-          <Text style={styles.sendButtonText}>Send Split Request</Text>
+          <Text style={styles.sendButtonText}>{loading ? 'Sending...' : 'Send Split Request'}</Text>
         </TouchableOpacity>
       </ScrollView>
+      <Modal visible={showAddModal} transparent animationType="slide" onRequestClose={() => setShowAddModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <Text style={styles.modalTitle}>Add Phone Number</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="080..., +234..."
+              value={manualPhone}
+              onChangeText={setManualPhone}
+              keyboardType="phone-pad"
+              placeholderTextColor={COLORS.gray400}
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity style={styles.modalCancel} onPress={() => setShowAddModal(false)}>
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.modalAdd} onPress={addManualPhone}>
+                <Text style={styles.modalAddText}>Add</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -374,4 +440,45 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.white,
   },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  modalCard: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xl,
+    borderTopRightRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+  },
+  modalTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.gray800,
+    marginBottom: SPACING.md,
+  },
+  modalInput: {
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: COLORS.gray200,
+    padding: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.gray800,
+  },
+  modalActions: {
+    marginTop: SPACING.md,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: SPACING.sm,
+  },
+  modalCancel: { paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
+  modalCancelText: { color: COLORS.gray500, fontWeight: '700' },
+  modalAdd: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  modalAddText: { color: COLORS.white, fontWeight: '800' },
 });

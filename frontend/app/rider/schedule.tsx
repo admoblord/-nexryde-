@@ -12,7 +12,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -41,14 +41,29 @@ interface ScheduledRide {
   id: string;
   pickup_address: string;
   dropoff_address: string;
+  pickup_lat?: number;
+  pickup_lng?: number;
+  dropoff_lat?: number;
+  dropoff_lng?: number;
   scheduled_time: string;
   status: string;
   fare_estimate?: number;
+  ride_type?: string;
 }
 
 export default function ScheduleScreen() {
   const router = useRouter();
   const { user } = useAppStore();
+  const params = useLocalSearchParams<{
+    pickup?: string;
+    dropoff?: string;
+    pickupLat?: string;
+    pickupLng?: string;
+    dropoffLat?: string;
+    dropoffLng?: string;
+    rideType?: string;
+    fareEstimate?: string;
+  }>();
   
   const [date, setDate] = useState(new Date(Date.now() + 24 * 60 * 60 * 1000)); // Tomorrow
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -57,6 +72,10 @@ export default function ScheduleScreen() {
   const [loading, setLoading] = useState(false);
   const [pickup, setPickup] = useState('Select Pickup Location');
   const [dropoff, setDropoff] = useState('Select Drop-off Location');
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [dropoffCoords, setDropoffCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [rideType, setRideType] = useState('economy');
+  const [fareEstimate, setFareEstimate] = useState<number | null>(null);
 
   useEffect(() => {
     if (user?.id) {
@@ -64,10 +83,28 @@ export default function ScheduleScreen() {
     }
   }, [user?.id]);
 
+  useEffect(() => {
+    if (params.pickup) setPickup(String(params.pickup));
+    if (params.dropoff) setDropoff(String(params.dropoff));
+    if (params.pickupLat && params.pickupLng) {
+      setPickupCoords({ lat: Number(params.pickupLat), lng: Number(params.pickupLng) });
+    }
+    if (params.dropoffLat && params.dropoffLng) {
+      setDropoffCoords({ lat: Number(params.dropoffLat), lng: Number(params.dropoffLng) });
+    }
+    if (params.rideType) setRideType(String(params.rideType));
+    if (params.fareEstimate) {
+      const parsed = Number(params.fareEstimate);
+      setFareEstimate(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
+    }
+  }, [params.pickup, params.dropoff, params.pickupLat, params.pickupLng, params.dropoffLat, params.dropoffLng, params.rideType, params.fareEstimate]);
+
   const loadScheduledRides = async () => {
     if (!user?.id) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${user.id}`);
+      const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${user.id}`, {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       if (data.scheduled_rides) {
         setScheduledRides(data.scheduled_rides);
@@ -87,26 +124,38 @@ export default function ScheduleScreen() {
       Alert.alert('Missing Information', 'Please select pickup and drop-off locations');
       return;
     }
+    if (!pickupCoords || !dropoffCoords) {
+      Alert.alert('Location needed', 'Open ride booking and select the route from the map/search suggestions before scheduling.');
+      return;
+    }
+    if (date.getTime() < Date.now() + 30 * 60 * 1000) {
+      Alert.alert('Too soon', 'Scheduled rides must be at least 30 minutes ahead.');
+      return;
+    }
 
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/schedule`, {
+      const res = await fetch(`${BACKEND_URL}/api/rides/schedule?rider_id=${encodeURIComponent(user.id)}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          user_id: user.id,
+          pickup_lat: pickupCoords.lat,
+          pickup_lng: pickupCoords.lng,
           pickup_address: pickup,
+          dropoff_lat: dropoffCoords.lat,
+          dropoff_lng: dropoffCoords.lng,
           dropoff_address: dropoff,
           scheduled_time: date.toISOString(),
+          ride_type: rideType,
         }),
       });
       const data = await res.json();
-      if (data.scheduled_ride_id) {
+      if (res.ok && data.scheduled_ride_id) {
         Alert.alert('Success! 🎉', 'Your ride has been scheduled', [
           { text: 'OK', onPress: () => loadScheduledRides() }
         ]);
-        setPickup('Select Pickup Location');
-        setDropoff('Select Drop-off Location');
+      } else {
+        Alert.alert('Error', typeof data?.detail === 'string' ? data.detail : 'Failed to schedule ride');
       }
     } catch (e) {
       console.error('Schedule ride error:', e);
@@ -126,8 +175,9 @@ export default function ScheduleScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              await fetch(`${BACKEND_URL}/api/rides/scheduled/${rideId}/cancel`, {
+              await fetch(`${BACKEND_URL}/api/rides/scheduled/${rideId}/cancel?rider_id=${encodeURIComponent(user?.id || '')}`, {
                 method: 'DELETE',
+                headers: getAuthHeaders(),
               });
               loadScheduledRides();
             } catch (e) {
@@ -233,6 +283,17 @@ export default function ScheduleScreen() {
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <View style={styles.heroStrip}>
+            <View>
+              <Text style={styles.heroStripTitle}>Advanced Schedule</Text>
+              <Text style={styles.heroStripSub}>Plan ahead with premium pickup confidence and cleaner trip setup.</Text>
+            </View>
+            <View style={styles.heroStripBadge}>
+              <Ionicons name="sparkles-outline" size={14} color={COLORS.blue} />
+              <Text style={styles.heroStripBadgeText}>2026</Text>
+            </View>
+          </View>
+
           {/* Schedule Form Card */}
           <View style={styles.formCard}>
             <View style={styles.formHeader}>
@@ -247,6 +308,12 @@ export default function ScheduleScreen() {
                 <Text style={styles.formDesc}>Set your pickup time up to 7 days ahead</Text>
               </View>
             </View>
+            <View style={styles.contextCard}>
+              <Text style={styles.contextTitle}>Best for airport, church and work runs</Text>
+              <Text style={styles.contextSubtitle}>
+                Lock in your route early for those high-demand morning pickups.
+              </Text>
+            </View>
 
             {/* Location Inputs */}
             <TouchableOpacity 
@@ -260,6 +327,19 @@ export default function ScheduleScreen() {
               </View>
               <Ionicons name="chevron-forward" size={20} color={COLORS.textMuted} />
             </TouchableOpacity>
+
+            <View style={styles.routeMetaRow}>
+              <View style={styles.metaChip}>
+                <Ionicons name="car-outline" size={15} color={COLORS.blue} />
+                <Text style={styles.metaChipText}>{rideType.replace(/_/g, ' ')}</Text>
+              </View>
+              {fareEstimate != null && fareEstimate > 0 && (
+                <View style={styles.metaChip}>
+                  <Ionicons name="cash-outline" size={15} color={COLORS.green} />
+                  <Text style={styles.metaChipText}>Est. ₦{fareEstimate.toLocaleString()}</Text>
+                </View>
+              )}
+            </View>
 
             <TouchableOpacity 
               style={styles.locationInput}
@@ -449,6 +529,49 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+    paddingBottom: 28,
+  },
+  heroStrip: {
+    backgroundColor: '#EEF4FF',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#D6E6FF',
+    padding: 14,
+    marginBottom: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  heroStripTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: COLORS.primary,
+  },
+  heroStripSub: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: COLORS.textSecondary,
+    maxWidth: width * 0.62,
+  },
+  heroStripBadge: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderRadius: 999,
+    backgroundColor: '#DBEAFE',
+    borderWidth: 1,
+    borderColor: '#93C5FD',
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  heroStripBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: COLORS.blue,
+    letterSpacing: 0.5,
   },
   formCard: {
     backgroundColor: COLORS.card,
@@ -457,9 +580,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    elevation: 6,
   },
   formHeader: {
     flexDirection: 'row',
@@ -484,6 +607,25 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
+  contextCard: {
+    backgroundColor: '#F5F3FF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#DDD6FE',
+  },
+  contextTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    marginBottom: 4,
+  },
+  contextSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    color: COLORS.textSecondary,
+  },
   locationInput: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -492,6 +634,31 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 12,
     gap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  routeMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 16,
+  },
+  metaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: COLORS.background,
+    borderWidth: 1,
+    borderColor: COLORS.border,
+  },
+  metaChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.textPrimary,
+    textTransform: 'capitalize',
   },
   locationDot: {
     width: 14,
@@ -526,6 +693,8 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 14,
     gap: 12,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   dateTimeIcon: {
     width: 44,

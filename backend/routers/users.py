@@ -10,9 +10,24 @@ import base64
 import re
 
 from database import db
+from user_scores import build_trust_summary
 
 logger = logging.getLogger('server')
 users_router = APIRouter(prefix="/api", tags=["Users"])
+
+
+def _normalize_phone(raw: str) -> str:
+    value = (raw or "").strip().replace(" ", "")
+    digits = ''.join(ch for ch in value if ch.isdigit())
+    if not digits:
+        return ""
+    if value.startswith('+'):
+        return f"+{digits}"
+    if digits.startswith('0'):
+        return f"+234{digits[1:]}"
+    if digits.startswith('234'):
+        return f"+{digits}"
+    return f"+234{digits}"
 
 # ==================== MODELS ====================
 
@@ -70,6 +85,30 @@ async def get_user(user_id: str, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     user["_id"] = str(user["_id"])
     return user
+
+
+@users_router.get("/users/{user_id}/trust-summary")
+async def get_user_trust_summary(user_id: str, request: Request):
+    verify_owner_strict(request, user_id)
+    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    driver_profile = None
+    if user.get("role") == "driver":
+        driver_profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    summary = build_trust_summary(user, driver_profile)
+    await db.users.update_one(
+        {"id": user_id},
+        {
+            "$set": {
+                "nexryde_score": summary["nexryde_score"],
+                "rider_risk_score": summary["rider_risk_score"],
+                "driver_safety_score": summary["driver_safety_score"],
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+        },
+    )
+    return summary
 
 @users_router.get("/users/phone/{phone}")
 async def get_user_by_phone(phone: str, request: Request):
@@ -322,7 +361,11 @@ async def get_emergency_contacts(user_id: str, request: Request):
 @users_router.delete("/users/{user_id}/emergency-contacts/{contact_phone}")
 async def remove_emergency_contact(user_id: str, contact_phone: str, request: Request):
     verify_owner_strict(request, user_id)
-    await db.users.update_one({"id": user_id}, {"$pull": {"emergency_contacts": {"phone": contact_phone}}})
+    normalized = _normalize_phone(contact_phone)
+    await db.users.update_one(
+        {"id": user_id},
+        {"$pull": {"emergency_contacts": {"phone": {"$in": [contact_phone, normalized]}}}},
+    )
     return {"message": "Emergency contact removed"}
 
 # ==================== FAVORITE/BLOCKED DRIVERS ====================
@@ -359,7 +402,7 @@ async def get_favorite_drivers(user_id: str, request: Request):
                 "rating": driver.get("rating", 5.0),
                 "total_trips": trips_count,
                 "vehicle_model": profile.get("vehicle_model") if profile else None,
-                "vehicle_plate": profile.get("vehicle_plate") if profile else None,
+                "vehicle_plate": (profile.get("vehicle_plate") or profile.get("plate_number")) if profile else None,
                 "vehicle_color": profile.get("vehicle_color") if profile else None,
                 "is_online": profile.get("is_online", False) if profile else False,
             })

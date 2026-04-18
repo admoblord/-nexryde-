@@ -23,6 +23,7 @@ interface FleetDriver {
   lng: number;
   status: string;
   trips_today: number;
+  distance_km?: number;
 }
 
 export default function FleetTrackerScreen() {
@@ -147,7 +148,9 @@ export default function FleetTrackerScreen() {
                 <View style={styles.driverMeta}>
                   <View style={styles.metaItem}>
                     <Ionicons name="navigate" size={14} color="#94A3B8" />
-                    <Text style={styles.metaText}>{driver.distance_km ? `${driver.distance_km.toFixed(1)}km away` : 'Nearby'}</Text>
+                    <Text style={styles.metaText}>
+                      {driver.distance_km != null ? `${Number(driver.distance_km).toFixed(1)}km away` : 'Nearby'}
+                    </Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Ionicons name="car" size={14} color="#94A3B8" />

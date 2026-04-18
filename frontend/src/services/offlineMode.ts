@@ -17,7 +17,7 @@ import { BACKEND_URL } from '@/src/services/api';
 // Offline queue for pending requests
 interface QueuedRequest {
   id: string;
-  type: 'trip_request' | 'location_update' | 'profile_update';
+  type: 'trip_request' | 'driver_accept_trip' | 'location_update' | 'profile_update';
   data: any;
   timestamp: number;
   retries: number;
@@ -110,11 +110,15 @@ export const syncQueuedRequests = async (): Promise<void> => {
       try {
         // Process based on type
         if (request.type === 'trip_request') {
+          // Include Authorization if the queued payload carried a token (required when JWT middleware applies).
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          const t = (request.data as { auth_token?: string })?.auth_token;
+          if (t) headers.Authorization = `Bearer ${t}`;
           const response = await fetch(
             `${BACKEND_URL}/api/trips/request?rider_id=${request.data.rider_id}`,
             {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers,
               body: JSON.stringify(request.data),
             }
           );
@@ -127,6 +131,33 @@ export const syncQueuedRequests = async (): Promise<void> => {
             );
           } else {
             throw new Error('Request failed');
+          }
+        }
+        if (request.type === 'driver_accept_trip') {
+          const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+          const t = (request.data as { auth_token?: string })?.auth_token;
+          if (t) headers.Authorization = `Bearer ${t}`;
+          const response = await fetch(
+            `${BACKEND_URL}/api/trips/${request.data.trip_id}/accept`,
+            {
+              method: 'PUT',
+              headers,
+              body: JSON.stringify({
+                driver_id: request.data.driver_id,
+                offer_id: request.data.offer_id,
+                proposed_fare: request.data.proposed_fare,
+              }),
+            }
+          );
+
+          if (response.ok) {
+            console.log(`✅ Synced driver accept: ${request.id}`);
+            Alert.alert(
+              'Ride Accepted',
+              'Your queued ride acceptance was sent successfully after network recovery.'
+            );
+          } else {
+            throw new Error('Driver accept failed');
           }
         }
         // Add other request types as needed
@@ -245,18 +276,41 @@ export const getRecentLocations = async (): Promise<any[]> => {
  */
 export const createOfflineBooking = async (
   riderId: string,
-  bookingData: any
+  bookingData: any,
+  authToken?: string | null
 ): Promise<void> => {
-  // Queue the trip request
   await queueRequest('trip_request', {
     rider_id: riderId,
     ...bookingData,
+    ...(authToken ? { auth_token: authToken } : {}),
   });
   
   // Show confirmation
   Alert.alert(
     '📱 Offline Mode',
     'No network detected. Your ride request has been saved and will be sent automatically when you\'re back online.',
+    [{ text: 'OK' }]
+  );
+};
+
+export const queueDriverRideAcceptance = async (
+  tripId: string,
+  data: {
+    driver_id: string;
+    offer_id?: string;
+    proposed_fare: number;
+  },
+  authToken?: string | null
+): Promise<void> => {
+  await queueRequest('driver_accept_trip', {
+    trip_id: tripId,
+    ...data,
+    ...(authToken ? { auth_token: authToken } : {}),
+  });
+
+  Alert.alert(
+    'Offline Mode',
+    'Low network detected. Your ride acceptance has been saved and will sync automatically once the network is stable.',
     [{ text: 'OK' }]
   );
 };

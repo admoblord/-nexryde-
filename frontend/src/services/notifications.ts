@@ -7,13 +7,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
 });
 
 export interface PushNotificationData {
-  type: 'ride_request' | 'driver_assigned' | 'driver_arriving' | 'trip_started' | 'trip_completed' | 'earnings_update' | 'challenge_complete' | 'subscription_expiring';
+  type:
+    | 'ride_request'
+    | 'driver_assigned'
+    | 'driver_arriving'
+    | 'trip_started'
+    | 'trip_completed'
+    | 'earnings_update'
+    | 'challenge_complete'
+    | 'subscription_expiring'
+    | 'geo_fence_deviation'
+    | 'geo_fence_explained'
+    | 'speed_spike_alert'
+    | 'safe_arrival_checkin'
+    | 'feature_update';
   title: string;
   body: string;
   data?: Record<string, any>;
@@ -89,8 +104,11 @@ class NotificationService {
   // Schedule a local notification
   async scheduleLocalNotification(notification: PushNotificationData, delaySeconds: number = 0) {
     try {
-      const trigger = delaySeconds > 0 
-        ? { seconds: delaySeconds } 
+      const trigger: Notifications.NotificationTriggerInput | null = delaySeconds > 0
+        ? {
+            type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL as Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+            seconds: delaySeconds,
+          }
         : null;
 
       await Notifications.scheduleNotificationAsync({

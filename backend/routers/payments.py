@@ -1,7 +1,9 @@
 """Payments Router - Wallet, subscriptions, fare, tiers, promos, receipts for NEXRYDE."""
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
-from typing import Optional, List
+from fastapi import APIRouter, Body, HTTPException, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Any, Optional, List
+from pymongo.errors import DuplicateKeyError
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 import logging
@@ -18,6 +20,15 @@ import hmac
 
 from openai import OpenAI
 
+from squad_checkout_parse import (
+    extract_squad_checkout_url,
+    extract_squad_field,
+    generate_nexryde_squad_transaction_ref,
+    normalize_squad_transaction_ref,
+    sanitize_squad_transaction_initiate_payload,
+    squad_dynamic_va_response_ok,
+    squad_initiate_response_ok,
+)
 from database import db
 from smart_pricing import (
     area_summary_line,
@@ -34,7 +45,30 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 PAYSTACK_SECRET_KEY = os.environ.get("PAYSTACK_SECRET_KEY", "")
 SQUAD_SECRET_KEY = os.environ.get("SQUAD_SECRET_KEY", "")
 SQUAD_PUBLIC_KEY = os.environ.get("SQUAD_PUBLIC_KEY", "")
+# Squad live: SQUAD_BASE_URL (default https://api-d.squadco.com), SQUAD_SECRET_KEY, SQUAD_PUBLIC_KEY.
+# Optional: SQUAD_INITIATE_URL if checkout POST host differs; NEXRYDE_PUBLIC_BACKEND_URL for CallBack_URL.
+# Live: https://api-d.squadco.com — set SQUAD_BASE_URL explicitly for production (no sandbox).
 SQUAD_BASE_URL = os.environ.get("SQUAD_BASE_URL", "https://api-d.squadco.com").rstrip("/")
+# Optional override if Squad uses a different host for inline checkout initiate.
+SQUAD_INITIATE_URL = (os.environ.get("SQUAD_INITIATE_URL") or "").rstrip("/")
+NEXRYDE_PUBLIC_URL = (
+    os.environ.get("NEXRYDE_PUBLIC_BACKEND_URL")
+    or os.environ.get("NEXRYDE_BACKEND_URL")
+    or os.environ.get("PUBLIC_API_URL")
+    or ""
+).rstrip("/")
+
+def _squad_dynamic_va_duration_seconds() -> int:
+    """Squad dynamic VA `duration` (seconds); minimum 60."""
+    try:
+        v = int(os.environ.get("SQUAD_DYNAMIC_VA_DURATION_SECONDS", "86400") or "86400")
+    except (TypeError, ValueError):
+        v = 86400
+    return max(60, v)
+
+
+def _squad_dynamic_va_pass_charge() -> bool:
+    return os.environ.get("SQUAD_DYNAMIC_VA_PASS_CHARGE", "").strip().lower() in ("1", "true", "yes")
 
 # Import shared functions (set at startup)
 _get_directions_fn = None
@@ -84,8 +118,8 @@ SUBSCRIPTION_CONFIG = {
     "currency": "NGN",
     "bank_details": {
         "provider": "SquadCo",
-        "mode": "virtual_account_only",
-        "message": "Virtual account is generated per driver. No manual company transfer account.",
+        "mode": "virtual_account_and_checkout",
+        "message": "Each driver gets a dedicated virtual account (bank transfer) and optional Squad card checkout. Activation is automatic after verified payment.",
     }
 }
 
@@ -147,6 +181,7 @@ class CreateVirtualAccountRequest(BaseModel):
     driver_id: str
     plan_amount: float
     tier: Optional[str] = "city_rider"
+    model_config = ConfigDict(extra="forbid")
 
 class FareEstimateRequest(BaseModel):
     pickup_lat: float
@@ -176,6 +211,35 @@ class GracePeriodRequest(BaseModel):
 class CreateSubscriptionRequest(BaseModel):
     payment_method: Optional[str] = None
     tier: Optional[str] = None
+
+
+class SubscriptionCheckoutInitRequest(BaseModel):
+    """Only tier is accepted; transaction_ref must never be sent by clients."""
+
+    tier: Optional[str] = "city_rider"
+    model_config = ConfigDict(extra="forbid")
+
+
+class RiderWalletTopupAmountBody(BaseModel):
+    """Rider (or any user) wallet top-up via Squad — amount in NGN. Ref is always server-generated."""
+
+    amount: float = Field(..., gt=0)
+    replace_pending: bool = False
+    model_config = ConfigDict(extra="forbid")
+
+
+class VerifyRiderWalletBody(BaseModel):
+    """Optional reference; defaults to latest pending checkout for this user."""
+
+    transaction_ref: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
+
+
+class VerifySubscriptionCheckoutBody(BaseModel):
+    """Optional Squad ref; defaults to latest pending subscription checkout for this driver."""
+
+    transaction_ref: Optional[str] = None
+    model_config = ConfigDict(extra="forbid")
 
 
 CITY_RIDER_PRICES = {
@@ -220,6 +284,52 @@ async def _assert_driver_account(driver_id: str):
     if profile or (user and user.get("role") == "driver"):
         return
     raise HTTPException(status_code=403, detail="Driver account required")
+
+
+async def _assert_wallet_user_exists(user_id: str):
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+
+async def _rider_wallet_topup_idempotent(
+    user_id: str,
+    amount: float,
+    reference: str,
+    payment_method: str,
+    verify_result: dict,
+    webhook_payload: Optional[dict] = None,
+) -> dict:
+    """Credit wallet once per reference; used by Squad webhook and verify-pending."""
+    existing = await db.transactions.find_one(
+        {
+            "user_id": user_id,
+            "reference": reference,
+            "type": {"$in": ["topup", "credit"]},
+        }
+    )
+    if existing:
+        user = await db.users.find_one({"id": user_id})
+        return {"duplicate": True, "new_balance": (user or {}).get("wallet_balance", 0)}
+    await db.transactions.insert_one(
+        {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "type": "credit",
+            "source": "squad",
+            "amount": amount,
+            "status": "success",
+            "timestamp": datetime.utcnow(),
+            "payment_method": payment_method,
+            "reference": reference,
+            "provider": "squad",
+            "provider_verification": verify_result,
+            "webhook_payload": webhook_payload,
+        }
+    )
+    await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
+    user = await db.users.find_one({"id": user_id})
+    return {"duplicate": False, "new_balance": (user or {}).get("wallet_balance", amount)}
 
 
 async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dict]:
@@ -286,29 +396,80 @@ def _normalize_amount(value: Optional[float]) -> Optional[float]:
     return round(float(value), 2)
 
 
+def _coerce_squad_paid_to_ngn(paid: Optional[float], expected_ngn: float) -> Optional[float]:
+    """Squad often returns amounts in kobo; virtual-account flow stores NGN."""
+    if paid is None:
+        return None
+    p = float(paid)
+    e = float(expected_ngn)
+    if e <= 0:
+        return round(p / 100.0, 2) if p > 1000 else round(p, 2)
+    if abs(p - e) <= max(0.05, e * 0.002):
+        return round(e, 2)
+    if abs(p / 100.0 - e) <= max(0.05, e * 0.002):
+        return round(e, 2)
+    if p > e * 50:
+        return round(p / 100.0, 2)
+    return round(p, 2)
+
+
+def _wallet_intent_ref_candidates(ref: Optional[str]) -> list[str]:
+    """Match DB transaction_ref (alnum + underscore) and rare raw variants."""
+    if not ref or not str(ref).strip():
+        return []
+    raw = str(ref).strip()
+    cleaned = "".join(c for c in raw if c.isalnum() or c == "_")
+    out: list[str] = []
+    for x in (raw, cleaned):
+        if x and x not in out:
+            out.append(x)
+    return out
+
+
+def _squad_event_status_success(event_status: Any) -> bool:
+    return str(event_status or "").strip().lower() in {
+        "success",
+        "successful",
+        "paid",
+        "completed",
+        "complete",
+        "approved",
+    }
+
+
+def _reconcile_squad_amount_with_intent(
+    expected_amount: Optional[float],
+    paid_raw: Optional[float],
+    *,
+    verify_ok: bool,
+) -> Optional[float]:
+    """
+    Map Squad-reported amount to our intent NGN. When verify_ok, trust intent amount if API omits amount
+    or differs slightly (fees / kobo rounding), so wallet and subscription activate after dashboard success.
+    """
+    if expected_amount is None:
+        return None
+    e = round(float(expected_amount), 2)
+    coerced = _coerce_squad_paid_to_ngn(paid_raw, e)
+    if coerced is not None and abs(coerced - e) <= max(0.01, max(0.05, e * 0.002)):
+        return e
+    if verify_ok:
+        if coerced is None:
+            logger.info("Squad reconcile: verify ok, no paid amount — using expected NGN %s", e)
+            return e
+        if abs(coerced - e) <= max(5.0, e * 0.02):
+            logger.info("Squad reconcile: verify ok, paid=%s expected=%s — using expected", coerced, e)
+            return e
+    return None
+
+
 def _to_utc_naive(dt_value: datetime) -> datetime:
     if dt_value.tzinfo:
         return dt_value.astimezone(timezone.utc).replace(tzinfo=None)
     return dt_value
 
 
-def _extract_squad_field(payload: dict, *keys: str):
-    for key in keys:
-        if "." in key:
-            current = payload
-            ok = True
-            for part in key.split("."):
-                if isinstance(current, dict) and part in current:
-                    current = current[part]
-                else:
-                    ok = False
-                    break
-            if ok:
-                return current
-            continue
-        if key in payload:
-            return payload.get(key)
-    return None
+_extract_squad_field = extract_squad_field
 
 
 def _squad_headers() -> dict:
@@ -316,6 +477,9 @@ def _squad_headers() -> dict:
         "Authorization": f"Bearer {SQUAD_SECRET_KEY}",
         "Content-Type": "application/json",
     }
+
+
+_squad_extract_checkout_url = extract_squad_checkout_url
 
 
 async def _verify_squad_transaction(reference: str) -> dict:
@@ -328,7 +492,11 @@ async def _verify_squad_transaction(reference: str) -> dict:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(verify_url, headers=_squad_headers())
-            payload = response.json()
+            status_code = response.status_code
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
     except Exception as exc:
         return {"verified": False, "reason": f"Squad verify request failed: {str(exc)}", "provider": "squad"}
 
@@ -340,7 +508,7 @@ async def _verify_squad_transaction(reference: str) -> dict:
         or payload.get("status")
     )
     status_norm = str(status_value or "").strip().lower()
-    success_statuses = {"success", "successful", "paid", "completed"}
+    success_statuses = {"success", "successful", "paid", "completed", "complete", "approved"}
 
     amount_raw = (
         data.get("transaction_amount")
@@ -352,12 +520,20 @@ async def _verify_squad_transaction(reference: str) -> dict:
     except Exception:
         paid_amount = None
 
+    verified = status_norm in success_statuses
+    # Some environments return HTTP 200 with success in body even when nested shape differs
+    if not verified and isinstance(payload, dict):
+        msg = str(payload.get("message") or "").strip().lower()
+        if msg in success_statuses and status_code < 400:
+            verified = True
+
     return {
-        "verified": status_norm in success_statuses,
+        "verified": verified,
         "provider": "squad",
         "provider_status": status_value,
         "paid_amount": paid_amount,
         "currency": data.get("transaction_currency_id") or data.get("currency") or "NGN",
+        "http_status": status_code,
         "raw": payload,
     }
 
@@ -586,79 +762,59 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
 
     driver = await db.users.find_one({"id": request.driver_id}) or {}
     profile = await db.driver_profiles.find_one({"user_id": request.driver_id}) or {}
-    full_name = (
+    full_name_raw = (
         profile.get("full_name")
         or driver.get("name")
         or "Nexryde Driver"
     ).strip()
-    first_name = full_name.split(" ")[0] if full_name else "Nexryde"
-    last_name = " ".join(full_name.split(" ")[1:]) if len(full_name.split(" ")) > 1 else "Driver"
-    email = driver.get("email") or f"{request.driver_id}@nexryde.app"
-    phone = profile.get("phone") or driver.get("phone") or "0000000000"
+    full_name = _squad_require_customer_name_for_va(full_name_raw)
+    email = _squad_require_va_email(driver.get("email") or f"{request.driver_id}@nexryde.app")
 
-    provider_reference = f"NXRVA_{request.driver_id}_{uuid4().hex[:10].upper()}"
     amount_expected = round(float(request.plan_amount), 2)
+    amount_kobo = int(round(amount_expected * 100))
+    transaction_ref = normalize_squad_transaction_ref(generate_nexryde_squad_transaction_ref())
     metadata = {
         "driver_id": request.driver_id,
         "plan_amount": amount_expected,
         "tier": request.tier or "city_rider",
-        "provider_reference": provider_reference,
+        "transaction_ref": transaction_ref,
+        "provider_reference": transaction_ref,
     }
-    payload = {
-        "customer_identifier": request.driver_id,
-        "first_name": first_name,
-        "last_name": last_name,
-        "mobile_num": str(phone),
+    init_body: dict = {
+        "amount": amount_kobo,
+        "duration": _squad_dynamic_va_duration_seconds(),
         "email": email,
-        "amount": amount_expected,
-        "reference": provider_reference,
-        "metadata": metadata,
+        "transaction_ref": transaction_ref,
     }
+    if _squad_dynamic_va_pass_charge():
+        init_body["pass_charge"] = True
 
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            provider_response = await client.post(
-                f"{SQUAD_BASE_URL}/virtual-account",
-                headers=_squad_headers(),
-                json=payload,
-            )
-            provider_payload = provider_response.json()
-    except Exception as exc:
-        logger.error(f"Squad virtual account creation failed for {request.driver_id}: {exc}")
-        raise HTTPException(status_code=502, detail="Could not create virtual account")
-
-    data = provider_payload.get("data") if isinstance(provider_payload, dict) else {}
-    data = data if isinstance(data, dict) else {}
-
-    account_number = _extract_squad_field(
-        data,
-        "account_number",
-        "virtual_account_number",
-        "accountNo",
-        "customer.account_number",
+    logger.info(
+        "Squad driver dynamic VA initiate driver=%s amount_kobo=%s transaction_ref=%s",
+        request.driver_id,
+        amount_kobo,
+        transaction_ref,
     )
-    bank_name = _extract_squad_field(
-        data,
-        "bank_name",
-        "bank",
-        "bankName",
-        "bank_details.bank_name",
-    ) or "SQUAD"
-    account_name = _extract_squad_field(
-        data,
-        "account_name",
-        "accountName",
-        "customer_name",
-        "customer.account_name",
-    ) or full_name
-    returned_reference = (
-        _extract_squad_field(data, "reference", "transaction_ref", "customer_identifier")
-        or provider_reference
-    )
+    provider_payload, last_error = await _post_squad_initiate_dynamic_virtual_account(init_body)
 
-    if not account_number:
-        logger.error(f"Squad virtual account response missing account number: {provider_payload}")
-        raise HTTPException(status_code=502, detail="Squad did not return a virtual account number")
+    if not provider_payload:
+        logger.error(
+            "Squad driver dynamic VA failed driver=%s error=%s",
+            request.driver_id,
+            last_error,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to generate bank account. Please try again or use card payment.",
+        )
+
+    account_number, bank_name, account_name_api, returned_reference, amount_display = _parse_squad_dynamic_va_response(
+        provider_payload,
+        transaction_ref=transaction_ref,
+        fallback_amount_ngn=amount_expected,
+    )
+    provider_reference = transaction_ref
+    account_name = account_name_api or full_name
 
     now = datetime.utcnow()
     await db.subscription_virtual_accounts.update_one(
@@ -672,8 +828,9 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
             "account_name": str(account_name),
             "reference": str(returned_reference),
             "provider_reference": provider_reference,
+            "transaction_ref": transaction_ref,
             "status": "pending",
-            "amount_expected": amount_expected,
+            "amount_expected": amount_display,
             "metadata": metadata,
             "provider_response": provider_payload,
             "updated_at": now,
@@ -689,7 +846,7 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
             {"$set": {
                 "status": "pending_payment",
                 "tier": request.tier or subscription.get("tier", "city_rider"),
-                "amount": amount_expected,
+                "amount": amount_display,
                 "payment_provider": "squad",
                 "payment_method": "virtual_account",
                 "virtual_account_number": str(account_number),
@@ -703,7 +860,7 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
                 "id": str(uuid.uuid4()),
                 "driver_id": request.driver_id,
                 "tier": request.tier or "city_rider",
-                "amount": amount_expected,
+                "amount": amount_display,
                 "status": "pending_payment",
                 "payment_provider": "squad",
                 "payment_method": "virtual_account",
@@ -716,8 +873,8 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
 
     await _sync_driver_subscription_flags(request.driver_id)
     logger.info(
-        f"Squad virtual account created for driver={request.driver_id} "
-        f"acct={account_number} ref={returned_reference} amount={amount_expected}"
+        f"Squad dynamic virtual account created for driver={request.driver_id} "
+        f"acct={account_number} ref={returned_reference} amount={amount_display}"
     )
     return {
         "account_number": str(account_number),
@@ -725,8 +882,1121 @@ async def create_virtual_account(request: CreateVirtualAccountRequest, http_requ
         "account_name": str(account_name),
         "reference": str(returned_reference),
         "status": "pending",
-        "amount_expected": amount_expected,
+        "amount_expected": amount_display,
     }
+
+
+def _squad_secret_is_sandbox() -> bool:
+    sk = (SQUAD_SECRET_KEY or "").strip()
+    return sk.startswith("sandbox_sk_") or sk.startswith("test_sk_")
+
+
+def _squad_url_looks_sandbox(url: str) -> bool:
+    return "sandbox" in (url or "").lower()
+
+
+def _squad_checkout_initiate_bases() -> list[str]:
+    """
+    Do not mix sandbox and live Squad hosts on the same initiate flow.
+    Sandbox secret → sandbox API only (+ optional SQUAD_INITIATE_URL if URL contains 'sandbox').
+    Live secret → live API only (skip sandbox-looking SQUAD_INITIATE_URL).
+    """
+    bases: list[str] = []
+    live_default = (SQUAD_BASE_URL or "https://api-d.squadco.com").rstrip("/")
+
+    if _squad_secret_is_sandbox():
+        if SQUAD_INITIATE_URL:
+            u = SQUAD_INITIATE_URL.rstrip("/")
+            if _squad_url_looks_sandbox(u):
+                bases.append(u)
+        if "https://sandbox-api-d.squadco.com" not in bases:
+            bases.append("https://sandbox-api-d.squadco.com")
+        logger.info("Squad checkout bases (sandbox secret, no live host): %s", bases)
+        return bases
+
+    if SQUAD_INITIATE_URL:
+        u = SQUAD_INITIATE_URL.rstrip("/")
+        if _squad_url_looks_sandbox(u):
+            logger.warning(
+                "Squad: SQUAD_INITIATE_URL is sandbox-shaped but secret is live — ignoring %s",
+                u,
+            )
+        else:
+            bases.append(u)
+    if live_default not in bases:
+        bases.append(live_default)
+    logger.info("Squad checkout bases (live secret, no sandbox host): %s", bases)
+    return bases
+
+
+def _squad_checkout_initiate_urls() -> list[str]:
+    return [f"{b}/transaction/initiate" for b in _squad_checkout_initiate_bases()]
+
+
+def _squad_dynamic_va_initiate_urls() -> list[str]:
+    """Squad dynamic VA (per-payment bank details) — not the B2C /virtual-account KYC endpoint."""
+    return [
+        f"{b.rstrip('/')}/virtual-account/initiate-dynamic-virtual-account"
+        for b in _squad_checkout_initiate_bases()
+    ]
+
+
+async def _post_squad_initiate_dynamic_virtual_account(init_body: dict) -> tuple[Optional[dict], str]:
+    """
+    POST initiate-dynamic-virtual-account (amount in kobo, duration seconds, email, transaction_ref).
+    Tries each configured Squad API base (sandbox vs live).
+    """
+    last_err = ""
+    for url in _squad_dynamic_va_initiate_urls():
+        try:
+            async with httpx.AsyncClient(timeout=45.0) as client:
+                response = await client.post(url, headers=_squad_headers(), json=init_body)
+                payload, raw = _squad_parse_initiate_response(response)
+                if payload is None:
+                    last_err = f"{url} HTTP {response.status_code} (not JSON): {raw}"
+                    logger.error(
+                        "Squad dynamic VA non-JSON response url=%s status=%s raw=%s",
+                        url,
+                        response.status_code,
+                        raw,
+                    )
+                    continue
+                try:
+                    payload_str = json.dumps(payload, default=str)
+                except Exception:
+                    payload_str = str(payload)
+                logger.info(
+                    "Squad dynamic VA request url=%s payload=%s http_status=%s response=%s",
+                    url,
+                    json.dumps(init_body, default=str),
+                    response.status_code,
+                    payload_str[:12000],
+                )
+                data = payload.get("data") if isinstance(payload, dict) else {}
+                data = data if isinstance(data, dict) else {}
+                acct = _extract_squad_field(
+                    data,
+                    "account_number",
+                    "virtual_account_number",
+                    "accountNo",
+                )
+                if response.status_code in (200, 201) and squad_dynamic_va_response_ok(payload) and acct:
+                    return payload, ""
+                err_hint = None
+                if isinstance(payload, dict):
+                    err_hint = payload.get("message") or payload.get("title") or payload.get("detail")
+                last_err = f"{url} HTTP {response.status_code}: {err_hint or payload_str[:800]}"
+                logger.error("Squad dynamic VA failed: %s", last_err)
+        except Exception as exc:
+            last_err = f"{url}: {exc}"
+            logger.exception("Squad dynamic VA request exception url=%s", url)
+    return None, last_err
+
+
+def _squad_require_va_email(email: str) -> str:
+    e = (email or "").strip()
+    if not e or "@" not in e:
+        raise HTTPException(
+            status_code=400,
+            detail="A valid email is required for bank transfer. Update your email in your profile.",
+        )
+    return e
+
+
+def _squad_require_customer_name_for_va(full_name: str) -> str:
+    n = (full_name or "").strip()
+    if len(n) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="Your name is required for bank transfer. Please update your profile name.",
+        )
+    return n
+
+
+def _parse_squad_dynamic_va_response(
+    provider_payload: dict,
+    *,
+    transaction_ref: str,
+    fallback_amount_ngn: float,
+) -> tuple[str, str, str, str, float]:
+    """Returns account_number, bank_name, account_name, returned_reference, amount_ngn for wallet/subscription VA."""
+    data = provider_payload.get("data") if isinstance(provider_payload, dict) else {}
+    data = data if isinstance(data, dict) else {}
+    account_number = _extract_squad_field(
+        data,
+        "account_number",
+        "virtual_account_number",
+        "accountNo",
+    )
+    bank_name = _extract_squad_field(
+        data,
+        "bank",
+        "bank_name",
+        "bankName",
+    )
+    account_name = (
+        _extract_squad_field(
+            data,
+            "account_name",
+            "accountName",
+            "customer_name",
+        )
+        or ""
+    )
+    returned_reference = (
+        _extract_squad_field(data, "transaction_reference", "transaction_ref", "reference")
+        or transaction_ref
+    )
+    amount_ngn = fallback_amount_ngn
+    exp_raw = data.get("expected_amount")
+    if exp_raw is not None:
+        try:
+            amount_ngn = round(float(str(exp_raw).replace(",", "")), 2)
+        except Exception:
+            pass
+    if not account_number:
+        logger.error(
+            "Squad dynamic VA parsed missing account_number full_response=%s",
+            json.dumps(provider_payload, default=str)[:12000],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Virtual account not generated: Squad did not return an account number.",
+        )
+    if not bank_name or not str(bank_name).strip():
+        logger.error(
+            "Squad dynamic VA parsed missing bank_name full_response=%s",
+            json.dumps(provider_payload, default=str)[:12000],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Virtual account not generated: Squad did not return a bank name.",
+        )
+    return (
+        str(account_number).strip(),
+        str(bank_name).strip(),
+        str(account_name).strip(),
+        str(returned_reference).strip(),
+        amount_ngn,
+    )
+
+
+def _squad_callback_url() -> Optional[str]:
+    if not NEXRYDE_PUBLIC_URL:
+        return None
+    return f"{NEXRYDE_PUBLIC_URL.rstrip('/')}/"
+
+
+def _squad_inline_checkout_transaction_ref(prefix: str = "NXWR") -> str:
+    """Server-generated Squad reference (NEXRYDE_* format). Prefix arg ignored."""
+    del prefix
+    return generate_nexryde_squad_transaction_ref()
+
+
+def _squad_initiate_inline_body(
+    *,
+    amount_kobo: int,
+    email: str,
+    transaction_ref: str,
+    customer_name: str,
+    metadata: dict,
+) -> dict:
+    """
+    Squad POST /transaction/initiate (inline checkout).
+    Use snake_case `transaction_ref` only. Payload is allow-listed before HTTP (see sanitize_squad_transaction_initiate_payload).
+    """
+    if int(amount_kobo) <= 0:
+        raise HTTPException(status_code=400, detail="Invalid payment amount")
+    em = (email or "").strip()
+    if not em or "@" not in em:
+        em = "customer@nexryde.app"
+    tr = normalize_squad_transaction_ref(transaction_ref)
+    if not tr or len(tr) < 6 or len(tr) > 50:
+        raise HTTPException(status_code=500, detail="Invalid payment reference")
+    body: dict = {
+        "amount": int(amount_kobo),
+        "email": em,
+        "currency": "NGN",
+        "initiate_type": "inline",
+        "transaction_ref": tr,
+    }
+    meta = metadata if isinstance(metadata, dict) else {}
+    if meta:
+        body["metadata"] = meta
+    name = (customer_name or "").strip()
+    if name:
+        body["customer_name"] = name[:200]
+    cb = _squad_callback_url()
+    if cb:
+        body["callback_url"] = cb
+    body["payment_channels"] = ["card", "bank", "ussd", "transfer"]
+    return sanitize_squad_transaction_initiate_payload(body)
+
+
+def _squad_parse_initiate_response(response: httpx.Response) -> tuple[Optional[dict], Optional[str]]:
+    """Parse JSON body; return (payload, raw_text_or_none_on_json_error)."""
+    try:
+        return response.json(), None
+    except Exception:
+        try:
+            return None, (response.text or "")[:800]
+        except Exception:
+            return None, "non-json response"
+
+
+async def _post_squad_transaction_initiate_once(init_body: dict) -> tuple[Optional[dict], str]:
+    """POST /transaction/initiate on each configured base URL until one succeeds."""
+    last_err = ""
+    for url in _squad_checkout_initiate_urls():
+        try:
+            safe_body = sanitize_squad_transaction_initiate_payload(init_body)
+            try:
+                req_log = json.dumps(safe_body, default=str)
+            except Exception:
+                req_log = str(safe_body)
+            logger.info("Squad POST /transaction/initiate url=%s payload=%s", url, req_log)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(url, headers=_squad_headers(), json=safe_body)
+                payload, raw = _squad_parse_initiate_response(response)
+                if payload is None:
+                    logger.error(
+                        "Squad /transaction/initiate non-JSON url=%s status=%s raw=%s",
+                        url,
+                        response.status_code,
+                        raw,
+                    )
+                    last_err = f"{url} HTTP {response.status_code} (not JSON): {raw}"
+                    continue
+                try:
+                    resp_log = json.dumps(payload, default=str)
+                except Exception:
+                    resp_log = str(payload)
+                logger.info(
+                    "Squad /transaction/initiate response url=%s http=%s body=%s",
+                    url,
+                    response.status_code,
+                    resp_log[:12000],
+                )
+                if response.status_code in (200, 201) and squad_initiate_response_ok(payload):
+                    return payload, ""
+                err_hint = payload.get("message") or payload.get("title") or payload.get("detail")
+                errs = payload.get("errors")
+                if errs and not err_hint:
+                    err_hint = str(errs)[:400]
+                last_err = f"{url} HTTP {response.status_code}: {err_hint or payload}"
+                logger.error("Squad /transaction/initiate failed: %s", last_err)
+        except Exception as exc:
+            last_err = f"{url}: {exc}"
+            logger.exception("Squad /transaction/initiate exception url=%s", url)
+    return None, last_err
+
+
+async def _post_squad_transaction_initiate(init_body: dict) -> tuple[Optional[dict], str]:
+    """Try official payload (no public key in body); retry with `key` if some environments require it."""
+    base = sanitize_squad_transaction_initiate_payload(init_body)
+    p, e = await _post_squad_transaction_initiate_once(base)
+    if p:
+        return p, ""
+    if SQUAD_PUBLIC_KEY and "key" not in base:
+        retry_body = sanitize_squad_transaction_initiate_payload({**base, "key": SQUAD_PUBLIC_KEY})
+        p2, e2 = await _post_squad_transaction_initiate_once(retry_body)
+        if p2:
+            return p2, ""
+        return None, f"{e} | retry_with_key: {e2}"
+    return None, e
+
+
+@payments_router.post("/payment/subscription/initiate-checkout")
+async def initiate_subscription_checkout(
+    http_request: Request,
+    body: SubscriptionCheckoutInitRequest = SubscriptionCheckoutInitRequest(),
+):
+    """
+    Start Squad inline checkout (card / bank channels in Squad modal) for driver subscription.
+    Stores a row in subscription_payment_intents; webhook or verify-pending completes activation.
+    """
+    driver_id = require_authenticated(http_request)
+    await _assert_driver_account(driver_id)
+    if not SQUAD_SECRET_KEY or not SQUAD_PUBLIC_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Squad is not configured (SQUAD_SECRET_KEY and SQUAD_PUBLIC_KEY required)",
+        )
+
+    tier = body.tier or "city_rider"
+    if tier not in {"city_rider", "road_warrior"}:
+        tier = "city_rider"
+
+    existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
+    if existing and existing.get("status") in {"active", "trial", "grace_period"}:
+        raise HTTPException(status_code=400, detail="Subscription already active")
+
+    amount_ngn = float(await _get_dynamic_tier_price(tier))
+    amount_kobo = int(round(amount_ngn * 100))
+
+    driver = await db.users.find_one({"id": driver_id}) or {}
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    full_name = (profile.get("full_name") or driver.get("name") or "Nexryde Driver").strip()
+    email = driver.get("email") or f"{driver_id}@nexryde.app"
+
+    transaction_ref, intent_id = await _reserve_subscription_payment_intent(
+        driver_id=driver_id,
+        tier=tier,
+        amount_ngn=amount_ngn,
+        amount_kobo=amount_kobo,
+    )
+
+    init_body = _squad_initiate_inline_body(
+        amount_kobo=amount_kobo,
+        email=email,
+        transaction_ref=transaction_ref,
+        customer_name=full_name,
+        metadata={
+            "driver_id": driver_id,
+            "tier": tier,
+            "purpose": "driver_subscription",
+        },
+    )
+    transaction_ref = str(init_body["transaction_ref"])
+
+    provider_payload, last_error = await _post_squad_transaction_initiate(init_body)
+
+    if not provider_payload or not squad_initiate_response_ok(provider_payload):
+        logger.error("Squad checkout initiate failed: %s", last_error)
+        safe = (last_error or "unknown")[:500]
+        fail_at = datetime.utcnow()
+        await db.subscription_payment_intents.update_one(
+            {"id": intent_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failed_reason": safe,
+                    "initiate_error": safe,
+                    "updated_at": fail_at,
+                }
+            },
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not start Squad checkout. {safe}",
+        )
+
+    data = provider_payload.get("data") if isinstance(provider_payload, dict) else {}
+    data = data if isinstance(data, dict) else {}
+    checkout_url = _squad_extract_checkout_url(provider_payload, data)
+    if not checkout_url:
+        logger.error(
+            "Squad checkout success but no URL in response; data keys=%s",
+            list(data.keys()) if isinstance(data, dict) else type(data),
+        )
+        fail_at = datetime.utcnow()
+        await db.subscription_payment_intents.update_one(
+            {"id": intent_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failed_reason": "no_checkout_url",
+                    "initiate_response": provider_payload,
+                    "updated_at": fail_at,
+                }
+            },
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="Squad did not return a checkout URL. Try again or contact support.",
+        )
+
+    now = datetime.utcnow()
+    await db.subscription_payment_intents.update_one(
+        {"id": intent_id},
+        {
+            "$set": {
+                "checkout_url": checkout_url,
+                "initiate_response": provider_payload,
+                "updated_at": now,
+            }
+        },
+    )
+
+    sub_update = {
+        "status": "pending_payment",
+        "tier": tier,
+        "amount": amount_ngn,
+        "payment_provider": "squad_checkout",
+        "payment_method": "card_or_transfer",
+        "payment_reference": transaction_ref,
+        "updated_at": now,
+    }
+    if existing and existing.get("id"):
+        await db.subscriptions.update_one({"id": existing["id"]}, {"$set": sub_update})
+    else:
+        await db.subscriptions.insert_one(
+            {
+                "id": str(uuid4()),
+                "driver_id": driver_id,
+                **sub_update,
+                "created_at": now,
+            }
+        )
+    await _sync_driver_subscription_flags(driver_id)
+
+    return {
+        "transaction_ref": transaction_ref,
+        "checkout_url": checkout_url,
+        "amount_kobo": amount_kobo,
+        "amount_ngn": amount_ngn,
+        "public_key": SQUAD_PUBLIC_KEY,
+        "tier": tier,
+        "hint": "Open checkout_url in an in-app browser, or use Squad SDK with public_key and amount (kobo).",
+        "squad_data": data,
+    }
+
+
+@payments_router.post("/payment/subscription/verify-pending")
+async def verify_pending_subscription_checkout(
+    http_request: Request,
+    body: VerifySubscriptionCheckoutBody = Body(default_factory=VerifySubscriptionCheckoutBody),
+):
+    """After Squad shows success (dashboard or app): verify with Squad API and activate subscription."""
+    driver_id = require_authenticated(http_request)
+    await _assert_driver_account(driver_id)
+
+    ref_filter: dict = {}
+    if body.transaction_ref and str(body.transaction_ref).strip():
+        candidates = _wallet_intent_ref_candidates(str(body.transaction_ref).strip())
+        if not candidates:
+            raise HTTPException(status_code=404, detail="No pending subscription checkout for that reference")
+        ref_filter = {"transaction_ref": {"$in": candidates}}
+
+    intent = None
+    if ref_filter:
+        intent = await db.subscription_payment_intents.find_one(
+            {"driver_id": driver_id, "status": "pending", **ref_filter},
+        )
+    else:
+        intent = await db.subscription_payment_intents.find_one(
+            {"driver_id": driver_id, "status": "pending"},
+            sort=[("created_at", -1)],
+        )
+
+    if not intent and ref_filter:
+        intent = await db.subscription_payment_intents.find_one(
+            {"driver_id": driver_id, "status": "completed", **ref_filter},
+            sort=[("completed_at", -1)],
+        )
+        if intent:
+            await _sync_driver_subscription_flags(driver_id)
+            return {
+                "verified": True,
+                "duplicate": True,
+                "activated": False,
+                "subscription_active": True,
+                "already_settled": True,
+            }
+
+    if not intent and not ref_filter:
+        since = datetime.utcnow() - timedelta(hours=24)
+        intent = await db.subscription_payment_intents.find_one(
+            {
+                "driver_id": driver_id,
+                "status": "completed",
+                "completed_at": {"$gte": since},
+            },
+            sort=[("completed_at", -1)],
+        )
+        if intent:
+            await _sync_driver_subscription_flags(driver_id)
+            return {
+                "verified": True,
+                "duplicate": True,
+                "activated": False,
+                "subscription_active": True,
+                "already_settled": True,
+            }
+
+    if not intent:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending subscription checkout. If payment shows in Squad, wait a moment and try again.",
+        )
+
+    if intent.get("status") == "completed":
+        await _sync_driver_subscription_flags(driver_id)
+        return {
+            "verified": True,
+            "duplicate": True,
+            "activated": False,
+            "subscription_active": True,
+            "already_settled": True,
+        }
+
+    ref = str(intent.get("transaction_ref") or "")
+    verify_result = await _verify_squad_transaction(ref)
+    if not verify_result.get("verified"):
+        return {"verified": False, "verify_result": verify_result}
+
+    expected_amount = _normalize_amount(intent.get("amount_ngn"))
+    paid_amount = _reconcile_squad_amount_with_intent(
+        expected_amount,
+        verify_result.get("paid_amount"),
+        verify_ok=True,
+    )
+    if paid_amount is None or expected_amount is None:
+        return {
+            "verified": False,
+            "detail": "amount_mismatch",
+            "paid_amount": verify_result.get("paid_amount"),
+            "expected_amount": expected_amount,
+        }
+
+    ref_cands = _wallet_intent_ref_candidates(ref) or [ref]
+    existing_success = await db.subscription_transactions.find_one(
+        {"provider": "squad", "reference": {"$in": ref_cands}, "status": "success"}
+    )
+    if existing_success:
+        await _sync_driver_subscription_flags(driver_id)
+        return {"verified": True, "duplicate": True, "subscription_active": True}
+
+    activation = await _activate_subscription(
+        driver_id=driver_id,
+        payment_reference=ref,
+        provider="squad_checkout",
+        paid_amount=paid_amount,
+    )
+    await db.subscription_payment_intents.update_one(
+        {"id": intent["id"]},
+        {
+            "$set": {
+                "status": "completed",
+                "paid_amount_ngn": paid_amount,
+                "completed_at": datetime.utcnow(),
+            }
+        },
+    )
+    await db.subscription_transactions.insert_one(
+        {
+            "id": str(uuid4()),
+            "provider": "squad",
+            "driver_id": driver_id,
+            "reference": ref,
+            "status": "success",
+            "paid_amount": paid_amount,
+            "expected_amount": expected_amount,
+            "verified": True,
+            "activation_result": activation,
+            "verify_result": verify_result,
+            "source": "verify_pending_endpoint",
+            "created_at": datetime.utcnow(),
+        }
+    )
+    return {"verified": True, "activated": True, "activation": activation, "subscription_active": True}
+
+
+def _validate_wallet_topup_amount(amount: float) -> float:
+    a = round(float(amount), 2)
+    if a < 100:
+        raise HTTPException(status_code=400, detail="Minimum top-up is ₦100")
+    if a > 1_000_000:
+        raise HTTPException(
+            status_code=400,
+            detail="Maximum single top-up is ₦1,000,000. Contact support for larger amounts.",
+        )
+    return a
+
+
+_WALLET_CHECKOUT_EMAIL_RE = re.compile(
+    r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,63}$"
+)
+
+
+def _validate_rider_wallet_checkout_email(email: str) -> str:
+    e = (email or "").strip()
+    if not e or any(c.isspace() for c in e):
+        raise HTTPException(
+            status_code=400,
+            detail="A valid email is required for payment. Update your email in your profile.",
+        )
+    if not _WALLET_CHECKOUT_EMAIL_RE.match(e):
+        raise HTTPException(
+            status_code=400,
+            detail="A valid email is required for payment. Update your email in your profile.",
+        )
+    return e
+
+
+def _json_safe_for_response(obj: Any) -> Any:
+    try:
+        return json.loads(json.dumps(obj, default=str))
+    except Exception:
+        return {"_serialization_note": str(obj)[:800]}
+
+
+def _wallet_checkout_squad_failed_response(
+    *,
+    user_id: str,
+    intent_id: str,
+    init_body: dict,
+    provider_payload: Optional[dict],
+    last_error: str,
+    fail_reason: str,
+) -> JSONResponse:
+    """502 JSON body for clients; full context logged server-side."""
+    safe_body = sanitize_squad_transaction_initiate_payload(init_body)
+    try:
+        req_json = json.dumps(safe_body, default=str)
+    except Exception:
+        req_json = str(safe_body)
+    sq = provider_payload if isinstance(provider_payload, dict) else None
+    try:
+        sq_log = json.dumps(sq, default=str) if sq else last_error
+    except Exception:
+        sq_log = str(sq) if sq else last_error
+    logger.error(
+        "Squad wallet checkout init FAILED user=%s intent=%s reason=%s last_error=%s "
+        "request_payload=%s full_squad_response=%s",
+        user_id,
+        intent_id,
+        fail_reason,
+        last_error,
+        req_json[:8000],
+        sq_log[:14000],
+    )
+    squad_out: Any = _json_safe_for_response(sq) if sq is not None else {"error": last_error}
+    return JSONResponse(
+        status_code=502,
+        content={
+            "success": False,
+            "message": "Squad init failed",
+            "squad_response": squad_out,
+        },
+    )
+
+
+async def _latest_pending_wallet_checkout_intent(user_id: str) -> Optional[dict]:
+    """Newest pending Squad inline checkout with a URL (resumable session)."""
+    return await db.wallet_payment_intents.find_one(
+        {
+            "user_id": user_id,
+            "status": "pending",
+            "checkout_url": {"$ne": None, "$exists": True},
+        },
+        sort=[("created_at", -1)],
+    )
+
+
+def _wallet_checkout_client_payload(*, checkout_url: str, transaction_ref: str, resumed: bool = False) -> dict:
+    """Minimal client response: no bank/VA fields, no Squad raw payload."""
+    return {
+        "success": True,
+        "checkout_url": checkout_url,
+        "transaction_ref": transaction_ref,
+        "transactionRef": transaction_ref,
+        "resumed": resumed,
+    }
+
+
+async def _cancel_all_pending_wallet_intents(user_id: str) -> int:
+    now = datetime.utcnow()
+    result = await db.wallet_payment_intents.update_many(
+        {"user_id": user_id, "status": "pending"},
+        {
+            "$set": {
+                "status": "cancelled",
+                "cancelled_at": now,
+                "updated_at": now,
+            }
+        },
+    )
+    return int(result.modified_count)
+
+
+async def _reserve_wallet_payment_intent(
+    *,
+    user_id: str,
+    amount_ngn: float,
+    amount_kobo: int,
+) -> tuple[str, str]:
+    """
+    Persist a pending wallet payment before calling Squad (unique transaction_ref).
+    Returns (transaction_ref, intent_id).
+    """
+    last_exc: Optional[Exception] = None
+    for _ in range(12):
+        transaction_ref = generate_nexryde_squad_transaction_ref()
+        intent_id = str(uuid4())
+        now = datetime.utcnow()
+        doc = {
+            "id": intent_id,
+            "user_id": user_id,
+            "amount_ngn": amount_ngn,
+            "amount_kobo": amount_kobo,
+            "transaction_ref": transaction_ref,
+            "status": "pending",
+            "payment_provider": "squad",
+            "checkout_url": None,
+            "initiate_response": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            await db.wallet_payment_intents.insert_one(doc)
+            return transaction_ref, intent_id
+        except DuplicateKeyError as exc:
+            last_exc = exc
+            continue
+    logger.error("wallet_payment_intents could not allocate unique transaction_ref: %s", last_exc)
+    raise HTTPException(
+        status_code=503,
+        detail="Could not allocate a payment reference. Please try again.",
+    )
+
+
+async def _reserve_subscription_payment_intent(
+    *,
+    driver_id: str,
+    tier: str,
+    amount_ngn: float,
+    amount_kobo: int,
+) -> tuple[str, str]:
+    """Persist pending driver subscription checkout before Squad initiate."""
+    last_exc: Optional[Exception] = None
+    for _ in range(12):
+        transaction_ref = generate_nexryde_squad_transaction_ref()
+        intent_id = str(uuid4())
+        now = datetime.utcnow()
+        doc = {
+            "id": intent_id,
+            "driver_id": driver_id,
+            "tier": tier,
+            "amount_ngn": amount_ngn,
+            "amount_kobo": amount_kobo,
+            "transaction_ref": transaction_ref,
+            "status": "pending",
+            "payment_provider": "squad",
+            "checkout_url": None,
+            "initiate_response": None,
+            "created_at": now,
+            "updated_at": now,
+        }
+        try:
+            await db.subscription_payment_intents.insert_one(doc)
+            return transaction_ref, intent_id
+        except DuplicateKeyError as exc:
+            last_exc = exc
+            continue
+    logger.error("subscription_payment_intents could not allocate unique transaction_ref: %s", last_exc)
+    raise HTTPException(
+        status_code=503,
+        detail="Could not allocate a payment reference. Please try again.",
+    )
+
+
+@payments_router.post("/payment/wallet/initiate-checkout")
+async def initiate_rider_wallet_checkout(
+    http_request: Request,
+    body: RiderWalletTopupAmountBody,
+):
+    """
+    Squad inline checkout (card / bank in Squad UI) to credit rider wallet.
+    Completes via webhook or POST /payment/wallet/verify-pending.
+    """
+    user_id = require_authenticated(http_request)
+    verify_owner_strict(http_request, user_id)
+    await _assert_wallet_user_exists(user_id)
+    if not SQUAD_SECRET_KEY or not SQUAD_PUBLIC_KEY:
+        raise HTTPException(
+            status_code=500,
+            detail="Squad is not configured (SQUAD_SECRET_KEY and SQUAD_PUBLIC_KEY required)",
+        )
+    amount_ngn = _validate_wallet_topup_amount(body.amount)
+    amount_kobo = int(round(amount_ngn * 100))
+
+    user = await db.users.find_one({"id": user_id}) or {}
+    full_name = (user.get("name") or "Nexryde User").strip()
+    raw_email = (user.get("email") or "").strip()
+    if raw_email:
+        email = _validate_rider_wallet_checkout_email(raw_email)
+    else:
+        email = f"{user_id}@nexryde.app"
+
+    if body.replace_pending:
+        await _cancel_all_pending_wallet_intents(user_id)
+    else:
+        pending = await _latest_pending_wallet_checkout_intent(user_id)
+        if pending:
+            prev_amt = _normalize_amount(pending.get("amount_ngn"))
+            checkout_url = pending.get("checkout_url")
+            prev_ref = str(pending.get("transaction_ref") or "")
+            if checkout_url and isinstance(checkout_url, str):
+                if prev_amt is not None and abs(float(prev_amt) - float(amount_ngn)) <= 0.01:
+                    return _wallet_checkout_client_payload(
+                        checkout_url=checkout_url,
+                        transaction_ref=prev_ref,
+                        resumed=True,
+                    )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "pending_checkout_exists",
+                        "message": (
+                            "You already have a pending top-up. Open the same checkout, verify payment, "
+                            "or cancel it to use a different amount."
+                        ),
+                        "pending_amount_ngn": prev_amt,
+                        "transaction_ref": prev_ref,
+                        "checkout_url": checkout_url,
+                    },
+                )
+
+    transaction_ref, intent_id = await _reserve_wallet_payment_intent(
+        user_id=user_id,
+        amount_ngn=amount_ngn,
+        amount_kobo=amount_kobo,
+    )
+
+    init_body = _squad_initiate_inline_body(
+        amount_kobo=amount_kobo,
+        email=email,
+        transaction_ref=transaction_ref,
+        customer_name=full_name,
+        metadata={
+            "user_id": user_id,
+            "purpose": "rider_wallet_topup",
+        },
+    )
+    transaction_ref = str(init_body["transaction_ref"])
+
+    provider_payload, last_error = await _post_squad_transaction_initiate(init_body)
+
+    pp_dict = provider_payload if isinstance(provider_payload, dict) else None
+    if not pp_dict or not squad_initiate_response_ok(pp_dict):
+        safe = (last_error or "unknown")[:500]
+        fail_at = datetime.utcnow()
+        await db.wallet_payment_intents.update_one(
+            {"id": intent_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failed_reason": safe,
+                    "initiate_error": safe,
+                    "updated_at": fail_at,
+                }
+            },
+        )
+        return _wallet_checkout_squad_failed_response(
+            user_id=user_id,
+            intent_id=intent_id,
+            init_body=init_body,
+            provider_payload=pp_dict,
+            last_error=last_error or safe,
+            fail_reason="squad_reject_or_invalid_response",
+        )
+
+    data = pp_dict.get("data") if isinstance(pp_dict.get("data"), dict) else {}
+    data = data if isinstance(data, dict) else {}
+    checkout_url = _squad_extract_checkout_url(pp_dict, data)
+    if not checkout_url:
+        fail_at = datetime.utcnow()
+        await db.wallet_payment_intents.update_one(
+            {"id": intent_id},
+            {
+                "$set": {
+                    "status": "failed",
+                    "failed_reason": "no_checkout_url",
+                    "initiate_response": pp_dict,
+                    "updated_at": fail_at,
+                }
+            },
+        )
+        return _wallet_checkout_squad_failed_response(
+            user_id=user_id,
+            intent_id=intent_id,
+            init_body=init_body,
+            provider_payload=pp_dict,
+            last_error="Squad response missing checkout_url",
+            fail_reason="no_checkout_url",
+        )
+
+    now = datetime.utcnow()
+    await db.wallet_payment_intents.update_one(
+        {"id": intent_id},
+        {
+            "$set": {
+                "checkout_url": checkout_url,
+                "initiate_response": pp_dict,
+                "updated_at": now,
+            }
+        },
+    )
+
+    logger.info(
+        "Squad wallet checkout init OK user=%s ref=%s amount_kobo=%s checkout_url_present=1",
+        user_id,
+        transaction_ref,
+        amount_kobo,
+    )
+
+    return _wallet_checkout_client_payload(
+        checkout_url=checkout_url,
+        transaction_ref=transaction_ref,
+        resumed=False,
+    )
+
+
+@payments_router.get("/payment/wallet/pending-checkout")
+async def get_pending_rider_wallet_checkout(http_request: Request):
+    """Source of truth for an in-progress Squad checkout (app resume / sync)."""
+    user_id = require_authenticated(http_request)
+    verify_owner_strict(http_request, user_id)
+    intent = await _latest_pending_wallet_checkout_intent(user_id)
+    if not intent:
+        return {"pending": False}
+    return {
+        "pending": True,
+        "transaction_ref": intent.get("transaction_ref"),
+        "checkout_url": intent.get("checkout_url"),
+        "amount_ngn": intent.get("amount_ngn"),
+        "amount_kobo": intent.get("amount_kobo"),
+    }
+
+
+@payments_router.post("/payment/wallet/cancel-pending")
+async def cancel_pending_rider_wallet_checkout(http_request: Request):
+    """Abandon in-app checkout so a new amount/session can be started (wallet not credited)."""
+    user_id = require_authenticated(http_request)
+    verify_owner_strict(http_request, user_id)
+    n = await _cancel_all_pending_wallet_intents(user_id)
+    return {"cancelled": n}
+
+
+@payments_router.post("/payment/wallet/create-virtual-account")
+async def create_rider_wallet_virtual_account(http_request: Request):
+    """Removed: wallet top-up uses Squad checkout only (no per-user bank transfer VA)."""
+    require_authenticated(http_request)
+    raise HTTPException(
+        status_code=410,
+        detail="Wallet bank-transfer virtual accounts are disabled. Use card/bank checkout (Squad) only.",
+    )
+
+
+@payments_router.post("/payment/wallet/verify-pending")
+async def verify_pending_rider_wallet_checkout(
+    http_request: Request,
+    body: VerifyRiderWalletBody = Body(default_factory=VerifyRiderWalletBody),
+):
+    """Poll after paying if webhook was delayed; verifies reference with Squad API."""
+    user_id = require_authenticated(http_request)
+    verify_owner_strict(http_request, user_id)
+
+    async def _balance_payload(*, duplicate: bool, credited: bool, settled: bool) -> dict:
+        user = await db.users.find_one({"id": user_id})
+        bal = float((user or {}).get("wallet_balance") or 0)
+        return {
+            "verified": True,
+            "credited": credited,
+            "duplicate": duplicate,
+            "new_balance": bal,
+            "already_settled": settled,
+        }
+
+    intent = None
+    ref_filter: dict = {}
+    if body.transaction_ref and str(body.transaction_ref).strip():
+        candidates = _wallet_intent_ref_candidates(str(body.transaction_ref).strip())
+        if not candidates:
+            raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
+        ref_filter = {"transaction_ref": {"$in": candidates}}
+    else:
+        ref_filter = {}
+
+    # 1) Pending checkout (normal path)
+    if ref_filter:
+        intent = await db.wallet_payment_intents.find_one(
+            {"user_id": user_id, "status": "pending", **ref_filter},
+        )
+    else:
+        intent = await db.wallet_payment_intents.find_one(
+            {"user_id": user_id, "status": "pending"},
+            sort=[("created_at", -1)],
+        )
+
+    # 2) Already completed (e.g. webhook credited before user tapped Verify)
+    if not intent and ref_filter:
+        intent = await db.wallet_payment_intents.find_one(
+            {"user_id": user_id, "status": "completed", **ref_filter},
+            sort=[("completed_at", -1)],
+        )
+        if intent:
+            return await _balance_payload(duplicate=True, credited=True, settled=True)
+
+    if not intent and not ref_filter:
+        since = datetime.utcnow() - timedelta(hours=24)
+        intent = await db.wallet_payment_intents.find_one(
+            {
+                "user_id": user_id,
+                "status": "completed",
+                "completed_at": {"$gte": since},
+            },
+            sort=[("completed_at", -1)],
+        )
+        if intent:
+            return await _balance_payload(duplicate=True, credited=True, settled=True)
+
+    if not intent:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending wallet checkout. If you already paid, pull to refresh balance or try again in a moment.",
+        )
+
+    if intent.get("status") == "completed":
+        return await _balance_payload(duplicate=True, credited=True, settled=True)
+
+    ref = str(intent.get("transaction_ref") or "")
+    verify_result = await _verify_squad_transaction(ref)
+    if not verify_result.get("verified"):
+        return {"verified": False, "verify_result": verify_result}
+
+    expected_amount = _normalize_amount(intent.get("amount_ngn"))
+    paid_amount = _reconcile_squad_amount_with_intent(
+        expected_amount,
+        verify_result.get("paid_amount"),
+        verify_ok=True,
+    )
+    if paid_amount is None or expected_amount is None:
+        return {
+            "verified": False,
+            "detail": "amount_mismatch",
+            "paid_amount": verify_result.get("paid_amount"),
+            "expected_amount": expected_amount,
+        }
+
+    res = await _rider_wallet_topup_idempotent(
+        user_id,
+        paid_amount,
+        ref,
+        "squad_checkout",
+        verify_result,
+        None,
+    )
+    if not res.get("duplicate"):
+        await db.wallet_payment_intents.update_one(
+            {"id": intent["id"]},
+            {
+                "$set": {
+                    "status": "completed",
+                    "paid_amount_ngn": paid_amount,
+                    "completed_at": datetime.utcnow(),
+                }
+            },
+        )
+    return {
+        "verified": True,
+        "credited": not res.get("duplicate"),
+        "duplicate": bool(res.get("duplicate")),
+        "new_balance": res.get("new_balance"),
+        "already_settled": False,
+    }
+
 
 @payments_router.get("/subscriptions/{driver_id}")
 async def get_subscription(driver_id: str, request: Request):
@@ -841,33 +2111,8 @@ async def get_driver_subscription_status(request: Request):
     }
 
 
-@payments_router.post("/squad/webhook")
-async def handle_squad_webhook(request: Request):
-    raw_body = await request.body()
-    signature = request.headers.get("x-squad-encrypted-body", "")
-
-    if not SQUAD_SECRET_KEY:
-        logger.error("Squad webhook received but SQUAD_SECRET_KEY is not configured")
-        return {"received": False}
-
-    expected_signature = hmac.new(
-        SQUAD_SECRET_KEY.encode("utf-8"),
-        raw_body,
-        hashlib.sha512,
-    ).hexdigest().upper()
-    if not signature:
-        logger.warning("Squad webhook rejected: missing signature header")
-        raise HTTPException(status_code=401, detail="Missing webhook signature")
-    if signature.upper() != expected_signature:
-        logger.warning("Squad webhook rejected due to signature mismatch")
-        raise HTTPException(status_code=401, detail="Invalid webhook signature")
-
-    try:
-        payload = await request.json()
-    except Exception:
-        logger.error("Invalid Squad webhook payload")
-        raise HTTPException(status_code=400, detail="Invalid JSON payload")
-
+async def _process_squad_webhook_payload(payload: dict) -> dict:
+    """Apply verified Squad subscription webhook (virtual account or checkout). Idempotent."""
     event_reference = _extract_squad_field(
         payload,
         "transaction_ref",
@@ -892,7 +2137,72 @@ async def handle_squad_webhook(request: Request):
 
     verify_result = await _verify_squad_transaction(str(event_reference or ""))
     logger.info(f"Squad verification response for ref={event_reference}: {verify_result}")
+    # Squad verify API can lag right after payment; if webhook says success, trust it and use payload amount.
+    if not verify_result.get("verified") and _squad_event_status_success(event_status) and event_reference:
+        try:
+            w_amt = round(float(amount), 2) if amount is not None else None
+        except (TypeError, ValueError):
+            w_amt = None
+        if w_amt is None:
+            w_amt = _normalize_amount(
+                _extract_squad_field(
+                    payload,
+                    "data.amount",
+                    "data.transaction_amount",
+                    "transaction_amount",
+                )
+            )
+        verify_result = {
+            **verify_result,
+            "verified": True,
+            "paid_amount": w_amt if w_amt is not None else verify_result.get("paid_amount"),
+            "webhook_trusted_status": True,
+        }
+        logger.info(
+            "Squad webhook: using event status=%s for ref=%s (verify API not success yet)",
+            event_status,
+            event_reference,
+        )
+
     if not verify_result.get("verified"):
+        ref_s = str(event_reference or "").strip()
+        ps = str(verify_result.get("provider_status") or "").strip().lower()
+        ev = str(event_status or "").strip().lower()
+        terminal_fail = {
+            "failed",
+            "failure",
+            "abandoned",
+            "cancelled",
+            "canceled",
+            "reversed",
+            "declined",
+            "expired",
+        }
+        if ref_s and (ps in terminal_fail or ev in terminal_fail):
+            fail_at = datetime.utcnow()
+            reason = ps or ev or verify_result.get("reason") or "verification_failed"
+            await db.wallet_payment_intents.update_many(
+                {"transaction_ref": ref_s, "status": "pending"},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "failed_at": fail_at,
+                        "failed_reason": reason,
+                        "updated_at": fail_at,
+                    }
+                },
+            )
+            await db.subscription_payment_intents.update_many(
+                {"transaction_ref": ref_s, "status": "pending"},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "failed_at": fail_at,
+                        "failed_reason": reason,
+                        "updated_at": fail_at,
+                    }
+                },
+            )
         await db.subscription_transactions.insert_one(
             {
                 "id": str(uuid.uuid4()),
@@ -907,7 +2217,136 @@ async def handle_squad_webhook(request: Request):
         )
         return {"received": True, "processed": False}
 
-    paid_amount = _normalize_amount(verify_result.get("paid_amount"))
+    # --- Rider wallet top-up (before driver subscription matching) ---
+    wva = None
+    wva_or: list = []
+    if event_reference:
+        er = str(event_reference)
+        wva_or.extend([{"reference": er}, {"provider_reference": er}])
+    if account_number:
+        wva_or.append({"account_number": str(account_number)})
+    if wva_or:
+        wva = await db.wallet_virtual_accounts.find_one({"$and": [{"$or": wva_or}, {"status": "pending"}]})
+
+    wpi = None
+    if not wva and event_reference:
+        wpi_candidates = _wallet_intent_ref_candidates(str(event_reference))
+        if wpi_candidates:
+            wpi = await db.wallet_payment_intents.find_one(
+                {"transaction_ref": {"$in": wpi_candidates}, "status": "pending"}
+            )
+            if not wpi:
+                done_w = await db.wallet_payment_intents.find_one(
+                    {"transaction_ref": {"$in": wpi_candidates}, "status": "completed"},
+                    sort=[("completed_at", -1)],
+                )
+                if done_w:
+                    logger.info(
+                        "Squad webhook: wallet checkout already completed ref=%s (duplicate event)",
+                        event_reference,
+                    )
+                    return {"received": True, "processed": True, "wallet_topup": True, "duplicate": True}
+
+    if wva:
+        uid = wva.get("user_id")
+        expected_amount = _normalize_amount(wva.get("amount_expected"))
+        paid_amount = _reconcile_squad_amount_with_intent(
+            expected_amount,
+            verify_result.get("paid_amount"),
+            verify_ok=bool(verify_result.get("verified")),
+        )
+        if paid_amount is None or expected_amount is None:
+            logger.warning(
+                f"Squad wallet VA amount mismatch user={uid} paid={verify_result.get('paid_amount')} expected={expected_amount}"
+            )
+            await db.subscription_transactions.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "provider": "squad",
+                    "reference": event_reference,
+                    "status": "wallet_va_amount_mismatch",
+                    "paid_amount": paid_amount,
+                    "expected_amount": expected_amount,
+                    "verify_result": verify_result,
+                    "webhook_payload": payload,
+                    "created_at": datetime.utcnow(),
+                }
+            )
+            return {"received": True, "processed": False}
+        ref_key = str(event_reference or wva.get("reference") or "")
+        res = await _rider_wallet_topup_idempotent(
+            uid,
+            paid_amount,
+            ref_key,
+            "squad_virtual_account",
+            verify_result,
+            payload,
+        )
+        await db.wallet_virtual_accounts.update_one(
+            {"id": wva["id"]},
+            {
+                "$set": {
+                    "status": "success",
+                    "paid_amount": paid_amount,
+                    "verified_at": datetime.utcnow(),
+                    "last_webhook_status": event_status,
+                    "last_reference": ref_key,
+                }
+            },
+        )
+        logger.info(f"Squad wallet VA credited user={uid} ref={ref_key} dup={res.get('duplicate')}")
+        return {"received": True, "processed": True, "wallet_topup": True}
+
+    if wpi:
+        uid = wpi.get("user_id")
+        expected_amount = _normalize_amount(wpi.get("amount_ngn"))
+        paid_amount = _reconcile_squad_amount_with_intent(
+            expected_amount,
+            verify_result.get("paid_amount"),
+            verify_ok=bool(verify_result.get("verified")),
+        )
+        if paid_amount is None or expected_amount is None:
+            logger.warning(
+                f"Squad wallet checkout amount mismatch user={uid} raw_paid={verify_result.get('paid_amount')} expected={expected_amount}"
+            )
+            await db.subscription_transactions.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "provider": "squad",
+                    "reference": event_reference,
+                    "status": "wallet_checkout_amount_mismatch",
+                    "paid_amount": paid_amount,
+                    "expected_amount": expected_amount,
+                    "verify_result": verify_result,
+                    "webhook_payload": payload,
+                    "created_at": datetime.utcnow(),
+                }
+            )
+            return {"received": True, "processed": False}
+        ref_key = str(event_reference or "")
+        res = await _rider_wallet_topup_idempotent(
+            uid,
+            paid_amount,
+            ref_key,
+            "squad_checkout",
+            verify_result,
+            payload,
+        )
+        if not res.get("duplicate"):
+            await db.wallet_payment_intents.update_one(
+                {"id": wpi["id"]},
+                {
+                    "$set": {
+                        "status": "completed",
+                        "paid_amount_ngn": paid_amount,
+                        "completed_at": datetime.utcnow(),
+                        "last_webhook_status": event_status,
+                    }
+                },
+            )
+        logger.info(f"Squad wallet checkout credited user={uid} ref={ref_key} dup={res.get('duplicate')}")
+        return {"received": True, "processed": True, "wallet_topup": True}
+
     virtual_account = await db.subscription_virtual_accounts.find_one(
         {"$or": [
             {"reference": str(event_reference)},
@@ -915,7 +2354,15 @@ async def handle_squad_webhook(request: Request):
             {"account_number": str(account_number) if account_number else ""},
         ]}
     )
-    if not virtual_account:
+    checkout_intent = None
+    if not virtual_account and event_reference:
+        sub_cands = _wallet_intent_ref_candidates(str(event_reference))
+        if sub_cands:
+            checkout_intent = await db.subscription_payment_intents.find_one(
+                {"transaction_ref": {"$in": sub_cands}, "status": "pending"}
+            )
+
+    if not virtual_account and not checkout_intent:
         logger.warning(f"Squad verified payment could not be mapped ref={event_reference}")
         await db.subscription_transactions.insert_one(
             {
@@ -924,7 +2371,7 @@ async def handle_squad_webhook(request: Request):
                 "reference": event_reference,
                 "account_number": account_number,
                 "status": "unmapped",
-                "paid_amount": paid_amount,
+                "paid_amount": verify_result.get("paid_amount"),
                 "verify_result": verify_result,
                 "webhook_payload": payload,
                 "created_at": datetime.utcnow(),
@@ -932,11 +2379,26 @@ async def handle_squad_webhook(request: Request):
         )
         return {"received": True, "processed": False}
 
-    driver_id = virtual_account.get("driver_id")
-    expected_amount = _normalize_amount(virtual_account.get("amount_expected"))
-    if paid_amount is None or expected_amount is None or abs(paid_amount - expected_amount) > 0.01:
+    if virtual_account:
+        driver_id = virtual_account.get("driver_id")
+        expected_amount = _normalize_amount(virtual_account.get("amount_expected"))
+        paid_amount = _reconcile_squad_amount_with_intent(
+            expected_amount,
+            verify_result.get("paid_amount"),
+            verify_ok=bool(verify_result.get("verified")),
+        )
+    else:
+        driver_id = checkout_intent.get("driver_id")
+        expected_amount = _normalize_amount(checkout_intent.get("amount_ngn"))
+        paid_amount = _reconcile_squad_amount_with_intent(
+            expected_amount,
+            verify_result.get("paid_amount"),
+            verify_ok=bool(verify_result.get("verified")),
+        )
+
+    if paid_amount is None or expected_amount is None:
         logger.warning(
-            f"Squad amount mismatch driver={driver_id} paid={paid_amount} expected={expected_amount}"
+            f"Squad amount mismatch driver={driver_id} raw_paid={verify_result.get('paid_amount')} expected={expected_amount}"
         )
         await db.subscription_transactions.insert_one(
             {
@@ -944,7 +2406,7 @@ async def handle_squad_webhook(request: Request):
                 "provider": "squad",
                 "driver_id": driver_id,
                 "reference": event_reference,
-                "account_number": virtual_account.get("account_number"),
+                "account_number": (virtual_account or {}).get("account_number"),
                 "status": "amount_mismatch",
                 "paid_amount": paid_amount,
                 "expected_amount": expected_amount,
@@ -955,38 +2417,53 @@ async def handle_squad_webhook(request: Request):
         )
         return {"received": True, "processed": False}
 
+    _er = str(event_reference or "").strip()
+    dup_refs = _wallet_intent_ref_candidates(_er) or ([_er] if _er else [])
     existing_success = await db.subscription_transactions.find_one(
-        {"provider": "squad", "reference": str(event_reference), "status": "success"}
+        {"provider": "squad", "reference": {"$in": dup_refs}, "status": "success"}
     )
     if existing_success:
         logger.info(f"Duplicate Squad webhook ignored ref={event_reference}")
         return {"received": True, "processed": True, "duplicate": True}
 
+    provider_label = "squad" if virtual_account else "squad_checkout"
     activation = await _activate_subscription(
         driver_id=driver_id,
         payment_reference=str(event_reference),
-        provider="squad",
+        provider=provider_label,
         paid_amount=paid_amount,
     )
 
-    await db.subscription_virtual_accounts.update_one(
-        {"driver_id": driver_id},
-        {"$set": {
-            "status": "success",
-            "paid_amount": paid_amount,
-            "verified": True,
-            "verified_at": datetime.utcnow(),
-            "last_webhook_status": event_status,
-            "last_reference": str(event_reference),
-        }}
-    )
+    if virtual_account:
+        await db.subscription_virtual_accounts.update_one(
+            {"driver_id": driver_id},
+            {"$set": {
+                "status": "success",
+                "paid_amount": paid_amount,
+                "verified": True,
+                "verified_at": datetime.utcnow(),
+                "last_webhook_status": event_status,
+                "last_reference": str(event_reference),
+            }}
+        )
+    if checkout_intent:
+        await db.subscription_payment_intents.update_one(
+            {"id": checkout_intent["id"]},
+            {"$set": {
+                "status": "completed",
+                "paid_amount_ngn": paid_amount,
+                "completed_at": datetime.now(timezone.utc),
+                "last_webhook_status": event_status,
+            }},
+        )
+
     await db.subscription_transactions.insert_one(
         {
             "id": str(uuid.uuid4()),
             "provider": "squad",
             "driver_id": driver_id,
             "reference": str(event_reference),
-            "account_number": virtual_account.get("account_number"),
+            "account_number": (virtual_account or {}).get("account_number"),
             "status": "success",
             "paid_amount": paid_amount,
             "expected_amount": expected_amount,
@@ -999,6 +2476,86 @@ async def handle_squad_webhook(request: Request):
     )
     logger.info(f"Squad activation success driver={driver_id} ref={event_reference}")
     return {"received": True, "processed": True}
+
+
+@payments_router.post("/squad/webhook")
+async def handle_squad_webhook(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("x-squad-encrypted-body", "")
+
+    if not SQUAD_SECRET_KEY:
+        logger.error("Squad webhook received but SQUAD_SECRET_KEY is not configured")
+        return {"received": False}
+
+    expected_signature = hmac.new(
+        SQUAD_SECRET_KEY.encode("utf-8"),
+        raw_body,
+        hashlib.sha512,
+    ).hexdigest().upper()
+    if not signature:
+        logger.warning("Squad webhook rejected: missing signature header")
+        raise HTTPException(status_code=401, detail="Missing webhook signature")
+    if signature.upper() != expected_signature:
+        logger.warning("Squad webhook rejected due to signature mismatch")
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except json.JSONDecodeError:
+        logger.error("Invalid Squad webhook JSON")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    try:
+        return await _process_squad_webhook_payload(payload)
+    except Exception:
+        logger.exception("Squad webhook processing failed; queued for manual replay")
+        dlq_id = str(uuid.uuid4())
+        await db.squad_webhook_dlq.insert_one(
+            {
+                "id": dlq_id,
+                "payload": payload,
+                "status": "pending",
+                "attempts": 0,
+                "created_at": datetime.now(timezone.utc),
+            }
+        )
+        return {"received": True, "processed": False, "queued_for_retry": True, "dlq_id": dlq_id}
+
+
+@payments_router.get("/payment/squad-webhook-dlq")
+async def list_squad_webhook_dlq(request: Request, limit: int = 40):
+    """Admin: list failed Squad webhooks (exceptions during processing)."""
+    await require_admin_request(request)
+    items = (
+        await db.squad_webhook_dlq.find({}, {"_id": 0})
+        .sort("created_at", -1)
+        .limit(min(limit, 100))
+        .to_list(min(limit, 100))
+    )
+    return {"items": items}
+
+
+@payments_router.post("/payment/squad-webhook-dlq/{dlq_id}/replay")
+async def replay_squad_webhook_dlq(dlq_id: str, request: Request):
+    """Admin: re-run processing for a DLQ payload (idempotent)."""
+    await require_admin_request(request)
+    doc = await db.squad_webhook_dlq.find_one({"id": dlq_id})
+    if not doc or not isinstance(doc.get("payload"), dict):
+        raise HTTPException(status_code=404, detail="DLQ entry not found")
+    result = await _process_squad_webhook_payload(doc["payload"])
+    await db.squad_webhook_dlq.update_one(
+        {"id": dlq_id},
+        {
+            "$set": {
+                "status": "replayed",
+                "replayed_at": datetime.now(timezone.utc),
+                "last_result": result,
+            },
+            "$inc": {"attempts": 1},
+        },
+    )
+    return {"dlq_id": dlq_id, **result}
+
 
 @payments_router.get("/subscriptions/{driver_id}/history")
 async def get_subscription_history(driver_id: str, request: Request):
@@ -1495,15 +3052,42 @@ async def estimate_fare(request: FareEstimateRequest):
 
 
 # ==================== WALLET ENDPOINTS ====================
+@payments_router.get("/wallet/me")
+async def get_wallet_me(request: Request, limit: int = 25):
+    """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
+    user_id = require_authenticated(request)
+    verify_owner_strict(request, user_id)
+    user = await db.users.find_one({"id": user_id})
+    safe_limit = max(1, min(limit, 100))
+    rows = (
+        await db.transactions.find({"user_id": user_id}, {"_id": 0})
+        .sort("timestamp", -1)
+        .limit(safe_limit)
+        .to_list(safe_limit)
+    )
+    for tx in rows:
+        ts = tx.get("timestamp")
+        if hasattr(ts, "isoformat"):
+            tx["timestamp"] = ts.isoformat()
+    return {
+        "currency": "NGN",
+        "user_id": user_id,
+        "balance": float((user or {}).get("wallet_balance") or 0),
+        "transactions": rows,
+    }
+
+
 @payments_router.get("/wallet/{user_id}")
 async def get_wallet_balance(user_id: str, request: Request):
     """Get user wallet balance"""
     verify_owner_strict(request, user_id)
     user = await db.users.find_one({"id": user_id})
+    base: dict = {"currency": "NGN", "user_id": user_id}
     if not user:
-        # Create user wallet with 0 balance
-        return {"balance": 0, "currency": "NGN", "user_id": user_id}
-    return {"balance": user.get("wallet_balance", 0), "currency": "NGN", "user_id": user_id}
+        base["balance"] = 0
+        return base
+    base["balance"] = user.get("wallet_balance", 0)
+    return base
 
 
 @payments_router.get("/wallet/{user_id}/transactions")

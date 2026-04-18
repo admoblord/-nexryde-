@@ -8,6 +8,7 @@ from database import db
 
 logger = logging.getLogger('server')
 gamification_router = APIRouter(prefix="/api", tags=["Gamification"])
+DRIVER_OF_MONTH_CASH_BONUS = 50000
 
 LOYALTY_TIERS = {
     "bronze": {"min_trips": 0, "min_spent": 0, "perks": ["Basic support"], "points_multiplier": 1.0},
@@ -22,6 +23,103 @@ DRIVER_CERTIFICATION_LEVELS = {
     "gold": {"name": "Gold", "min_trips": 200, "min_rating": 4.7, "min_months": 6, "perks": ["Premium support", "Fee waiver days", "Premium matching", "10% subscription discount"], "badge_color": "#FFD700"},
     "platinum": {"name": "Platinum", "min_trips": 500, "min_rating": 4.9, "min_months": 12, "perks": ["Dedicated support", "Profit sharing", "First access to new features", "15% subscription discount", "Free subscription month yearly"], "badge_color": "#E5E4E2"}
 }
+
+
+def _current_month_key(now: datetime | None = None) -> str:
+    current = now or datetime.utcnow()
+    return current.strftime("%Y-%m")
+
+
+async def _driver_of_month_candidates(limit: int = 3) -> list[dict]:
+    start_date = datetime.utcnow() - timedelta(days=30)
+    pipeline = [
+        {
+            "$match": {
+                "status": "completed",
+                "completed_at": {"$gte": start_date},
+                "driver_id": {"$exists": True, "$ne": None},
+                "$or": [
+                    {"payment_status": "completed"},
+                    {"payment_status": {"$exists": False}},
+                ],
+            }
+        },
+        {
+            "$group": {
+                "_id": "$driver_id",
+                "trip_count": {"$sum": 1},
+                "avg_rating": {"$avg": "$driver_rating"},
+                "total_earnings": {"$sum": "$fare"},
+            }
+        },
+        {"$sort": {"avg_rating": -1, "trip_count": -1, "total_earnings": -1}},
+        {"$limit": max(3, limit)},
+    ]
+    leaders = await db.trips.aggregate(pipeline).to_list(limit)
+    driver_ids = [row["_id"] for row in leaders if row.get("_id")]
+    users = await db.users.find({"id": {"$in": driver_ids}}, {"_id": 0, "id": 1, "name": 1, "rating": 1}).to_list(100)
+    users_map = {u["id"]: u for u in users}
+    candidates = []
+    for row in leaders:
+        driver_id = row.get("_id")
+        if not driver_id or driver_id not in users_map:
+            continue
+        user = users_map[driver_id]
+        candidates.append(
+            {
+                "driver_id": driver_id,
+                "name": user.get("name") or "Anonymous Driver",
+                "rating": round(float(row.get("avg_rating") or user.get("rating") or 5.0), 1),
+                "trip_count": int(row.get("trip_count") or 0),
+                "total_earnings": round(float(row.get("total_earnings") or 0), 2),
+                "campaign_story": "Top-rated driver with standout rider love this month.",
+            }
+        )
+    return candidates[:limit]
+
+
+async def _build_driver_of_month_payload(month_key: str) -> dict:
+    campaign = await db.driver_of_month_campaigns.find_one({"month_key": month_key}, {"_id": 0})
+    if not campaign:
+        candidates = await _driver_of_month_candidates(limit=3)
+        campaign = {
+            "month_key": month_key,
+            "title": "Driver of the Month",
+            "subtitle": "Community votes decide who gets featured, cash bonus, and a home-delivered trophy.",
+            "cash_bonus": DRIVER_OF_MONTH_CASH_BONUS,
+            "trophy_delivery": "Physical trophy delivered to the winner's home",
+            "social_hook": "Built for viral hometown pride and shareable Nexryde moments.",
+            "candidates": candidates,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+        await db.driver_of_month_campaigns.update_one({"month_key": month_key}, {"$set": campaign}, upsert=True)
+
+    votes = await db.driver_of_month_votes.find({"month_key": month_key}, {"_id": 0}).to_list(5000)
+    vote_totals: dict[str, int] = {}
+    for vote in votes:
+        driver_id = vote.get("driver_id")
+        if driver_id:
+            vote_totals[driver_id] = vote_totals.get(driver_id, 0) + 1
+
+    ranked = []
+    for candidate in campaign.get("candidates", []):
+        enriched = dict(candidate)
+        enriched["votes"] = vote_totals.get(candidate.get("driver_id"), 0)
+        ranked.append(enriched)
+    ranked.sort(key=lambda item: (-int(item.get("votes", 0)), -float(item.get("rating", 0)), -int(item.get("trip_count", 0))))
+
+    featured = ranked[0] if ranked else None
+    return {
+        "month_key": month_key,
+        "title": campaign.get("title", "Driver of the Month"),
+        "subtitle": campaign.get("subtitle", ""),
+        "cash_bonus": campaign.get("cash_bonus", DRIVER_OF_MONTH_CASH_BONUS),
+        "trophy_delivery": campaign.get("trophy_delivery", "Physical trophy delivered to the winner's home"),
+        "social_hook": campaign.get("social_hook", ""),
+        "candidates": ranked,
+        "featured_driver": featured,
+        "total_votes": sum(vote_totals.values()),
+    }
 
 # ==================== CHALLENGES ====================
 
@@ -61,7 +159,16 @@ async def get_driver_leaderboard(city: str = "lagos", period: str = "weekly"):
     else:
         start_date = datetime.utcnow() - timedelta(days=30)
     pipeline = [
-        {"$match": {"status": "completed", "completed_at": {"$gte": start_date}}},
+        {
+            "$match": {
+                "status": "completed",
+                "completed_at": {"$gte": start_date},
+                "$or": [
+                    {"payment_status": "completed"},
+                    {"payment_status": {"$exists": False}},
+                ],
+            }
+        },
         {"$group": {"_id": "$driver_id", "total_earnings": {"$sum": "$fare"}, "trip_count": {"$sum": 1}, "avg_rating": {"$avg": "$driver_rating"}}},
         {"$sort": {"total_earnings": -1}},
         {"$limit": 20}
@@ -95,6 +202,44 @@ async def get_top_rated_drivers(limit: int = 20):
         profile = profiles_map.get(driver["id"])
         result.append({"rank": rank, "driver_id": driver["id"], "name": (driver.get("name", "Anonymous")[:10] + "...") if driver.get("name") else "Anonymous", "rating": driver.get("rating", 5.0), "total_trips": driver.get("total_trips", 0), "comfort_scores": {"smoothness": profile.get("smoothness_rating", 5.0) if profile else 5.0, "politeness": profile.get("politeness_rating", 5.0) if profile else 5.0, "cleanliness": profile.get("cleanliness_rating", 5.0) if profile else 5.0, "safety": profile.get("safety_rating", 5.0) if profile else 5.0}})
     return {"top_rated_drivers": result}
+
+
+@gamification_router.get("/driver-of-the-month/current")
+async def get_driver_of_the_month_current():
+    payload = await _build_driver_of_month_payload(_current_month_key())
+    return {"success": True, **payload}
+
+
+@gamification_router.post("/driver-of-the-month/vote")
+async def vote_for_driver_of_the_month(request: dict):
+    voter_id = str(request.get("user_id") or "").strip()
+    driver_id = str(request.get("driver_id") or "").strip()
+    if not voter_id:
+        raise HTTPException(status_code=400, detail="User id is required")
+    if not driver_id:
+        raise HTTPException(status_code=400, detail="Driver id is required")
+
+    month_key = _current_month_key()
+    payload = await _build_driver_of_month_payload(month_key)
+    candidate_ids = {candidate.get("driver_id") for candidate in payload.get("candidates", [])}
+    if driver_id not in candidate_ids:
+        raise HTTPException(status_code=400, detail="Driver is not in this month's shortlist")
+
+    existing = await db.driver_of_month_votes.find_one({"month_key": month_key, "voter_id": voter_id}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="You already voted this month")
+
+    await db.driver_of_month_votes.insert_one(
+        {
+            "vote_id": str(uuid.uuid4()),
+            "month_key": month_key,
+            "voter_id": voter_id,
+            "driver_id": driver_id,
+            "created_at": datetime.utcnow().isoformat(),
+        }
+    )
+    updated = await _build_driver_of_month_payload(month_key)
+    return {"success": True, "message": "Vote recorded", **updated}
 
 # ==================== DRIVER CERTIFICATION ====================
 

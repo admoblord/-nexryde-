@@ -48,8 +48,8 @@ export function ProfileHeroCard({
   const displayVerified = showVerifiedOnAvatar && verified;
   const trips = user?.total_trips ?? 0;
   const ratingText =
-    (user?.trips_completed ?? 0) > 0 && typeof user?.rating === 'number'
-      ? user.rating.toFixed(1)
+    (user?.trips_completed ?? 0) > 0 && user?.rating != null
+      ? Number(user.rating).toFixed(1)
       : '—';
 
   return (

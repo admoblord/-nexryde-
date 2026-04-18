@@ -13,7 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, verifyTripBiometricLock } from '@/src/services/api';
+import { BiometricScanner } from '@/src/components/tier1';
 
 export default function SecurityCodeScreen() {
   const router = useRouter();
@@ -23,6 +24,7 @@ export default function SecurityCodeScreen() {
   const [securityCode, setSecurityCode] = useState('');
   const [activeTripId, setActiveTripId] = useState('');
   const [activeDriverId, setActiveDriverId] = useState('');
+  const [tripStatus, setTripStatus] = useState<any>(null);
   const tripId = (params.trip_id as string) || (params.tripId as string) || activeTripId;
   const driverId = (params.driver_id as string) || (params.driverId as string) || activeDriverId;
   const backendUrl = BACKEND_URL;
@@ -56,6 +58,7 @@ export default function SecurityCodeScreen() {
             headers: getAuthHeaders(),
           });
           const tripData = await tripRes.json();
+          setTripStatus(tripData);
           if (tripRes.ok && tripData?.security_code) {
             setSecurityCode(String(tripData.security_code));
           }
@@ -95,6 +98,42 @@ export default function SecurityCodeScreen() {
             ) : (
               <Text style={styles.codeUnavailable}>Code unavailable</Text>
             )}
+          </View>
+
+          <BiometricScanner
+            title="Rider biometric trip lock"
+            subtitle={
+              tripStatus?.driver_biometric_verified_at
+                ? 'Driver biometric already confirmed. Complete yours now to unlock the trip handshake.'
+                : 'Verify with fingerprint or face unlock. The trip stays locked until both rider and driver confirm.'
+            }
+            confirmLabel={tripStatus?.rider_biometric_verified_at ? 'Biometric confirmed' : 'Verify my biometric'}
+            onSuccess={async () => {
+              if (!tripId) return;
+              try {
+                const res = await verifyTripBiometricLock(tripId);
+                setTripStatus((prev: any) => ({ ...prev, ...res.data }));
+                Alert.alert(
+                  'Biometric recorded',
+                  res.data?.biometric_handshake_ready
+                    ? 'Double verified handshake is ready. Your driver can now finish secure trip start.'
+                    : 'Your biometric is recorded. Waiting for the driver to complete theirs.'
+                );
+              } catch (error: any) {
+                Alert.alert('Biometric lock', error?.response?.data?.detail || 'Could not record biometric lock.');
+              }
+            }}
+            onFailure={(msg) => Alert.alert('Biometric check', msg)}
+          />
+
+          <View style={styles.handshakeCard}>
+            <Text style={styles.handshakeTitle}>Double Verified Handshake</Text>
+            <Text style={styles.handshakeItem}>
+              Rider: {tripStatus?.rider_biometric_verified_at ? 'Confirmed' : 'Pending'}
+            </Text>
+            <Text style={styles.handshakeItem}>
+              Driver: {tripStatus?.driver_biometric_verified_at ? 'Confirmed' : 'Pending'}
+            </Text>
           </View>
 
           <View style={styles.tipsCard}>
@@ -178,6 +217,26 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
     color: COLORS.gray300,
+  },
+  handshakeCard: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginTop: SPACING.lg,
+    marginBottom: SPACING.lg,
+  },
+  handshakeTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+    color: COLORS.white,
+    marginBottom: SPACING.sm,
+  },
+  handshakeItem: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: COLORS.gray200,
+    marginBottom: 4,
   },
   tipsCard: {
     backgroundColor: 'rgba(255,255,255,0.1)',

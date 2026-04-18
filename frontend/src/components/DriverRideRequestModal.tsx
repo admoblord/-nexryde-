@@ -65,6 +65,13 @@ const CHIP_PRESETS = [
   { label: '+15%', pct: 0.15 },
 ] as const;
 
+const RIDE_PREFERENCE_LABELS: Record<string, string> = {
+  quiet_ride: 'Quiet Ride',
+  chatty_driver: 'Chatty Driver',
+  music_on: 'Music On',
+  cold_ac: 'AC Must Be Cold',
+};
+
 export default function DriverRideRequestModal({
   visible,
   trip,
@@ -120,6 +127,17 @@ export default function DriverRideRequestModal({
       ? Number(trip.shield.rider_reputation_avg).toFixed(1)
       : null;
   const ratingCount = trip?.shield?.rider_reputation_trip_count ?? null;
+  const riderRiskScore =
+    trip?.shield?.rider_risk_score != null ? Number(trip.shield.rider_risk_score) : null;
+  const riderRiskBand = String(trip?.shield?.rider_risk_band || '').toLowerCase();
+  const riderRiskConfig =
+    riderRiskBand === 'green'
+      ? { label: 'Green', color: C.success, hint: 'Low safety risk' }
+      : riderRiskBand === 'yellow'
+        ? { label: 'Yellow', color: '#EAB308', hint: 'Moderate caution' }
+        : riderRiskBand === 'red'
+          ? { label: 'Red', color: C.danger, hint: 'High caution' }
+          : null;
 
   const distPickup = trip?.distance_to_pickup != null ? Number(trip.distance_to_pickup) : null;
   const etaPickupMin =
@@ -130,6 +148,11 @@ export default function DriverRideRequestModal({
     paymentRaw === 'cash'
       ? 'Cash'
       : paymentRaw.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+  const ridePreferences = Array.isArray(trip?.ride_preferences)
+    ? (trip.ride_preferences as string[])
+        .map((item) => RIDE_PREFERENCE_LABELS[item] || item.replace(/_/g, ' '))
+        .slice(0, 4)
+    : [];
 
   const pl = trip?.pickup_location;
   const dl = trip?.dropoff_location;
@@ -330,6 +353,15 @@ export default function DriverRideRequestModal({
                         </Text>
                       </View>
                     )}
+                    {riderRiskConfig && (
+                      <View style={[styles.statChip, { borderColor: riderRiskConfig.color + '66' }]}>
+                        <Ionicons name="shield-outline" size={14} color={riderRiskConfig.color} />
+                        <Text style={[styles.statChipText, { color: riderRiskConfig.color }]}>
+                          {riderRiskConfig.label}
+                          {riderRiskScore != null ? ` ${Math.round(riderRiskScore)}` : ''}
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 </View>
               </View>
@@ -362,9 +394,24 @@ export default function DriverRideRequestModal({
                       {trip.shield.rider_new_account
                         ? 'New rider — limited reputation history.'
                         : `Driver-rated ${trip.shield.rider_reputation_avg != null ? `${Number(trip.shield.rider_reputation_avg).toFixed(1)}★` : '—'} · ${trip.shield.rider_reputation_trip_count ?? 0} trips`}
+                      {riderRiskConfig ? ` · Safety band ${riderRiskConfig.label} (${riderRiskConfig.hint})` : ''}
                     </Text>
                   </View>
                 </View>
+              )}
+
+              {ridePreferences.length > 0 && (
+                <>
+                  <Text style={styles.sectionLabel}>Rider vibe preferences</Text>
+                  <View style={styles.prefRow}>
+                    {ridePreferences.map((preference) => (
+                      <View key={preference} style={styles.prefChip}>
+                        <Ionicons name="sparkles-outline" size={14} color={C.primary} />
+                        <Text style={styles.prefChipText}>{preference}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </>
               )}
 
               <Text style={styles.sectionLabel}>Counter with one tap</Text>
@@ -661,6 +708,28 @@ const styles = StyleSheet.create({
   },
   shieldTitle: { fontSize: 13, fontWeight: '800', color: C.text },
   shieldBody: { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 4, lineHeight: 17 },
+  prefRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 18,
+  },
+  prefChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#ECFDF5',
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+  },
+  prefChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: C.text,
+  },
   sectionLabel: {
     ...DS_TYPE.caption,
     color: C.muted,

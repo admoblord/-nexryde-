@@ -4,9 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 import { useAppStore } from '@/src/store/appStore';
-import { completeRiderVerification } from '@/src/services/api';
+import { completeRiderVerification, verifyFace } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
+import { BiometricScanner } from '@/src/components/tier1';
 
 const COLORS = {
   bg: '#0F172A',
@@ -26,11 +28,49 @@ export default function RiderVerificationScreen() {
   const [phone, setPhone] = useState(user?.phone || '');
   const [address, setAddress] = useState((user as any)?.address || '');
   const [nin, setNin] = useState((user as any)?.nin || '');
+  const [faceVerified, setFaceVerified] = useState(Boolean((user as any)?.face_verified));
+  const [biometricVerified, setBiometricVerified] = useState(false);
+  const [facePreview, setFacePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const canSubmit = useMemo(() => {
-    return name.trim().length > 1 && phone.trim().length >= 10 && address.trim().length > 5 && /^\d{11}$/.test(nin.trim());
-  }, [name, phone, address, nin]);
+    return (
+      name.trim().length > 1 &&
+      phone.trim().length >= 10 &&
+      address.trim().length > 5 &&
+      /^\d{11}$/.test(nin.trim()) &&
+      faceVerified &&
+      biometricVerified
+    );
+  }, [name, phone, address, nin, faceVerified, biometricVerified]);
+
+  const handleFaceCapture = async () => {
+    if (!user?.id) {
+      Alert.alert('Session error', 'Please login again.');
+      return;
+    }
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera access is required for face verification.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+      const base64 = `data:image/jpeg;base64,${result.assets[0].base64}`;
+      await verifyFace(user.id, base64);
+      setFacePreview(result.assets[0].uri);
+      setFaceVerified(true);
+      Alert.alert('Face verified', 'Your face scan has been saved for rider verification.');
+    } catch (e: any) {
+      Alert.alert('Face verification failed', e?.response?.data?.detail || 'Could not verify your face now.');
+    }
+  };
 
   const handleSubmit = async () => {
     if (!user?.id) {
@@ -38,7 +78,7 @@ export default function RiderVerificationScreen() {
       return;
     }
     if (!canSubmit) {
-      Alert.alert('Incomplete details', 'Enter full name, phone, address and a valid 11-digit NIN.');
+      Alert.alert('Incomplete details', 'Enter your details, complete face verification, and confirm device biometrics.');
       return;
     }
     setLoading(true);
@@ -93,6 +133,39 @@ export default function RiderVerificationScreen() {
                 placeholder="12345678901"
                 placeholderTextColor={COLORS.muted}
               />
+
+              <Text style={styles.label}>Face Verification</Text>
+              <TouchableOpacity style={styles.faceCard} onPress={() => void handleFaceCapture()}>
+                <View style={styles.faceIconWrap}>
+                  <Ionicons
+                    name={faceVerified ? 'checkmark-circle' : 'camera'}
+                    size={28}
+                    color={faceVerified ? '#22C55E' : COLORS.text}
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.faceTitle}>{faceVerified ? 'Face verified' : 'Capture live face photo'}</Text>
+                  <Text style={styles.faceText}>
+                    {faceVerified
+                      ? 'Your rider selfie is linked to this account.'
+                      : 'Take a clear live selfie to finish account verification.'}
+                  </Text>
+                  {facePreview ? <Text style={styles.faceHint}>Latest capture saved</Text> : null}
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.card}>
+              <BiometricScanner
+                title="Confirm device biometric"
+                subtitle="Use fingerprint or face unlock on this device to harden your account."
+                confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify biometric'}
+                onSuccess={() => {
+                  setBiometricVerified(true);
+                  Alert.alert('Biometric confirmed', 'Device biometric check complete.');
+                }}
+                onFailure={(msg) => Alert.alert('Biometric check', msg)}
+              />
             </View>
 
             <TouchableOpacity disabled={!canSubmit || loading} onPress={handleSubmit} style={styles.buttonWrap}>
@@ -120,6 +193,28 @@ const styles = StyleSheet.create({
   card: { backgroundColor: COLORS.card, borderRadius: 14, borderWidth: 1, borderColor: COLORS.border, padding: 14 },
   label: { color: COLORS.text, marginTop: 10, marginBottom: 6, fontWeight: '700', fontSize: 13 },
   input: { backgroundColor: COLORS.input, borderColor: COLORS.border, borderWidth: 1, borderRadius: 10, color: COLORS.text, paddingHorizontal: 12, paddingVertical: 12 },
+  faceCard: {
+    marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: COLORS.input,
+    borderColor: COLORS.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 12,
+  },
+  faceIconWrap: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111827',
+  },
+  faceTitle: { color: COLORS.text, fontWeight: '800', fontSize: 14 },
+  faceText: { color: COLORS.muted, fontWeight: '600', fontSize: 12, marginTop: 3, lineHeight: 18 },
+  faceHint: { color: '#22C55E', fontWeight: '700', fontSize: 11, marginTop: 4 },
   buttonWrap: { marginTop: 18, borderRadius: 12, overflow: 'hidden' },
   button: { paddingVertical: 14, alignItems: 'center' },
   buttonText: { color: '#fff', fontWeight: '800', fontSize: 15 },

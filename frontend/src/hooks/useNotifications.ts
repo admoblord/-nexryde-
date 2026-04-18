@@ -4,10 +4,13 @@ import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
 import { registerPushToken } from '@/src/services/api';
+import { markFeatureAsSeen, syncAndNotifyNewFeatures } from '@/src/services/featureAnnouncements';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
@@ -16,7 +19,7 @@ Notifications.setNotificationHandler({
 export function useNotifications() {
   const router = useRouter();
   const { user } = useAppStore();
-  const responseListener = useRef<Notifications.Subscription>();
+  const responseListener = useRef<Notifications.Subscription | null>(null);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -37,6 +40,9 @@ export function useNotifications() {
       try {
         await registerPushToken(user.id, tokenData.data);
       } catch {}
+      try {
+        await syncAndNotifyNewFeatures(user.role);
+      } catch {}
     })();
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
@@ -55,11 +61,19 @@ export function useNotifications() {
       if (data?.type === 'trial_ended' && user?.role === 'driver') {
         router.push('/driver/subscription');
       }
+      if (data?.type === 'feature_update') {
+        const route = typeof data?.route === 'string' ? data.route : '/(rider-tabs)/rider-home';
+        const featureId = typeof data?.feature_id === 'string' ? data.feature_id : '';
+        if (featureId) {
+          void markFeatureAsSeen(featureId);
+        }
+        router.push(route as any);
+      }
     });
 
     return () => {
       if (responseListener.current) {
-        Notifications.removeNotificationSubscription(responseListener.current);
+        responseListener.current.remove();
       }
     };
   }, [user?.id, user?.role]);

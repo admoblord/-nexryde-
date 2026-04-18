@@ -6,19 +6,158 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Modal,
   ActivityIndicator,
   Platform,
   Vibration,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { BRAND, LAYOUT } from '@/src/constants/designSystem';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
+import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
+
+type Row = {
+  label: string;
+  desc: string;
+  route: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  tone: 'safe' | 'danger' | 'info';
+};
+
+const QUICK = [
+  { label: 'Emergency', route: '/(rider-tabs)/rider-safety', icon: 'warning' as const, variant: 'danger' as const },
+  { label: 'Police & help', route: '/support', icon: 'shield' as const, variant: 'police' as const },
+  { label: 'Witness', route: '/rider/share-trip', icon: 'eye' as const, variant: 'witness' as const },
+  { label: 'Settings', route: '/settings', icon: 'settings' as const, variant: 'neutral' as const },
+];
+
+const SECTIONS: { title: string; rows: Row[] }[] = [
+  {
+    title: 'Verification',
+    rows: [
+      {
+        label: 'Area safety check',
+        desc: 'Look up risk context before you ride',
+        route: '/rider/safety-check',
+        icon: 'map',
+        tone: 'info',
+      },
+      {
+        label: 'Trip security code',
+        desc: 'PIN-style verification with your driver',
+        route: '/rider/security-code',
+        icon: 'key',
+        tone: 'safe',
+      },
+      {
+        label: 'Rider verification',
+        desc: 'Complete profile verification',
+        route: '/(auth)/rider-verification',
+        icon: 'checkmark-done',
+        tone: 'safe',
+      },
+    ],
+  },
+  {
+    title: 'Emergency & live trip',
+    rows: [
+      {
+        label: 'Live tracking',
+        desc: 'Map, ETA & silent safety tools during trips',
+        route: '/rider/tracking',
+        icon: 'navigate',
+        tone: 'danger',
+      },
+      {
+        label: 'Support line',
+        desc: 'Talk to NEXRYDE when something feels off',
+        route: '/support',
+        icon: 'headset',
+        tone: 'info',
+      },
+    ],
+  },
+  {
+    title: 'Recording & sharing',
+    rows: [
+      {
+        label: 'Trip recording',
+        desc: 'Optional encrypted-style trip capture',
+        route: '/rider/ride-recording',
+        icon: 'mic',
+        tone: 'info',
+      },
+      {
+        label: 'Share trip with someone',
+        desc: 'Live location for a trusted contact',
+        route: '/rider/share-trip',
+        icon: 'share-social',
+        tone: 'safe',
+      },
+    ],
+  },
+  {
+    title: 'Account security',
+    rows: [
+      {
+        label: 'Wallet & payments',
+        desc: 'Balances and payment methods (Wallet tab)',
+        route: '/(rider-tabs)/rider-wallet',
+        icon: 'wallet',
+        tone: 'info',
+      },
+      {
+        label: 'App settings',
+        desc: 'Privacy, notifications & appearance',
+        route: '/settings',
+        icon: 'options',
+        tone: 'info',
+      },
+    ],
+  },
+];
+
+function toneIconBg(tone: Row['tone']) {
+  switch (tone) {
+    case 'danger':
+      return COLORS.errorSoft;
+    case 'safe':
+      return COLORS.successSoft;
+    default:
+      return COLORS.infoSoft;
+  }
+}
+
+function toneIconColor(tone: Row['tone']) {
+  switch (tone) {
+    case 'danger':
+      return COLORS.error;
+    case 'safe':
+      return COLORS.success;
+    default:
+      return COLORS.info;
+  }
+}
+
+function quickBg(v: (typeof QUICK)[number]['variant']) {
+  switch (v) {
+    case 'danger':
+      return COLORS.error;
+    case 'police':
+      return BRAND.navyDeep;
+    case 'witness':
+      return COLORS.warning;
+    default:
+      return COLORS.gray700;
+  }
+}
 
 export default function RiderSafetyScreen() {
+  const router = useRouter();
   const { user, currentTrip } = useAppStore();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
@@ -47,7 +186,7 @@ export default function RiderSafetyScreen() {
     };
 
     fetchActiveTrip();
-    const interval = setInterval(fetchActiveTrip, 10000);
+    const interval = setInterval(fetchActiveTrip, 20000);
     return () => clearInterval(interval);
   }, [user?.id, BACKEND_URL]);
 
@@ -93,80 +232,91 @@ export default function RiderSafetyScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Safety Center</Text>
-        <Text style={styles.headerSubtext}>Your safety is our priority</Text>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <View style={styles.hero}>
+        <Text style={styles.heroTitle}>Safety Center</Text>
+        <Text style={styles.heroSub}>Verification, emergencies, and trip protection — organized in one screen.</Text>
       </View>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* SOS Button */}
-        <TouchableOpacity
-          style={[styles.sosButton, !effectiveTripId && styles.sosDisabled]}
-          activeOpacity={0.85}
-          onLongPress={() => setSosModalVisible(true)}
-          delayLongPress={500}
-          disabled={!effectiveTripId || sendingSos}
-        >
+
+      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <Text style={styles.quickLabel}>Quick access</Text>
+        <View style={styles.quickRow}>
+          {QUICK.map(q => (
+            <TouchableOpacity
+              key={q.label}
+              style={styles.quickBtn}
+              onPress={() => {
+                if (q.route === '/(rider-tabs)/rider-safety') {
+                  setSosModalVisible(true);
+                  return;
+                }
+                router.push(q.route as any);
+              }}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel={q.label}
+            >
+              <View style={[styles.quickIconWrap, { backgroundColor: quickBg(q.variant) }]}>
+                <Ionicons name={q.icon} size={22} color={COLORS.white} />
+              </View>
+              <Text style={styles.quickText} numberOfLines={2}>
+                {q.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <View style={[styles.sosButton, !effectiveTripId && styles.sosDisabled]}>
           <Ionicons name="alert-circle" size={32} color={COLORS.white} />
           <Text style={styles.sosText}>{sendingSos ? 'Sending SOS...' : 'Emergency SOS'}</Text>
           <Text style={styles.sosSubtext}>
-            {effectiveTripId ? 'Press and hold to trigger SOS' : 'SOS available only in active trip'}
+            {effectiveTripId ? 'Trigger a protected emergency alert now' : 'SOS available only in active trip'}
           </Text>
-        </TouchableOpacity>
-        {loadingTrip && <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginTop: 10 }} />}
-
-        {/* Safety Features */}
-        <Text style={styles.sectionTitle}>Safety Features</Text>
-        <View style={styles.featuresList}>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.successSoft }]}>
-              <Ionicons name="shield-checkmark" size={24} color={COLORS.success} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Driver Checks</Text>
-              <Text style={styles.featureDesc}>Look for approved driver badges and trip safety checks</Text>
-            </View>
-          </View>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.infoSoft }]}>
-              <Ionicons name="location" size={24} color={COLORS.info} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>Live Trip Tracking</Text>
-              <Text style={styles.featureDesc}>Share your ride in real-time</Text>
-            </View>
-          </View>
-          <View style={styles.featureCard}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.accentSoft }]}>
-              <Ionicons name="call" size={24} color={COLORS.accent} />
-            </View>
-            <View style={styles.featureContent}>
-              <Text style={styles.featureTitle}>24/7 Support</Text>
-              <Text style={styles.featureDesc}>Always here to help you</Text>
-            </View>
-          </View>
+          <EmergencyButton
+            label={effectiveTripId ? 'Send SOS Alert' : 'No Active Trip'}
+            style={styles.sosCta}
+            onPress={() => setSosModalVisible(true)}
+            compact={false}
+          />
         </View>
+        {loadingTrip ? <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginBottom: SPACING.md }} /> : null}
+
+        {SECTIONS.map(section => (
+          <View key={section.title} style={styles.section}>
+            <Text style={styles.sectionTitle}>{section.title}</Text>
+            {section.rows.map(row => (
+              <TouchableOpacity
+                key={row.route + row.label}
+                style={styles.row}
+                onPress={() => router.push(row.route as any)}
+                activeOpacity={0.9}
+                accessibilityRole="button"
+                accessibilityLabel={row.label}
+              >
+                <View style={[styles.rowIcon, { backgroundColor: toneIconBg(row.tone) }]}>
+                  <Ionicons name={row.icon} size={22} color={toneIconColor(row.tone)} />
+                </View>
+                <View style={styles.rowBody}>
+                  <Text style={styles.rowTitle}>{row.label}</Text>
+                  <Text style={styles.rowDesc}>{row.desc}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={COLORS.lightTextMuted} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
       </ScrollView>
 
-      <Modal visible={sosModalVisible} transparent animationType="fade" onRequestClose={() => setSosModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Ionicons name="warning" size={52} color={COLORS.error} />
-            <Text style={styles.modalTitle}>Confirm Emergency SOS</Text>
-            <Text style={styles.modalText}>
-              This sends your live location and trip details to emergency contacts and NEXRYDE support.
-            </Text>
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnAlt]} onPress={() => setSosModalVisible(false)}>
-                <Text style={styles.modalBtnAltText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.modalBtn, styles.modalBtnDanger]} onPress={handleConfirmSOS} disabled={sendingSos}>
-                <Text style={styles.modalBtnDangerText}>{sendingSos ? 'Sending...' : 'Send SOS'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+      <ConfirmationModal
+        visible={sosModalVisible}
+        title="Confirm Emergency SOS"
+        message="This sends your live location and trip details to emergency contacts and NEXRYDE support."
+        confirmText={sendingSos ? 'Sending...' : 'Send SOS'}
+        cancelText="Cancel"
+        destructive
+        onCancel={() => setSosModalVisible(false)}
+        onConfirm={() => void handleConfirmSOS()}
+      />
     </SafeAreaView>
   );
 }
@@ -176,26 +326,61 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.gray50,
   },
-  header: {
-    backgroundColor: COLORS.primary,
+  hero: {
     paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.lg,
+    paddingTop: SPACING.md,
+    paddingBottom: SPACING.lg,
+    backgroundColor: BRAND.navyDeep,
     borderBottomLeftRadius: BORDER_RADIUS.xxl,
     borderBottomRightRadius: BORDER_RADIUS.xxl,
   },
-  headerTitle: {
+  heroTitle: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
     color: COLORS.white,
   },
-  headerSubtext: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: '#FDE68A',
+  heroSub: {
     marginTop: SPACING.xs,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
+    lineHeight: 20,
   },
-  content: {
+  scroll: {
     padding: SPACING.lg,
+    paddingBottom: SPACING.huge,
+  },
+  quickLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.lightTextMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: SPACING.sm,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  quickBtn: {
+    flex: 1,
+    alignItems: 'center',
+    minHeight: LAYOUT.touchMin + 8,
+  },
+  quickIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  quickText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    textAlign: 'center',
   },
   sosButton: {
     backgroundColor: COLORS.error,
@@ -221,96 +406,40 @@ const styles = StyleSheet.create({
     color: '#FEE2E2',
     marginTop: SPACING.xs,
   },
+  sosCta: {
+    marginTop: SPACING.md,
+    alignSelf: 'stretch',
+  },
+  section: {
+    marginBottom: SPACING.lg,
+  },
   sectionTitle: {
     fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.md,
-    letterSpacing: -0.3,
+    fontWeight: '800',
+    color: COLORS.lightTextPrimary,
+    marginBottom: SPACING.sm,
   },
-  featuresList: {
-    gap: SPACING.md,
-  },
-  featureCard: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.white,
-    padding: SPACING.md,
     borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    minHeight: LAYOUT.touchMin + 6,
     ...SHADOWS.sm,
   },
-  featureIcon: {
-    width: 48,
-    height: 48,
+  rowIcon: {
+    width: 44,
+    height: 44,
     borderRadius: BORDER_RADIUS.lg,
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: SPACING.md,
   },
-  featureContent: {
-    marginLeft: SPACING.md,
-    flex: 1,
-  },
-  featureTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: '#0F172A',
-  },
-  featureDesc: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#475569',
-    marginTop: 2,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: SPACING.lg,
-  },
-  modalCard: {
-    width: '100%',
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    alignItems: 'center',
-  },
-  modalTitle: {
-    marginTop: SPACING.md,
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '800',
-    color: COLORS.error,
-  },
-  modalText: {
-    marginTop: SPACING.sm,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray600,
-    textAlign: 'center',
-  },
-  modalActions: {
-    marginTop: SPACING.lg,
-    width: '100%',
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  modalBtn: {
-    flex: 1,
-    borderRadius: BORDER_RADIUS.md,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-  },
-  modalBtnAlt: {
-    backgroundColor: COLORS.gray100,
-  },
-  modalBtnDanger: {
-    backgroundColor: COLORS.error,
-  },
-  modalBtnAltText: {
-    color: COLORS.gray700,
-    fontWeight: '700',
-  },
-  modalBtnDangerText: {
-    color: COLORS.white,
-    fontWeight: '700',
-  },
+  rowBody: { flex: 1 },
+  rowTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.lightTextPrimary },
+  rowDesc: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.lightTextSecondary, marginTop: 2 },
 });
