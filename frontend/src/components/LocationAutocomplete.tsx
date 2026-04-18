@@ -52,7 +52,8 @@ interface LocationAutocompleteProps {
   onChangeText: (text: string) => void;
   onPlaceSelected: (place: { description: string; placeId: string }) => void;
   placeholder?: string;
-  apiKey: string;
+  /** @deprecated Unused — autocomplete uses BACKEND_URL /api/places. Kept for call-site compatibility. */
+  apiKey?: string;
   countryCode?: string;
   style?: any;
   inputStyle?: any;
@@ -64,7 +65,7 @@ export default function LocationAutocomplete({
   onChangeText,
   onPlaceSelected,
   placeholder = 'Enter location',
-  apiKey,
+  apiKey: _apiKey,
   countryCode = 'ng',
   style,
   inputStyle,
@@ -91,9 +92,6 @@ export default function LocationAutocomplete({
     }
 
     if (value.length >= 2) {
-      // #region agent log
-      fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:valueEffect',message:'debounce fetch scheduled',data:{len:value.length},timestamp:Date.now(),hypothesisId:'T1'})}).catch(()=>{});
-      // #endregion
       debounceTimeout.current = setTimeout(() => {
         fetchPredictions(value);
       }, 300);
@@ -110,16 +108,8 @@ export default function LocationAutocomplete({
   }, [value]);
 
   const fetchPredictions = async (input: string) => {
-    if (!apiKey) {
-      console.error('Google Maps API key is required');
-      return;
-    }
-
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
-    // #region agent log
-    fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'fetch start',data:{inputLen:input.length,requestId},timestamp:Date.now(),hypothesisId:'T2'})}).catch(()=>{});
-    // #endregion
     setIsLoading(true);
     try {
       // Use backend proxy to avoid CORS issues
@@ -140,14 +130,8 @@ export default function LocationAutocomplete({
         const normalized = (data.predictions || []).map((p: any, index: number) =>
           normalizePrediction(p, index)
         );
-        // #region agent log
-        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'OK before setPredictions',data:{count:normalized.length,requestId},timestamp:Date.now(),hypothesisId:'T2'})}).catch(()=>{});
-        // #endregion
         setPredictions(normalized);
         setShowSuggestions(true);
-        // #region agent log
-        fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:fetchPredictions',message:'OK after showSuggestions true',data:{count:normalized.length},timestamp:Date.now(),hypothesisId:'T3'})}).catch(()=>{});
-        // #endregion
       } else if (data.status === 'ZERO_RESULTS') {
         setPredictions([]);
         setShowSuggestions(false);
@@ -179,9 +163,6 @@ export default function LocationAutocomplete({
       description: safeDescription,
       placeId: prediction.place_id || '',
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'LocationAutocomplete.tsx:handleSelectPlace',message:'prediction tapped',data:{descLen:safeDescription.length,placeIdLen:(prediction.place_id||'').length},timestamp:Date.now(),hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     setPredictions([]);
     setShowSuggestions(false);
     Keyboard.dismiss();

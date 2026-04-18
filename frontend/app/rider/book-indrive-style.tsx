@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
-  ScrollView, Modal, TextInput, Platform,
+  ScrollView, Modal, TextInput, Platform, Animated, Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -16,7 +16,7 @@ import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 
 const COLORS = {
-  bg: '#0B1120',
+  bg: '#0D1420',
   card: '#1A2332',
   cardLight: '#232F42',
   green: '#00D46A',
@@ -79,6 +79,9 @@ export default function BookInDriveStyle() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
   const [routeSafety, setRouteSafety] = useState<RouteSafetyResponse | null>(null);
+  const [routeSafetyLoading, setRouteSafetyLoading] = useState(false);
+  const sheetSlide = useRef(new Animated.Value(28)).current;
+  const fareReveal = useRef(new Animated.Value(0)).current;
   const [nearbyDrivers, setNearbyDrivers] = useState<Array<{
     driver_id: string;
     name?: string;
@@ -690,10 +693,27 @@ export default function BookInDriveStyle() {
   }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng, selectedVehicle, availableVehicles]);
 
   useEffect(() => {
-    if (!token) {
-      setRouteSafety(null);
-      return;
+    Animated.timing(sheetSlide, {
+      toValue: 0,
+      duration: 420,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [sheetSlide]);
+
+  useEffect(() => {
+    if (currentFare > 0) {
+      fareReveal.setValue(0);
+      Animated.timing(fareReveal, {
+        toValue: 1,
+        duration: 380,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
     }
+  }, [currentFare, fareReveal]);
+
+  useEffect(() => {
     const pLat = pickupCoords?.lat ?? currentLocation?.lat;
     const pLng = pickupCoords?.lng ?? currentLocation?.lng;
     const dLat = destinationCoords?.lat;
@@ -705,18 +725,24 @@ export default function BookInDriveStyle() {
       !Number.isFinite(Number(dLng))
     ) {
       setRouteSafety(null);
+      setRouteSafetyLoading(false);
       return;
     }
     let cancelled = false;
+    setRouteSafetyLoading(true);
     const timer = setTimeout(() => {
       void (async () => {
-        const snap = await fetchRouteSafety({
-          pickup_lat: Number(pLat),
-          pickup_lng: Number(pLng),
-          dropoff_lat: Number(dLat),
-          dropoff_lng: Number(dLng),
-        });
-        if (!cancelled) setRouteSafety(snap);
+        try {
+          const snap = await fetchRouteSafety({
+            pickup_lat: Number(pLat),
+            pickup_lng: Number(pLng),
+            dropoff_lat: Number(dLat),
+            dropoff_lng: Number(dLng),
+          });
+          if (!cancelled) setRouteSafety(snap);
+        } finally {
+          if (!cancelled) setRouteSafetyLoading(false);
+        }
       })();
     }, 550);
     return () => {
@@ -724,7 +750,6 @@ export default function BookInDriveStyle() {
       clearTimeout(timer);
     };
   }, [
-    token,
     pickupCoords?.lat,
     pickupCoords?.lng,
     destinationCoords?.lat,
@@ -1036,7 +1061,7 @@ export default function BookInDriveStyle() {
     <SafeAreaView style={s.container} edges={['top']}>
       {/* MAP SECTION */}
       <View style={s.mapArea}>
-        {pickupCoords && destinationCoords ? (
+        {pickupCoords ? (
           Platform.OS === 'web' ? (
             <MapComponent
               style={s.mapPlaceholder}
@@ -1045,15 +1070,23 @@ export default function BookInDriveStyle() {
                 longitude: pickupCoords.lng,
                 address: pickup,
               }}
-              dropoff={{
-                latitude: destinationCoords.lat,
-                longitude: destinationCoords.lng,
-                address: destination,
-              }}
-              routeCoordinates={[
-                { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
-                { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
-              ]}
+              dropoff={
+                destinationCoords
+                  ? {
+                      latitude: destinationCoords.lat,
+                      longitude: destinationCoords.lng,
+                      address: destination,
+                    }
+                  : undefined
+              }
+              routeCoordinates={
+                destinationCoords
+                  ? [
+                      { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
+                      { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+                    ]
+                  : [{ latitude: pickupCoords.lat, longitude: pickupCoords.lng }]
+              }
             />
           ) : (
             (() => {
@@ -1063,10 +1096,14 @@ export default function BookInDriveStyle() {
                   mapRef={null}
                   pickupCoords={pickupCoords}
                   destinationCoords={destinationCoords}
-                  routePolyline={[
-                    { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
-                    { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
-                  ]}
+                  routePolyline={
+                    destinationCoords
+                      ? [
+                          { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
+                          { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
+                        ]
+                      : []
+                  }
                   pickup={pickup}
                   destination={destination}
                   nearbyDrivers={nearbyDrivers}
@@ -1077,13 +1114,16 @@ export default function BookInDriveStyle() {
         ) : (
           <View style={s.mapPlaceholder}>
             <Ionicons name="map" size={56} color={COLORS.dim} />
-            <Text style={s.mapText}>
-              {pickupCoords && destinationCoords
-                ? formatDistanceKm(fareDetails?.distance_km)
-                : 'Select locations to view route'}
-            </Text>
+            <Text style={s.mapText}>Turn on location or choose pickup to see the map</Text>
           </View>
         )}
+
+        {pickupCoords && !destinationCoords ? (
+          <View style={s.mapRouteHint} pointerEvents="none">
+            <Ionicons name="navigate-circle-outline" size={16} color={COLORS.lime} />
+            <Text style={s.mapRouteHintText}>Tap the red row to set destination</Text>
+          </View>
+        ) : null}
 
         <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
           <Ionicons name="arrow-back" size={22} color={COLORS.white} />
@@ -1121,12 +1161,18 @@ export default function BookInDriveStyle() {
       </View>
 
       {/* BOTTOM SHEET */}
-      <View style={s.sheet}>
+      <Animated.View style={[s.sheet, { transform: [{ translateY: sheetSlide }] }]}>
         <ScrollView contentContainerStyle={s.sheetContent} showsVerticalScrollIndicator={false}>
           <View style={s.experienceHero}>
             <View>
-              <Text style={s.experienceHeroTitle}>Quick Actions + Live Info</Text>
-              <Text style={s.experienceHeroSub}>Nearby drivers, ETA, and one-tap trip controls.</Text>
+              <Text style={s.experienceHeroTitle}>
+                {pickupCoords && destinationCoords ? 'Quick actions + live info' : 'Set your route first'}
+              </Text>
+              <Text style={s.experienceHeroSub}>
+                {pickupCoords && destinationCoords
+                  ? 'Nearby drivers, ETA, and one-tap trip controls.'
+                  : 'Choose a destination above, then schedule, split fare, and safety tools unlock here.'}
+              </Text>
             </View>
 
             <View style={s.heroStatRow}>
@@ -1142,53 +1188,57 @@ export default function BookInDriveStyle() {
               </View>
             </View>
 
-            <View style={s.heroActionsRow}>
-              <TouchableOpacity
-                style={s.heroActionBtn}
-                onPress={openScheduleRide}
-                accessibilityLabel="Schedule ride from quick actions"
-                accessibilityRole="button"
-              >
-                <Ionicons name="calendar-clear-outline" size={15} color={COLORS.white} />
-                <Text style={s.heroActionText}>Schedule Ride</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.heroActionBtn}
-                onPress={() => router.push('/rider/split-fare')}
-                accessibilityLabel="Split fare from quick actions"
-                accessibilityRole="button"
-              >
-                <Ionicons name="people-outline" size={15} color={COLORS.white} />
-                <Text style={s.heroActionText}>Split Fare</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={s.heroActionBtn}
-                onPress={() => router.push('/rider/safety-check')}
-                accessibilityLabel="Open safety check from quick actions"
-                accessibilityRole="button"
-              >
-                <Ionicons name="shield-checkmark-outline" size={15} color={COLORS.white} />
-                <Text style={s.heroActionText}>Safety Check</Text>
-              </TouchableOpacity>
-            </View>
+            {pickupCoords && destinationCoords ? (
+              <View style={s.heroActionsRow}>
+                <TouchableOpacity
+                  style={s.heroActionBtn}
+                  onPress={openScheduleRide}
+                  accessibilityLabel="Schedule ride from quick actions"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="calendar-clear-outline" size={15} color={COLORS.white} />
+                  <Text style={s.heroActionText}>Schedule Ride</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.heroActionBtn}
+                  onPress={() => router.push('/rider/split-fare')}
+                  accessibilityLabel="Split fare from quick actions"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="people-outline" size={15} color={COLORS.white} />
+                  <Text style={s.heroActionText}>Split Fare</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.heroActionBtn}
+                  onPress={() => router.push('/rider/safety-check')}
+                  accessibilityLabel="Open safety check from quick actions"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="shield-checkmark-outline" size={15} color={COLORS.white} />
+                  <Text style={s.heroActionText}>Safety Check</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
           </View>
 
-          <TouchableOpacity
-            style={s.scheduleShortcut}
-            onPress={openScheduleRide}
-            disabled={isLoading}
-            accessibilityLabel="Open schedule ride"
-            accessibilityRole="button"
-          >
-            <View style={s.scheduleShortcutIcon}>
-              <Ionicons name="calendar-clear-outline" size={18} color={COLORS.blue} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.scheduleShortcutTitle}>Schedule ride</Text>
-              <Text style={s.scheduleShortcutSub}>Set pickup, destination and choose your ride time.</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-          </TouchableOpacity>
+          {pickupCoords && destinationCoords ? (
+            <TouchableOpacity
+              style={s.scheduleShortcut}
+              onPress={openScheduleRide}
+              disabled={isLoading}
+              accessibilityLabel="Open schedule ride"
+              accessibilityRole="button"
+            >
+              <View style={s.scheduleShortcutIcon}>
+                <Ionicons name="calendar-clear-outline" size={18} color={COLORS.blue} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.scheduleShortcutTitle}>Schedule ride</Text>
+                <Text style={s.scheduleShortcutSub}>Set pickup, destination and choose your ride time.</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
+            </TouchableOpacity>
+          ) : null}
 
           {scheduledRides.length > 0 && (
             <View style={s.scheduledCard}>
@@ -1210,52 +1260,79 @@ export default function BookInDriveStyle() {
             </View>
           )}
 
-          {pickupCoords && destinationCoords && routeSafety ? (
-            <View style={s.routeSafetyCard}>
+          {pickupCoords && destinationCoords && (routeSafetyLoading || routeSafety) ? (
+            <View
+              style={[
+                s.routeSafetyCard,
+                routeSafety?.route_risk_level === 'high' && s.routeSafetyCardHigh,
+              ]}
+            >
               <View style={s.routeSafetyHeader}>
-                <Ionicons name="shield-half-outline" size={18} color={COLORS.yellow} />
-                <Text style={s.routeSafetyTitle}>Route safety · {routeSafety.city}</Text>
-              </View>
-              <Text style={s.routeSafetyRisk}>
-                Corridor risk:{' '}
-                <Text
-                  style={{
-                    fontWeight: '900',
-                    color:
-                      routeSafety.route_risk_level === 'high'
-                        ? COLORS.red
-                        : routeSafety.route_risk_level === 'moderate'
-                          ? COLORS.yellow
-                          : COLORS.green,
-                  }}
-                >
-                  {routeSafety.route_risk_level.toUpperCase()}
+                <Ionicons
+                  name="shield-half-outline"
+                  size={20}
+                  color={routeSafety?.route_risk_level === 'high' ? COLORS.yellow : COLORS.yellow}
+                />
+                <Text style={s.routeSafetyTitle}>
+                  {routeSafety ? `Route safety · ${routeSafety.city}` : 'Route safety'}
                 </Text>
-              </Text>
-              {routeSafety.risk_zones_on_route?.length ? (
+              </View>
+              {routeSafetyLoading && !routeSafety ? (
+                <Text style={s.routeSafetySub}>Checking corridor against known risk anchors…</Text>
+              ) : routeSafety ? (
                 <>
-                  <Text style={s.routeSafetySub}>Anchors near this pickup–drop corridor:</Text>
-                  {routeSafety.risk_zones_on_route.slice(0, 5).map((z) => (
-                    <Text key={z.area} style={s.routeSafetyBullet}>
-                      • {z.area} ({z.risk})
+                  {routeSafety.route_risk_level === 'high' ? (
+                    <View style={s.routeSafetyWarnBanner}>
+                      <Ionicons name="warning" size={18} color="#0D1420" />
+                      <Text style={s.routeSafetyWarnText}>
+                        Higher-risk corridor — travel alert: share trip, stay on main roads, avoid stops after dark.
+                      </Text>
+                    </View>
+                  ) : null}
+                  <Text style={s.routeSafetyRisk}>
+                    Corridor risk:{' '}
+                    <Text
+                      style={{
+                        fontWeight: '900',
+                        color:
+                          routeSafety.route_risk_level === 'high'
+                            ? COLORS.red
+                            : routeSafety.route_risk_level === 'moderate'
+                              ? COLORS.yellow
+                              : COLORS.green,
+                      }}
+                    >
+                      {routeSafety.route_risk_level.toUpperCase()}
                     </Text>
-                  ))}
+                  </Text>
+                  {routeSafety.risk_zones_on_route?.length ? (
+                    <>
+                      <Text style={s.routeSafetySub}>Anchors near this pickup–drop corridor:</Text>
+                      {routeSafety.risk_zones_on_route.slice(0, 5).map((z) => (
+                        <Text key={z.area} style={s.routeSafetyBullet}>
+                          • {z.area} ({z.risk})
+                        </Text>
+                      ))}
+                    </>
+                  ) : (
+                    <Text style={s.routeSafetySub}>No mapped high-risk anchors in this corridor box.</Text>
+                  )}
+                  {routeSafety.safety_tips?.length ? (
+                    <Text style={s.routeSafetyTips} numberOfLines={4}>
+                      {routeSafety.safety_tips.join(' · ')}
+                    </Text>
+                  ) : null}
                 </>
               ) : (
-                <Text style={s.routeSafetySub}>No mapped high-risk anchors in this corridor box.</Text>
+                <Text style={s.routeSafetySub}>Could not check route safety.</Text>
               )}
-              {routeSafety.safety_tips?.length ? (
-                <Text style={s.routeSafetyTips} numberOfLines={4}>
-                  {routeSafety.safety_tips.join(' · ')}
-                </Text>
-              ) : null}
             </View>
           ) : null}
 
           {/* Vehicle */}
           <TouchableOpacity style={[s.vehicleCard, !veh && s.vehicleCardPrompt]} onPress={() => setShowVehicleModal(true)} accessibilityLabel="Select vehicle type" accessibilityRole="button">
             <View style={[s.vehIcon, { backgroundColor: (veh?.color || COLORS.dim) + '20' }]}>
-              <Ionicons name={(veh?.icon || 'car') as any} size={24} color={veh?.color || COLORS.dim} />
+              <Ionicons name={(veh?.icon || 'car') as any} size={32} color={veh?.color || COLORS.dim} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[s.vehName, !veh && { color: COLORS.muted }]}>{veh ? veh.name : 'Select Vehicle Type'}</Text>
@@ -1315,7 +1392,7 @@ export default function BookInDriveStyle() {
                   )}
                 </View>
               )}
-              <View style={s.fareRow}>
+              <Animated.View style={[s.fareRow, { opacity: fareReveal }]}>
                 <TouchableOpacity
                   style={s.fareBtn}
                   onPress={() =>
@@ -1341,7 +1418,7 @@ export default function BookInDriveStyle() {
                 >
                   <Text style={s.fareBtnText}>+</Text>
                 </TouchableOpacity>
-              </View>
+              </Animated.View>
               <View>
                 <Text style={s.paySectionLabel}>Pay with</Text>
                 <View style={s.payRow}>
@@ -1441,14 +1518,25 @@ export default function BookInDriveStyle() {
               </TouchableOpacity>
             </View>
           ) : (
-            <TouchableOpacity style={s.calcBtn} onPress={() => handleCalculateFare()} disabled={isLoading || !pickup || !destination}>
-              <LinearGradient colors={pickup && destination && selectedVehicle ? [COLORS.green, '#00B455'] : ['#334155', '#334155']} style={s.btnGrad}>
+            <TouchableOpacity
+              style={s.calcBtn}
+              onPress={() => handleCalculateFare()}
+              disabled={isLoading || !pickup || !destination}
+              accessibilityLabel="Calculate fare"
+              accessibilityRole="button"
+            >
+              <LinearGradient
+                colors={pickup && destination && selectedVehicle ? [COLORS.green, '#00B455'] : ['#334155', '#475569']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={s.calcBtnGrad}
+              >
                 {isLoading ? <ActivityIndicator color={COLORS.white} /> : <Text style={s.calcBtnText}>{selectedVehicle ? 'Calculate Fare' : 'Select Vehicle & Calculate'}</Text>}
               </LinearGradient>
             </TouchableOpacity>
           )}
         </ScrollView>
-      </View>
+      </Animated.View>
 
       {/* LOCATION MODAL */}
       <Modal visible={showLocationModal} animationType="slide" onRequestClose={() => setShowLocationModal(false)}>
@@ -1471,18 +1559,50 @@ export default function BookInDriveStyle() {
                 try {
                   const field = editingField;
                   const rawDesc = typeof loc?.description === 'string' ? loc.description : '';
-                  const details = loc?.placeId ? await fetchPlaceDetails(loc.placeId) : null;
-                  const desc = String(details?.description || rawDesc || '').trim() || 'Selected location';
-                  const coords =
-                    details && Number.isFinite(details.lat) && Number.isFinite(details.lng)
-                      ? { lat: details.lat, lng: details.lng }
-                      : null;
+                  let desc = String(rawDesc || '').trim() || 'Selected location';
+                  let coords: { lat: number; lng: number } | null = null;
+
+                  const placeId = typeof loc?.placeId === 'string' ? loc.placeId.trim() : '';
+                  const syntheticPlaceId = !placeId || placeId.startsWith('prediction-');
+
+                  if (placeId && !syntheticPlaceId) {
+                    const details = await fetchPlaceDetails(placeId);
+                    if (details && Number.isFinite(details.lat) && Number.isFinite(details.lng)) {
+                      coords = { lat: details.lat, lng: details.lng };
+                      if (details.description) desc = details.description;
+                    }
+                  }
+
+                  if (!coords && desc.length >= 3) {
+                    const resolved = await resolveAddressToCoords(desc);
+                    if (resolved && Number.isFinite(resolved.lat) && Number.isFinite(resolved.lng)) {
+                      coords = { lat: resolved.lat, lng: resolved.lng };
+                      desc = String(resolved.address || desc).trim() || desc;
+                    }
+                  }
+
                   if (field === 'pickup') {
                     setPickup(desc);
-                    if (coords) setPickupCoords(coords);
+                    if (coords) {
+                      setPickupCoords(coords);
+                    } else {
+                      Alert.alert(
+                        'Could not pin pickup',
+                        'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
+                      );
+                      return;
+                    }
                   } else {
                     setDestination(desc);
-                    if (coords) setDestinationCoords(coords);
+                    if (coords) {
+                      setDestinationCoords(coords);
+                    } else {
+                      Alert.alert(
+                        'Could not pin destination',
+                        'Pick a suggestion from the list or type a fuller street address so we can place it on the map.',
+                      );
+                      return;
+                    }
                   }
                   setShowLocationModal(false);
                 } catch {
@@ -1531,7 +1651,7 @@ export default function BookInDriveStyle() {
                   }
                 }}>
                 <View style={[s.vehIcon, { backgroundColor: v.color + '20' }]}>
-                  <Ionicons name={v.icon as any} size={26} color={v.color} />
+                  <Ionicons name={v.icon as any} size={32} color={v.color} />
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.vehOptName}>{v.name}</Text>
@@ -1618,6 +1738,23 @@ const s = StyleSheet.create({
   mapArea: { height: '50%', position: 'relative' },
   mapPlaceholder: { flex: 1, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center' },
   mapText: { fontSize: 14, color: COLORS.dim, marginTop: 10 },
+  mapRouteHint: {
+    position: 'absolute',
+    bottom: 100,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(13,20,32,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(184,241,27,0.35)',
+  },
+  mapRouteHintText: { color: COLORS.lime, fontSize: 13, fontWeight: '800' },
   backBtn: { position: 'absolute', top: 16, left: 16, width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(26,35,50,0.9)', alignItems: 'center', justifyContent: 'center' },
   preferredBanner: { position: 'absolute', bottom: 16, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
   preferredText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
@@ -1736,6 +1873,26 @@ const s = StyleSheet.create({
     borderColor: 'rgba(251,191,36,0.35)',
     gap: 6,
   },
+  routeSafetyCardHigh: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.65)',
+  },
+  routeSafetyWarnBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#F59E0B',
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 8,
+  },
+  routeSafetyWarnText: {
+    flex: 1,
+    color: '#0D1420',
+    fontSize: 12,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
   routeSafetyHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   routeSafetyTitle: { fontSize: 14, fontWeight: '900', color: COLORS.white },
   routeSafetyRisk: { fontSize: 13, fontWeight: '700', color: COLORS.muted },
@@ -1757,7 +1914,7 @@ const s = StyleSheet.create({
   fareRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 20 },
   fareBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.cardLight, alignItems: 'center', justifyContent: 'center' },
   fareBtnText: { fontSize: 24, fontWeight: '800', color: COLORS.white },
-  fareAmount: { fontSize: 32, fontWeight: '900', color: COLORS.lime },
+  fareAmount: { fontSize: 36, fontWeight: '900', color: COLORS.lime },
   paySectionLabel: { fontSize: 12, fontWeight: '700', color: COLORS.muted, marginBottom: 8 },
   payRow: { flexDirection: 'row', gap: 10 },
   payChip: {
@@ -1845,7 +2002,24 @@ const s = StyleSheet.create({
     gap: 8,
   },
   scheduleRideBtnText: { fontSize: 15, fontWeight: '800', color: COLORS.white },
-  calcBtn: { borderRadius: 16, overflow: 'hidden' },
+  calcBtn: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    width: '100%',
+    alignSelf: 'stretch',
+    shadowColor: COLORS.green,
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  calcBtnGrad: {
+    minHeight: 60,
+    paddingVertical: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 16,
+  },
   calcBtnText: { fontSize: 18, fontWeight: '800', color: COLORS.white },
   modalContainer: { flex: 1, backgroundColor: COLORS.bg },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
@@ -1857,7 +2031,15 @@ const s = StyleSheet.create({
   vehModalContent: { backgroundColor: COLORS.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 40 },
   vehModalTitle: { fontSize: 18, fontWeight: '900', color: COLORS.white, marginBottom: 16, textAlign: 'center' },
   vehOption: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 16, marginBottom: 8, backgroundColor: COLORS.card, gap: 12 },
-  vehOptionActive: { borderWidth: 2, borderColor: COLORS.green },
+  vehOptionActive: {
+    borderWidth: 2,
+    borderColor: COLORS.green,
+    shadowColor: COLORS.green,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
+  },
   vehOptName: { fontSize: 16, fontWeight: '800', color: COLORS.white },
   vehOptDesc: { fontSize: 13, color: COLORS.muted },
   vehOptFare: { fontSize: 14, fontWeight: '900', color: COLORS.lime, marginRight: 8 },

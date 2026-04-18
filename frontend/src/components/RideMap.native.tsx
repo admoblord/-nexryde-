@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import React, { useEffect, useMemo, useRef } from 'react';
+import { View, Text, StyleSheet, Animated, Easing } from 'react-native';
+import MapView, { Marker, Polyline, Circle, type LatLng } from 'react-native-maps';
 
 const COLORS = {
   brandGreen: '#00D46A',
@@ -8,8 +8,18 @@ const COLORS = {
   red: '#EF4444',
 };
 
+const DARK_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#1A2332' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#94A3B8' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0D1420' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#2d3a4f' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#1e293b' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+];
+
 function parseCoordPair(
-  coords: { lat?: unknown; lng?: unknown } | null | undefined
+  coords: { lat?: unknown; lng?: unknown } | null | undefined,
 ): { lat: number; lng: number } | null {
   if (!coords) return null;
   const lat = Number(coords.lat);
@@ -19,9 +29,9 @@ function parseCoordPair(
   return { lat, lng };
 }
 
-function sanitizePolyline(raw: unknown): { latitude: number; longitude: number }[] {
+function sanitizePolyline(raw: unknown): LatLng[] {
   if (!Array.isArray(raw)) return [];
-  const out: { latitude: number; longitude: number }[] = [];
+  const out: LatLng[] = [];
   for (const p of raw) {
     const o = p && typeof p === 'object' ? (p as Record<string, unknown>) : null;
     if (!o) continue;
@@ -34,10 +44,54 @@ function sanitizePolyline(raw: unknown): { latitude: number; longitude: number }
   return out;
 }
 
+function PulseDot({ color }: { color: string }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scale, {
+          toValue: 1.35,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [scale]);
+  return (
+    <Animated.View
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        backgroundColor: color,
+        borderWidth: 3,
+        borderColor: '#FFFFFF',
+        transform: [{ scale }],
+        shadowColor: color,
+        shadowOpacity: 0.45,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 0 },
+        elevation: 6,
+      }}
+    />
+  );
+}
+
 interface RideMapProps {
-  mapRef: any;
+  /** Pass `null` if the parent does not need a ref to the map. */
+  mapRef: React.RefObject<MapView | null> | null;
   pickupCoords: { lat: number; lng: number };
-  destinationCoords: { lat: number; lng: number };
+  /** When omitted, map shows pickup only (camera on rider) until a drop-off is set. */
+  destinationCoords?: { lat: number; lng: number } | null;
   routePolyline: any[];
   pickup: string;
   destination: string;
@@ -66,76 +120,139 @@ export default function RideMap({
   activeDriverMoving = false,
   activeDriverMeta = null,
 }: RideMapProps) {
+  const internalRef = useRef<MapView>(null);
+  const mapViewRef = mapRef != null ? mapRef : internalRef;
+
   const pickupLL = parseCoordPair(pickupCoords);
-  const destLL = parseCoordPair(destinationCoords);
+  const destLL = parseCoordPair(destinationCoords ?? undefined);
   const lineCoords = useMemo(() => sanitizePolyline(routePolyline), [routePolyline]);
   const activeLL = parseCoordPair(activeDriverLocation ?? undefined);
 
   const pickupLabel = String(pickup ?? '');
   const destLabel = String(destination ?? '');
 
-  if (!pickupLL || !destLL) {
+  const fitCoords = useMemo(() => {
+    if (!pickupLL) return [];
+    if (!destLL) return [{ latitude: pickupLL.lat, longitude: pickupLL.lng }];
+    const pts: LatLng[] =
+      lineCoords.length >= 2
+        ? lineCoords
+        : [
+            { latitude: pickupLL.lat, longitude: pickupLL.lng },
+            { latitude: destLL.lat, longitude: destLL.lng },
+          ];
+    return pts;
+  }, [pickupLL, destLL, lineCoords]);
+
+  useEffect(() => {
+    const m = mapViewRef.current;
+    if (!m || !pickupLL) return;
+    const t = setTimeout(() => {
+      try {
+        if (destLL && fitCoords.length >= 2) {
+          m.fitToCoordinates(fitCoords, {
+            edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
+            animated: true,
+          });
+        } else {
+          m.animateToRegion(
+            {
+              latitude: pickupLL.lat,
+              longitude: pickupLL.lng,
+              latitudeDelta: 0.06,
+              longitudeDelta: 0.06,
+            },
+            350,
+          );
+        }
+      } catch {
+        try {
+          if (destLL) {
+            const midLat = (pickupLL.lat + destLL.lat) / 2;
+            const midLng = (pickupLL.lng + destLL.lng) / 2;
+            m.animateToRegion(
+              {
+                latitude: midLat,
+                longitude: midLng,
+                latitudeDelta: Math.max(0.02, Math.abs(pickupLL.lat - destLL.lat) * 2.2),
+                longitudeDelta: Math.max(0.02, Math.abs(pickupLL.lng - destLL.lng) * 2.2),
+              },
+              450,
+            );
+          } else {
+            m.animateToRegion(
+              {
+                latitude: pickupLL.lat,
+                longitude: pickupLL.lng,
+                latitudeDelta: 0.08,
+                longitudeDelta: 0.08,
+              },
+              350,
+            );
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }, 120);
+    return () => clearTimeout(t);
+  }, [fitCoords, mapViewRef, pickupLL?.lat, pickupLL?.lng, destLL?.lat, destLL?.lng]);
+
+  if (!pickupLL) {
     return (
       <View style={[styles.mapContainer, styles.fallback]}>
-        <Text style={styles.fallbackText}>Map needs valid pickup and destination.</Text>
+        <Text style={styles.fallbackText}>Map needs a valid pickup location.</Text>
       </View>
     );
   }
 
-  const mapKey = `booking-map-${pickupLL.lat}-${pickupLL.lng}-${destLL.lat}-${destLL.lng}`;
-
-  // #region agent log
-  fetch('http://127.0.0.1:7639/ingest/774e86fb-629a-4687-bad0-4630ed7bb9d7',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'274678'},body:JSON.stringify({sessionId:'274678',location:'RideMap.native.tsx:MapView',message:'RideMap mounting MapView',data:{linePts:lineCoords.length,drivers:nearbyDrivers.length,mapKeyLen:mapKey.length},timestamp:Date.now(),hypothesisId:'H2'})}).catch(()=>{});
-  // #endregion
+  const mapKey = destLL
+    ? `booking-map-${pickupLL.lat}-${pickupLL.lng}-${destLL.lat}-${destLL.lng}`
+    : `booking-map-pickup-${pickupLL.lat}-${pickupLL.lng}`;
 
   return (
     <View style={styles.mapContainer}>
       <MapView
         key={mapKey}
-        ref={mapRef}
+        ref={mapViewRef as React.RefObject<MapView>}
         style={styles.map}
+        customMapStyle={DARK_MAP_STYLE}
         initialRegion={{
           latitude: pickupLL.lat,
           longitude: pickupLL.lng,
-          latitudeDelta: 0.05,
-          longitudeDelta: 0.05,
+          latitudeDelta: 0.06,
+          longitudeDelta: 0.06,
         }}
-        showsUserLocation={true}
+        showsUserLocation
         showsMyLocationButton={false}
-        loadingEnabled={true}
+        loadingEnabled
       >
-        {/* Pickup Marker */}
         <Marker
-          coordinate={{
-            latitude: pickupLL.lat,
-            longitude: pickupLL.lng,
-          }}
+          coordinate={{ latitude: pickupLL.lat, longitude: pickupLL.lng }}
           title="Pickup"
           description={pickupLabel}
-          pinColor={COLORS.brandGreen}
-        />
+          anchor={{ x: 0.5, y: 0.5 }}
+          tracksViewChanges={false}
+        >
+          <PulseDot color={COLORS.brandGreen} />
+        </Marker>
 
-        {/* Destination Marker */}
-        <Marker
-          coordinate={{
-            latitude: destLL.lat,
-            longitude: destLL.lng,
-          }}
-          title="Destination"
-          description={destLabel}
-          pinColor={COLORS.red}
-        />
+        {destLL ? (
+          <Marker
+            coordinate={{ latitude: destLL.lat, longitude: destLL.lng }}
+            title="Destination"
+            description={destLabel}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <PulseDot color={COLORS.red} />
+          </Marker>
+        ) : null}
 
-        {/* Route Polyline */}
-        {lineCoords.length > 0 && (
-          <Polyline
-            coordinates={lineCoords}
-            strokeColor={COLORS.brandBlue}
-            strokeWidth={4}
-          />
-        )}
+        {destLL && lineCoords.length >= 2 ? (
+          <Polyline coordinates={lineCoords} strokeColor={COLORS.brandGreen} strokeWidth={4} />
+        ) : null}
 
-        {/* Nearby available drivers */}
         {nearbyDrivers.map((driver, index) => {
           const d = parseCoordPair({ lat: driver.lat, lng: driver.lng });
           if (!d) return null;
@@ -155,8 +272,7 @@ export default function RideMap({
           );
         })}
 
-        {/* Assigned driver marker */}
-        {activeLL && (
+        {activeLL ? (
           <Marker
             coordinate={{
               latitude: activeLL.lat,
@@ -172,18 +288,60 @@ export default function RideMap({
             }`}
             pinColor={activeDriverMoving ? COLORS.brandGreen : '#F59E0B'}
           />
-        )}
+        ) : null}
       </MapView>
+    </View>
+  );
+}
+
+export function RideMapDangerCircles({
+  center,
+  zones,
+}: {
+  center: { lat: number; lng: number };
+  zones: Array<{ area: string; lat: number; lng: number }>;
+}) {
+  const M = MapView;
+  return (
+    <View style={styles.mapContainer}>
+      <M
+        style={styles.map}
+        customMapStyle={DARK_MAP_STYLE}
+        initialRegion={{
+          latitude: center.lat,
+          longitude: center.lng,
+          latitudeDelta: 0.12,
+          longitudeDelta: 0.12,
+        }}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        pitchEnabled={false}
+      >
+        {zones.slice(0, 8).map((z) => (
+          <Circle
+            key={z.area}
+            center={{ latitude: z.lat, longitude: z.lng }}
+            radius={750}
+            strokeColor="rgba(239, 68, 68, 0.95)"
+            fillColor="rgba(239, 68, 68, 0.18)"
+            strokeWidth={2}
+          />
+        ))}
+      </M>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   mapContainer: {
-    height: 200,
+    flex: 1,
+    minHeight: 160,
     borderRadius: 20,
     overflow: 'hidden',
     marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   map: {
     width: '100%',
@@ -192,7 +350,7 @@ const styles = StyleSheet.create({
   fallback: {
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1E293B',
+    backgroundColor: '#1A2332',
   },
   fallbackText: {
     color: '#94A3B8',
