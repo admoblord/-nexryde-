@@ -1271,6 +1271,9 @@ app.include_router(drivers_router)
 from routers.support import support_router
 app.include_router(support_router)
 
+from places_service import places_router
+app.include_router(places_router)
+
 # ==================== SEED ON STARTUP ====================
 @app.on_event("startup")
 async def seed_promo_codes():
