@@ -20,6 +20,9 @@ import json
 import asyncio
 import time
 from openai import OpenAI
+from slowapi.errors import RateLimitExceeded
+from slowapi import _rate_limit_exceeded_handler
+from rate_limit import limiter
 
 # LLM Chat disabled - emergentintegrations removed
 # from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -91,6 +94,9 @@ EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # Create the main app
 app = FastAPI(title="NEXRYDE API", version="2.0.0")
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 
 @app.get("/")
@@ -1551,7 +1557,20 @@ async def seed_promo_codes():
     """Schedule heavy startup work; return immediately so the server can bind to PORT."""
     asyncio.create_task(_deferred_startup())
 
-ALLOWED_ORIGINS = os.environ.get("CORS_ORIGINS", "*").split(",")
+# Browser CORS: default deny-all-open; set CORS_ORIGINS=* for local dev, or comma-separated list.
+_DEFAULT_CORS_ORIGINS = (
+    "https://nexryde.com,"
+    "https://www.nexryde.com,"
+    "https://nexryde-backend-993913300770.us-central1.run.app,"
+    "http://localhost:3000,"
+    "http://localhost:8081,"
+    "http://127.0.0.1:8081"
+)
+_cors_raw = os.environ.get("CORS_ORIGINS", _DEFAULT_CORS_ORIGINS).strip()
+if _cors_raw == "*":
+    ALLOWED_ORIGINS = ["*"]
+else:
+    ALLOWED_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 
 app.add_middleware(
     CORSMiddleware,

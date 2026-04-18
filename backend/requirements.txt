@@ -42,6 +42,9 @@ grpcio-status>=1.50.0
 protobuf>=3.19.5,<5.0.0
 proto-plus>=1.20.0
 
+# Rate limiting (per-IP on selected routes)
+slowapi==0.1.9
+
 # Utilities
 python-dotenv==1.2.1
 email-validator==2.3.0
