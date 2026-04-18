@@ -126,6 +126,12 @@ export default function LocationAutocomplete({
       }
       if (!mountedRef.current || requestId !== activeRequestIdRef.current) return;
 
+      if (!response.ok) {
+        setPredictions([]);
+        setShowSuggestions(false);
+        return;
+      }
+
       if (data.status === 'OK') {
         const normalized = (data.predictions || []).map((p: any, index: number) =>
           normalizePrediction(p, index)
@@ -153,19 +159,24 @@ export default function LocationAutocomplete({
   };
 
   const handleSelectPlace = (prediction: Prediction) => {
-    const safeDescription =
-      prediction.description ||
-      prediction.main_text ||
-      prediction.structured_formatting?.main_text ||
-      'Selected location';
-    onChangeText(safeDescription);
-    onPlaceSelected({
-      description: safeDescription,
-      placeId: prediction.place_id || '',
-    });
-    setPredictions([]);
-    setShowSuggestions(false);
-    Keyboard.dismiss();
+    try {
+      const safeDescription =
+        prediction.description ||
+        prediction.main_text ||
+        prediction.structured_formatting?.main_text ||
+        'Selected location';
+      onChangeText(safeDescription);
+      onPlaceSelected({
+        description: safeDescription,
+        placeId: prediction.place_id || '',
+      });
+      setPredictions([]);
+      setShowSuggestions(false);
+      Keyboard.dismiss();
+    } catch {
+      setPredictions([]);
+      setShowSuggestions(false);
+    }
   };
 
   const renderPrediction = ({ item }: { item: Prediction }) => {

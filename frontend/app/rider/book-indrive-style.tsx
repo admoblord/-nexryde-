@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
-  ScrollView, Modal, TextInput, Platform, Animated, Easing,
+  ScrollView, Modal, TextInput, Platform, Animated, Easing, KeyboardAvoidingView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -14,6 +14,34 @@ import { fetchRouteSafety, type RouteSafetyResponse } from '@/src/services/crime
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
+
+/** True when the pickup label is still raw "lat, lng" (geocode not applied yet or failed). */
+function isRawLatLngLabel(s: string): boolean {
+  return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
+}
+
+async function reverseGeocodeViaBackend(
+  lat: number,
+  lng: number,
+  baseUrl: string,
+): Promise<string | null> {
+  const origin = String(baseUrl || '').replace(/\/$/, '');
+  if (!origin) return null;
+  const url = `${origin}/api/places/geocode?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
+  const once = async () => {
+    const res = await fetch(url);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) return null;
+    const raw = String(data?.address || data?.formatted_address || '').trim();
+    if (!raw || isRawLatLngLabel(raw)) return null;
+    return raw;
+  };
+  let out = await once();
+  if (out) return out;
+  await new Promise((r) => setTimeout(r, 800));
+  out = await once();
+  return out || null;
+}
 
 const COLORS = {
   bg: '#0D1420',
@@ -392,11 +420,11 @@ export default function BookInDriveStyle() {
 
         let address = `${latN.toFixed(4)}, ${lngN.toFixed(4)}`;
         try {
-          const res = await fetch(`${BACKEND_URL}/api/places/geocode?lat=${latN}&lng=${lngN}`);
-          const data = await res.json();
-          if (data?.address) address = data.address;
-          else if (data?.formatted_address) address = data.formatted_address;
-        } catch {}
+          const resolved = await reverseGeocodeViaBackend(latN, lngN, BACKEND_URL);
+          if (resolved) address = resolved;
+        } catch {
+          /* keep coordinate fallback */
+        }
 
         if (!mounted) return;
         setCurrentLocation({ lat: latN, lng: lngN, address });
@@ -410,6 +438,33 @@ export default function BookInDriveStyle() {
     detectGPS();
     return () => { mounted = false; };
   }, []);
+
+  // If pickup is still raw coordinates after lock, retry reverse geocode (cold start / rate limit).
+  useEffect(() => {
+    if (gpsStatus !== 'locked' || !pickupCoords) return;
+    if (!isRawLatLngLabel(pickup)) return;
+    let cancelled = false;
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const addr = await reverseGeocodeViaBackend(pickupCoords.lat, pickupCoords.lng, BACKEND_URL);
+          if (cancelled || !addr) return;
+          setPickup(addr);
+          setCurrentLocation((prev) =>
+            prev && Number(prev.lat) === pickupCoords.lat && Number(prev.lng) === pickupCoords.lng
+              ? { ...prev, address: addr }
+              : prev,
+          );
+        } catch {
+          /* ignore */
+        }
+      })();
+    }, 600);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
   const fetchPlaceDetails = async (placeId: string) => {
     const id = String(placeId || '').trim();
@@ -1032,19 +1087,6 @@ export default function BookInDriveStyle() {
         : null;
   const priorityMatch =
     smartBaseUi != null && smartBaseUi > 0 && currentFare >= smartBaseUi * 0.95;
-  const nearbyOnlineCount = nearbyDrivers.filter((d) => d.status === 'online').length;
-  const liveEtaLabel = veh?.time || 'ETA pending';
-  const liveDriverLabel =
-    nearbyOnlineCount > 0
-      ? `${nearbyOnlineCount} nearby driver${nearbyOnlineCount > 1 ? 's' : ''}`
-      : nearbyDrivers.length > 0
-        ? `${nearbyDrivers.length} nearby (offline)`
-        : 'Searching nearby drivers';
-  const formatDistanceKm = (value: unknown) => {
-    const distance = Number(value);
-    if (!Number.isFinite(distance) || distance <= 0) return 'Route pending';
-    return `${distance.toFixed(1)} km route`;
-  };
   const formatScheduledTime = (iso: string) => {
     const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return 'Scheduled ride';
@@ -1144,11 +1186,31 @@ export default function BookInDriveStyle() {
 
         {/* Location bar */}
         <View style={s.locBar}>
-          <TouchableOpacity style={s.locRow} onPress={() => { setEditingField('pickup'); setShowLocationModal(true); }} accessibilityLabel="Select pickup location" accessibilityRole="button">
+          <TouchableOpacity
+            style={s.locRow}
+            onPress={() => {
+              requestAnimationFrame(() => {
+                setEditingField('pickup');
+                setShowLocationModal(true);
+              });
+            }}
+            accessibilityLabel="Select pickup location"
+            accessibilityRole="button"
+          >
             <View style={[s.dot, { backgroundColor: COLORS.green }]} />
             <Text style={s.locText} numberOfLines={1}>{pickup || 'Select pickup'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.locRow} onPress={() => { setEditingField('destination'); setShowLocationModal(true); }} accessibilityLabel="Select destination" accessibilityRole="button">
+          <TouchableOpacity
+            style={s.locRow}
+            onPress={() => {
+              requestAnimationFrame(() => {
+                setEditingField('destination');
+                setShowLocationModal(true);
+              });
+            }}
+            accessibilityLabel="Select destination"
+            accessibilityRole="button"
+          >
             <View style={[s.dot, { backgroundColor: COLORS.red }]} />
             <Text style={s.locText} numberOfLines={1}>{destination || 'Select destination'}</Text>
           </TouchableOpacity>
@@ -1162,84 +1224,11 @@ export default function BookInDriveStyle() {
 
       {/* BOTTOM SHEET */}
       <Animated.View style={[s.sheet, { transform: [{ translateY: sheetSlide }] }]}>
-        <ScrollView contentContainerStyle={s.sheetContent} showsVerticalScrollIndicator={false}>
-          <View style={s.experienceHero}>
-            <View>
-              <Text style={s.experienceHeroTitle}>
-                {pickupCoords && destinationCoords ? 'Quick actions + live info' : 'Set your route first'}
-              </Text>
-              <Text style={s.experienceHeroSub}>
-                {pickupCoords && destinationCoords
-                  ? 'Nearby drivers, ETA, and one-tap trip controls.'
-                  : 'Choose a destination above, then schedule, split fare, and safety tools unlock here.'}
-              </Text>
-            </View>
-
-            <View style={s.heroStatRow}>
-              <View style={s.heroStatCard}>
-                <Ionicons name="pulse-outline" size={14} color={COLORS.green} />
-                <Text style={s.heroStatLabel}>Nearby Drivers</Text>
-                <Text style={s.heroStatValue} numberOfLines={1}>{liveDriverLabel}</Text>
-              </View>
-              <View style={s.heroStatCard}>
-                <Ionicons name="time-outline" size={14} color={COLORS.blue} />
-                <Text style={s.heroStatLabel}>Best ETA</Text>
-                <Text style={s.heroStatValue} numberOfLines={1}>{liveEtaLabel}</Text>
-              </View>
-            </View>
-
-            {pickupCoords && destinationCoords ? (
-              <View style={s.heroActionsRow}>
-                <TouchableOpacity
-                  style={s.heroActionBtn}
-                  onPress={openScheduleRide}
-                  accessibilityLabel="Schedule ride from quick actions"
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="calendar-clear-outline" size={15} color={COLORS.white} />
-                  <Text style={s.heroActionText}>Schedule Ride</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.heroActionBtn}
-                  onPress={() => router.push('/rider/split-fare')}
-                  accessibilityLabel="Split fare from quick actions"
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="people-outline" size={15} color={COLORS.white} />
-                  <Text style={s.heroActionText}>Split Fare</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={s.heroActionBtn}
-                  onPress={() => router.push('/rider/safety-check')}
-                  accessibilityLabel="Open safety check from quick actions"
-                  accessibilityRole="button"
-                >
-                  <Ionicons name="shield-checkmark-outline" size={15} color={COLORS.white} />
-                  <Text style={s.heroActionText}>Safety Check</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
-          </View>
-
-          {pickupCoords && destinationCoords ? (
-            <TouchableOpacity
-              style={s.scheduleShortcut}
-              onPress={openScheduleRide}
-              disabled={isLoading}
-              accessibilityLabel="Open schedule ride"
-              accessibilityRole="button"
-            >
-              <View style={s.scheduleShortcutIcon}>
-                <Ionicons name="calendar-clear-outline" size={18} color={COLORS.blue} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.scheduleShortcutTitle}>Schedule ride</Text>
-                <Text style={s.scheduleShortcutSub}>Set pickup, destination and choose your ride time.</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color={COLORS.muted} />
-            </TouchableOpacity>
-          ) : null}
-
+        <ScrollView
+          contentContainerStyle={s.sheetContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
           {scheduledRides.length > 0 && (
             <View style={s.scheduledCard}>
               <View style={s.scheduledHeader}>
@@ -1540,7 +1529,7 @@ export default function BookInDriveStyle() {
 
       {/* LOCATION MODAL */}
       <Modal visible={showLocationModal} animationType="slide" onRequestClose={() => setShowLocationModal(false)}>
-        <SafeAreaView style={s.modalContainer}>
+        <SafeAreaView style={s.modalContainer} edges={['top', 'bottom']}>
           <View style={s.modalHeader}>
             <TouchableOpacity onPress={() => setShowLocationModal(false)}>
               <Ionicons name="close" size={28} color={COLORS.white} />
@@ -1548,7 +1537,12 @@ export default function BookInDriveStyle() {
             <Text style={s.modalTitle}>{editingField === 'pickup' ? 'Pickup Location' : 'Destination'}</Text>
             <View style={{ width: 28 }} />
           </View>
-          <View style={s.modalBody}>
+          <KeyboardAvoidingView
+            style={s.modalKb}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+            <View style={s.modalBody}>
             <LocationAutocomplete
               placeholder={editingField === 'pickup' ? 'Enter pickup...' : 'Enter destination...'}
               value={editingField === 'pickup' ? pickup : destination}
@@ -1627,7 +1621,8 @@ export default function BookInDriveStyle() {
                 <Text style={s.useGpsText}>Use current location</Text>
               </TouchableOpacity>
             )}
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
 
@@ -1766,71 +1761,6 @@ const s = StyleSheet.create({
   gpsText: { fontSize: 11, fontWeight: '800', color: COLORS.green, textTransform: 'uppercase', letterSpacing: 0.8 },
   sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
   sheetContent: { padding: 20, paddingBottom: 56 },
-  experienceHero: {
-    backgroundColor: '#101B2E',
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.22)',
-    padding: 14,
-    marginBottom: 14,
-    gap: 10,
-  },
-  experienceHeroTitle: { color: COLORS.white, fontSize: 16, fontWeight: '900' },
-  experienceHeroSub: { color: COLORS.muted, fontSize: 12, marginTop: 4, maxWidth: 280, lineHeight: 18 },
-  heroStatRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  heroStatCard: {
-    flex: 1,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 2,
-  },
-  heroStatLabel: { color: COLORS.muted, fontSize: 10, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6 },
-  heroStatValue: { color: COLORS.white, fontSize: 12, fontWeight: '800' },
-  heroActionsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 6,
-  },
-  heroActionBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.3)',
-    backgroundColor: 'rgba(35,47,66,0.65)',
-    paddingVertical: 9,
-    paddingHorizontal: 6,
-  },
-  heroActionText: { color: COLORS.white, fontSize: 11, fontWeight: '800' },
-  scheduleShortcut: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: COLORS.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.18)',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
-  },
-  scheduleShortcutIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    backgroundColor: 'rgba(14,165,233,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  scheduleShortcutTitle: { color: COLORS.white, fontSize: 14, fontWeight: '900' },
-  scheduleShortcutSub: { color: COLORS.muted, fontSize: 12, marginTop: 2 },
   scheduledCard: {
     backgroundColor: '#10213A',
     borderRadius: 16,
@@ -2022,6 +1952,7 @@ const s = StyleSheet.create({
   },
   calcBtnText: { fontSize: 18, fontWeight: '800', color: COLORS.white },
   modalContainer: { flex: 1, backgroundColor: COLORS.bg },
+  modalKb: { flex: 1 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
   modalTitle: { fontSize: 18, fontWeight: '800', color: COLORS.white },
   modalBody: { flex: 1, padding: 16 },
