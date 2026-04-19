@@ -3,7 +3,7 @@ Google Places API Proxy Service
 Handles autocomplete and place details from backend to avoid CORS issues
 """
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import List, Optional
 import httpx
@@ -13,7 +13,6 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 
 from database import db
-from rate_limit import limiter
 
 places_router = APIRouter(prefix="/api/places", tags=["places"])
 
@@ -77,9 +76,7 @@ class PlaceDetails(BaseModel):
     address: str
 
 @places_router.get("/autocomplete")
-@limiter.limit("100/minute")
 async def autocomplete_places(
-    request: Request,
     input: str = Query(..., min_length=1),
     location_bias: Optional[str] = Query(None),
     radius: Optional[int] = Query(None),
@@ -154,8 +151,7 @@ async def autocomplete_places(
 
 
 @places_router.get("/details/{place_id}")
-@limiter.limit("100/minute")
-async def get_place_details(request: Request, place_id: str):
+async def get_place_details(place_id: str):
     """
     Get place details including coordinates and formatted address
     """
@@ -199,9 +195,7 @@ async def get_place_details(request: Request, place_id: str):
 
 
 @places_router.get("/geocode")
-@limiter.limit("100/minute")
 async def reverse_geocode(
-    request: Request,
     lat: float = Query(...),
     lng: float = Query(...)
 ):
@@ -248,9 +242,7 @@ async def reverse_geocode(
 
 
 @places_router.get("/geocode-address")
-@limiter.limit("100/minute")
 async def geocode_address(
-    request: Request,
     address: str = Query(..., min_length=3),
     components: Optional[str] = Query("country:ng")
 ):
@@ -303,9 +295,7 @@ async def geocode_address(
 
 
 @places_router.get("/nearby")
-@limiter.limit("100/minute")
 async def nearby_places(
-    request: Request,
     lat: float = Query(...),
     lng: float = Query(...),
     radius: int = Query(5000, ge=100, le=50000),

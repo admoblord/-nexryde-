@@ -450,7 +450,7 @@ export default function BookInDriveStyle() {
           const addr = await reverseGeocodeViaBackend(pickupCoords.lat, pickupCoords.lng, BACKEND_URL);
           if (cancelled || !addr) return;
           setPickup(addr);
-          setCurrentLocation((prev) =>
+          setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
             prev && Number(prev.lat) === pickupCoords.lat && Number(prev.lng) === pickupCoords.lng
               ? { ...prev, address: addr }
               : prev,
