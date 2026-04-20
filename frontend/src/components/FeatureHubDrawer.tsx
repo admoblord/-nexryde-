@@ -91,7 +91,7 @@ const RIDER_SECTIONS: HubSection[] = [
     id: 'convenience',
     title: 'Convenience',
     items: [
-      { label: 'Book (full options)', route: '/rider/book-indrive-style', icon: 'options', hint: 'Gate code & mood' },
+      { label: 'Book (full options)', route: '/rider/book', icon: 'options', hint: 'Gate code & mood' },
       { label: 'Mood preferences', route: '/rider/mood-preferences', icon: 'happy', hint: 'Ride vibe' },
       { label: 'Schedule a ride', route: '/rider/schedule', icon: 'calendar', hint: 'Advance booking' },
       { label: 'Family & sharing', route: '/rider/family', icon: 'home', hint: 'Household' },

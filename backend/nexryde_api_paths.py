@@ -20,6 +20,9 @@ PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     # Read-only helpers used before/during login (still enforced inside routers where needed)
     "/api/chat/presets",
     "/api/subscription/pricing",
+    # Crime / route heuristics (read-only, safe to expose before login for booking UX)
+    "/api/safety/real-crime-data",
+    "/api/safety/route-safety",
 )
 
 # Note: middleware checks PUBLIC_PATH_PREFIXES first. /api/payment/squad-webhook-dlq* is public

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   Platform,
   Vibration,
+  Animated,
+  Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -20,6 +22,7 @@ import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
 import { fetchRealCrimeData, type RealCrimeDataResponse } from '@/src/services/crimeSafetyData';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
+import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 
 type Row = {
   label: string;
@@ -159,18 +162,39 @@ function quickBg(v: (typeof QUICK)[number]['variant']) {
 
 export default function RiderSafetyScreen() {
   const router = useRouter();
-  const { user, currentTrip, token } = useAppStore();
+  const { user, currentTrip } = useAppStore();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
   const [crimeBrief, setCrimeBrief] = useState<RealCrimeDataResponse | null>(null);
   const [crimeLoading, setCrimeLoading] = useState(false);
+  const sosPulse = useRef(new Animated.Value(1)).current;
 
   const effectiveTripId = useMemo(() => currentTrip?.id || activeTripId || null, [currentTrip?.id, activeTripId]);
 
   useEffect(() => {
-    if (!token) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(sosPulse, {
+          toValue: 1.06,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(sosPulse, {
+          toValue: 1,
+          duration: 700,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [sosPulse]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       setCrimeLoading(true);
@@ -194,7 +218,7 @@ export default function RiderSafetyScreen() {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     const fetchActiveTrip = async () => {
@@ -269,13 +293,53 @@ export default function RiderSafetyScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.intelCard}>
+        {crimeBrief ? (
+          <View style={styles.timeRiskStrip} accessibilityRole="summary">
+            <View
+              style={[
+                styles.timeRiskSeg,
+                crimeBrief.time_risk_level === 'low' ? styles.timeRiskOn : styles.timeRiskOff,
+                { backgroundColor: crimeBrief.time_risk_level === 'low' ? COLORS.success : 'rgba(148,163,184,0.25)' },
+              ]}
+            />
+            <View
+              style={[
+                styles.timeRiskSeg,
+                crimeBrief.time_risk_level === 'moderate' ? styles.timeRiskOn : styles.timeRiskOff,
+                {
+                  backgroundColor:
+                    crimeBrief.time_risk_level === 'moderate' ? COLORS.warning : 'rgba(148,163,184,0.25)',
+                },
+              ]}
+            />
+            <View
+              style={[
+                styles.timeRiskSeg,
+                crimeBrief.time_risk_level === 'high' ? styles.timeRiskOn : styles.timeRiskOff,
+                { backgroundColor: crimeBrief.time_risk_level === 'high' ? COLORS.error : 'rgba(148,163,184,0.25)' },
+              ]}
+            />
+          </View>
+        ) : null}
+
+        <View
+          style={[
+            styles.intelCard,
+            crimeBrief?.time_risk_level === 'high' && styles.intelCardHigh,
+            crimeBrief?.time_risk_level === 'moderate' && styles.intelCardMod,
+            crimeBrief?.time_risk_level === 'low' && styles.intelCardLow,
+          ]}
+        >
           <View style={styles.intelHeader}>
             <Ionicons name="map" size={18} color={COLORS.info} />
             <Text style={styles.intelTitle}>Area intelligence</Text>
           </View>
           {crimeLoading ? (
-            <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginVertical: 8 }} />
+            <View style={{ gap: 10, marginVertical: 8 }}>
+              <SkeletonBlock height={16} width="70%" />
+              <SkeletonBlock height={14} width="100%" />
+              <SkeletonBlock height={14} width="90%" />
+            </View>
           ) : crimeBrief ? (
             <>
               <Text style={styles.intelMeta}>
@@ -309,11 +373,31 @@ export default function RiderSafetyScreen() {
               </Text>
             </>
           ) : (
-            <Text style={styles.intelBody}>
-              {token ? 'Could not load area snapshot. Try again later.' : 'Sign in to load live area intelligence.'}
-            </Text>
+            <Text style={styles.intelBody}>Could not load area snapshot. Pull to refresh later.</Text>
           )}
         </View>
+
+        {Platform.OS !== 'web' &&
+        crimeBrief?.location &&
+        (crimeBrief.nearby_high_risk_zones?.length ?? 0) > 0
+          ? (() => {
+              try {
+                const { RideMapDangerCircles } = require('@/src/components/RideMap.native');
+                return (
+                  <RideMapDangerCircles
+                    center={{ lat: crimeBrief.location.lat, lng: crimeBrief.location.lng }}
+                    zones={crimeBrief.nearby_high_risk_zones.map((z) => ({
+                      area: z.area,
+                      lat: z.lat,
+                      lng: z.lng,
+                    }))}
+                  />
+                );
+              } catch {
+                return null;
+              }
+            })()
+          : null}
 
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
@@ -342,8 +426,16 @@ export default function RiderSafetyScreen() {
           ))}
         </View>
 
-        <View style={[styles.sosButton, !effectiveTripId && styles.sosDisabled]}>
-          <Ionicons name="alert-circle" size={32} color={COLORS.white} />
+        <Animated.View
+          style={[
+            styles.sosButton,
+            !effectiveTripId && styles.sosDisabled,
+            { transform: [{ scale: sosPulse }] },
+          ]}
+        >
+          <View style={styles.sosIconWrap}>
+            <Ionicons name="alert-circle" size={44} color={COLORS.white} />
+          </View>
           <Text style={styles.sosText}>{sendingSos ? 'Sending SOS...' : 'Emergency SOS'}</Text>
           <Text style={styles.sosSubtext}>
             {effectiveTripId ? 'Trigger a protected emergency alert now' : 'SOS available only in active trip'}
@@ -354,7 +446,7 @@ export default function RiderSafetyScreen() {
             onPress={() => setSosModalVisible(true)}
             compact={false}
           />
-        </View>
+        </Animated.View>
         {loadingTrip ? <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginBottom: SPACING.md }} /> : null}
 
         {SECTIONS.map(section => (
@@ -465,6 +557,34 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextMuted,
     lineHeight: 18,
   },
+  intelCardHigh: {
+    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+    borderColor: 'rgba(239, 68, 68, 0.45)',
+  },
+  intelCardMod: {
+    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+  },
+  intelCardLow: {
+    backgroundColor: 'rgba(0, 212, 106, 0.08)',
+    borderColor: 'rgba(0, 212, 106, 0.35)',
+  },
+  timeRiskStrip: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: SPACING.md,
+  },
+  timeRiskSeg: {
+    flex: 1,
+    height: 8,
+    borderRadius: 999,
+  },
+  timeRiskOn: {
+    opacity: 1,
+  },
+  timeRiskOff: {
+    opacity: 0.85,
+  },
   quickLabel: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '800',
@@ -504,6 +624,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: SPACING.xl,
     ...SHADOWS.lg,
+    shadowColor: '#EF4444',
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+  },
+  sosIconWrap: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(0,0,0,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: SPACING.sm,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.35)',
   },
   sosDisabled: {
     backgroundColor: COLORS.gray400,

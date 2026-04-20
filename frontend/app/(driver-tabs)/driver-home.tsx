@@ -37,6 +37,7 @@ import DriverRideRequestModal, {
   DRIVER_OFFER_TIMER_SECONDS,
 } from '@/src/components/DriverRideRequestModal';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
+import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 import { COLORS } from '@/src/constants/theme';
 import { HOME_PALETTE } from '@/src/constants/designSystem';
 
@@ -247,7 +248,6 @@ export default function ModernDriverHome() {
           }
         );
       } catch (e) {
-        console.log('Driver location bootstrap failed:', e);
       }
     };
     bootstrapLocation();
@@ -700,11 +700,16 @@ export default function ModernDriverHome() {
   if (checkingOnboarding) {
     return (
       <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28, width: '100%' }}>
           <ActivityIndicator size="large" color={COLORS.accentGreen} />
           <Text style={{ marginTop: 16, color: COLORS.lightTextSecondary, fontSize: 16, fontWeight: '600' }}>
             Checking your status...
           </Text>
+          <View style={{ marginTop: 24, width: '100%', gap: 12 }}>
+            <SkeletonBlock height={18} width="55%" />
+            <SkeletonBlock height={14} width="100%" />
+            <SkeletonBlock height={14} width="88%" />
+          </View>
         </View>
       </SafeAreaView>
     );
@@ -757,7 +762,13 @@ export default function ModernDriverHome() {
         </View>
 
         {/* ONLINE STATUS TOGGLE - PROMINENT */}
-        <Animated.View style={[styles.statusCard, { opacity: fadeAnim }]}>
+        <Animated.View
+          style={[
+            styles.statusCard,
+            { opacity: fadeAnim },
+            isOnline && styles.statusCardOnlineGlow,
+          ]}
+        >
           <View style={styles.statusLeft}>
             <Ionicons 
               name={isOnline ? "radio-button-on" : "radio-button-off"} 
@@ -855,31 +866,38 @@ export default function ModernDriverHome() {
         {/* EARNINGS CARDS - PRIORITY */}
         <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
-          <View style={styles.earningsGrid}>
-            <View style={[styles.earningCard, { backgroundColor: '#FEF3C7' }]}>
-              <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
-                <Ionicons name="wallet" size={24} color="#FFF" />
+          <LinearGradient
+            colors={['#022c22', '#064e3b', '#0f766e']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.earningsGradientWrap}
+          >
+            <View style={styles.earningsGrid}>
+              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
+                  <Ionicons name="wallet" size={26} color="#FFF" />
+                </View>
+                <Text style={styles.earningLabelLight}>Today</Text>
+                <Text style={styles.earningValueLight}>₦{earnings.today.toLocaleString()}</Text>
               </View>
-              <Text style={styles.earningLabel}>Today</Text>
-              <Text style={styles.earningValue}>₦{earnings.today.toLocaleString()}</Text>
-            </View>
 
-            <View style={[styles.earningCard, { backgroundColor: '#D1FAE5' }]}>
-              <View style={[styles.earningIcon, { backgroundColor: COLORS.success }]}>
-                <Ionicons name="calendar" size={24} color="#FFF" />
+              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                <View style={[styles.earningIcon, { backgroundColor: COLORS.accentGreen }]}>
+                  <Ionicons name="calendar" size={26} color="#FFF" />
+                </View>
+                <Text style={styles.earningLabelLight}>This Week</Text>
+                <Text style={styles.earningValueLight}>₦{earnings.week.toLocaleString()}</Text>
               </View>
-              <Text style={styles.earningLabel}>This Week</Text>
-              <Text style={styles.earningValue}>₦{earnings.week.toLocaleString()}</Text>
-            </View>
 
-            <View style={[styles.earningCard, { backgroundColor: '#E0E7FF' }]}>
-              <View style={[styles.earningIcon, { backgroundColor: HOME_PALETTE.accentIndigo }]}>
-                <Ionicons name="car" size={24} color="#FFF" />
+              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                <View style={[styles.earningIcon, { backgroundColor: HOME_PALETTE.accentIndigo }]}>
+                  <Ionicons name="car" size={26} color="#FFF" />
+                </View>
+                <Text style={styles.earningLabelLight}>Total Trips</Text>
+                <Text style={styles.earningValueLight}>{earnings.trips}</Text>
               </View>
-              <Text style={styles.earningLabel}>Total Trips</Text>
-              <Text style={styles.earningValue}>{earnings.trips}</Text>
             </View>
-          </View>
+          </LinearGradient>
         </Animated.View>
 
         {/* PRIORITY FEATURES - BIG CARDS */}
@@ -891,7 +909,7 @@ export default function ModernDriverHome() {
                 key={feature.id}
                 style={styles.priorityCard}
                 onPress={() => guardedPush(feature.route)}
-                activeOpacity={0.7}
+                activeOpacity={0.88}
               >
                 <LinearGradient
                   colors={[feature.color, feature.color + 'CC']}
@@ -1029,6 +1047,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.5)',
   },
+  statusCardOnlineGlow: {
+    shadowColor: '#00D46A',
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    borderColor: 'rgba(0, 212, 106, 0.45)',
+  },
   statusLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1051,11 +1075,11 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextSecondary,
   },
   toggleButton: {
-    width: 60,
-    height: 34,
-    borderRadius: 17,
+    width: 72,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#E2E8F0',
-    padding: 3,
+    padding: 4,
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#CBD5E1',
@@ -1063,11 +1087,16 @@ const styles = StyleSheet.create({
   toggleButtonActive: {
     backgroundColor: COLORS.accentGreen,
     borderColor: COLORS.accentGreenDark,
+    shadowColor: '#00D46A',
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 6,
   },
   toggleThumb: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
     backgroundColor: '#FFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
@@ -1166,6 +1195,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
+  earningsGradientWrap: {
+    borderRadius: 22,
+    padding: 12,
+    overflow: 'hidden',
+  },
   earningsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1211,6 +1245,24 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextPrimary,
     letterSpacing: 1,
   },
+  earningCardOnGreen: {
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  earningLabelLight: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(255,255,255,0.85)',
+    marginBottom: 6,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+  earningValueLight: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 0.5,
+  },
   priorityGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1247,9 +1299,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     marginHorizontal: -6,
+    justifyContent: 'space-between',
   },
   featureCard: {
-    width: (width - 60) / 4,
+    width: (width - 56) / 2,
     alignItems: 'center',
     marginBottom: 20,
     paddingHorizontal: 6,

@@ -1,4 +1,4 @@
-import api from './api';
+import { BACKEND_URL } from './api';
 
 export type TimeRiskLevel = 'low' | 'moderate' | 'high';
 export type RouteRiskLevel = 'low' | 'moderate' | 'high';
@@ -43,15 +43,19 @@ export interface RouteSafetyResponse {
   city: string;
 }
 
-export async function fetchRealCrimeData(lat: number, lng: number): Promise<RealCrimeDataResponse | null> {
+async function fetchJson<T>(pathWithQuery: string): Promise<T | null> {
   try {
-    const { data } = await api.get<RealCrimeDataResponse>('/safety/real-crime-data', {
-      params: { lat, lng },
-    });
-    return data;
+    const res = await fetch(`${BACKEND_URL}${pathWithQuery}`);
+    if (!res.ok) return null;
+    return (await res.json()) as T;
   } catch {
     return null;
   }
+}
+
+export async function fetchRealCrimeData(lat: number, lng: number): Promise<RealCrimeDataResponse | null> {
+  const q = `?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
+  return fetchJson<RealCrimeDataResponse>(`/api/safety/real-crime-data${q}`);
 }
 
 export async function fetchRouteSafety(params: {
@@ -60,10 +64,11 @@ export async function fetchRouteSafety(params: {
   dropoff_lat: number;
   dropoff_lng: number;
 }): Promise<RouteSafetyResponse | null> {
-  try {
-    const { data } = await api.get<RouteSafetyResponse>('/safety/route-safety', { params });
-    return data;
-  } catch {
-    return null;
-  }
+  const q = new URLSearchParams({
+    pickup_lat: String(params.pickup_lat),
+    pickup_lng: String(params.pickup_lng),
+    dropoff_lat: String(params.dropoff_lat),
+    dropoff_lng: String(params.dropoff_lng),
+  });
+  return fetchJson<RouteSafetyResponse>(`/api/safety/route-safety?${q.toString()}`);
 }

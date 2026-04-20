@@ -56,7 +56,7 @@ export function ProfileHeroCard({
     <View style={[styles.card, { backgroundColor: colors.card }]}>
       <View style={styles.row}>
         <TouchableOpacity style={styles.avatarWrap} onPress={onAvatarPress} activeOpacity={0.85}>
-          <View style={styles.avatar}>
+          <View style={[styles.avatar, displayVerified && styles.avatarVerified]}>
             {profileImage ? (
               <Image source={{ uri: profileImage }} style={styles.avatarImage} />
             ) : (
@@ -104,7 +104,7 @@ export function ProfileHeroCard({
             </View>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.stat}>
-              <Text style={[styles.statValue, { color: colors.text }]}>{trips}</Text>
+              <Text style={[styles.statValue, { color: COLORS.accentGreen }]}>{trips}</Text>
               <Text style={[styles.statCaption, { color: colors.textMuted }]}>Total trips</Text>
             </View>
           </View>
@@ -140,21 +140,25 @@ const styles = StyleSheet.create({
     marginRight: SPACING.md,
   },
   avatar: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: COLORS.primary,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
     ...SHADOWS.md,
   },
+  avatarVerified: {
+    borderWidth: 3,
+    borderColor: '#00D46A',
+  },
   avatarImage: {
     width: '100%',
     height: '100%',
   },
   avatarLetter: {
-    fontSize: 36,
+    fontSize: 40,
     fontWeight: '800',
     color: COLORS.accent,
   },
@@ -250,7 +254,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   statValue: {
-    fontSize: FONT_SIZE.lg,
+    fontSize: FONT_SIZE.xxl,
     fontWeight: '900',
   },
   statCaption: {

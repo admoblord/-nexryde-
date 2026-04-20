@@ -11,15 +11,14 @@ export const COLORS = {
   primaryLight: '#1E293B',      // Lighter navy
   primarySoft: 'rgba(15, 23, 42, 0.08)',
   
-  // Accent Green - BRIGHTER & MORE VIBRANT
-  accentGreen: '#22C55E',       // Vibrant green (brighter)
+  // Accent Green — product primary (Bolt-style)
+  accentGreen: '#00D46A',
   accentGreenLight: '#4ADE80',  // Bright lime green
   accentGreenDark: '#16A34A',   // Darker green
   accentGreenSoft: 'rgba(34, 197, 94, 0.15)',
   accentGreenBright: '#00FF7F', // Neon green for highlights
   
-  // Accent Blue - SHARPER & MORE VIVID
-  accentBlue: '#3B82F6',        // Vivid blue
+  accentBlue: '#0EA5E9',
   accentBlueDark: '#1D4ED8',    // Deep blue
   accentBlueLight: '#60A5FA',   // Sky blue
   accentBlueSoft: 'rgba(59, 130, 246, 0.15)',
@@ -41,8 +40,8 @@ export const COLORS = {
   gradientNeon: ['#00FF7F', '#22C55E', '#3B82F6'],
   
   // Backgrounds (Dark - for splash/login)
-  background: '#020617',        // Rich black background
-  surface: '#0F172A',           // Card surfaces
+  background: '#0D1420',
+  surface: '#1A2332',
   surfaceLight: '#1E293B',      // Elevated surfaces
   surfaceGlass: 'rgba(15, 23, 42, 0.9)',
   
@@ -68,14 +67,14 @@ export const COLORS = {
   // Legacy support (grids / home cards)
   secondary: '#64748B',
   secondaryDark: '#475569',
-  accent: '#22C55E',
+  accent: '#00D46A',
   accentLight: '#4ADE80',
   accentDark: '#16A34A',
   accentSoft: 'rgba(34, 197, 94, 0.15)',
   accentMuted: '#86EFAC',
   
   // Semantic Colors - BRIGHTER
-  success: '#22C55E',           // Vibrant green
+  success: '#00D46A',
   successSoft: 'rgba(34, 197, 94, 0.15)',
   successBright: '#4ADE80',
   error: '#EF4444',             // Bright red

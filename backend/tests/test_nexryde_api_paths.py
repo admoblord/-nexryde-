@@ -42,6 +42,12 @@ def test_public_chat_presets_and_subscription_pricing():
     assert api_path_is_public("/api/subscription/pricing")
 
 
+def test_public_safety_crime_endpoints():
+    assert api_path_is_public("/api/safety/real-crime-data")
+    assert api_path_is_public("/api/safety/route-safety")
+    assert api_path_is_protected("/api/safety/danger-zones")
+
+
 def test_protected_driver_earnings_vault_routes():
     assert api_path_is_protected("/api/drivers/d1/earnings-vault")
     assert api_path_is_protected("/api/drivers/d1/earnings-vault/lock")

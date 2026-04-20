@@ -73,7 +73,6 @@ export default function DriverProfileScreen() {
       try {
         await updateUser(user.id, { profile_image: uri });
       } catch {
-        console.log('Failed to save profile image to server');
       }
     }
   };
@@ -512,6 +511,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     padding: SPACING.md,
+    minHeight: 56,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray100,
   },

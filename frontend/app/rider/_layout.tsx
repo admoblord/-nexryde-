@@ -12,9 +12,6 @@ export default function RiderLayout() {
         contentStyle: { backgroundColor: COLORS.background },
         animation: 'slide_from_right',
       }}
-    >
-      <Stack.Screen name="book" />
-      <Stack.Screen name="tracking" />
-    </Stack>
+    />
   );
 }

@@ -79,7 +79,6 @@ export default function SplashScreen() {
   useEffect(() => {
     // On web, immediately show splash (SecureStore doesn't work reliably)
     if (Platform.OS === 'web') {
-      console.log('ℹ️ Web environment detected - showing splash screen.');
       setChecking(false);
       return;
     }
@@ -88,7 +87,6 @@ export default function SplashScreen() {
     
     // Safety timeout - if checking takes too long, show splash screen anyway
     const timeout = setTimeout(() => {
-      console.log('⏰ Timeout reached - showing splash screen.');
       setChecking(false);
     }, 3000);
     
@@ -112,26 +110,19 @@ export default function SplashScreen() {
           const biometricSupported = await isBiometricSupported();
           
           if (biometricEnabled && biometricSupported) {
-            console.log('🔐 Biometric login enabled - requesting authentication...');
-            
             // Request biometric authentication
             const authResult = await authenticateWithBiometrics();
             
             if (!authResult.success) {
-              console.log('⚠️ Biometric authentication failed or cancelled');
               setChecking(false);
               return;
             }
             
-            console.log('✅ Biometric authentication successful!');
           }
           
           const userData = await getUserSession();
           
           if (userData) {
-            console.log('✅ Found saved login! Auto-logging in...');
-            console.log('User:', userData.name, '| Role:', userData.role);
-            
             // Restore user state
             if (setUser) setUser(userData);
             if (setToken) setToken(userData.token || null);
@@ -164,8 +155,7 @@ export default function SplashScreen() {
                   return;
                 }
                 router.replace('/(rider-tabs)/rider-home');
-              } catch (routeError) {
-                console.log('⚠️ Verification route check failed, forcing login:', routeError);
+              } catch {
                 router.replace('/(auth)/login');
               }
             }, 1000); // Small delay for smooth transition
@@ -173,8 +163,8 @@ export default function SplashScreen() {
             return;
           }
         }
-      } catch (storageError) {
-        console.log('⚠️ Storage not available (first install?), skipping auto-login');
+      } catch {
+        /* storage unavailable */
       }
       
       const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
@@ -183,7 +173,6 @@ export default function SplashScreen() {
         return;
       }
       
-      console.log('ℹ️ No saved login found. Showing splash screen.');
       setChecking(false);
     } catch (error) {
       console.error('❌ Error checking saved login:', error);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -16,6 +16,7 @@ import { useAppStore } from '@/src/store/appStore';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const { colors } = useThemeColors();
   const { user } = useAppStore();
   const prefVariant = user?.role === 'driver' ? 'driver' : 'rider';
@@ -35,16 +36,24 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, 24) + 16 }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={[styles.sectionCard, { backgroundColor: colors.card }]}>
+        <Text style={[styles.lead, { color: colors.textMuted }]}>
+          Control how NEXRYDE behaves on this device. Changes apply right away.
+        </Text>
+        <View style={[styles.sectionCard, { backgroundColor: colors.card, borderWidth: StyleSheet.hairlineWidth, borderColor: colors.border }]}>
           <View style={styles.sectionHeaderRow}>
             <View style={[styles.sectionIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
               <Ionicons name="options-outline" size={20} color={COLORS.accentGreen} />
             </View>
-            <Text style={[styles.sectionTitle, { color: colors.text }]}>Preferences</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.sectionTitle, { color: colors.text }]}>Preferences</Text>
+              <Text style={[styles.sectionSubtitle, { color: colors.textMuted }]}>
+                Notifications, units, accessibility and more
+              </Text>
+            </View>
           </View>
           <ProfileMergedPreferences variant={prefVariant} />
         </View>
@@ -77,7 +86,13 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: SPACING.lg,
-    paddingBottom: SPACING.xxl,
+    paddingTop: SPACING.sm,
+  },
+  lead: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    lineHeight: 20,
+    marginBottom: SPACING.md,
   },
   sectionCard: {
     borderRadius: BORDER_RADIUS.xl,
@@ -102,5 +117,11 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '800',
+  },
+  sectionSubtitle: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    marginTop: 4,
+    lineHeight: 16,
   },
 });

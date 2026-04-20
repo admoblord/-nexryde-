@@ -19,6 +19,53 @@ import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
 import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
 import { BiometricScanner, EmergencyButton, LoadingSpinner, UserCard } from '@/src/components/tier1';
 
+type ThemePalette = ReturnType<typeof useThemeColors>['colors'];
+
+function MenuRow({
+  icon,
+  iconBg,
+  title,
+  subtitle,
+  onPress,
+  isLast,
+  colors,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  iconBg: string;
+  title: string;
+  subtitle?: string;
+  onPress: () => void;
+  isLast?: boolean;
+  colors: ThemePalette;
+}) {
+  return (
+    <TouchableOpacity
+      style={[
+        styles.menuRow,
+        !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+      ]}
+      onPress={onPress}
+      activeOpacity={0.72}
+      accessibilityRole="button"
+    >
+      <View style={[styles.menuIcon, { backgroundColor: iconBg }]}>
+        <Ionicons name={icon} size={20} color={COLORS.white} />
+      </View>
+      <View style={styles.menuRowText}>
+        <Text style={[styles.menuTitle, { color: colors.text }]} numberOfLines={2}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={[styles.menuSubtitle, { color: colors.textMuted }]} numberOfLines={2}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
+    </TouchableOpacity>
+  );
+}
+
 export default function RiderProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -110,7 +157,6 @@ export default function RiderProfileScreen() {
       try {
         await updateUser(user.id, { profile_image: uri });
       } catch {
-        console.log('Failed to save profile image to server');
       }
     }
   };
@@ -193,8 +239,9 @@ export default function RiderProfileScreen() {
         />
 
         <ProfileQuickActions
-          title="Quick Actions"
+          title="Shortcuts"
           colors={colors}
+          tileBorderColor={colors.border}
           actions={[
             {
               key: 'edit',
@@ -231,13 +278,48 @@ export default function RiderProfileScreen() {
           ]}
         />
 
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Preferences</Text>
+          <MenuRow
+            icon="settings-outline"
+            iconBg={COLORS.accentGreen}
+            title="Settings"
+            subtitle="App preferences, language and defaults"
+            onPress={() => router.push('/settings')}
+            colors={colors}
+          />
+          <MenuRow
+            icon="notifications-outline"
+            iconBg="#6366F1"
+            title="Notifications"
+            subtitle="Trip updates and alerts"
+            onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)}
+            isLast
+            colors={colors}
+          />
+        </View>
+
+        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Wallet</Text>
+          <MenuRow
+            icon="wallet-outline"
+            iconBg="#0EA5E9"
+            title="Wallet & payments"
+            subtitle="Balance, top up and transactions"
+            onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)}
+            isLast
+            colors={colors}
+          />
+        </View>
+
         {loadingTrust ? (
           <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-            <LoadingSpinner label="Refreshing trust summary..." />
+            <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Trust & rewards</Text>
+            <LoadingSpinner label="Loading trust summary…" />
           </View>
         ) : trustSummary ? (
           <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-            <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Tier 1 Trust</Text>
+            <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Trust & rewards</Text>
             <UserCard
               name={user?.name || 'Rider'}
               role="rider"
@@ -254,16 +336,21 @@ export default function RiderProfileScreen() {
                     : 'Verification incomplete'
               }
             />
-            <BiometricScanner
-              title="Protect this rider account"
-              subtitle="Use device biometrics before sensitive actions like wallet access or emergency updates."
-            />
-            <View style={[styles.scorePanel, { backgroundColor: colors.background }]}>
+            <View
+              style={[
+                styles.scorePanel,
+                {
+                  backgroundColor: colors.background,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
               <View style={styles.scorePanelHeader}>
-                <View>
-                  <Text style={[styles.scorePanelTitle, { color: colors.text }]}>Nexryde Score</Text>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.scorePanelTitle, { color: colors.text }]}>Nexryde score</Text>
                   <Text style={[styles.scorePanelSubtitle, { color: colors.textMuted }]}>
-                    {trustSummary.score_tier.label} tier unlocks transport trust perks.
+                    {trustSummary.score_tier.label} tier unlocks transport perks.
                   </Text>
                 </View>
                 <View style={styles.scoreTierBadge}>
@@ -271,21 +358,49 @@ export default function RiderProfileScreen() {
                 </View>
               </View>
               <View style={styles.scoreBreakdownGrid}>
-                <View style={styles.scoreMetricCard}>
-                  <Text style={styles.scoreMetricLabel}>Service</Text>
-                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.service_quality)}</Text>
+                <View
+                  style={[
+                    styles.scoreMetricCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.scoreMetricLabel, { color: colors.textMuted }]}>Service</Text>
+                  <Text style={[styles.scoreMetricValue, { color: colors.text }]}>
+                    {Math.round(trustSummary.score_breakdown.service_quality)}
+                  </Text>
                 </View>
-                <View style={styles.scoreMetricCard}>
-                  <Text style={styles.scoreMetricLabel}>Punctuality</Text>
-                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.punctuality)}</Text>
+                <View
+                  style={[
+                    styles.scoreMetricCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.scoreMetricLabel, { color: colors.textMuted }]}>Punctuality</Text>
+                  <Text style={[styles.scoreMetricValue, { color: colors.text }]}>
+                    {Math.round(trustSummary.score_breakdown.punctuality)}
+                  </Text>
                 </View>
-                <View style={styles.scoreMetricCard}>
-                  <Text style={styles.scoreMetricLabel}>Verification</Text>
-                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.verification)}</Text>
+                <View
+                  style={[
+                    styles.scoreMetricCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.scoreMetricLabel, { color: colors.textMuted }]}>Verification</Text>
+                  <Text style={[styles.scoreMetricValue, { color: colors.text }]}>
+                    {Math.round(trustSummary.score_breakdown.verification)}
+                  </Text>
                 </View>
-                <View style={styles.scoreMetricCard}>
-                  <Text style={styles.scoreMetricLabel}>Payments</Text>
-                  <Text style={styles.scoreMetricValue}>{Math.round(trustSummary.score_breakdown.payment_behavior)}</Text>
+                <View
+                  style={[
+                    styles.scoreMetricCard,
+                    { backgroundColor: colors.card, borderColor: colors.border },
+                  ]}
+                >
+                  <Text style={[styles.scoreMetricLabel, { color: colors.textMuted }]}>Payments</Text>
+                  <Text style={[styles.scoreMetricValue, { color: colors.text }]}>
+                    {Math.round(trustSummary.score_breakdown.payment_behavior)}
+                  </Text>
                 </View>
               </View>
               <Text style={[styles.scorePerksTitle, { color: colors.text }]}>Unlocked perks</Text>
@@ -296,96 +411,101 @@ export default function RiderProfileScreen() {
                 </View>
               ))}
             </View>
+            <BiometricScanner
+              title="Protect this account"
+              subtitle="Use device biometrics before wallet access and sensitive actions."
+            />
           </View>
         ) : null}
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety & Trust</Text>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Safety</Text>
           <EmergencyButton
             label="Open SOS Center"
             style={styles.emergencyBtn}
             onPress={() => router.push('/(rider-tabs)/rider-safety' as any)}
           />
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/(rider-tabs)/rider-safety' as any)}>
-            <View style={[styles.menuIcon, { backgroundColor: '#F59E0B' }]}>
-              <Ionicons name="shield-checkmark" size={20} color={COLORS.white} />
-            </View>
-            <View style={{ flex: 1, marginLeft: SPACING.md }}>
-              <Text style={[styles.menuText, { color: colors.text }]}>Safety Center</Text>
-              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>SOS, emergency contacts and trip protection</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/shield-disputes')}>
-            <View style={[styles.menuIcon, { backgroundColor: '#0D9488' }]}>
-              <Ionicons name="ribbon" size={20} color={COLORS.white} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Nexryde Shield (Disputes)</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
+          <MenuRow
+            icon="shield-checkmark"
+            iconBg="#F59E0B"
+            title="Safety Center"
+            subtitle="SOS, emergency contacts and trip protection"
+            onPress={() => router.push('/(rider-tabs)/rider-safety' as any)}
+            colors={colors}
+          />
+          <MenuRow
+            icon="ribbon"
+            iconBg="#0D9488"
+            title="Nexryde Shield"
+            subtitle="Disputes and ride protection"
+            onPress={() => router.push('/shield-disputes')}
+            isLast
+            colors={colors}
+          />
         </View>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Mode & access</Text>
-          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => setShowDriverModal(true)}>
-            <View style={[styles.menuIcon, { backgroundColor: '#6366F1' }]}>
-              <Ionicons name="car-sport" size={20} color={COLORS.white} />
-            </View>
-            <View style={{ flex: 1, marginLeft: SPACING.md }}>
-              <Text style={[styles.menuText, { color: colors.text }]}>Switch to Driver Mode</Text>
-              <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>Drive and earn on Nexryde</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Driving</Text>
+          <MenuRow
+            icon="car-sport"
+            iconBg="#6366F1"
+            title="Switch to driver mode"
+            subtitle="Drive and earn on Nexryde"
+            onPress={() => setShowDriverModal(true)}
+            isLast
+            colors={colors}
+          />
         </View>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & Legal</Text>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/support')}>
-            <View style={[styles.menuIcon, { backgroundColor: '#F97316' }]}>
-              <Ionicons name="help-circle" size={20} color={COLORS.white} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Help & Support</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/privacy-policy')}>
-            <View style={[styles.menuIcon, { backgroundColor: '#8B5CF6' }]}>
-              <Ionicons name="document-text" size={20} color={COLORS.white} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Privacy Policy</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/terms-of-service')}>
-            <View style={[styles.menuIcon, { backgroundColor: '#0EA5E9' }]}>
-              <Ionicons name="reader" size={20} color={COLORS.white} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Terms of Service</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Support & legal</Text>
+          <MenuRow
+            icon="help-circle"
+            iconBg="#F97316"
+            title="Help & support"
+            onPress={() => router.push('/support')}
+            colors={colors}
+          />
+          <MenuRow
+            icon="document-text"
+            iconBg="#8B5CF6"
+            title="Privacy policy"
+            onPress={() => router.push('/privacy-policy')}
+            colors={colors}
+          />
+          <MenuRow
+            icon="reader"
+            iconBg="#0EA5E9"
+            title="Terms of service"
+            onPress={() => router.push('/terms-of-service')}
+            isLast
+            colors={colors}
+          />
         </View>
 
         <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast]} onPress={() => router.push('/settings')}>
-            <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreen }]}>
-              <Ionicons name="settings" size={20} color={COLORS.white} />
-            </View>
-            <Text style={[styles.menuText, { color: colors.text }]}>Settings</Text>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={[styles.menuSection, { backgroundColor: colors.card }]}>
-          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Account actions</Text>
-          <TouchableOpacity style={[styles.menuItem, styles.menuItemLast, styles.deleteRow]} onPress={handleDeleteAccount}>
+          <Text style={[styles.menuSectionTitle, { color: colors.textMuted }]}>Account</Text>
+          <TouchableOpacity
+            style={[styles.menuRow, styles.deleteRow, { borderBottomWidth: 0 }]}
+            onPress={handleDeleteAccount}
+            activeOpacity={0.72}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+          >
             <View style={[styles.menuIcon, { backgroundColor: COLORS.error }]}>
               <Ionicons name="trash" size={20} color={COLORS.white} />
             </View>
-            <Text style={[styles.menuText, { color: COLORS.error }]}>Delete Account</Text>
+            <View style={styles.menuRowText}>
+              <Text style={[styles.menuTitle, { color: COLORS.error }]}>Delete account</Text>
+              <Text style={[styles.menuSubtitle, { color: colors.textMuted }]}>
+                Permanently deactivate this profile
+              </Text>
+            </View>
             <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.versionText}>NEXRYDE v1.0.0</Text>
+        <Text style={[styles.versionText, { color: colors.textMuted }]}>NEXRYDE v1.0.0</Text>
 
         <TouchableOpacity
           style={[styles.logoutButtonScroll, { marginBottom: Math.max(insets.bottom, 16) + 8 }]}
@@ -446,14 +566,29 @@ const styles = StyleSheet.create({
     marginHorizontal: SPACING.md,
     marginBottom: SPACING.sm,
   },
-  menuItem: {
+  menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: SPACING.md,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.gray100,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm + 2,
+    minHeight: 56,
   },
-  menuItemLast: { borderBottomWidth: 0 },
+  menuRowText: {
+    flex: 1,
+    marginLeft: SPACING.md,
+    minWidth: 0,
+    justifyContent: 'center',
+  },
+  menuTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '700',
+  },
+  menuSubtitle: {
+    fontSize: FONT_SIZE.sm,
+    marginTop: 3,
+    fontWeight: '600',
+    lineHeight: 18,
+  },
   deleteRow: { backgroundColor: COLORS.errorSoft },
   menuIcon: {
     width: 40,
@@ -461,16 +596,6 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  menuText: {
-    flex: 1,
-    marginLeft: SPACING.md,
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-  },
-  menuSubtext: {
-    fontSize: FONT_SIZE.sm,
-    marginTop: 2,
   },
   scorePanel: {
     marginTop: SPACING.md,
@@ -512,19 +637,17 @@ const styles = StyleSheet.create({
   },
   scoreMetricCard: {
     width: '48%',
-    backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
     padding: SPACING.sm,
+    borderWidth: StyleSheet.hairlineWidth,
   },
   scoreMetricLabel: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '700',
-    color: COLORS.gray500,
   },
   scoreMetricValue: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '900',
-    color: COLORS.gray900,
     marginTop: 4,
   },
   scorePerksTitle: {
@@ -559,9 +682,9 @@ const styles = StyleSheet.create({
   },
   versionText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.gray400,
     textAlign: 'center',
     marginBottom: SPACING.sm,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,

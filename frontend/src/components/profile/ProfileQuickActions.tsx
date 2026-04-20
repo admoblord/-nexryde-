@@ -22,9 +22,12 @@ type Props = {
   title: string;
   actions: QuickActionItem[];
   colors: ThemeColors;
+  /** Divider / tile border — use theme `colors.border` for light & dark. */
+  tileBorderColor?: string;
 };
 
-export function ProfileQuickActions({ title, actions, colors }: Props) {
+export function ProfileQuickActions({ title, actions, colors, tileBorderColor }: Props) {
+  const border = tileBorderColor ?? COLORS.gray100;
   return (
     <View style={[styles.section, { backgroundColor: colors.card }]}>
       <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{title}</Text>
@@ -32,7 +35,7 @@ export function ProfileQuickActions({ title, actions, colors }: Props) {
         {actions.map((a) => (
           <TouchableOpacity
             key={a.key}
-            style={[styles.tile, { backgroundColor: colors.card, borderColor: COLORS.gray100 }]}
+            style={[styles.tile, { backgroundColor: colors.card, borderColor: border }]}
             onPress={a.onPress}
             activeOpacity={0.75}
           >

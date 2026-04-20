@@ -206,14 +206,10 @@ export default function RideMap({
     );
   }
 
-  const mapKey = destLL
-    ? `booking-map-${pickupLL.lat}-${pickupLL.lng}-${destLL.lat}-${destLL.lng}`
-    : `booking-map-pickup-${pickupLL.lat}-${pickupLL.lng}`;
-
+  /** Avoid remounting MapView on every coord change — Android often crashes on rapid destroy/recreate. */
   return (
-    <View style={styles.mapContainer}>
+    <View style={styles.mapContainer} collapsable={false}>
       <MapView
-        key={mapKey}
         ref={mapViewRef as React.RefObject<MapView>}
         style={styles.map}
         customMapStyle={DARK_MAP_STYLE}

@@ -900,7 +900,7 @@ async def complete_driver_profile(request: dict, http_request: Request):
         if user:
             user["_id"] = str(user["_id"])
             user["onboarding_complete"] = True
-        return {"success": True, "user": user, "trial_activated": bool(trial_end), "trial_expires_at": trial_end.isoformat() if isinstance(trial_end, datetime) else None, "message": "Profile completed! 48-hour unlimited city-rides trial activated."}
+        return {"success": True, "user": user, "trial_activated": bool(trial_end), "trial_expires_at": trial_end.isoformat() if isinstance(trial_end, datetime) else None, "message": "Profile completed! 48-hour trial activated. You can accept 3 trips."}
     except HTTPException:
         raise
     except Exception as e:

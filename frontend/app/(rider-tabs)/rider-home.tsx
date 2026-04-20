@@ -113,8 +113,8 @@ export default function ModernRiderHome() {
       try {
         const res = await getDriverOfMonth();
         setDriverOfMonth(res.data || null);
-      } catch (error) {
-        console.log('Driver of the month load failed:', error);
+      } catch {
+        /* optional widget */
       }
     };
     loadDriverOfMonth();

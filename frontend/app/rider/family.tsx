@@ -221,7 +221,7 @@ export default function FamilyModeScreen() {
           text: 'Book',
           onPress: () => {
             router.push({
-              pathname: '/rider/book-indrive-style',
+              pathname: '/rider/book',
               params: { 
                 forFamily: 'true',
                 familyName: member.name,

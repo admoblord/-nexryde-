@@ -3,7 +3,7 @@ import {
   View,
   Text,
   TextInput,
-  ScrollView,
+  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
@@ -223,18 +223,15 @@ export default function LocationAutocomplete({
 
       {showSuggestions && predictions.length > 0 && (
         <View style={styles.suggestionsContainer}>
-          <ScrollView
+          <FlatList
+            data={predictions.slice(0, 20)}
+            keyExtractor={(item, index) => item.place_id || `prediction-${index}`}
+            renderItem={renderPrediction}
             keyboardShouldPersistTaps="handled"
-            nestedScrollEnabled
             style={styles.list}
             bounces={false}
-          >
-            {predictions.slice(0, 20).map((item, index) => (
-              <View key={item.place_id || `prediction-${index}`}>
-                {renderPrediction({ item })}
-              </View>
-            ))}
-          </ScrollView>
+            nestedScrollEnabled
+          />
         </View>
       )}
     </View>
