@@ -1,6 +1,7 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+import org.gradle.api.GradleException
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -81,13 +82,6 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-// Release signing: create android/keystore.properties (see keystore.properties.example). Never commit secrets.
-def keystoreProperties = new Properties()
-def keystorePropertiesFile = rootProject.file("keystore.properties")
-if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-}
-
 android {
     ndkVersion rootProject.ext.ndkVersion
 
@@ -112,11 +106,17 @@ android {
             keyPassword 'android'
         }
         release {
-            if (keystorePropertiesFile.exists()) {
-                keyAlias keystoreProperties['keyAlias']
-                keyPassword keystoreProperties['keyPassword']
-                storeFile rootProject.file(keystoreProperties['storeFile'])
-                storePassword keystoreProperties['storePassword']
+            // Prefer explicit local upload keystore, but allow EAS/CI injected signing props.
+            def releaseStoreFile = findProperty("NEXRYDE_UPLOAD_STORE_FILE") ?: findProperty("android.injected.signing.store.file")
+            def releaseStorePassword = findProperty("NEXRYDE_UPLOAD_STORE_PASSWORD") ?: findProperty("android.injected.signing.store.password")
+            def releaseKeyAlias = findProperty("NEXRYDE_UPLOAD_KEY_ALIAS") ?: findProperty("android.injected.signing.key.alias")
+            def releaseKeyPassword = findProperty("NEXRYDE_UPLOAD_KEY_PASSWORD") ?: findProperty("android.injected.signing.key.password")
+
+            if (releaseStoreFile && releaseStorePassword && releaseKeyAlias && releaseKeyPassword) {
+                storeFile file(releaseStoreFile.toString())
+                storePassword releaseStorePassword.toString()
+                keyAlias releaseKeyAlias.toString()
+                keyPassword releaseKeyPassword.toString()
             }
         }
     }
@@ -125,8 +125,17 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Play Store requires a release-signed AAB/APK. Configure android/keystore.properties.
-            signingConfig keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+            def isEasBuild = (System.getenv("EAS_BUILD") ?: "").toLowerCase() == "true"
+            if (!signingConfigs.release.storeFile) {
+                if (isEasBuild) {
+                    logger.warn("Release keystore not resolved; falling back to debug keystore for EAS preview/internal build.")
+                    signingConfig signingConfigs.debug
+                } else {
+                    throw new GradleException("Release signing is required. Set NEXRYDE_UPLOAD_* properties locally, or provide android.injected.signing.* properties in CI/EAS.")
+                }
+            } else {
+                signingConfig signingConfigs.release
+            }
             def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
             shrinkResources enableShrinkResources.toBoolean()
             minifyEnabled enableMinifyInReleaseBuilds

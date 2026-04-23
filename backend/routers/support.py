@@ -18,6 +18,7 @@ from database import db
 from shield_network import broadcast_sos_to_nearby_nexryde_drivers
 from auth_guard import require_authenticated, verify_owner_strict, verify_trip_participant
 from admin_guard import require_admin_request
+from security_advanced import general_limiter
 
 logger = logging.getLogger('server')
 support_router = APIRouter(prefix="/api", tags=["Support"])
@@ -224,6 +225,7 @@ async def _log_trip_event_safe(trip_id: str, event_type: str, actor_id: str, dat
 @support_router.post("/sos/trigger")
 async def trigger_sos(request: SOSRequest, http_request: Request):
     actor_id = require_authenticated(http_request)
+    await general_limiter.check_rate_limit(http_request, f"sos:{actor_id}")
     trip = await db.trips.find_one({"id": request.trip_id})
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
@@ -1249,16 +1251,6 @@ async def get_feature_announcements(request: Request):
                 "title": "Auto Stop Safety Check",
                 "message": "If a trip stops abnormally, riders receive a safety prompt and drivers can share stop reasons.",
                 "feature_route": "/(rider-tabs)/rider-safety",
-                "audience": "all",
-                "version": "2026.4",
-                "created_at": now_iso,
-                "is_active": True,
-            },
-            {
-                "id": "feat-nigeria-scan",
-                "title": "Nationwide Area Safety Scan",
-                "message": "Area safety check now scans unsafe zones across Nigerian cities, not only Lagos.",
-                "feature_route": "/rider/safety-check",
                 "audience": "all",
                 "version": "2026.4",
                 "created_at": now_iso,

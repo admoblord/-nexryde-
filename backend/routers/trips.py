@@ -40,6 +40,7 @@ from wallet_ops import (
 )
 from earnings_query import match_completed_trip_paid_for_earnings
 from user_scores import calculate_rider_risk_score
+from security_advanced import general_limiter
 
 logger = logging.getLogger('server')
 trips_router = APIRouter(prefix="/api", tags=["Trips"])
@@ -1348,6 +1349,7 @@ class LocationUpdate(BaseModel):
 
 @trips_router.post("/trips/request")
 async def request_trip(rider_id: str, request: TripRequest, http_request: Request):
+    await general_limiter.check_rate_limit(http_request, f"trip_request:{rider_id}")
     verify_owner_strict(http_request, rider_id)
     status_check = await check_user_status(rider_id)
     if not status_check.get("allowed", True):

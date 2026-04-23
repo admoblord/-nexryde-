@@ -701,6 +701,16 @@ export const getPendingWalletCheckout = () =>
     amount_kobo?: number;
   }>('/payment/wallet/pending-checkout');
 
+export const getWalletPendingIntents = () =>
+  api.get<{
+    data: Array<{
+      squadReference: string;
+      status: string;
+      amountKobo: number;
+      expiresAt: string | null;
+    }>;
+  }>('/wallet/pending-intents');
+
 /** Abandon pending checkout intents so a new session/amount can start. */
 export const cancelPendingWalletCheckout = () => api.post('/payment/wallet/cancel-pending');
 

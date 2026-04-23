@@ -453,7 +453,8 @@ class MapService:
         }
 
 # API Routes
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Request
+from auth_guard import require_authenticated
 
 map_router = APIRouter(prefix="/api/map", tags=["map"])
 
@@ -462,6 +463,7 @@ _map_tracker_instance = MapUsageTracker()
 
 @map_router.post("/calculate-distance")
 async def calculate_ride_distance(
+    request: Request,
     driver_id: str,
     ride_id: str,
     pickup_lat: float,
@@ -470,6 +472,9 @@ async def calculate_ride_distance(
     dropoff_lng: float
 ):
     """Calculate distance and fare for a ride (ONCE per ride)"""
+    actor_id = require_authenticated(request)
+    if actor_id != driver_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this driver_id")
     
     # Get driver subscription status (from database)
     subscription_status = "active"  # Placeholder
@@ -490,8 +495,11 @@ async def calculate_ride_distance(
     return result
 
 @map_router.get("/usage-stats/{driver_id}")
-async def get_map_usage_stats(driver_id: str):
+async def get_map_usage_stats(driver_id: str, request: Request):
     """Get driver's map usage statistics"""
+    actor_id = require_authenticated(request)
+    if actor_id != driver_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this driver_id")
     
     tracker = _map_tracker_instance
     

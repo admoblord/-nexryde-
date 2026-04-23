@@ -188,7 +188,12 @@ class ScheduledRideRequest(BaseModel):
 async def schedule_ride(request: ScheduledRideRequest, rider_id: str, http_request: Request):
     """Schedule a ride for future"""
     verify_owner_strict(http_request, rider_id)
-    if request.scheduled_time < datetime.utcnow() + timedelta(minutes=30):
+    scheduled_at = request.scheduled_time
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+    else:
+        scheduled_at = scheduled_at.astimezone(timezone.utc)
+    if scheduled_at < datetime.now(timezone.utc) + timedelta(minutes=30):
         raise HTTPException(status_code=400, detail="Schedule at least 30 minutes ahead")
     
     scheduled = {
@@ -196,13 +201,13 @@ async def schedule_ride(request: ScheduledRideRequest, rider_id: str, http_reque
         "rider_id": rider_id,
         "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
         "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
-        "scheduled_time": request.scheduled_time,
+        "scheduled_time": scheduled_at,
         "ride_type": request.ride_type,
         "status": "scheduled",
         "created_at": datetime.utcnow()
     }
     await db.scheduled_rides.insert_one(scheduled)
-    return {"scheduled_ride_id": scheduled["id"], "scheduled_time": request.scheduled_time.isoformat()}
+    return {"scheduled_ride_id": scheduled["id"], "scheduled_time": scheduled_at.isoformat()}
 
 @bidding_router.get("/rides/scheduled/{rider_id}")
 async def get_scheduled_rides(rider_id: str, request: Request):

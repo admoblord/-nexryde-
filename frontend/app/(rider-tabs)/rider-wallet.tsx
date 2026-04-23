@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   AppState,
+  Modal,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import axios from 'axios';
@@ -38,6 +39,15 @@ import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 
 const PRESETS = [500, 1000, 2000, 5000, 10000, 20000];
 
+type TopupState =
+  | { phase: 'idle' }
+  | { phase: 'initiating'; amountNgn: number }
+  | { phase: 'checkout'; reference: string; checkoutUrl: string; amountNgn: number }
+  | { phase: 'verifying'; reference: string; startedAt: number }
+  | { phase: 'success'; reference: string; amountNgn: number; balanceNgn: number }
+  | { phase: 'failed'; reference?: string; reason: string }
+  | { phase: 'cancelled'; reference?: string };
+
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
   const insets = useSafeAreaInsets();
@@ -48,6 +58,7 @@ export default function RiderWalletScreen() {
   const [promoCode, setPromoCode] = useState('');
   const [referralCode, setReferralCode] = useState('');
   const [busy, setBusy] = useState<'checkout' | 'verify' | null>(null);
+  const [topupState, setTopupState] = useState<TopupState>({ phase: 'idle' });
   const [txs, setTxs] = useState<Record<string, unknown>[]>([]);
   /** In-progress Squad checkout (server + local; survives app background). */
   const [pendingMeta, setPendingMeta] = useState<{
@@ -59,22 +70,25 @@ export default function RiderWalletScreen() {
 
   const uid = user?.id;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<number | null> => {
     if (!uid) {
       setLoading(false);
-      return;
+      return null;
     }
     try {
       const w = await getWalletMe(15);
-      setBalance(Number(w.data?.balance ?? 0));
+      const bal = Number(w.data?.balance ?? 0);
+      setBalance(bal);
       setTxs(
         Array.isArray(w.data?.transactions)
           ? (w.data.transactions as Record<string, unknown>[])
           : []
       );
+      return bal;
     } catch {
       setBalance(0);
       setTxs([]);
+      return null;
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -314,25 +328,56 @@ export default function RiderWalletScreen() {
         const ref =
           pendingMeta?.ref ||
           (uid ? (await loadWalletCheckoutSession(uid))?.transaction_ref : undefined);
-        const res = await verifyPendingRiderWallet(ref);
-        const data = res.data as Record<string, unknown>;
-        if (data.verified && (data.credited || data.duplicate)) {
+        if (!ref) {
+          if (!silent) setTopupState({ phase: 'failed', reason: 'No pending payment reference found.' });
+          return;
+        }
+        if (!silent) setTopupState({ phase: 'verifying', reference: ref, startedAt: Date.now() });
+
+        let terminal: Record<string, unknown> | null = null;
+        for (let i = 0; i < 20; i += 1) {
+          const res = await verifyPendingRiderWallet(ref);
+          const data = res.data as Record<string, unknown>;
+          if (data.verified && (data.credited || data.duplicate)) {
+            terminal = data;
+            break;
+          }
+          if (data.terminal || data.reason || data.detail === 'amount_mismatch') {
+            terminal = data;
+            break;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 3000));
+        }
+        const data = terminal;
+        if (data?.verified && (data.credited || data.duplicate)) {
+          const amountForDisplay = pendingMeta?.amount ?? parsedAmount();
           if (uid) await clearWalletCheckoutSession(uid);
           setPendingMeta(null);
-          await load();
+          const balAfter = await load();
+          setTopupState({
+            phase: 'success',
+            reference: ref,
+            amountNgn: amountForDisplay,
+            balanceNgn: typeof balAfter === 'number' ? balAfter : 0,
+          });
           if (!silent) {
-            Alert.alert('Success', 'Wallet updated.');
+            Alert.alert('Success', 'Confirmed by Squad and wallet updated.');
           }
         } else {
           const mismatch =
-            data.detail === 'amount_mismatch'
+            data?.detail === 'amount_mismatch'
               ? 'Amount mismatch with bank. Contact support with your receipt if money left your account.'
               : '';
-          const vr = data.verify_result as Record<string, unknown> | undefined;
+          const vr = data?.verify_result as Record<string, unknown> | undefined;
           const reason =
             mismatch ||
             (typeof vr?.reason === 'string' ? vr.reason : '') ||
-            'Payment not confirmed yet. Wait a moment and tap Verify again.';
+            'Still confirming with Squad. We will auto-update once confirmed.';
+          if (String(data?.status || '').toLowerCase() === 'cancelled') {
+            setTopupState({ phase: 'cancelled', reference: ref });
+          } else {
+            setTopupState({ phase: 'failed', reference: ref, reason });
+          }
           if (!silent) {
             Alert.alert('Not yet', reason);
           }
@@ -351,29 +396,20 @@ export default function RiderWalletScreen() {
         if (!silent) setBusy(null);
       }
     },
-    [uid, pendingMeta?.ref, load],
+    [uid, pendingMeta, load],
   );
 
-  const verifyPendingRef = useRef(verifyPending);
-  verifyPendingRef.current = verifyPending;
-
   useEffect(() => {
-    let verifyTimer: ReturnType<typeof setTimeout> | undefined;
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
         void syncPendingCheckout();
         void load();
-        if (pendingMeta?.ref) {
-          if (verifyTimer) clearTimeout(verifyTimer);
-          verifyTimer = setTimeout(() => void verifyPendingRef.current({ silent: true }), 900);
-        }
       }
     });
     return () => {
-      if (verifyTimer) clearTimeout(verifyTimer);
       sub.remove();
     };
-  }, [syncPendingCheckout, load, pendingMeta?.ref]);
+  }, [syncPendingCheckout, load]);
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -409,7 +445,7 @@ export default function RiderWalletScreen() {
           <View style={styles.pendingBanner}>
             <Ionicons name="time-outline" size={22} color="#B45309" />
             <View style={{ flex: 1 }}>
-              <Text style={styles.pendingBannerTitle}>Payment in progress</Text>
+              <Text style={styles.pendingBannerTitle}>Payment pending</Text>
               <Text style={styles.pendingBannerText}>
                 ₦{pendingMeta.amount.toLocaleString()} — same Squad session. Tap Resume if the browser closed.
               </Text>
@@ -462,7 +498,7 @@ export default function RiderWalletScreen() {
         <TouchableOpacity
           style={[styles.primaryBtn, busy === 'checkout' && { opacity: 0.7 }]}
           onPress={startCardCheckout}
-          disabled={busy !== null}
+          disabled={busy !== null || (topupState.phase !== 'idle' && topupState.phase !== 'failed' && topupState.phase !== 'cancelled' && topupState.phase !== 'success')}
         >
           {busy === 'checkout' ? (
             <ActivityIndicator color="#FFF" />
@@ -619,6 +655,15 @@ export default function RiderWalletScreen() {
           })
         )}
       </ScrollView>
+      <Modal visible={topupState.phase === 'verifying'} transparent animationType="fade">
+        <View style={styles.verifyModalOverlay}>
+          <View style={styles.verifyModalCard}>
+            <ActivityIndicator color={COLORS.accentGreen} />
+            <Text style={styles.verifyModalTitle}>Confirming payment with Squad…</Text>
+            <Text style={styles.verifyModalText}>Do not close the app. We only credit after Squad confirms income.</Text>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -994,5 +1039,32 @@ const styles = StyleSheet.create({
   txAmt: {
     fontWeight: '900',
     fontSize: FONT_SIZE.md,
+  },
+  verifyModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: SPACING.lg,
+  },
+  verifyModalCard: {
+    width: '100%',
+    maxWidth: 360,
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    alignItems: 'center',
+    gap: SPACING.sm,
+  },
+  verifyModalTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '800',
+    color: COLORS.gray900,
+    textAlign: 'center',
+  },
+  verifyModalText: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray600,
+    textAlign: 'center',
   },
 });

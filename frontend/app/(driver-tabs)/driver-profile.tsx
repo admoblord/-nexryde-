@@ -567,13 +567,17 @@ const styles = StyleSheet.create({
   scoreBreakdownGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: SPACING.sm,
+    justifyContent: 'space-between',
+    rowGap: SPACING.sm,
   },
   scoreMetricCard: {
-    width: '48%',
+    width: '48.5%',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.sm,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    minHeight: 96,
+    justifyContent: 'space-between',
   },
   scoreMetricLabel: {
     fontSize: FONT_SIZE.xs,
@@ -584,11 +588,12 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.lg,
     fontWeight: '900',
     color: COLORS.gray900,
-    marginTop: 4,
+    marginTop: 8,
   },
   scorePerksTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '900',
+    marginTop: SPACING.xs,
   },
   scorePerkRow: {
     flexDirection: 'row',

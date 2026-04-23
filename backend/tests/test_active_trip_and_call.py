@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import uuid
 from typing import Optional
+import os
 
 import pytest
 import requests
@@ -23,6 +24,9 @@ from tests.integration_utils import (
 )
 
 BASE_URL = get_base_url()
+RUN_LIVE_API_TESTS = os.environ.get("RUN_LIVE_API_TESTS", "").strip().lower() in {"1", "true", "yes"}
+if not RUN_LIVE_API_TESTS:
+    pytestmark = pytest.mark.skip(reason="Live API integration test. Set RUN_LIVE_API_TESTS=1 to run.")
 
 
 def _hdr(token: str) -> dict:

@@ -27,12 +27,16 @@ logger = logging.getLogger(__name__)
 
 import os
 
-JWT_SECRET = os.environ.get("JWT_SECRET", "NEXRYDE_ULTRA_SECURE_SECRET_2026_CHANGE_THIS_IN_PRODUCTION")
+JWT_SECRET = os.environ.get("JWT_SECRET", "").strip()
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_HOURS = 24
 
-if JWT_SECRET == "NEXRYDE_ULTRA_SECURE_SECRET_2026_CHANGE_THIS_IN_PRODUCTION":
-    logger.warning("JWT_SECRET is using the default value — set the JWT_SECRET environment variable in production")
+if not JWT_SECRET:
+    if os.environ.get("ALLOW_INSECURE_JWT_FOR_TESTS", "").lower() in ("1", "true", "yes"):
+        JWT_SECRET = "INSECURE_TEST_ONLY_JWT_SECRET"
+        logger.warning("Running with ALLOW_INSECURE_JWT_FOR_TESTS=1 fallback JWT secret")
+    else:
+        raise RuntimeError("JWT_SECRET environment variable is required")
 
 # Rate limiting storage (in production, use Redis)
 request_counts: Dict[str, List[float]] = defaultdict(list)

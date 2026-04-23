@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+import asyncio
 
 from wallet_ops import (
     assert_rider_wallet_covers_fare,
@@ -86,65 +87,59 @@ class FakeDB:
         self.transactions = transactions
 
 
-@pytest.mark.asyncio
-async def test_assert_wallet_skips_non_wallet():
+def test_assert_wallet_skips_non_wallet():
     db = FakeDB(FakeUsers([{"id": "r1", "wallet_balance": 0}]), FakeTransactions())
-    await assert_rider_wallet_covers_fare(db, "r1", "cash", 500.0)
+    asyncio.run(assert_rider_wallet_covers_fare(db, "r1", "cash", 500.0))
 
 
-@pytest.mark.asyncio
-async def test_assert_wallet_insufficient():
+def test_assert_wallet_insufficient():
     db = FakeDB(FakeUsers([{"id": "r1", "wallet_balance": 50.0}]), FakeTransactions())
     with pytest.raises(Exception) as ei:
-        await assert_rider_wallet_covers_fare(db, "r1", "wallet", 100.0)
+        asyncio.run(assert_rider_wallet_covers_fare(db, "r1", "wallet", 100.0))
     assert getattr(ei.value, "status_code", None) == 400
 
 
-@pytest.mark.asyncio
-async def test_assert_wallet_sufficient():
+def test_assert_wallet_sufficient():
     db = FakeDB(FakeUsers([{"id": "r1", "wallet_balance": 150.0}]), FakeTransactions())
-    await assert_rider_wallet_covers_fare(db, "r1", "wallet", 100.0)
+    asyncio.run(assert_rider_wallet_covers_fare(db, "r1", "wallet", 100.0))
 
 
-@pytest.mark.asyncio
-async def test_rider_debit_once_and_idempotent():
+def test_rider_debit_once_and_idempotent():
     txs = FakeTransactions()
     users = FakeUsers([{"id": "r1", "wallet_balance": 200.0}])
     db = FakeDB(users, txs)
     tid = "trip-abc"
-    await apply_rider_wallet_ride_debit(db, "r1", tid, 80.0)
+    asyncio.run(apply_rider_wallet_ride_debit(db, "r1", tid, 80.0))
     assert users._by_id["r1"]["wallet_balance"] == 120.0
     assert len(txs.rows) == 1
     assert txs.rows[0]["type"] == "debit"
     assert txs.rows[0]["amount"] == -80.0
 
-    await apply_rider_wallet_ride_debit(db, "r1", tid, 80.0)
+    asyncio.run(apply_rider_wallet_ride_debit(db, "r1", tid, 80.0))
     assert users._by_id["r1"]["wallet_balance"] == 120.0
     assert len(txs.rows) == 1
 
 
-@pytest.mark.asyncio
-async def test_rider_debit_insufficient():
+def test_rider_debit_insufficient():
     txs = FakeTransactions()
     users = FakeUsers([{"id": "r1", "wallet_balance": 10.0}])
     db = FakeDB(users, txs)
     with pytest.raises(Exception) as ei:
-        await apply_rider_wallet_ride_debit(db, "r1", "trip-x", 50.0)
+        asyncio.run(apply_rider_wallet_ride_debit(db, "r1", "trip-x", 50.0))
     assert getattr(ei.value, "status_code", None) == 400
     assert users._by_id["r1"]["wallet_balance"] == 10.0
     assert len(txs.rows) == 0
 
 
-@pytest.mark.asyncio
-async def test_driver_credit_idempotent():
+def test_driver_credit_idempotent():
     txs = FakeTransactions()
     users = FakeUsers([{"id": "d1", "wallet_balance": 0.0}])
     db = FakeDB(users, txs)
     tid = "trip-xyz"
-    await apply_driver_wallet_ride_credit(db, "d1", tid, 40.0)
+    asyncio.run(apply_driver_wallet_ride_credit(db, "d1", tid, 40.0))
     assert users._by_id["d1"]["wallet_balance"] == 40.0
     assert len(txs.rows) == 1
 
-    await apply_driver_wallet_ride_credit(db, "d1", tid, 40.0)
+    asyncio.run(apply_driver_wallet_ride_credit(db, "d1", tid, 40.0))
     assert users._by_id["d1"]["wallet_balance"] == 40.0
     assert len(txs.rows) == 1

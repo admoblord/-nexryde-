@@ -9,6 +9,8 @@ import os
 import random
 import uuid
 import re
+import smtplib
+from email.message import EmailMessage
 
 import httpx
 
@@ -29,6 +31,7 @@ OTP_EXPIRY_MINUTES = 10
 OTP_MAX_ATTEMPTS = 3
 OTP_RESEND_COOLDOWN_SECONDS = 60
 OTP_MAX_DAILY_REQUESTS = 10
+EMAIL_OTP_VERIFICATION_TTL_HOURS = 24
 
 otp_store = {}
 
@@ -111,6 +114,15 @@ class EmailSignInRequest(BaseModel):
     email: str
     name: Optional[str] = None
     device_id: Optional[str] = None
+
+
+class EmailOTPRequest(BaseModel):
+    email: str
+
+
+class EmailOTPVerifyRequest(BaseModel):
+    email: str
+    otp: str
 
 
 class DriverFortressVerifyRequest(BaseModel):
@@ -232,6 +244,10 @@ async def ensure_otp_indexes() -> None:
     """Create OTP indexes for fast lookups and automatic expiry cleanup."""
     await db.otp_records.create_index("phone", unique=True)
     await db.otp_records.create_index("expires_at", expireAfterSeconds=0)
+    await db.email_otp_records.create_index("email", unique=True)
+    await db.email_otp_records.create_index("expires_at", expireAfterSeconds=0)
+    await db.email_verifications.create_index("email", unique=True)
+    await db.email_verifications.create_index("expires_at", expireAfterSeconds=0)
 
 async def get_otp_record(phone: str):
     """Get OTP record from database"""
@@ -326,6 +342,83 @@ async def increment_otp_attempts(phone: str) -> int:
 async def delete_otp_record(phone: str):
     """Delete OTP record after successful verification"""
     await db.otp_records.delete_one({"phone": phone})
+
+
+async def get_email_otp_record(email: str):
+    return await db.email_otp_records.find_one({"email": email.lower().strip()})
+
+
+async def save_email_otp_record(email: str, otp: str):
+    now = datetime.now(timezone.utc)
+    expiry = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
+    await db.email_otp_records.update_one(
+        {"email": email.lower().strip()},
+        {
+            "$set": {
+                "email": email.lower().strip(),
+                "otp": otp,
+                "expires_at": expiry,
+                "attempts": 0,
+                "last_sent_at": now,
+                "updated_at": now,
+            },
+            "$setOnInsert": {
+                "created_at": now,
+            },
+        },
+        upsert=True,
+    )
+
+
+async def increment_email_otp_attempts(email: str) -> int:
+    result = await db.email_otp_records.find_one_and_update(
+        {"email": email.lower().strip()},
+        {"$inc": {"attempts": 1}},
+        return_document=True
+    )
+    return result.get("attempts", 0) if result else OTP_MAX_ATTEMPTS
+
+
+def _send_email_otp(email: str, otp_code: str) -> None:
+    smtp_host = os.environ.get("SMTP_HOST", "").strip()
+    smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+    smtp_user = os.environ.get("SMTP_USER", "").strip()
+    smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
+    from_email = (os.environ.get("EMAIL_OTP_FROM", "") or smtp_user).strip()
+
+    if not smtp_host or not smtp_user or not smtp_password or not from_email:
+        raise RuntimeError("Email OTP service not configured")
+
+    message = EmailMessage()
+    message["Subject"] = "NEXRYDE Email Verification Code"
+    message["From"] = from_email
+    message["To"] = email
+    message.set_content(
+        f"Your NEXRYDE verification code is {otp_code}. "
+        f"This code expires in {OTP_EXPIRY_MINUTES} minutes."
+    )
+
+    with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
+        smtp.starttls()
+        smtp.login(smtp_user, smtp_password)
+        smtp.send_message(message)
+
+
+async def _create_and_send_email_otp(email: str) -> None:
+    normalized = email.lower().strip()
+    record = await get_email_otp_record(normalized)
+    if record:
+        last_sent = record.get("last_sent_at")
+        if isinstance(last_sent, datetime):
+            if last_sent.tzinfo is None:
+                last_sent = last_sent.replace(tzinfo=timezone.utc)
+            elapsed = (datetime.now(timezone.utc) - last_sent).total_seconds()
+            if elapsed < OTP_RESEND_COOLDOWN_SECONDS:
+                wait = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
+                raise HTTPException(status_code=429, detail=f"Please wait {wait} seconds before requesting another email OTP.")
+    otp_code = generate_otp()
+    _send_email_otp(normalized, otp_code)
+    await save_email_otp_record(normalized, otp_code)
 
 async def send_sms_notification(phone: str, message: str):
     """Send SMS notification via Termii"""
@@ -598,8 +691,9 @@ async def send_otp_whatsapp(request: OTPRequest):
         raise HTTPException(status_code=500, detail="Failed to send WhatsApp OTP")
 
 @auth_router.post("/auth/verify-otp")
-async def verify_otp(request: OTPVerify):
+async def verify_otp(request: OTPVerify, http_request: Request):
     """Verify OTP with retry limiting and brute force protection"""
+    await otp_limiter.check_rate_limit(http_request, f"otp_verify:{request.phone}")
     await check_brute_force(request.phone)
     normalized_phone = normalize_phone(request.phone)
     
@@ -926,13 +1020,87 @@ async def email_sign_in(request: EmailSignInRequest):
         }
 
     suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "Nexryde User"
+    await _create_and_send_email_otp(email)
     return {
-        "message": "Email verified. Complete registration.",
+        "message": "Email OTP sent. Verify to continue.",
         "is_new_user": True,
+        "email_verification_required": True,
         "email_data": {
             "email": email,
             "name": suggested_name,
         },
+    }
+
+
+@auth_router.post("/auth/email-otp/request")
+async def request_email_otp(request: EmailOTPRequest):
+    email = (request.email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+    await _create_and_send_email_otp(email)
+    return {
+        "success": True,
+        "message": "Email OTP sent",
+        "expires_in_minutes": OTP_EXPIRY_MINUTES,
+        "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+    }
+
+
+@auth_router.post("/auth/email-otp/verify")
+async def verify_email_otp(request: EmailOTPVerifyRequest):
+    email = (request.email or "").strip().lower()
+    if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    record = await get_email_otp_record(email)
+    if not record:
+        raise HTTPException(status_code=400, detail="OTP not found. Please request a new code.")
+
+    expires_at = record.get("expires_at")
+    if isinstance(expires_at, datetime):
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expires_at:
+            await db.email_otp_records.delete_one({"email": email})
+            raise HTTPException(status_code=400, detail="OTP expired. Please request a new code.")
+
+    attempts = int(record.get("attempts", 0))
+    if attempts >= OTP_MAX_ATTEMPTS:
+        await db.email_otp_records.delete_one({"email": email})
+        raise HTTPException(status_code=400, detail="Too many failed attempts. Please request a new code.")
+
+    if str(record.get("otp") or "") != str(request.otp or "").strip():
+        new_attempts = await increment_email_otp_attempts(email)
+        remaining = max(0, OTP_MAX_ATTEMPTS - new_attempts)
+        if remaining <= 0:
+            await db.email_otp_records.delete_one({"email": email})
+            raise HTTPException(status_code=400, detail="Too many failed attempts. Please request a new code.")
+        raise HTTPException(status_code=400, detail=f"Invalid OTP code. {remaining} attempt(s) remaining.")
+
+    now = datetime.now(timezone.utc)
+    expires = now + timedelta(hours=EMAIL_OTP_VERIFICATION_TTL_HOURS)
+    await db.email_verifications.update_one(
+        {"email": email},
+        {
+            "$set": {
+                "email": email,
+                "verified_at": now,
+                "expires_at": expires,
+                "consumed": False,
+                "updated_at": now,
+            },
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+    await db.email_otp_records.delete_one({"email": email})
+
+    suggested_name = email.split("@")[0].replace(".", " ").title() or "Nexryde User"
+    return {
+        "verified": True,
+        "is_new_user": True,
+        "message": "Email verified. Complete registration.",
+        "email_data": {"email": email, "name": suggested_name},
     }
 
 
@@ -1056,9 +1224,22 @@ async def register(request: RegisterRequest):
             raise HTTPException(status_code=400, detail="User with this phone already exists")
     
     if request.email:
-        existing = await db.users.find_one({"email": request.email})
+        normalized_email = request.email.strip().lower()
+        existing = await db.users.find_one({"email": normalized_email})
         if existing:
             raise HTTPException(status_code=400, detail="User with this email already exists")
+        if not request.google_id:
+            email_verification = await db.email_verifications.find_one(
+                {"email": normalized_email, "consumed": False}
+            )
+            if not email_verification:
+                raise HTTPException(status_code=400, detail="Email must be OTP-verified before registration")
+            expires_at = email_verification.get("expires_at")
+            if isinstance(expires_at, datetime):
+                if expires_at.tzinfo is None:
+                    expires_at = expires_at.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) > expires_at:
+                    raise HTTPException(status_code=400, detail="Email verification expired. Verify email again.")
     
     if request.google_id:
         existing = await db.users.find_one({"google_id": request.google_id})
@@ -1075,7 +1256,7 @@ async def register(request: RegisterRequest):
     user = create_user_dict(
         phone=request.phone or "",
         name=request.name, 
-        email=request.email, 
+        email=(request.email.strip().lower() if request.email else None), 
         role=request.role, 
         is_verified=True,
         google_id=request.google_id,
@@ -1093,6 +1274,12 @@ async def register(request: RegisterRequest):
     if request.role == "driver":
         driver_profile = create_driver_profile_dict(user["id"])
         await db.driver_profiles.insert_one(driver_profile)
+
+    if request.email and not request.google_id:
+        await db.email_verifications.update_one(
+            {"email": request.email.strip().lower()},
+            {"$set": {"consumed": True, "consumed_at": datetime.now(timezone.utc), "user_id": user["id"]}},
+        )
     
     token = create_jwt_token(user["id"], user.get("role", "rider"))
     return {"message": "Registration successful", "user": user, "token": token}

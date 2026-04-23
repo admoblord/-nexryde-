@@ -4,6 +4,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import * as Location from 'expo-location';
+import policeContacts from '@/src/data/policeContacts';
 let ExpoSpeechRecognitionModule: any = null;
 let useSpeechRecognitionEvent: any = (_name: string, _cb: any) => {};
 try {
@@ -57,6 +59,17 @@ type BotMessage = {
   text: string;
 };
 
+type PoliceContact = {
+  state: string;
+  aliases: string[];
+  phone: string;
+};
+
+const POLICE_CONTACTS: PoliceContact[] = policeContacts as PoliceContact[];
+
+const normalizeStateInput = (value: string) =>
+  value.toLowerCase().replace(/\bstate\b/g, '').replace(/\s+/g, ' ').trim();
+
 export default function SupportScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -76,7 +89,9 @@ export default function SupportScreen() {
   const [listening, setListening] = useState(false);
   const [supportPhone, setSupportPhone] = useState('+2348089297811');
   const [supportEmail, setSupportEmail] = useState('support@nexryde.com');
-  const [policeLines, setPoliceLines] = useState<string[]>(['+234199']);
+  const [stateQuery, setStateQuery] = useState('');
+  const [detectedState, setDetectedState] = useState('');
+  const [searchTouched, setSearchTouched] = useState(false);
 
   useEffect(() => {
     const loadContacts = async () => {
@@ -84,9 +99,6 @@ export default function SupportScreen() {
         const res = await getSupportContacts();
         if (res.data?.support_phone) setSupportPhone(res.data.support_phone);
         if (res.data?.support_email) setSupportEmail(res.data.support_email);
-        if (Array.isArray(res.data?.nigerian_police_numbers) && res.data.nigerian_police_numbers.length > 0) {
-          setPoliceLines(res.data.nigerian_police_numbers);
-        }
       } catch (e) {
         console.log('Failed to load support contacts', e);
       }
@@ -94,10 +106,42 @@ export default function SupportScreen() {
     void loadContacts();
   }, []);
 
+  useEffect(() => {
+    const detectState = async () => {
+      try {
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const current = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const geo = await Location.reverseGeocodeAsync({
+          latitude: current.coords.latitude,
+          longitude: current.coords.longitude,
+        });
+        const stateRaw = String(geo?.[0]?.region || geo?.[0]?.subregion || '').trim();
+        const normalized = normalizeStateInput(stateRaw);
+        if (!normalized) return;
+        setDetectedState(normalized);
+        setStateQuery((prev) => (prev.trim() ? prev : normalized));
+      } catch {
+        // Best-effort GPS detection only.
+      }
+    };
+    void detectState();
+  }, []);
+
+  const normalizedQuery = normalizeStateInput(stateQuery);
+  const activeQuery = normalizedQuery || detectedState;
+  const matchedPoliceContact = useMemo(() => {
+    if (!activeQuery) return null;
+    return (
+      POLICE_CONTACTS.find((contact) =>
+        contact.aliases.some((alias) => alias.includes(activeQuery))
+      ) || null
+    );
+  }, [activeQuery]);
+
   const contactOptions = [
     { icon: 'call', label: 'Call Support', value: supportPhone, action: () => Linking.openURL(`tel:${supportPhone}`) },
     { icon: 'mail', label: 'Email Us', value: supportEmail, action: () => Linking.openURL(`mailto:${supportEmail}`) },
-    { icon: 'shield-checkmark', label: 'Nigerian Police Emergency', value: policeLines[0] || '+234199', action: () => Linking.openURL(`tel:${policeLines[0] || '+234199'}`) },
   ];
 
   const voiceReplyEnglish = useMemo(
@@ -257,7 +301,7 @@ export default function SupportScreen() {
           <View style={styles.placeholder} />
         </View>
 
-        <ScrollView style={styles.content}>
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
           <View style={styles.heroCard}>
             <View style={styles.heroIcon}>
               <Ionicons name="headset" size={24} color={COLORS.accentGreen} />
@@ -283,6 +327,46 @@ export default function SupportScreen() {
               <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
             </TouchableOpacity>
           ))}
+
+          <Text style={styles.sectionTitle}>Nigerian Police Finder</Text>
+          <View style={styles.messageCard}>
+            <TextInput
+              style={[styles.messageInput, styles.finderInput]}
+              placeholder="Search state (e.g. Lagos, Abuja, Port Harcourt)"
+              placeholderTextColor={COLORS.gray400}
+              value={stateQuery}
+              onChangeText={(value) => {
+                setStateQuery(value);
+                setSearchTouched(true);
+              }}
+            />
+            {!stateQuery.trim() && detectedState ? (
+              <Text style={styles.issueMeta}>Auto-detected: {detectedState}</Text>
+            ) : null}
+            {activeQuery && matchedPoliceContact ? (
+              <View style={[styles.contactCard, styles.finderResultCard]}>
+                <View style={styles.contactIcon}>
+                  <Ionicons name="shield-checkmark" size={24} color={COLORS.accentGreen} />
+                </View>
+                <View style={styles.contactInfo}>
+                  <Text style={styles.contactLabel}>{matchedPoliceContact.state}</Text>
+                  <Text style={styles.contactValue}>Police Command</Text>
+                  <Text style={[styles.contactValue, { color: COLORS.gray900, fontWeight: '700', marginTop: 3 }]}>
+                    {matchedPoliceContact.phone}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.callNowBtn}
+                  onPress={() => Linking.openURL(`tel:${matchedPoliceContact.phone}`)}
+                >
+                  <Text style={styles.callNowText}>Call Now</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            {(searchTouched || !!detectedState) && activeQuery && !matchedPoliceContact ? (
+              <Text style={styles.emptyStateText}>No state found. Try another name.</Text>
+            ) : null}
+          </View>
 
           <TouchableOpacity
             style={styles.contactCard}
@@ -429,7 +513,14 @@ const styles = StyleSheet.create({
   },
   placeholder: { width: 40 },
   content: { flex: 1, padding: SPACING.lg },
-  sectionTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.gray900, marginBottom: SPACING.md, marginTop: SPACING.lg },
+  contentContainer: { paddingBottom: SPACING.xl * 2 },
+  sectionTitle: {
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '700',
+    color: COLORS.white,
+    marginBottom: SPACING.md,
+    marginTop: SPACING.lg,
+  },
   heroCard: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -557,6 +648,18 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     marginBottom: SPACING.md,
   },
+  finderInput: {
+    minHeight: 52,
+    textAlignVertical: 'center',
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: COLORS.gray200,
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.md,
+  },
+  finderResultCard: {
+    marginBottom: 0,
+  },
   actionRow: {
     flexDirection: 'row',
     gap: SPACING.sm,
@@ -582,4 +685,22 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sendButtonText: { fontSize: FONT_SIZE.md, fontWeight: '600', color: COLORS.white },
+  callNowBtn: {
+    backgroundColor: COLORS.accentGreen,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: 8,
+    borderRadius: BORDER_RADIUS.md,
+    alignSelf: 'center',
+  },
+  callNowText: {
+    color: COLORS.white,
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+  },
+  emptyStateText: {
+    marginTop: SPACING.sm,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray600,
+    fontWeight: '600',
+  },
 });

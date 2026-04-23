@@ -1,13 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Image } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import {
-  COLORS,
-  SPACING,
-  FONT_SIZE,
-  BORDER_RADIUS,
-  SHADOWS,
-} from '@/src/constants/theme';
+import { profileTokens as t, typography } from '@/src/theme/tokens';
 import type { User } from '@/src/store/appStore';
 
 type ThemeColors = {
@@ -45,77 +39,82 @@ export function ProfileHeroCard({
   showVerifiedOnAvatar = true,
 }: Props) {
   const verified = Boolean(user?.is_verified);
-  const displayVerified = showVerifiedOnAvatar && verified;
   const trips = user?.total_trips ?? 0;
   const ratingText =
     (user?.trips_completed ?? 0) > 0 && user?.rating != null
       ? Number(user.rating).toFixed(1)
       : '—';
+  const initials = (user?.name || fallbackInitial || 'AD')
+    .split(' ')
+    .slice(0, 2)
+    .map((part) => part[0] || '')
+    .join('')
+    .toUpperCase()
+    .slice(0, 2);
+  const phone = (user?.phone || '').trim();
+  const formattedPhone =
+    /^\+?\d+$/.test(phone.replace(/\s+/g, '')) && phone.replace(/\s+/g, '').length >= 13
+      ? `+${phone.replace(/\D/g, '').slice(0, 3)} ${phone.replace(/\D/g, '').slice(3, 6)} ${phone.replace(/\D/g, '').slice(6, 9)} ${phone.replace(/\D/g, '').slice(9, 13)}`
+      : user?.phone || '—';
 
   return (
-    <View style={[styles.card, { backgroundColor: colors.card }]}>
+    <View style={[styles.card, { backgroundColor: t.bg.card }]}>
       <View style={styles.row}>
-        <TouchableOpacity style={styles.avatarWrap} onPress={onAvatarPress} activeOpacity={0.85}>
-          <View style={[styles.avatar, displayVerified && styles.avatarVerified]}>
+        <Pressable style={styles.avatarWrap} onPress={onAvatarPress}>
+          <View style={[styles.avatar, verified && showVerifiedOnAvatar && styles.avatarVerified]}>
             {profileImage ? (
               <Image source={{ uri: profileImage }} style={styles.avatarImage} />
             ) : (
-              <Text style={styles.avatarLetter}>{fallbackInitial}</Text>
+              <Text style={styles.avatarLetter}>{initials}</Text>
             )}
           </View>
-          {displayVerified ? (
-            <View style={styles.verifiedDot}>
-              <Ionicons name="checkmark" size={11} color={COLORS.white} />
-            </View>
-          ) : null}
           <View style={styles.cameraDot}>
-            <Ionicons name="camera" size={14} color={COLORS.white} />
+            <Ionicons name="camera" size={14} color={t.text.primary} />
           </View>
-        </TouchableOpacity>
+        </Pressable>
 
         <View style={styles.info}>
           <View style={styles.nameRow}>
-            <Text style={[styles.name, { color: colors.text }]} numberOfLines={1}>
+            <Text style={[styles.name, { color: t.text.primary }]} numberOfLines={1}>
               {user?.name || roleLabel}
             </Text>
+          </View>
+          <View style={styles.metaRow}>
             {verified ? (
               <View style={styles.verifiedPill}>
-                <Ionicons name="shield-checkmark" size={12} color={COLORS.success} />
                 <Text style={styles.verifiedPillText}>Verified</Text>
               </View>
             ) : null}
+            <Text style={styles.metaDot}>·</Text>
+            <View style={styles.roleChip}>
+              <Text style={styles.roleChipText}>{roleLabel}</Text>
+            </View>
           </View>
-          <Text style={[styles.phone, { color: colors.textSecondary }]} numberOfLines={1}>
-            {user?.phone || '—'}
-          </Text>
-
-          <View style={[styles.roleChip, { backgroundColor: roleBg }]}>
-            <Ionicons name={roleIcon} size={14} color={roleTint} />
-            <Text style={[styles.roleChipText, { color: roleTint }]}>{roleLabel}</Text>
-          </View>
+          <Text style={styles.phone} numberOfLines={1}>{formattedPhone}</Text>
 
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <View style={styles.statIconLabel}>
-                <Ionicons name="star" size={16} color={COLORS.warning} />
-                <Text style={[styles.statValue, { color: colors.text }]}>{ratingText}</Text>
+                <Ionicons name="star" size={16} color={t.accent.amber} />
+                <Text style={styles.statValue}>{ratingText}</Text>
               </View>
-              <Text style={[styles.statCaption, { color: colors.textMuted }]}>Rating</Text>
+              <Text style={styles.statCaption}>RATING</Text>
             </View>
-            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statDivider} />
             <View style={styles.stat}>
-              <Text style={[styles.statValue, { color: COLORS.accentGreen }]}>{trips}</Text>
-              <Text style={[styles.statCaption, { color: colors.textMuted }]}>Total trips</Text>
+              <Text style={styles.statValue}>{trips}</Text>
+              <Text style={styles.statCaption}>TOTAL TRIPS</Text>
             </View>
           </View>
 
           {user?.created_at ? (
-            <Text style={[styles.memberSince, { color: colors.textMuted }]}>
+            <Text style={styles.memberSince}>
               Member since{' '}
               {new Date(user.created_at).toLocaleDateString('en-US', {
                 month: 'short',
                 year: 'numeric',
               })}
+              {'  · Nigeria'}
             </Text>
           ) : null}
         </View>
@@ -126,10 +125,9 @@ export function ProfileHeroCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.lg,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.sm,
+    borderRadius: t.radius.lg,
+    padding: t.space.xl,
+    marginBottom: t.space.xxl,
   },
   row: {
     flexDirection: 'row',
@@ -137,116 +135,91 @@ const styles = StyleSheet.create({
   },
   avatarWrap: {
     position: 'relative',
-    marginRight: SPACING.md,
+    marginRight: t.space.md,
   },
   avatar: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    backgroundColor: COLORS.primary,
+    width: 84,
+    height: 84,
+    borderRadius: 42,
+    backgroundColor: '#1E2A44',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    ...SHADOWS.md,
   },
   avatarVerified: {
-    borderWidth: 3,
-    borderColor: '#00D46A',
+    borderWidth: 2,
+    borderColor: t.accent.green,
   },
   avatarImage: {
     width: '100%',
     height: '100%',
   },
   avatarLetter: {
-    fontSize: 40,
-    fontWeight: '800',
-    color: COLORS.accent,
-  },
-  verifiedDot: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: COLORS.success,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: COLORS.white,
+    ...typography.h2,
+    color: t.text.primary,
   },
   cameraDot: {
     position: 'absolute',
-    bottom: 2,
-    left: 2,
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: COLORS.accent,
+    bottom: -2,
+    right: -2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: t.accent.blue,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    borderColor: COLORS.white,
+    borderColor: t.bg.card,
   },
   info: {
     flex: 1,
     minWidth: 0,
   },
   nameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    flexWrap: 'wrap',
+    marginTop: 2,
   },
   name: {
-    fontSize: FONT_SIZE.xl,
-    fontWeight: '900',
+    ...typography.h1,
     flexShrink: 1,
   },
+  metaRow: { flexDirection: 'row', alignItems: 'center', marginTop: t.space.xs, gap: t.space.sm },
   verifiedPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: COLORS.successSoft,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 3,
-    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: t.accent.greenSoft,
+    paddingHorizontal: t.space.sm,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   verifiedPillText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    color: COLORS.success,
+    ...typography.small,
+    color: t.accent.green,
   },
+  metaDot: { ...typography.small, color: t.text.tertiary },
   phone: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    marginTop: 4,
+    ...typography.body,
+    color: t.text.tertiary,
+    marginTop: t.space.sm,
   },
   roleChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    gap: 6,
-    marginTop: SPACING.sm,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: 'rgba(59,130,246,0.15)',
+    paddingHorizontal: t.space.sm,
+    paddingVertical: 2,
+    borderRadius: 6,
   },
   roleChipText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
+    ...typography.small,
+    color: t.accent.blue,
   },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: SPACING.md,
-    paddingTop: SPACING.md,
+    marginTop: t.space.lg,
+    paddingTop: t.space.lg,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: COLORS.gray200,
+    borderTopColor: t.bg.divider,
   },
   stat: {
     flex: 1,
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
   statIconLabel: {
     flexDirection: 'row',
@@ -254,24 +227,23 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   statValue: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
+    ...typography.h1,
+    color: t.text.primary,
   },
   statCaption: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    marginTop: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    marginTop: 4,
+    ...typography.label,
+    color: t.text.label,
   },
   statDivider: {
     width: 1,
-    height: 36,
-    marginHorizontal: SPACING.sm,
+    height: 32,
+    backgroundColor: t.bg.divider,
+    marginHorizontal: t.space.md,
   },
   memberSince: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    marginTop: SPACING.sm,
+    ...typography.small,
+    color: t.text.tertiary,
+    marginTop: t.space.md,
   },
 });

@@ -5,12 +5,16 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Pressable,
   Alert,
   Modal,
+  Platform,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
+import { COLORS, SPACING, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import { deleteUserAccount, getUserTrustSummary, updateUser } from '@/src/services/api';
@@ -18,6 +22,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
 import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
 import { BiometricScanner, EmergencyButton, LoadingSpinner, UserCard } from '@/src/components/tier1';
+import { profileTokens as t, typography } from '@/src/theme/tokens';
+import { BlurView } from 'expo-blur';
 
 type ThemePalette = ReturnType<typeof useThemeColors>['colors'];
 
@@ -39,30 +45,30 @@ function MenuRow({
   colors: ThemePalette;
 }) {
   return (
-    <TouchableOpacity
-      style={[
+    <Pressable
+      style={({ pressed }) => [
         styles.menuRow,
-        !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.border },
+        !isLast && styles.rowDivider,
+        { opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
       ]}
       onPress={onPress}
-      activeOpacity={0.72}
       accessibilityRole="button"
     >
       <View style={[styles.menuIcon, { backgroundColor: iconBg }]}>
-        <Ionicons name={icon} size={20} color={COLORS.white} />
+        <Ionicons name={icon} size={22} color={t.text.primary} />
       </View>
       <View style={styles.menuRowText}>
-        <Text style={[styles.menuTitle, { color: colors.text }]} numberOfLines={2}>
+        <Text style={styles.menuTitle} numberOfLines={1}>
           {title}
         </Text>
         {subtitle ? (
-          <Text style={[styles.menuSubtitle, { color: colors.textMuted }]} numberOfLines={2}>
+          <Text style={styles.menuSubtitle} numberOfLines={1}>
             {subtitle}
           </Text>
         ) : null}
       </View>
-      <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-    </TouchableOpacity>
+      <Ionicons name="chevron-forward" size={18} color={t.text.tertiary} />
+    </Pressable>
   );
 }
 
@@ -91,6 +97,11 @@ export default function RiderProfileScreen() {
     verification_status: { account_verified: boolean; face_verified: boolean; nin_verified: boolean };
   }>(null);
   const [loadingTrust, setLoadingTrust] = useState(false);
+  const [showStickyTitle, setShowStickyTitle] = useState(false);
+
+  if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
 
   useEffect(() => {
     let mounted = true;
@@ -99,7 +110,10 @@ export default function RiderProfileScreen() {
       setLoadingTrust(true);
       try {
         const res = await getUserTrustSummary(user.id);
-        if (mounted) setTrustSummary(res.data);
+        if (mounted) {
+          LayoutAnimation.easeInEaseOut();
+          setTrustSummary(res.data);
+        }
       } catch {
         if (mounted) setTrustSummary(null);
       } finally {
@@ -222,8 +236,11 @@ export default function RiderProfileScreen() {
         style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: Math.max(insets.bottom, 24) + 100 },
+          { paddingBottom: 120, paddingTop: 12 },
         ]}
+        contentInsetAdjustmentBehavior="automatic"
+        onScroll={(e) => setShowStickyTitle(e.nativeEvent.contentOffset.y > 120)}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}
       >
         <ProfileHeroCard
@@ -284,7 +301,7 @@ export default function RiderProfileScreen() {
             icon="settings-outline"
             iconBg={COLORS.accentGreen}
             title="Settings"
-            subtitle="App preferences, language and defaults"
+            subtitle="App preferences & defaults"
             onPress={() => router.push('/settings')}
             colors={colors}
           />
@@ -517,6 +534,13 @@ export default function RiderProfileScreen() {
           <Text style={styles.logoutText}>Logout</Text>
         </TouchableOpacity>
       </ScrollView>
+      {showStickyTitle ? (
+        <View style={[styles.stickyTitleWrap, { top: insets.top }]}>
+          <BlurView intensity={40} tint="dark" style={styles.stickyBlur}>
+            <Text style={styles.stickyTitle}>Profile</Text>
+          </BlurView>
+        </View>
+      ) : null}
 
       <Modal visible={showDriverModal} animationType="slide" transparent onRequestClose={() => setShowDriverModal(false)}>
         <View style={styles.modalOverlay}>
@@ -545,124 +569,130 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
   content: {
-    padding: SPACING.lg,
+    paddingHorizontal: t.space.xl,
   },
   menuSection: {
-    borderRadius: BORDER_RADIUS.xl,
+    borderRadius: t.radius.lg,
     overflow: 'hidden',
-    marginBottom: SPACING.lg,
-    ...SHADOWS.sm,
+    marginBottom: t.space.xxl,
+    backgroundColor: t.bg.card,
   },
   menuSectionTitle: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    ...typography.label,
+    color: t.text.label,
+    paddingLeft: 16,
+    paddingTop: 12,
+    paddingBottom: 10,
   },
   emergencyBtn: {
-    marginHorizontal: SPACING.md,
-    marginBottom: SPACING.sm,
+    marginHorizontal: t.space.lg,
+    marginBottom: t.space.sm,
   },
   menuRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm + 2,
-    minHeight: 56,
+    paddingHorizontal: t.space.lg,
+    paddingVertical: 14,
+    minHeight: 72,
+  },
+  rowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: t.bg.divider,
+    marginLeft: 78,
   },
   menuRowText: {
     flex: 1,
-    marginLeft: SPACING.md,
+    marginLeft: 14,
     minWidth: 0,
     justifyContent: 'center',
   },
   menuTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    ...typography.h3,
+    color: t.text.primary,
   },
   menuSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    marginTop: 3,
-    fontWeight: '600',
-    lineHeight: 18,
+    ...typography.small,
+    marginTop: 2,
+    color: t.text.tertiary,
   },
   deleteRow: { backgroundColor: COLORS.errorSoft },
   menuIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: BORDER_RADIUS.md,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   scorePanel: {
-    marginTop: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    gap: SPACING.md,
+    marginTop: t.space.md,
+    borderRadius: t.radius.lg,
+    padding: t.space.xl,
+    gap: t.space.md,
   },
   scorePanelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: t.space.md,
   },
   scorePanelTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
+    ...typography.h2,
+    color: t.text.primary,
   },
   scorePanelSubtitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    ...typography.small,
+    color: t.text.tertiary,
     marginTop: 4,
   },
   scoreTierBadge: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: t.radius.pill,
+    backgroundColor: '#1F2A44',
   },
   scoreTierBadgeText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    color: COLORS.white,
-    textTransform: 'uppercase',
+    ...typography.small,
+    color: t.accent.amber,
   },
   scoreBreakdownGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: SPACING.sm,
+    justifyContent: 'space-between',
+    rowGap: t.space.md,
   },
   scoreMetricCard: {
-    width: '48%',
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.sm,
-    borderWidth: StyleSheet.hairlineWidth,
+    width: '48.5%',
+    borderRadius: t.radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    minHeight: 108,
+    borderWidth: 0,
+    justifyContent: 'space-between',
   },
   scoreMetricLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    ...typography.small,
+    color: t.text.tertiary,
   },
   scoreMetricValue: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    marginTop: 4,
+    ...typography.h1,
+    marginTop: 8,
+    color: t.text.primary,
   },
   scorePerksTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '900',
+    ...typography.h3,
+    color: t.text.primary,
+    marginTop: t.space.md,
   },
   scorePerkRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
+    gap: 10,
+    minHeight: 32,
   },
   scorePerkText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
+    ...typography.body,
     flex: 1,
+    color: t.text.primary,
   },
   logoutButtonScroll: {
     flexDirection: 'row',
@@ -676,15 +706,13 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
   },
   logoutText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
+    ...typography.h3,
     color: COLORS.error,
   },
   versionText: {
-    fontSize: FONT_SIZE.xs,
+    ...typography.label,
     textAlign: 'center',
     marginBottom: SPACING.sm,
-    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
@@ -714,15 +742,13 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.md,
   },
   modalTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
+    ...typography.h2,
     textAlign: 'center',
     marginBottom: SPACING.sm,
   },
   modalSubtitle: {
-    fontSize: FONT_SIZE.md,
+    ...typography.body,
     textAlign: 'center',
-    lineHeight: 22,
     marginBottom: SPACING.lg,
   },
   modalConfirm: {
@@ -733,7 +759,21 @@ const styles = StyleSheet.create({
   },
   modalConfirmText: {
     color: COLORS.white,
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
+    ...typography.h3,
+  },
+  stickyTitleWrap: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 10,
+  },
+  stickyBlur: {
+    backgroundColor: 'rgba(11,18,32,0.8)',
+    paddingVertical: t.space.sm,
+    paddingHorizontal: t.space.xl,
+  },
+  stickyTitle: {
+    color: t.text.primary,
+    ...typography.h3,
   },
 });

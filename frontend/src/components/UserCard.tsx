@@ -1,9 +1,7 @@
 import React from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Card, Badge } from '@/src/components/UI';
-import { COLORS, FONT_SIZE, SPACING } from '@/src/constants/theme';
-import { RatingDisplay } from '@/src/components/RatingDisplay';
+import { profileTokens as t, typography } from '@/src/theme/tokens';
 
 type Props = {
   name: string;
@@ -28,48 +26,61 @@ export const UserCard: React.FC<Props> = ({
   riderRiskScore,
   driverSafetyScore,
 }) => {
+  const risk = Math.max(0, Math.min(100, Math.round(riderRiskScore ?? 0)));
+  const riskFillColor = risk < 34 ? t.accent.green : risk <= 66 ? t.accent.amber : t.accent.red;
+  const initials = name
+    .split(' ')
+    .slice(0, 2)
+    .map((part) => part[0] || '')
+    .join('')
+    .toUpperCase();
   return (
-    <Card variant="elevated" style={styles.card}>
+    <View style={styles.card}>
       <View style={styles.row}>
         <View style={styles.avatarWrap}>
-          {image ? <Image source={{ uri: image }} style={styles.avatar} /> : <Ionicons name="person" size={28} color={COLORS.gray500} />}
+          {image ? <Image source={{ uri: image }} style={styles.avatar} /> : <Text style={styles.initials}>{initials || 'AD'}</Text>}
         </View>
         <View style={styles.meta}>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{name}</Text>
-            <Badge text={role === 'driver' ? 'Driver' : 'Rider'} variant={role === 'driver' ? 'info' : 'success'} size="sm" />
+            <View style={styles.rolePill}><Text style={styles.rolePillText}>{role === 'driver' ? 'Driver' : 'Rider'}</Text></View>
           </View>
-          <RatingDisplay rating={rating} reviewCount={reviewCount} score={nexrydeScore} compact />
-          {verificationLabel ? <Text style={styles.sub}>{verificationLabel}</Text> : null}
+          <View style={styles.ratingRow}>
+            <Ionicons name="star" size={14} color={t.accent.amber} />
+            <Text style={styles.ratingText}>{rating.toFixed(1)}</Text>
+            <Text style={styles.ratingCount}>({reviewCount ?? 0})</Text>
+            <Text style={styles.ratingDot}>·</Text>
+            <View style={styles.scoreChip}>
+              <Ionicons name="shield-checkmark" size={12} color={t.accent.green} />
+              <Text style={styles.scoreChipText}>Score {Math.round(nexrydeScore ?? 100)}</Text>
+            </View>
+          </View>
+          {verificationLabel ? <Text style={styles.sub}>✓ {verificationLabel}</Text> : null}
         </View>
       </View>
 
-      <View style={styles.metrics}>
-        {typeof riderRiskScore === 'number' ? (
-          <View style={styles.metric}>
-            <Text style={styles.metricLabel}>Rider risk</Text>
-            <Text style={styles.metricValue}>{Math.round(riderRiskScore)}</Text>
-          </View>
-        ) : null}
-        {typeof driverSafetyScore === 'number' ? (
-          <View style={styles.metric}>
-            <Text style={styles.metricLabel}>Driver safety</Text>
-            <Text style={styles.metricValue}>{Math.round(driverSafetyScore)}</Text>
-          </View>
-        ) : null}
+      <View style={styles.metricsHeader}>
+        <Text style={styles.metricLabel}>Rider risk</Text>
+        <Text style={styles.metricValue}>{risk} / 100</Text>
       </View>
-    </Card>
+      <View style={styles.progressTrack}>
+        <View style={[styles.progressFill, { width: `${risk}%`, backgroundColor: riskFillColor }]} />
+      </View>
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   card: {
-    gap: SPACING.md,
+    gap: t.space.md,
+    borderRadius: t.radius.lg,
+    backgroundColor: t.bg.card,
+    padding: t.space.xl,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.md,
+    gap: t.space.md,
   },
   avatarWrap: {
     width: 56,
@@ -77,7 +88,7 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: COLORS.gray100,
+    backgroundColor: '#1E2A44',
     overflow: 'hidden',
   },
   avatar: {
@@ -86,43 +97,48 @@ const styles = StyleSheet.create({
   },
   meta: {
     flex: 1,
-    gap: 6,
+    gap: 4,
   },
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: SPACING.sm,
-    flexWrap: 'wrap',
+    justifyContent: 'space-between',
   },
   name: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    ...typography.h2,
+    color: t.text.primary,
   },
+  initials: { ...typography.h3, color: t.text.primary },
+  rolePill: { backgroundColor: 'rgba(59,130,246,0.15)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+  rolePillText: { ...typography.small, color: t.accent.blue },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  ratingText: { ...typography.h2, color: t.text.primary },
+  ratingCount: { ...typography.small, color: t.text.tertiary },
+  ratingDot: { ...typography.small, color: t.text.tertiary },
+  scoreChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: t.accent.greenSoft, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 2 },
+  scoreChipText: { ...typography.small, color: t.accent.green },
   sub: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray500,
-    fontWeight: '600',
+    ...typography.small,
+    color: t.text.secondary,
   },
-  metrics: {
+  metricsHeader: {
     flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  metric: {
-    flex: 1,
-    backgroundColor: COLORS.lightSurface,
-    borderRadius: 14,
-    padding: SPACING.sm,
+    justifyContent: 'space-between',
+    marginTop: t.space.sm,
   },
   metricLabel: {
-    fontSize: FONT_SIZE.xs,
-    color: COLORS.gray500,
-    fontWeight: '700',
+    ...typography.small,
+    color: t.text.tertiary,
   },
   metricValue: {
-    marginTop: 2,
-    fontSize: FONT_SIZE.lg,
-    color: COLORS.lightTextPrimary,
-    fontWeight: '900',
+    ...typography.small,
+    color: t.text.primary,
   },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  progressFill: { height: '100%', borderRadius: 3 },
 });

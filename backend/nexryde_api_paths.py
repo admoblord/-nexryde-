@@ -23,6 +23,7 @@ PUBLIC_PATH_PREFIXES: tuple[str, ...] = (
     # Crime / route heuristics (read-only, safe to expose before login for booking UX)
     "/api/safety/real-crime-data",
     "/api/safety/route-safety",
+    "/api/safety/live-health",
 )
 
 # Note: middleware checks PUBLIC_PATH_PREFIXES first. /api/payment/squad-webhook-dlq* is public

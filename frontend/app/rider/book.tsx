@@ -1803,16 +1803,6 @@ function BookInDriveStyle() {
                   {isLoading ? <ActivityIndicator color={COLORS.bg} /> : <Text style={s.findBtnText}>Find offers</Text>}
                 </LinearGradient>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={s.scheduleRideBtn}
-                onPress={openScheduleRide}
-                disabled={isLoading}
-                accessibilityLabel="Schedule this ride"
-                accessibilityRole="button"
-              >
-                <Ionicons name="calendar-outline" size={18} color={COLORS.white} />
-                <Text style={s.scheduleRideBtnText}>Schedule for later</Text>
-              </TouchableOpacity>
             </View>
           ) : (
             <TouchableOpacity
@@ -2436,19 +2426,6 @@ const s = StyleSheet.create({
   },
   btnGrad: { paddingVertical: 19, alignItems: 'center', justifyContent: 'center', borderRadius: 18 },
   findBtnText: { fontSize: 18, fontWeight: '900', color: COLORS.bg },
-  scheduleRideBtn: {
-    marginTop: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.45)',
-    backgroundColor: '#17263F',
-    paddingVertical: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  scheduleRideBtnText: { fontSize: 15, fontWeight: '800', color: COLORS.white },
   calcBtn: {
     borderRadius: 16,
     overflow: 'hidden',

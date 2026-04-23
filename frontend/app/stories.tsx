@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Dimensions,
   Image,
   KeyboardAvoidingView,
   Modal,
+  PanResponder,
   Platform,
   RefreshControl,
   ScrollView,
@@ -79,8 +81,9 @@ export default function NexrydeStoriesScreen() {
   const [viewerStories, setViewerStories] = useState<Story[]>([]);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [viewerPaused, setViewerPaused] = useState(false);
-  const progressRef = useRef(0);
+  const [viewerProgress, setViewerProgress] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const viewerTranslateY = useRef(new Animated.Value(0)).current;
 
   const loadStories = useCallback(async () => {
     try {
@@ -168,6 +171,8 @@ export default function NexrydeStoriesScreen() {
     () => (user?.role === 'driver' ? 'Share road moments riders will love' : 'See real stories from riders and drivers'),
     [user?.role]
   );
+  const recentGroups = useMemo(() => groups.filter((g) => g.unseen_count > 0), [groups]);
+  const viewedGroups = useMemo(() => groups.filter((g) => g.unseen_count <= 0), [groups]);
 
   const timeAgo = (value: string) => {
     const diff = Date.now() - new Date(value).getTime();
@@ -183,28 +188,39 @@ export default function NexrydeStoriesScreen() {
       .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
     if (bucket.length === 0) return;
     setViewerStories(bucket);
-    setViewerIndex(0);
+    const firstUnseen = bucket.findIndex((s) => {
+      const grp = groups.find((g) => g.user_id === groupUserId);
+      return !!grp?.unseen_count;
+    });
+    setViewerIndex(firstUnseen >= 0 ? firstUnseen : 0);
+    setViewerProgress(0);
     setViewerOpen(true);
-  }, [stories]);
+  }, [stories, groups]);
 
   useEffect(() => {
     if (!viewerOpen || viewerPaused || viewerStories.length === 0) return;
     if (timerRef.current) clearInterval(timerRef.current);
-    progressRef.current = 0;
+    setViewerProgress(0);
+    const activeStory = viewerStories[viewerIndex];
+    const duration = Math.max(3500, Math.min(12000, Number(activeStory?.duration_ms || 6000)));
+    const stepMs = 100;
+    const step = stepMs / duration;
     timerRef.current = setInterval(() => {
-      progressRef.current += 0.1;
-      if (progressRef.current >= 1) {
+      setViewerProgress((prev) => {
+        const nextP = prev + step;
+        if (nextP < 1) return nextP;
         if (timerRef.current) clearInterval(timerRef.current);
         setViewerIndex((prev) => {
           const next = prev + 1;
           if (next >= viewerStories.length) {
-            setViewerOpen(false);
+            closeViewer();
             return prev;
           }
           return next;
         });
-      }
-    }, 450);
+        return 1;
+      });
+    }, stepMs);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
@@ -216,6 +232,38 @@ export default function NexrydeStoriesScreen() {
     if (!active?.id) return;
     void markNexrydeStorySeen(active.id).catch(() => {});
   }, [viewerIndex, viewerOpen, viewerStories]);
+
+  const closeViewer = useCallback(() => {
+    setViewerOpen(false);
+    Animated.timing(viewerTranslateY, {
+      toValue: 0,
+      duration: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [viewerTranslateY]);
+
+  const viewerPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_evt, gesture) => Math.abs(gesture.dy) > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onPanResponderMove: (_evt, gesture) => {
+          if (gesture.dy > 0) viewerTranslateY.setValue(Math.min(gesture.dy, 220));
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          if (gesture.dy > 120 || gesture.vy > 1.2) {
+            closeViewer();
+            return;
+          }
+          Animated.spring(viewerTranslateY, {
+            toValue: 0,
+            useNativeDriver: true,
+            tension: 120,
+            friction: 14,
+          }).start();
+        },
+      }),
+    [closeViewer, viewerTranslateY]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -234,15 +282,36 @@ export default function NexrydeStoriesScreen() {
           contentContainerStyle={styles.content}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         >
+          <Text style={styles.ringsTitle}>Recent updates</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ringsRow}>
-            {groups.map((group) => {
-              const unseen = group.unseen_count > 0;
-              return (
+            {recentGroups.map((group) => (
+              <TouchableOpacity key={group.user_id} style={styles.ringItem} onPress={() => openViewerForGroup(group.user_id)}>
+                <LinearGradient colors={['#A855F7', '#F43F5E']} style={styles.ringBorder}>
+                  <View style={styles.ringInner}>
+                    <Ionicons
+                      name={group.user_role === 'driver' ? 'car-sport-outline' : 'person-outline'}
+                      size={20}
+                      color={group.user_role === 'driver' ? '#1D4ED8' : '#7C3AED'}
+                    />
+                  </View>
+                </LinearGradient>
+                {group.total_count > 1 ? (
+                  <View style={styles.ringCountBadge}>
+                    <Text style={styles.ringCountText}>{group.total_count}</Text>
+                  </View>
+                ) : null}
+                <Text numberOfLines={1} style={styles.ringLabel}>{group.user_name}</Text>
+              </TouchableOpacity>
+            ))}
+            {recentGroups.length === 0 ? <Text style={styles.ringsEmpty}>No new stories</Text> : null}
+          </ScrollView>
+
+          {viewedGroups.length > 0 ? <Text style={[styles.ringsTitle, { marginTop: 2 }]}>Viewed updates</Text> : null}
+          {viewedGroups.length > 0 ? (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.ringsRow}>
+              {viewedGroups.map((group) => (
                 <TouchableOpacity key={group.user_id} style={styles.ringItem} onPress={() => openViewerForGroup(group.user_id)}>
-                  <LinearGradient
-                    colors={unseen ? ['#A855F7', '#F43F5E'] : ['#CBD5E1', '#CBD5E1']}
-                    style={styles.ringBorder}
-                  >
+                  <LinearGradient colors={['#CBD5E1', '#CBD5E1']} style={styles.ringBorder}>
                     <View style={styles.ringInner}>
                       <Ionicons
                         name={group.user_role === 'driver' ? 'car-sport-outline' : 'person-outline'}
@@ -251,11 +320,16 @@ export default function NexrydeStoriesScreen() {
                       />
                     </View>
                   </LinearGradient>
+                  {group.total_count > 1 ? (
+                    <View style={[styles.ringCountBadge, styles.ringCountBadgeViewed]}>
+                      <Text style={styles.ringCountText}>{group.total_count}</Text>
+                    </View>
+                  ) : null}
                   <Text numberOfLines={1} style={styles.ringLabel}>{group.user_name}</Text>
                 </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
+              ))}
+            </ScrollView>
+          ) : null}
 
           <View style={styles.composeCard}>
             <Text style={styles.composeTitle}>Share a trip story</Text>
@@ -371,12 +445,12 @@ export default function NexrydeStoriesScreen() {
           )}
         </ScrollView>
       </KeyboardAvoidingView>
-      <Modal visible={viewerOpen} animationType="fade" onRequestClose={() => setViewerOpen(false)}>
-        <View style={styles.viewerRoot}>
+      <Modal visible={viewerOpen} animationType="fade" onRequestClose={closeViewer}>
+        <Animated.View style={[styles.viewerRoot, { transform: [{ translateY: viewerTranslateY }] }]} {...viewerPanResponder.panHandlers}>
           <View style={styles.viewerProgressRow}>
             {viewerStories.map((s, idx) => (
               <View key={s.id} style={styles.viewerProgressTrack}>
-                <View style={[styles.viewerProgressFill, idx < viewerIndex ? { width: '100%' } : idx === viewerIndex ? { width: `${Math.round(progressRef.current * 100)}%` } : { width: '0%' }]} />
+                <View style={[styles.viewerProgressFill, idx < viewerIndex ? { width: '100%' } : idx === viewerIndex ? { width: `${Math.round(viewerProgress * 100)}%` } : { width: '0%' }]} />
               </View>
             ))}
           </View>
@@ -401,7 +475,7 @@ export default function NexrydeStoriesScreen() {
                 <TouchableOpacity onPress={() => setViewerPaused((v) => !v)} style={styles.viewerActionBtn}>
                   <Ionicons name={viewerPaused ? 'play' : 'pause'} size={18} color={COLORS.white} />
                 </TouchableOpacity>
-                <TouchableOpacity onPress={() => setViewerOpen(false)} style={styles.viewerActionBtn}>
+                <TouchableOpacity onPress={closeViewer} style={styles.viewerActionBtn}>
                   <Ionicons name="close" size={18} color={COLORS.white} />
                 </TouchableOpacity>
               </View>
@@ -421,7 +495,7 @@ export default function NexrydeStoriesScreen() {
               onPress={() =>
                 setViewerIndex((prev) => {
                   if (prev + 1 >= viewerStories.length) {
-                    setViewerOpen(false);
+                    closeViewer();
                     return prev;
                   }
                   return prev + 1;
@@ -429,7 +503,7 @@ export default function NexrydeStoriesScreen() {
               }
             />
           </View>
-        </View>
+        </Animated.View>
       </Modal>
     </SafeAreaView>
   );
@@ -449,10 +523,26 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: COLORS.white },
   headerSubtitle: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: 'rgba(255,255,255,0.84)', marginTop: 2 },
   content: { padding: SPACING.lg, paddingBottom: SPACING.xxl * 2 },
+  ringsTitle: { marginBottom: 8, fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.gray700 },
   ringsRow: { gap: SPACING.md, marginBottom: SPACING.md, paddingRight: SPACING.md },
+  ringsEmpty: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray500, marginTop: 18 },
   ringItem: { width: 72, alignItems: 'center' },
   ringBorder: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center' },
   ringInner: { width: 56, height: 56, borderRadius: 28, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
+  ringCountBadge: {
+    position: 'absolute',
+    top: -4,
+    right: 6,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: COLORS.error,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ringCountBadgeViewed: { backgroundColor: COLORS.gray400 },
+  ringCountText: { fontSize: 10, fontWeight: '900', color: COLORS.white },
   ringLabel: { marginTop: 6, fontSize: FONT_SIZE.xs, fontWeight: '700', color: COLORS.gray700 },
   composeCard: { backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg },
   composeTitle: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: COLORS.gray900 },

@@ -34,15 +34,6 @@ const FALLBACK_ANNOUNCEMENTS: FeatureAnnouncement[] = [
     version: '2026.4',
     created_at: '2026-04-17T00:00:00.000Z',
   },
-  {
-    id: 'feat-nigeria-area-scan',
-    title: 'Nationwide area safety scan',
-    message: 'Safety check now scans risky zones across Nigerian cities.',
-    feature_route: '/rider/safety-check',
-    audience: 'all',
-    version: '2026.4',
-    created_at: '2026-04-17T00:00:00.000Z',
-  },
 ];
 
 async function readSeenIds(): Promise<Set<string>> {

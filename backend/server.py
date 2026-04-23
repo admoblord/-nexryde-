@@ -3,6 +3,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 from typing import Set
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -1585,6 +1586,7 @@ app.add_middleware(
 # Auth middleware - validates JWT on protected routes
 from starlette.middleware.base import BaseHTTPMiddleware
 from security_advanced import verify_jwt_token
+from security_advanced import SECURITY_HEADERS
 
 from nexryde_api_paths import api_path_is_protected, api_path_is_public
 
@@ -1640,8 +1642,36 @@ class ResponseTimingMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Apply baseline security headers to every HTTP response."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        for k, v in SECURITY_HEADERS.items():
+            response.headers.setdefault(k, v)
+        return response
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """Attach a request id for traceability across logs and clients."""
+
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = req_id
+        response = await call_next(request)
+        response.headers["X-Request-Id"] = req_id
+        return response
+
+
 app.add_middleware(AuthMiddleware)
 app.add_middleware(ResponseTimingMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestIdMiddleware)
+_trusted_hosts_raw = os.environ.get("TRUSTED_HOSTS", "").strip()
+if _trusted_hosts_raw:
+    _trusted_hosts = [h.strip() for h in _trusted_hosts_raw.split(",") if h.strip()]
+    if _trusted_hosts:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts)
 
 # Mount admin static files (only if directory exists)
 if ADMIN_DIR.exists():

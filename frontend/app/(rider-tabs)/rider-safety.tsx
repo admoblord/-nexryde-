@@ -20,9 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
-import { fetchRealCrimeData, type RealCrimeDataResponse } from '@/src/services/crimeSafetyData';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
-import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 
 type Row = {
   label: string;
@@ -43,13 +41,6 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
   {
     title: 'Verification',
     rows: [
-      {
-        label: 'Area safety check',
-        desc: 'Look up risk context before you ride',
-        route: '/rider/safety-check',
-        icon: 'map',
-        tone: 'info',
-      },
       {
         label: 'Trip security code',
         desc: 'PIN-style verification with your driver',
@@ -167,8 +158,6 @@ export default function RiderSafetyScreen() {
   const [loadingTrip, setLoadingTrip] = useState(false);
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
-  const [crimeBrief, setCrimeBrief] = useState<RealCrimeDataResponse | null>(null);
-  const [crimeLoading, setCrimeLoading] = useState(false);
   const sosPulse = useRef(new Animated.Value(1)).current;
 
   const effectiveTripId = useMemo(() => currentTrip?.id || activeTripId || null, [currentTrip?.id, activeTripId]);
@@ -193,32 +182,6 @@ export default function RiderSafetyScreen() {
     loop.start();
     return () => loop.stop();
   }, [sosPulse]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setCrimeLoading(true);
-      try {
-        const perm = await Location.requestForegroundPermissionsAsync();
-        let lat = 6.5244;
-        let lng = 3.3792;
-        if (perm.status === 'granted') {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          lat = pos.coords.latitude;
-          lng = pos.coords.longitude;
-        }
-        const data = await fetchRealCrimeData(lat, lng);
-        if (!cancelled) setCrimeBrief(data);
-      } catch {
-        if (!cancelled) setCrimeBrief(null);
-      } finally {
-        if (!cancelled) setCrimeLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     const fetchActiveTrip = async () => {
@@ -293,112 +256,6 @@ export default function RiderSafetyScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
-        {crimeBrief ? (
-          <View style={styles.timeRiskStrip} accessibilityRole="summary">
-            <View
-              style={[
-                styles.timeRiskSeg,
-                crimeBrief.time_risk_level === 'low' ? styles.timeRiskOn : styles.timeRiskOff,
-                { backgroundColor: crimeBrief.time_risk_level === 'low' ? COLORS.success : 'rgba(148,163,184,0.25)' },
-              ]}
-            />
-            <View
-              style={[
-                styles.timeRiskSeg,
-                crimeBrief.time_risk_level === 'moderate' ? styles.timeRiskOn : styles.timeRiskOff,
-                {
-                  backgroundColor:
-                    crimeBrief.time_risk_level === 'moderate' ? COLORS.warning : 'rgba(148,163,184,0.25)',
-                },
-              ]}
-            />
-            <View
-              style={[
-                styles.timeRiskSeg,
-                crimeBrief.time_risk_level === 'high' ? styles.timeRiskOn : styles.timeRiskOff,
-                { backgroundColor: crimeBrief.time_risk_level === 'high' ? COLORS.error : 'rgba(148,163,184,0.25)' },
-              ]}
-            />
-          </View>
-        ) : null}
-
-        <View
-          style={[
-            styles.intelCard,
-            crimeBrief?.time_risk_level === 'high' && styles.intelCardHigh,
-            crimeBrief?.time_risk_level === 'moderate' && styles.intelCardMod,
-            crimeBrief?.time_risk_level === 'low' && styles.intelCardLow,
-          ]}
-        >
-          <View style={styles.intelHeader}>
-            <Ionicons name="map" size={18} color={COLORS.info} />
-            <Text style={styles.intelTitle}>Area intelligence</Text>
-          </View>
-          {crimeLoading ? (
-            <View style={{ gap: 10, marginVertical: 8 }}>
-              <SkeletonBlock height={16} width="70%" />
-              <SkeletonBlock height={14} width="100%" />
-              <SkeletonBlock height={14} width="90%" />
-            </View>
-          ) : crimeBrief ? (
-            <>
-              <Text style={styles.intelMeta}>
-                {crimeBrief.city} · Night/day risk:{' '}
-                <Text
-                  style={{
-                    fontWeight: '900',
-                    color:
-                      crimeBrief.time_risk_level === 'high'
-                        ? COLORS.error
-                        : crimeBrief.time_risk_level === 'moderate'
-                          ? COLORS.warning
-                          : COLORS.success,
-                  }}
-                >
-                  {crimeBrief.time_risk_level.toUpperCase()}
-                </Text>
-              </Text>
-              {crimeBrief.nearby_high_risk_zones?.length ? (
-                <Text style={styles.intelBody} numberOfLines={3}>
-                  Hotspots near you:{' '}
-                  {crimeBrief.nearby_high_risk_zones
-                    .map((z) => `${z.area} (${z.distance_km != null ? `${z.distance_km} km` : 'near'})`)
-                    .join(' · ')}
-                </Text>
-              ) : (
-                <Text style={styles.intelBody}>No mapped high-risk anchors within ~10 km of this pin.</Text>
-              )}
-              <Text style={styles.intelAdvice} numberOfLines={4}>
-                {crimeBrief.general_advice}
-              </Text>
-            </>
-          ) : (
-            <Text style={styles.intelBody}>Could not load area snapshot. Pull to refresh later.</Text>
-          )}
-        </View>
-
-        {Platform.OS !== 'web' &&
-        crimeBrief?.location &&
-        (crimeBrief.nearby_high_risk_zones?.length ?? 0) > 0
-          ? (() => {
-              try {
-                const { RideMapDangerCircles } = require('@/src/components/RideMap.native');
-                return (
-                  <RideMapDangerCircles
-                    center={{ lat: crimeBrief.location.lat, lng: crimeBrief.location.lng }}
-                    zones={crimeBrief.nearby_high_risk_zones.map((z) => ({
-                      area: z.area,
-                      lat: z.lat,
-                      lng: z.lng,
-                    }))}
-                  />
-                );
-              } catch {
-                return null;
-              }
-            })()
-          : null}
-
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
@@ -517,73 +374,6 @@ const styles = StyleSheet.create({
   scroll: {
     padding: SPACING.lg,
     paddingBottom: SPACING.huge,
-  },
-  intelCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    ...SHADOWS.sm,
-  },
-  intelHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: SPACING.xs,
-  },
-  intelTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-  },
-  intelMeta: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.lightTextSecondary,
-    marginBottom: 6,
-  },
-  intelBody: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextPrimary,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  intelAdvice: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
-    lineHeight: 18,
-  },
-  intelCardHigh: {
-    backgroundColor: 'rgba(239, 68, 68, 0.12)',
-    borderColor: 'rgba(239, 68, 68, 0.45)',
-  },
-  intelCardMod: {
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderColor: 'rgba(245, 158, 11, 0.45)',
-  },
-  intelCardLow: {
-    backgroundColor: 'rgba(0, 212, 106, 0.08)',
-    borderColor: 'rgba(0, 212, 106, 0.35)',
-  },
-  timeRiskStrip: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: SPACING.md,
-  },
-  timeRiskSeg: {
-    flex: 1,
-    height: 8,
-    borderRadius: 999,
-  },
-  timeRiskOn: {
-    opacity: 1,
-  },
-  timeRiskOff: {
-    opacity: 0.85,
   },
   quickLabel: {
     fontSize: FONT_SIZE.xs,

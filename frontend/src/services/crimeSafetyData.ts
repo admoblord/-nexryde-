@@ -14,6 +14,13 @@ export interface CrimeZoneBrief {
   note?: string;
 }
 
+export interface SafetyHeadline {
+  title: string;
+  url?: string;
+  published_at?: string;
+  source?: string;
+}
+
 export interface RealCrimeDataResponse {
   city: string;
   location: { lat: number; lng: number };
@@ -26,6 +33,11 @@ export interface RealCrimeDataResponse {
   total_safe_zones: number;
   data_source?: string;
   last_updated?: string;
+  /** Live news rows when backend uses NewsAPI / GNews. */
+  live_headlines?: SafetyHeadline[];
+  headline_signal?: string;
+  disclaimer?: string;
+  geocode_label?: string;
 }
 
 export interface RouteSafetyResponse {
@@ -41,6 +53,10 @@ export interface RouteSafetyResponse {
   risk_count: number;
   safety_tips: string[];
   city: string;
+  live_headlines?: SafetyHeadline[];
+  headline_signal?: string;
+  data_source?: string;
+  disclaimer?: string;
 }
 
 async function fetchJson<T>(pathWithQuery: string): Promise<T | null> {

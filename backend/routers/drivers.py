@@ -346,6 +346,25 @@ class FaceVerificationRequest(BaseModel):
 class BiometricWithdrawalRequest(BaseModel):
     amount: float = Field(..., gt=0)
     face_image: str
+    idempotency_key: Optional[str] = Field(default=None, min_length=6, max_length=120)
+
+
+class WithdrawalSettlementRequest(BaseModel):
+    status: str = Field(..., pattern="^(settled|failed)$")
+    reason: Optional[str] = Field(default=None, max_length=240)
+    provider_reference: Optional[str] = Field(default=None, max_length=120)
+
+
+class WithdrawalProcessingRequest(BaseModel):
+    provider_reference: str = Field(..., min_length=6, max_length=120)
+    note: Optional[str] = Field(default=None, max_length=240)
+
+
+class WithdrawalProviderCallbackRequest(BaseModel):
+    transaction_id: str = Field(..., min_length=8)
+    provider_reference: str = Field(..., min_length=6, max_length=120)
+    status: str = Field(..., pattern="^(settled|failed)$")
+    reason: Optional[str] = Field(default=None, max_length=240)
 
 
 class EarningsVaultLockRequest(BaseModel):
@@ -2036,6 +2055,26 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
     if amount > current_balance:
         raise HTTPException(status_code=400, detail=f"Insufficient wallet balance. Available: ₦{current_balance:,.2f}")
 
+    idem_key = (request.idempotency_key or "").strip()
+    if idem_key:
+        existing = await db.transactions.find_one(
+            {
+                "user_id": driver_id,
+                "source": "driver_withdrawal",
+                "meta.idempotency_key": idem_key,
+            },
+            {"_id": 0},
+        )
+        if existing:
+            return {
+                "success": True,
+                "duplicate": True,
+                "message": "Withdrawal request already submitted.",
+                "withdrawn_amount": abs(float(existing.get("amount") or 0)),
+                "status": existing.get("status"),
+                "reference": existing.get("reference"),
+            }
+
     await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
     await db.transactions.insert_one(
         {
@@ -2044,6 +2083,7 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
             "type": "debit",
             "source": "driver_withdrawal",
             "amount": -amount,
+            "amount_kobo": -int(round(amount * 100)),
             "status": "pending_settlement",
             "timestamp": datetime.utcnow(),
             "payment_method": "bank_transfer",
@@ -2054,6 +2094,7 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
                 "bank_name": profile.get("bank_name"),
                 "account_number": profile.get("account_number"),
                 "account_name": profile.get("account_name"),
+                "idempotency_key": idem_key or None,
             },
         }
     )
@@ -2073,3 +2114,126 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
         "remaining_balance": round(current_balance - amount, 2),
         "face_match_confidence": confidence,
     }
+
+
+@drivers_router.post("/admin/withdrawals/{transaction_id}/settlement")
+async def update_driver_withdrawal_settlement(transaction_id: str, payload: WithdrawalSettlementRequest, request: Request):
+    """Admin settlement state machine for driver withdrawal payouts."""
+    admin_email = await require_admin_request(request)
+    tx = await db.transactions.find_one({"id": transaction_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Withdrawal transaction not found")
+    if tx.get("source") != "driver_withdrawal":
+        raise HTTPException(status_code=400, detail="Transaction is not a driver withdrawal")
+
+    current_status = str(tx.get("status") or "").lower()
+    target = payload.status.lower()
+    if current_status == target:
+        return {"success": True, "duplicate": True, "status": current_status, "transaction_id": transaction_id}
+    if current_status not in {"pending_settlement", "processing"}:
+        raise HTTPException(status_code=409, detail=f"Invalid settlement transition from status={current_status}")
+
+    update_doc = {
+        "status": target,
+        "settlement_updated_at": datetime.utcnow(),
+        "settlement_updated_by": admin_email,
+        "settlement_reason": (payload.reason or "").strip() or None,
+    }
+    if payload.provider_reference:
+        update_doc["provider_reference"] = payload.provider_reference.strip()
+
+    if target == "failed":
+        amount = abs(float(tx.get("amount") or 0))
+        user_id = str(tx.get("user_id") or "")
+        if amount <= 0 or not user_id:
+            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
+        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
+        update_doc["reversed_to_wallet"] = True
+        update_doc["reversed_at"] = datetime.utcnow()
+
+    await db.transactions.update_one({"id": transaction_id}, {"$set": update_doc})
+
+    user_id = str(tx.get("user_id") or "")
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "wallet_balance": 1}) if user_id else None
+    return {
+        "success": True,
+        "transaction_id": transaction_id,
+        "status": target,
+        "wallet_balance": round(float((user or {}).get("wallet_balance") or 0.0), 2),
+    }
+
+
+@drivers_router.post("/admin/withdrawals/{transaction_id}/processing")
+async def mark_driver_withdrawal_processing(transaction_id: str, payload: WithdrawalProcessingRequest, request: Request):
+    """Move withdrawal from pending_settlement to processing with provider reference."""
+    admin_email = await require_admin_request(request)
+    tx = await db.transactions.find_one({"id": transaction_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Withdrawal transaction not found")
+    if tx.get("source") != "driver_withdrawal":
+        raise HTTPException(status_code=400, detail="Transaction is not a driver withdrawal")
+
+    current_status = str(tx.get("status") or "").lower()
+    if current_status == "processing":
+        return {"success": True, "duplicate": True, "transaction_id": transaction_id, "status": "processing"}
+    if current_status != "pending_settlement":
+        raise HTTPException(status_code=409, detail=f"Invalid processing transition from status={current_status}")
+
+    await db.transactions.update_one(
+        {"id": transaction_id},
+        {"$set": {
+            "status": "processing",
+            "provider_reference": payload.provider_reference.strip(),
+            "processing_note": (payload.note or "").strip() or None,
+            "processing_started_at": datetime.utcnow(),
+            "processing_started_by": admin_email,
+        }},
+    )
+    return {"success": True, "transaction_id": transaction_id, "status": "processing"}
+
+
+@drivers_router.post("/providers/withdrawals/callback")
+async def provider_withdrawal_callback(payload: WithdrawalProviderCallbackRequest, request: Request):
+    """
+    Provider callback to settle/failed driver withdrawal.
+    Guarded by x-provider-key == WITHDRAWAL_PROVIDER_CALLBACK_KEY.
+    """
+    expected_key = (os.environ.get("WITHDRAWAL_PROVIDER_CALLBACK_KEY") or "").strip()
+    got_key = (request.headers.get("x-provider-key") or "").strip()
+    if not expected_key or got_key != expected_key:
+        raise HTTPException(status_code=403, detail="Unauthorized provider callback")
+
+    tx = await db.transactions.find_one({"id": payload.transaction_id}, {"_id": 0})
+    if not tx:
+        raise HTTPException(status_code=404, detail="Withdrawal transaction not found")
+    if tx.get("source") != "driver_withdrawal":
+        raise HTTPException(status_code=400, detail="Transaction is not a driver withdrawal")
+
+    if str(tx.get("provider_reference") or "") != payload.provider_reference.strip():
+        raise HTTPException(status_code=409, detail="Provider reference mismatch")
+
+    # Reuse admin settlement state logic through direct state transition block.
+    current_status = str(tx.get("status") or "").lower()
+    target = payload.status.lower()
+    if current_status == target:
+        return {"success": True, "duplicate": True, "transaction_id": payload.transaction_id, "status": current_status}
+    if current_status not in {"pending_settlement", "processing"}:
+        raise HTTPException(status_code=409, detail=f"Invalid settlement transition from status={current_status}")
+
+    update_doc = {
+        "status": target,
+        "settlement_updated_at": datetime.utcnow(),
+        "settlement_updated_by": "provider_callback",
+        "settlement_reason": (payload.reason or "").strip() or None,
+    }
+    if target == "failed":
+        amount = abs(float(tx.get("amount") or 0))
+        user_id = str(tx.get("user_id") or "")
+        if amount <= 0 or not user_id:
+            raise HTTPException(status_code=400, detail="Invalid withdrawal amount/user for rollback")
+        await db.users.update_one({"id": user_id}, {"$inc": {"wallet_balance": amount}})
+        update_doc["reversed_to_wallet"] = True
+        update_doc["reversed_at"] = datetime.utcnow()
+
+    await db.transactions.update_one({"id": payload.transaction_id}, {"$set": update_doc})
+    return {"success": True, "transaction_id": payload.transaction_id, "status": target}

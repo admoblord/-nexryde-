@@ -10,9 +10,10 @@ from database import db
 
 logger = logging.getLogger('server')
 community_router = APIRouter(prefix="/api/community", tags=["Community"])
+STORY_EXPIRY_HOURS = 48
 
 
-def _story_time_cutoff(hours: int = 24) -> str:
+def _story_time_cutoff(hours: int = STORY_EXPIRY_HOURS) -> str:
     return (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
 
 
@@ -68,13 +69,15 @@ async def get_community_groups():
 async def get_nexryde_stories(limit: int = 30):
     try:
         lim = max(1, min(limit, 100))
+        cutoff = _story_time_cutoff(STORY_EXPIRY_HOURS)
         stories = await db.community_stories.find(
             {
-                "created_at": {"$gte": _story_time_cutoff(24 * 14)},
+                "created_at": {"$gte": cutoff},
                 "visibility": "public",
             },
             {"_id": 0, "liked_by": 0},
         ).sort("created_at", -1).limit(lim).to_list(length=lim)
+        stories = [s for s in stories if not _story_has_expired(s)]
         return {"success": True, "stories": stories}
     except Exception as e:
         logger.error(f"Get stories error: {str(e)}")
@@ -84,7 +87,7 @@ async def get_nexryde_stories(limit: int = 30):
 @community_router.get("/stories/groups")
 async def get_nexryde_story_groups(request: Request):
     actor_id = require_authenticated(request)
-    cutoff = _story_time_cutoff(24)
+    cutoff = _story_time_cutoff(STORY_EXPIRY_HOURS)
     try:
         stories = await db.community_stories.find(
             {"created_at": {"$gte": cutoff}, "visibility": "public"},
@@ -167,7 +170,7 @@ async def create_nexryde_story(request: Request, body: dict):
         "likes": 0,
         "liked_by": [],
         "created_at": now_iso,
-        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(hours=STORY_EXPIRY_HOURS)).isoformat(),
     }
     await db.community_stories.insert_one(story)
     story.pop("liked_by", None)

@@ -110,14 +110,18 @@ class ConnectionManager:
     """Manages WebSocket connections for real-time chat"""
     def __init__(self):
         self.active_connections: Dict[str, Set[WebSocket]] = {}
-        self.user_connections: Dict[str, WebSocket] = {}
+        self.user_connections: Dict[str, Set[WebSocket]] = {}
+        self.connection_owners: Dict[WebSocket, str] = {}
 
     async def connect(self, websocket: WebSocket, trip_id: str, user_id: str):
         await websocket.accept()
         if trip_id not in self.active_connections:
             self.active_connections[trip_id] = set()
         self.active_connections[trip_id].add(websocket)
-        self.user_connections[user_id] = websocket
+        if user_id not in self.user_connections:
+            self.user_connections[user_id] = set()
+        self.user_connections[user_id].add(websocket)
+        self.connection_owners[websocket] = user_id
         logger.info(f"WebSocket connected: user={user_id}, trip={trip_id}")
 
     def disconnect(self, websocket: WebSocket, trip_id: str, user_id: str):
@@ -126,7 +130,10 @@ class ConnectionManager:
             if not self.active_connections[trip_id]:
                 del self.active_connections[trip_id]
         if user_id in self.user_connections:
-            del self.user_connections[user_id]
+            self.user_connections[user_id].discard(websocket)
+            if not self.user_connections[user_id]:
+                del self.user_connections[user_id]
+        self.connection_owners.pop(websocket, None)
         logger.info(f"WebSocket disconnected: user={user_id}, trip={trip_id}")
 
     async def send_personal_message(self, message: dict, websocket: WebSocket):
@@ -140,11 +147,7 @@ class ConnectionManager:
             return
         for connection in self.active_connections[trip_id]:
             try:
-                user_id = None
-                for uid, ws in self.user_connections.items():
-                    if ws == connection:
-                        user_id = uid
-                        break
+                user_id = self.connection_owners.get(connection)
                 if exclude_user and user_id == exclude_user:
                     continue
                 await connection.send_json(message)
@@ -244,7 +247,8 @@ async def send_chat_message(request: ChatMessageRequest, http_request: Request):
             "message": request.message,
             "message_type": request.message_type,
             "is_read": False,
-            "created_at": datetime.now(timezone.utc)
+            "created_at": datetime.now(timezone.utc),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
         await db.trip_messages.insert_one(message)

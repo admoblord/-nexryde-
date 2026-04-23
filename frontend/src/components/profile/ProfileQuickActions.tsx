@@ -1,7 +1,7 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { profileTokens as t, typography } from '@/src/theme/tokens';
 
 export type QuickActionItem = {
   key: string;
@@ -26,26 +26,28 @@ type Props = {
   tileBorderColor?: string;
 };
 
-export function ProfileQuickActions({ title, actions, colors, tileBorderColor }: Props) {
-  const border = tileBorderColor ?? COLORS.gray100;
+export function ProfileQuickActions({ title, actions, colors: _colors, tileBorderColor }: Props) {
+  const border = tileBorderColor ?? 'rgba(255,255,255,0.04)';
   return (
-    <View style={[styles.section, { backgroundColor: colors.card }]}>
-      <Text style={[styles.sectionTitle, { color: colors.textMuted }]}>{title}</Text>
+    <View style={styles.section}>
+      <Text style={styles.sectionTitle}>{title}</Text>
       <View style={styles.grid}>
         {actions.map((a) => (
-          <TouchableOpacity
+          <Pressable
             key={a.key}
-            style={[styles.tile, { backgroundColor: colors.card, borderColor: border }]}
+            style={({ pressed }) => [
+              styles.tile,
+              { borderColor: border, opacity: pressed ? 0.7 : 1, transform: [{ scale: pressed ? 0.98 : 1 }] },
+            ]}
             onPress={a.onPress}
-            activeOpacity={0.75}
           >
             <View style={[styles.tileIcon, { backgroundColor: a.iconBg }]}>
-              <Ionicons name={a.icon} size={22} color={a.iconColor} />
+              <Ionicons name={a.icon} size={24} color={a.iconColor} />
             </View>
-            <Text style={[styles.tileLabel, { color: colors.text }]} numberOfLines={2}>
+            <Text style={styles.tileLabel} numberOfLines={2}>
               {a.label}
             </Text>
-          </TouchableOpacity>
+          </Pressable>
         ))}
       </View>
     </View>
@@ -54,47 +56,38 @@ export function ProfileQuickActions({ title, actions, colors, tileBorderColor }:
 
 const styles = StyleSheet.create({
   section: {
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-    paddingBottom: SPACING.md,
-    ...SHADOWS.sm,
-    overflow: 'hidden',
+    marginBottom: t.space.xxl,
   },
   sectionTitle: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    paddingHorizontal: SPACING.md,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    ...typography.label,
+    color: t.text.label,
+    paddingLeft: 16,
+    paddingBottom: 8,
   },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    paddingHorizontal: SPACING.sm,
-    gap: SPACING.sm,
+    gap: t.space.md,
   },
   tile: {
-    width: '47%',
-    flexGrow: 1,
-    minWidth: '44%',
-    borderRadius: BORDER_RADIUS.lg,
+    width: '48.5%',
+    aspectRatio: 1.15,
+    borderRadius: 16,
     borderWidth: 1,
-    padding: SPACING.md,
+    padding: t.space.lg,
+    backgroundColor: t.bg.cardElevated,
     alignItems: 'flex-start',
   },
   tileIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BORDER_RADIUS.md,
+    width: 48,
+    height: 48,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: SPACING.sm,
+    marginBottom: t.space.md,
   },
   tileLabel: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    lineHeight: 18,
+    ...typography.body,
+    color: t.text.primary,
   },
 });

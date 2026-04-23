@@ -51,10 +51,25 @@ async def ensure_indexes(db):
         
         # Wallets
         await db.wallets.create_index("user_id", unique=True)
+        await db.transactions.create_index("payment_intent_id", unique=True, sparse=True)
+        await db.transactions.create_index([("user_id", 1), ("created_at", -1)])
+        await db.wallet_topup_transactions.create_index("transactionRef", unique=True, sparse=True)
+        await db.wallet_topup_transactions.create_index([("userId", 1), ("status", 1), ("createdAt", -1)])
         
         # Ride bids
         await db.ride_bids.create_index("trip_id")
         await db.ride_bids.create_index("driver_id")
+        
+        # Safety and high-write incident collections
+        await db.sos_alerts.create_index("id", unique=True, sparse=True)
+        await db.sos_alerts.create_index([("trip_id", 1), ("triggered_at", -1)])
+        await db.sos_alerts.create_index([("user_id", 1), ("triggered_at", -1)])
+        await db.sos_alerts.create_index([("status", 1), ("triggered_at", -1)])
+        await db.safety_checks.create_index("id", unique=True, sparse=True)
+        await db.safety_checks.create_index([("trip_id", 1), ("triggered_at", -1)])
+        await db.safety_checks.create_index([("escalated", 1), ("triggered_at", -1)])
+        await db.trip_tracking.create_index([("trip_id", 1), ("timestamp", -1)])
+        await db.trip_tracking.create_index([("driver_id", 1), ("timestamp", -1)])
 
         # Driver-specific dispatch offers
         await db.trip_offers.create_index("id", unique=True)

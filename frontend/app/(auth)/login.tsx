@@ -52,6 +52,10 @@ export default function LoginScreen() {
   const requestedRole = params.role === 'driver' || params.role === 'rider' ? params.role : null;
   const [email, setEmail] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
+  const [emailOtpRequired, setEmailOtpRequired] = useState(false);
+  const [emailOtp, setEmailOtp] = useState('');
+  const [emailOtpLoading, setEmailOtpLoading] = useState(false);
+  const [otpTargetEmail, setOtpTargetEmail] = useState('');
   const [biometricReady, setBiometricReady] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [deviceId, setDeviceId] = useState<string>('');
@@ -216,6 +220,12 @@ export default function LoginScreen() {
       }
 
       if (data?.is_new_user) {
+        if (data?.email_verification_required) {
+          setOtpTargetEmail(normalizedEmail);
+          setEmailOtpRequired(true);
+          Alert.alert('Verify your email', 'We sent a NEXRYDE OTP to your email. Enter it to continue onboarding.');
+          return;
+        }
         const newEmail = data?.email_data?.email || normalizedEmail;
         const newName = data?.email_data?.name || normalizedEmail.split('@')[0];
         if (requestedRole === 'driver') {
@@ -268,6 +278,74 @@ export default function LoginScreen() {
     } finally {
       clearTimeout(t);
       setEmailLoading(false);
+    }
+  };
+
+  const continueToOnboarding = (verifiedEmail: string, suggestedName?: string) => {
+    const newName = suggestedName || verifiedEmail.split('@')[0];
+    if (requestedRole === 'driver') {
+      router.push({
+        pathname: '/(auth)/driver-terms',
+        params: { email: verifiedEmail, name: newName },
+      });
+      return;
+    }
+    if (requestedRole === 'rider') {
+      router.push({
+        pathname: '/(auth)/rider-nin',
+        params: { email: verifiedEmail, name: newName },
+      });
+      return;
+    }
+    router.push({
+      pathname: '/(auth)/register',
+      params: { email: verifiedEmail, name: newName, auth_type: 'email' },
+    });
+  };
+
+  const handleVerifyEmailOtp = async () => {
+    if (!otpTargetEmail || emailOtp.trim().length < 4) {
+      Alert.alert('Invalid code', 'Enter the OTP sent to your email.');
+      return;
+    }
+    setEmailOtpLoading(true);
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: otpTargetEmail, otp: emailOtp.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert('Verification failed', data?.detail || 'Could not verify code.');
+        return;
+      }
+      setEmailOtpRequired(false);
+      setEmailOtp('');
+      continueToOnboarding(data?.email_data?.email || otpTargetEmail, data?.email_data?.name);
+    } catch {
+      Alert.alert('Connection error', 'Unable to verify email OTP right now.');
+    } finally {
+      setEmailOtpLoading(false);
+    }
+  };
+
+  const handleResendEmailOtp = async () => {
+    if (!otpTargetEmail) return;
+    try {
+      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: otpTargetEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        Alert.alert('Resend failed', data?.detail || 'Please try again shortly.');
+        return;
+      }
+      Alert.alert('OTP sent', `A new code was sent to ${otpTargetEmail}.`);
+    } catch {
+      Alert.alert('Connection error', 'Unable to resend OTP right now.');
     }
   };
 
@@ -490,6 +568,32 @@ export default function LoginScreen() {
                     ) : (
                       <Text style={styles.loginButtonText}>Complete Fortress Verification</Text>
                     )}
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {emailOtpRequired ? (
+                <View style={styles.emailContainer}>
+                  <Text style={styles.emailLabel}>Email Verification</Text>
+                  <Text style={styles.helpText}>Enter the OTP sent to {otpTargetEmail}</Text>
+                  <TextInput
+                    style={styles.emailInput}
+                    placeholder="6-digit OTP"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={emailOtp}
+                    onChangeText={setEmailOtp}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                  />
+                  <TouchableOpacity
+                    style={[styles.loginButton, emailOtpLoading && styles.loginButtonDisabled]}
+                    onPress={handleVerifyEmailOtp}
+                    disabled={emailOtpLoading}
+                  >
+                    {emailOtpLoading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.loginButtonText}>Verify Email OTP</Text>}
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={handleResendEmailOtp}>
+                    <Text style={styles.linkText}>Resend OTP</Text>
                   </TouchableOpacity>
                 </View>
               ) : null}

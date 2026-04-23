@@ -45,6 +45,7 @@ def test_public_chat_presets_and_subscription_pricing():
 def test_public_safety_crime_endpoints():
     assert api_path_is_public("/api/safety/real-crime-data")
     assert api_path_is_public("/api/safety/route-safety")
+    assert api_path_is_public("/api/safety/live-health")
     assert api_path_is_protected("/api/safety/danger-zones")
 
 

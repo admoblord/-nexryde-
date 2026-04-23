@@ -19,7 +19,7 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.nexryde.app",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "NEXRYDE needs your location to find nearby drivers and calculate fares",
+        "NSLocationWhenInUseUsageDescription": "NexRyde uses your location to detect your pickup point and match you with nearby drivers.",
         "NSCameraUsageDescription": "NEXRYDE needs camera access for document verification",
         "NSSpeechRecognitionUsageDescription": "Book rides with your voice - Nigerian accent supported",
         "NSMicrophoneUsageDescription": "Voice booking needs microphone access"
@@ -50,7 +50,8 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "NEXRYDE needs your location to find nearby drivers and calculate fares"
+          "locationWhenInUsePermission": "NexRyde uses your location to detect your pickup point and match you with nearby drivers.",
+          "locationAlwaysAndWhenInUsePermission": "NexRyde uses your location to detect your pickup point and match you with nearby drivers."
         }
       ],
       [

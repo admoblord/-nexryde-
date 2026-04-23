@@ -1,7 +1,7 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, FONT_SIZE, SPACING, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { profileTokens as t, typography } from '@/src/theme/tokens';
 
 type Props = {
   onPress: () => void;
@@ -19,7 +19,7 @@ export const EmergencyButton: React.FC<Props> = ({ onPress, label = 'Emergency',
       onPress={onPress}
       activeOpacity={0.85}
     >
-      <Ionicons name="warning" size={compact ? 18 : 22} color={COLORS.white} />
+      <Ionicons name="warning" size={compact ? 18 : 22} color={t.text.primary} />
       {!compact ? <Text style={styles.text}>{label}</Text> : null}
     </TouchableOpacity>
   );
@@ -30,12 +30,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: SPACING.sm,
-    backgroundColor: COLORS.error,
-    borderRadius: BORDER_RADIUS.full,
-    paddingVertical: 14,
-    paddingHorizontal: SPACING.lg,
-    ...SHADOWS.md,
+    gap: t.space.sm,
+    backgroundColor: t.accent.red,
+    borderRadius: 28,
+    height: 56,
+    paddingHorizontal: t.space.xl,
+    shadowColor: 'rgba(239,68,68,0.25)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.8,
+    shadowRadius: 16,
+    elevation: 6,
   },
   compact: {
     width: 48,
@@ -44,8 +48,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 0,
   },
   text: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.white,
+    ...typography.h3,
+    color: t.text.primary,
   },
 });
