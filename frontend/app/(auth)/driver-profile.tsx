@@ -13,9 +13,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 
 export default function DriverProfileScreen() {
@@ -177,7 +179,6 @@ export default function DriverProfileScreen() {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Success! Set user data and log them in
         const loggedInUser = data.user
           ? {
               ...data.user,
@@ -192,23 +193,25 @@ export default function DriverProfileScreen() {
           await saveUserSession({ ...loggedInUser, token: resolvedToken });
         }
         setIsAuthenticated(true);
-        
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          '🎉 Welcome to NEXRYDE!',
-          'Your driver profile is complete and your 48-hour FREE trial is activated with unlimited city rides. Approved drivers can now continue to the dashboard and complete any remaining compliance steps if prompted.',
+          'Welcome to NEXRYDE',
+          'Your driver profile is saved. Your 48-hour trial starts now (unlimited city rides where available). On the home screen, finish any remaining checks such as subscription or admin review before going online.',
           [
             {
-              text: 'Start Driving',
+              text: 'Go to driver home',
               onPress: () => router.replace('/(driver-tabs)/driver-home'),
             },
-          ]
+          ],
         );
       } else {
-        Alert.alert('Error', data.detail || 'Could not complete profile');
+        const msg = formatApiDetail(data?.detail) || 'Could not complete profile. Check required fields and try again.';
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Profile not saved', msg);
       }
     } catch (error) {
-      console.error('Profile completion error:', error);
-      Alert.alert('Error', 'Could not complete profile. Please try again.');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Connection error', 'Could not reach the server. Check your network and try again.');
     } finally {
       setSubmitting(false);
     }
@@ -222,7 +225,7 @@ export default function DriverProfileScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Complete Profile</Text>
+          <Text style={styles.headerTitle}>Driver profile</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -231,10 +234,14 @@ export default function DriverProfileScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          <DriverOnboardingProgress
+            current="profile"
+            subtitle="Accurate details speed up approval. Bank fields are optional but recommended for payouts."
+          />
           <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Final Step!</Text>
+            <Text style={styles.infoTitle}>Final step</Text>
             <Text style={styles.infoText}>
-              Complete your profile to activate your 48-hour FREE trial (unlimited city rides)
+              Add your address, guarantor, vehicle, and confirm working AC. Submit once everything is correct.
             </Text>
           </View>
 
@@ -359,7 +366,9 @@ export default function DriverProfileScreen() {
           {/* Guarantor Information */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Guarantor Information</Text>
-            <Text style={styles.sectionSubtitle}>A guarantor is required for driver verification</Text>
+            <Text style={styles.sectionSubtitle}>
+              A reachable guarantor is required for compliance. Use someone who knows you well.
+            </Text>
 
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Guarantor Full Name *</Text>

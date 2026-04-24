@@ -12,10 +12,11 @@ import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
+import { useAppStore } from '@/src/store/appStore';
 
 export default function DocumentsScreen() {
   const router = useRouter();
-  const { useAppStore } = require('@/src/store/appStore');
   const { user } = useAppStore();
   const [documents, setDocuments] = React.useState([
     { id: 'nin', name: 'National ID (NIN)', status: 'not_uploaded', icon: 'id-card-outline' },
@@ -113,15 +114,13 @@ export default function DocumentsScreen() {
 
         <TouchableOpacity 
           style={styles.updateButton}
-          onPress={() => router.push({
-            pathname: '/(auth)/driver-documents',
-            params: {
-              driver_id: user?.id,
-              phone: user?.phone,
-              name: user?.name || '',
-              email: user?.email || '',
-            },
-          } as any)}
+          onPress={() => {
+            if (!user?.id) return;
+            router.push({
+              pathname: '/(auth)/driver-documents',
+              params: driverDocumentsRouteParams(user),
+            });
+          }}
         >
           <Ionicons name="cloud-upload-outline" size={20} color={COLORS.white} />
           <Text style={styles.updateButtonText}>Update Documents</Text>

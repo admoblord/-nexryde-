@@ -128,7 +128,7 @@ export default function SubscriptionScreen() {
     try {
       await Promise.all([fetchPricing(), fetchSubscriptionStatus()]);
     } catch (error) {
-      console.error('Error initializing:', error);
+      if (__DEV__) console.warn('Error initializing subscription', error);
       Alert.alert('Error', 'Failed to load subscription data');
     } finally {
       setLoading(false);
@@ -152,7 +152,7 @@ export default function SubscriptionScreen() {
         },
       });
     } catch (error) {
-      console.error('Error fetching pricing:', error);
+      if (__DEV__) console.warn('Error fetching pricing', error);
       // Set default pricing
       setPricing({
         city_rider: { current_price: 18000, current_phase: 'early', launch_slots_remaining: 450 },
@@ -249,7 +249,7 @@ export default function SubscriptionScreen() {
       }
       lastKnownStatusRef.current = normalizedStatus;
     } catch (error) {
-      console.error('Error fetching subscription:', error);
+      if (__DEV__) console.warn('Error fetching subscription', error);
       setSubscription({
         tier: 'none',
         status: 'expired',

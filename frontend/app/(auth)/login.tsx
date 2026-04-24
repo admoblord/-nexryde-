@@ -12,16 +12,24 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
+  Image,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
+import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
-import { useAppStore } from '@/src/store/appStore';
+import { useAppStore, type User } from '@/src/store/appStore';
 import { saveUserSession, getUserSession } from '@/utils/authStorage';
-import { BACKEND_URL } from '@/src/services/api';
+import {
+  driverTermsRouteParams,
+  driverDocumentsRouteParams,
+  driverProfileRouteParams,
+} from '@/src/utils/driverOnboardingNav';
+import { BACKEND_URL, postDriverFortressVerify, formatApiDetail } from '@/src/services/api';
 
 const { width, height } = Dimensions.get('window');
 
@@ -123,21 +131,21 @@ export default function LoginScreen() {
           if (status?.step === 'terms') {
             router.replace({
               pathname: '/(auth)/driver-terms',
-              params: { phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+              params: driverTermsRouteParams(loggedUser),
             });
             return;
           }
           if (status?.step === 'documents') {
             router.replace({
               pathname: '/(auth)/driver-documents',
-              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+              params: driverDocumentsRouteParams(loggedUser),
             });
             return;
           }
           if (status?.step === 'profile') {
             router.replace({
               pathname: '/(auth)/driver-profile',
-              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+              params: driverProfileRouteParams(loggedUser),
             });
             return;
           }
@@ -145,16 +153,15 @@ export default function LoginScreen() {
         router.replace('/(driver-tabs)/driver-home');
         return;
       } catch {
-        // Never grant direct dashboard access when verification check fails.
         router.replace({
           pathname: '/(auth)/driver-documents',
-          params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+          params: driverDocumentsRouteParams(loggedUser),
         });
         return;
       }
       router.replace({
         pathname: '/(auth)/driver-documents',
-        params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+        params: driverDocumentsRouteParams(loggedUser),
       });
       return;
     }
@@ -352,52 +359,65 @@ export default function LoginScreen() {
   const handleCaptureFortressFace = async () => {
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (permission.status !== 'granted') {
-      Alert.alert('Permission needed', 'Camera permission is required for fortress face scan.');
+      Alert.alert(
+        'Camera needed',
+        'NEXRYDE needs the camera to match your face to your saved profile—same as phone face unlock.',
+      );
       return;
     }
     const capture = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
-      quality: 0.7,
+      quality: 0.82,
       base64: true,
+      exif: false,
       cameraType: ImagePicker.CameraType.front,
     });
     if (capture.canceled || !capture.assets?.[0]?.base64) return;
     setFortressFaceImage(`data:image/jpeg;base64,${capture.assets[0].base64}`);
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  };
+
+  const handleRetakeFortressFace = () => {
+    setFortressFaceImage('');
   };
 
   const handleVerifyFortress = async () => {
     if (!fortressChallengeId) return;
     if (!fortressPhoneInput.trim() || !fortressPinInput.trim() || !fortressFaceImage) {
-      Alert.alert('Incomplete', 'Phone, PIN, and face scan are all required.');
+      Alert.alert('Almost there', 'Enter your phone, PIN, and take a clear selfie so we can match your face.');
       return;
     }
     setFortressLoading(true);
     try {
-      const res = await fetch(`${getBackendUrl()}/api/auth/driver-fortress/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          challenge_id: fortressChallengeId,
-          phone: fortressPhoneInput.trim(),
-          pin: fortressPinInput.trim(),
-          face_image: fortressFaceImage,
-        }),
+      const { data } = await postDriverFortressVerify({
+        challenge_id: fortressChallengeId,
+        phone: fortressPhoneInput.trim(),
+        pin: fortressPinInput.trim(),
+        face_image: fortressFaceImage,
       });
-      const data = await res.json();
-      if (!res.ok) {
-        Alert.alert('Fortress verification failed', data?.detail || 'Please try again.');
+      if (!data?.user) {
+        Alert.alert('Error', 'Unexpected response. Please try again.');
         return;
       }
-      const resolvedToken = data?.token || data?.user?.token || null;
-      setUser(data.user);
+      const loggedIn = data.user as unknown as User;
+      const resolvedToken = data?.token || null;
+      setUser(loggedIn);
       setToken(resolvedToken);
       setIsAuthenticated(true);
-      await saveUserSession({ ...data.user, token: resolvedToken });
+      await saveUserSession({ ...loggedIn, token: resolvedToken });
       setFortressChallengeId(null);
-      await routeVerifiedUser(data.user, resolvedToken);
-    } catch {
-      Alert.alert('Connection error', 'Could not verify fortress challenge.');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await routeVerifiedUser(loggedIn, resolvedToken);
+    } catch (e: unknown) {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      if (axios.isAxiosError(e)) {
+        const msg =
+          formatApiDetail(e.response?.data?.detail) || 'We could not verify you. Check phone, PIN, and try another selfie.';
+        Alert.alert('Face did not match', msg);
+        return;
+      }
+      Alert.alert('Connection error', 'Could not reach the server. Check your network and try again.');
     } finally {
       setFortressLoading(false);
     }
@@ -529,11 +549,33 @@ export default function LoginScreen() {
               </View>
 
               {fortressChallengeId ? (
-                <View style={styles.emailContainer}>
-                  <Text style={styles.emailLabel}>Driver Account Fortress</Text>
-                  <Text style={styles.helpText}>
-                    Verify registered phone {fortressMaskedPhone || ''}, PIN, and live face on this new device.
-                  </Text>
+                <View style={styles.fortressPanel}>
+                  <View style={styles.fortressHeaderRow}>
+                    <View style={styles.fortressShieldIcon}>
+                      <Ionicons name="shield-checkmark" size={22} color={COLORS.green} />
+                    </View>
+                    <View style={styles.fortressHeaderText}>
+                      <Text style={styles.fortressTitle}>Driver Account Fortress</Text>
+                      <Text style={styles.fortressSubtitle}>
+                        We’ll store this face to recognize you on this device—like phone face unlock. Enter your
+                        details on file for {fortressMaskedPhone || 'your number'}.
+                      </Text>
+                    </View>
+                  </View>
+                  <View style={styles.fortressTipRow}>
+                    {(
+                      [
+                        { icon: 'sunny' as const, label: 'Good light' },
+                        { icon: 'person' as const, label: 'Face the camera' },
+                        { icon: 'hand-left' as const, label: 'Hold steady' },
+                      ] as const
+                    ).map((tip) => (
+                      <View key={tip.label} style={styles.fortressTipChip}>
+                        <Ionicons name={tip.icon} size={14} color={COLORS.blue} />
+                        <Text style={styles.fortressTipChipText}>{tip.label}</Text>
+                      </View>
+                    ))}
+                  </View>
                   <TextInput
                     style={styles.emailInput}
                     placeholder="Registered phone (+234...)"
@@ -551,23 +593,111 @@ export default function LoginScreen() {
                     onChangeText={setFortressPinInput}
                     keyboardType="number-pad"
                     secureTextEntry
+                    maxLength={8}
                   />
-                  <TouchableOpacity style={styles.googleButton} onPress={() => void handleCaptureFortressFace()}>
-                    <Ionicons name="scan-outline" size={20} color={COLORS.white} />
-                    <Text style={styles.googleButtonText}>
-                      {fortressFaceImage ? 'Face Captured' : 'Capture Face Scan'}
+                  {!!fortressFaceImage && (
+                    <View style={styles.fortressPreviewRow}>
+                      <View
+                        style={[
+                          styles.fortressPreviewImageWrap,
+                          { borderColor: COLORS.green, borderWidth: 2 },
+                        ]}
+                      >
+                        <Image source={{ uri: fortressFaceImage }} style={styles.fortressPreviewImage} />
+                      </View>
+                      <View style={styles.fortressPreviewMeta}>
+                        <View style={styles.fortressPreviewCheck}>
+                          <Ionicons name="checkmark-circle" size={18} color={COLORS.green} />
+                          <Text style={styles.fortressPreviewCheckText}>Selfie ready</Text>
+                        </View>
+                        <TouchableOpacity
+                          onPress={handleRetakeFortressFace}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        >
+                          <Text style={styles.fortressRetakeText}>Retake photo</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+                  <TouchableOpacity
+                    style={[
+                      styles.fortressFaceButton,
+                      fortressFaceImage ? styles.fortressFaceButtonDone : null,
+                    ]}
+                    onPress={() => void handleCaptureFortressFace()}
+                    activeOpacity={0.88}
+                    accessibilityLabel={fortressFaceImage ? 'Retake or replace face photo' : 'Open camera for face photo'}
+                  >
+                    <Ionicons
+                      name="camera"
+                      size={20}
+                      color={fortressFaceImage ? COLORS.green : COLORS.white}
+                    />
+                    <Text
+                      style={[
+                        styles.fortressFaceButtonText,
+                        fortressFaceImage && { color: COLORS.green },
+                      ]}
+                    >
+                      {fortressFaceImage ? 'Replace selfie' : 'Take selfie'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
-                    style={[styles.loginButton, fortressLoading && styles.loginButtonDisabled]}
+                    style={[
+                      styles.fortressCompleteWrap,
+                      (!fortressPhoneInput.trim() ||
+                        !fortressPinInput.trim() ||
+                        !fortressFaceImage ||
+                        fortressLoading) &&
+                        styles.fortressCompleteWrapDim,
+                    ]}
                     onPress={() => void handleVerifyFortress()}
-                    disabled={fortressLoading}
+                    disabled={
+                      fortressLoading ||
+                      !fortressPhoneInput.trim() ||
+                      !fortressPinInput.trim() ||
+                      !fortressFaceImage
+                    }
+                    activeOpacity={0.9}
+                    accessibilityLabel="Complete face unlock verification"
                   >
-                    {fortressLoading ? (
-                      <ActivityIndicator color={COLORS.white} />
-                    ) : (
-                      <Text style={styles.loginButtonText}>Complete Fortress Verification</Text>
-                    )}
+                    <LinearGradient
+                      colors={
+                        fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
+                          ? [COLORS.greenLight, COLORS.green, COLORS.blue]
+                          : [COLORS.gray700, COLORS.gray700]
+                      }
+                      style={styles.fortressCompleteGradient}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0 }}
+                    >
+                      {fortressLoading ? (
+                        <ActivityIndicator color={COLORS.primary} />
+                      ) : (
+                        <>
+                          <Ionicons
+                            name="lock-open"
+                            size={20}
+                            color={
+                              fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
+                                ? COLORS.primary
+                                : COLORS.textMuted
+                            }
+                            style={{ marginRight: 8 }}
+                          />
+                          <Text
+                            style={[
+                              styles.fortressCompleteText,
+                              fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
+                                ? { color: COLORS.primary }
+                                : { color: COLORS.textMuted },
+                            ]}
+                          >
+                            Unlock with face and sign in
+                          </Text>
+                        </>
+                      )}
+                    </LinearGradient>
                   </TouchableOpacity>
                 </View>
               ) : null}
@@ -992,5 +1122,139 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#475569',
     fontWeight: '700',
+  },
+  fortressPanel: {
+    marginBottom: 12,
+    padding: 16,
+    borderRadius: 18,
+    backgroundColor: 'rgba(25, 37, 63, 0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(58, 209, 115, 0.28)',
+    gap: 12,
+  },
+  fortressHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  fortressShieldIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: COLORS.greenSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fortressHeaderText: {
+    flex: 1,
+  },
+  fortressTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: COLORS.white,
+    marginBottom: 4,
+    letterSpacing: -0.3,
+  },
+  fortressSubtitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    lineHeight: 19,
+  },
+  fortressTipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  fortressTipChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: COLORS.blueSoft,
+    borderWidth: 1,
+    borderColor: 'rgba(58, 140, 209, 0.35)',
+  },
+  fortressTipChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#BFDBFE',
+  },
+  fortressPreviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  fortressPreviewImageWrap: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    overflow: 'hidden',
+    backgroundColor: COLORS.surface,
+  },
+  fortressPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  fortressPreviewMeta: {
+    flex: 1,
+    gap: 6,
+  },
+  fortressPreviewCheck: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  fortressPreviewCheckText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.green,
+  },
+  fortressRetakeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.blue,
+    textDecorationLine: 'underline',
+  },
+  fortressFaceButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 16,
+    borderRadius: 16,
+    backgroundColor: COLORS.surface,
+    borderWidth: 1,
+    borderColor: COLORS.surfaceLight,
+  },
+  fortressFaceButtonDone: {
+    borderColor: 'rgba(58, 209, 115, 0.45)',
+    backgroundColor: 'rgba(58, 209, 115, 0.08)',
+  },
+  fortressFaceButtonText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.white,
+  },
+  fortressCompleteWrap: {
+    borderRadius: 18,
+    overflow: 'hidden',
+    opacity: 1,
+  },
+  fortressCompleteWrapDim: {
+    opacity: 0.72,
+  },
+  fortressCompleteGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+  },
+  fortressCompleteText: {
+    fontSize: 16,
+    fontWeight: '900',
   },
 });

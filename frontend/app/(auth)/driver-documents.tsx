@@ -8,9 +8,11 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { BiometricScanner } from '@/src/components/tier1';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 
 type DocKey = 'nin' | 'drivers_license' | 'passport_photo' | 'vehicle_registration'
   | 'vehicle_license' | 'hacking_permit' | 'road_worthiness' | 'insurance'
@@ -28,9 +30,9 @@ const DOCUMENTS: DocItem[] = [
   { key: 'nin', label: 'National ID (NIN)', icon: 'card', required: true, hasExpiry: false },
   { key: 'drivers_license', label: "Driver's License", icon: 'car', required: true, hasExpiry: true },
   { key: 'passport_photo', label: 'Passport Photo', icon: 'person', required: true, hasExpiry: false },
-  { key: 'vehicle_registration', label: 'Vehicle Registration', icon: 'document-text', required: true, hasExpiry: true },
-  { key: 'vehicle_license', label: 'Vehicle License', icon: 'receipt', required: true, hasExpiry: true },
-  { key: 'hacking_permit', label: 'Hackney Permit / Carriage', icon: 'shield-checkmark', required: true, hasExpiry: true },
+  { key: 'vehicle_registration', label: 'Plate Number Upload', icon: 'document-text', required: true, hasExpiry: true },
+  { key: 'vehicle_license', label: 'Vehicle License Number / Upload', icon: 'receipt', required: true, hasExpiry: true },
+  { key: 'hacking_permit', label: 'Hackney Permit / Carriage (Optional)', icon: 'shield-checkmark', required: false, hasExpiry: true },
   { key: 'road_worthiness', label: 'Road Worthiness Certificate', icon: 'construct', required: true, hasExpiry: true },
   { key: 'insurance', label: 'Vehicle Insurance', icon: 'umbrella', required: true, hasExpiry: true },
   { key: 'vehicle_front', label: 'Vehicle Photo (Front)', icon: 'camera', required: true, hasExpiry: false },
@@ -44,6 +46,8 @@ export default function DriverDocumentsScreen() {
 
   const [docs, setDocs] = useState<Record<string, string | null>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
+  const [ninNumber, setNinNumber] = useState('');
+  const [vehicleLicenseNumber, setVehicleLicenseNumber] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [biometricVerified, setBiometricVerified] = useState(false);
 
@@ -77,7 +81,8 @@ export default function DriverDocumentsScreen() {
       }
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.85,
+        exif: false,
       });
       if (!result.canceled && result.assets?.[0]) {
         setDocs(prev => ({ ...prev, [key]: result.assets[0].uri }));
@@ -97,7 +102,8 @@ export default function DriverDocumentsScreen() {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.8,
+        quality: 0.85,
+        exif: false,
       });
       if (!result.canceled && result.assets?.[0]) {
         setDocs(prev => ({ ...prev, [key]: result.assets[0].uri }));
@@ -108,14 +114,30 @@ export default function DriverDocumentsScreen() {
   };
 
   const requiredDocs = DOCUMENTS.filter(d => d.required);
-  const allRequiredUploaded = requiredDocs.every(d => !!docs[d.key]);
+  const cleanNinNumber = ninNumber.replace(/\D/g, '');
+  const ninSatisfied = Boolean(docs.nin) || cleanNinNumber.length === 11;
+  const cleanVehicleLicenseNumber = vehicleLicenseNumber.trim();
+  const vehicleLicenseSatisfied = Boolean(docs.vehicle_license) || cleanVehicleLicenseNumber.length >= 5;
+  const allRequiredUploaded = requiredDocs.every((d) => {
+    if (d.key === 'nin') return ninSatisfied;
+    if (d.key === 'vehicle_license') return vehicleLicenseSatisfied;
+    return !!docs[d.key];
+  });
   const expiryDocsWithDate = DOCUMENTS.filter(d => d.hasExpiry);
   const allExpiriesFilled = expiryDocsWithDate.every(d => !docs[d.key] || (expiry[d.key] && expiry[d.key].length >= 7));
 
   const handleSubmit = async () => {
-    const missing = requiredDocs.filter(d => !docs[d.key]);
-    if (missing.length > 0) {
-      Alert.alert('Missing Documents', `Please upload: ${missing.map(d => d.label).join(', ')}`);
+    const missing = requiredDocs.filter((d) => {
+      if (d.key === 'nin') return !ninSatisfied;
+      if (d.key === 'vehicle_license') return !vehicleLicenseSatisfied;
+      return !docs[d.key];
+    });
+    const missingWithNinFallback = missing.filter((d) => d.key !== 'nin');
+    if (!ninSatisfied) {
+      missingWithNinFallback.unshift(DOCUMENTS.find((d) => d.key === 'nin') as DocItem);
+    }
+    if (missingWithNinFallback.length > 0) {
+      Alert.alert('Missing Documents', `Please upload: ${missingWithNinFallback.map(d => d.label).join(', ')}`);
       return;
     }
 
@@ -133,6 +155,12 @@ export default function DriverDocumentsScreen() {
     try {
       const formData = new FormData();
       formData.append('driver_id', (params.driver_id as string) || '');
+      if (cleanNinNumber.length === 11) {
+        formData.append('nin_number', cleanNinNumber);
+      }
+      if (cleanVehicleLicenseNumber.length >= 5) {
+        formData.append('vehicle_license_number', cleanVehicleLicenseNumber);
+      }
 
       for (const doc of DOCUMENTS) {
         if (docs[doc.key]) {
@@ -163,42 +191,56 @@ export default function DriverDocumentsScreen() {
       }
 
       if (response.ok && data.verification_status === 'approved') {
-        Alert.alert('Documents Approved', 'Your full document set passed validation and has been archived securely. Please complete your driver profile to continue onboarding.', [
-          {
-            text: 'Continue',
-            onPress: () => {
-              router.push({
-                pathname: '/(auth)/driver-profile',
-                params: {
-                  driver_id: params.driver_id || data.driver_id,
-                  phone: params.phone as string,
-                  name: params.name as string,
-                  email: params.email as string,
-                },
-              });
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Documents approved',
+          'Your files passed automated checks and are stored securely. Next, complete your driver profile (vehicle, guarantor, payout details).',
+          [
+            {
+              text: 'Continue to profile',
+              onPress: () => {
+                router.push({
+                  pathname: '/(auth)/driver-profile',
+                  params: {
+                    driver_id: params.driver_id || data.driver_id,
+                    phone: params.phone as string,
+                    name: params.name as string,
+                    email: params.email as string,
+                  },
+                });
+              },
             },
-          },
-        ]);
+          ],
+        );
       } else if (data.verification_status === 'pending') {
-        Alert.alert('Submission Received', "Your documents were submitted successfully. We'll notify you when review is complete.", [
-          { text: 'OK', onPress: () => router.replace('/(auth)/login') },
-        ]);
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        Alert.alert(
+          'Submitted for review',
+          'Your package is with the NEXRYDE team. You will get an in-app update when review finishes. You can sign in later to check status.',
+          [{ text: 'Back to sign in', onPress: () => router.replace('/(auth)/login') }],
+        );
       } else {
         const msg =
-          data?.detail ||
-          data?.reason ||
-          (typeof data?.message === 'string' ? data.message : null) ||
-          'Documents could not be verified. Please check photos and expiry dates, then try again.';
-        Alert.alert('Verification Issue', String(msg));
+          formatApiDetail(data?.detail) ||
+          (typeof data?.reason === 'string' ? data.reason : '') ||
+          (typeof data?.message === 'string' ? data.message : '') ||
+          'Something did not pass validation. Check photo clarity, expiry dates (MM/YYYY), and required fields, then try again.';
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        Alert.alert('Could not submit documents', msg);
       }
     } catch {
-      Alert.alert('Connection Error', 'Could not submit documents. Check your connection and try again.');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+      Alert.alert('Connection error', 'Could not submit documents. Check your connection and try again.');
     } finally {
       setVerifying(false);
     }
   };
 
-  const uploadedCount = requiredDocs.filter(d => !!docs[d.key]).length;
+  const requiredCompleteCount = requiredDocs.filter((d) => {
+    if (d.key === 'nin') return ninSatisfied;
+    if (d.key === 'vehicle_license') return vehicleLicenseSatisfied;
+    return !!docs[d.key];
+  }).length;
 
   return (
     <View style={st.container}>
@@ -207,16 +249,22 @@ export default function DriverDocumentsScreen() {
           <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
             <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <Text style={st.headerTitle}>Upload Documents</Text>
-          <Text style={st.progress}>{uploadedCount}/{requiredDocs.length}</Text>
+          <Text style={st.headerTitle}>Driver verification</Text>
+          <Text style={st.progress}>
+            {requiredCompleteCount}/{requiredDocs.length}
+          </Text>
         </View>
 
         <ScrollView style={st.scroll} contentContainerStyle={st.scrollContent} showsVerticalScrollIndicator={false}>
+          <DriverOnboardingProgress
+            current="documents"
+            subtitle="Upload clear photos or enter NIN / license number where shown. Vehicle interior and AC must be live camera shots."
+          />
           <View style={st.infoCard}>
             <Ionicons name="shield-checkmark" size={40} color={COLORS.accentGreen} />
-            <Text style={st.infoTitle}>Driver Verification Documents</Text>
+            <Text style={st.infoTitle}>Documents and checks</Text>
             <Text style={st.infoText}>
-              Upload clear, readable photos in good light. Fill every expiry as MM/YYYY. Submit once when all items show a check — this is usually faster than fixing rejections one by one.
+              Use bright, glare-free light. Expiry fields use MM/YYYY. When every required row shows a green check (including NIN or 11-digit number, and license file or number), confirm biometrics and submit once.
             </Text>
           </View>
 
@@ -266,6 +314,40 @@ export default function DriverDocumentsScreen() {
                   )}
                 </View>
               )}
+              {doc.key === 'nin' && !docs.nin && (
+                <View style={st.expiryRow}>
+                  <Ionicons name="keypad" size={16} color={COLORS.lightTextSecondary} />
+                  <TextInput
+                    style={st.expiryInput}
+                    placeholder="Or enter 11-digit NIN number"
+                    placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
+                    value={ninNumber}
+                    onChangeText={(text) => setNinNumber(text.replace(/\D/g, '').slice(0, 11))}
+                    keyboardType="number-pad"
+                    maxLength={11}
+                  />
+                  {cleanNinNumber.length === 11 && (
+                    <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
+                  )}
+                </View>
+              )}
+              {doc.key === 'vehicle_license' && !docs.vehicle_license && (
+                <View style={st.expiryRow}>
+                  <Ionicons name="document-text" size={16} color={COLORS.lightTextSecondary} />
+                  <TextInput
+                    style={st.expiryInput}
+                    placeholder="Or enter vehicle license number"
+                    placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
+                    value={vehicleLicenseNumber}
+                    onChangeText={setVehicleLicenseNumber}
+                    autoCapitalize="characters"
+                    maxLength={32}
+                  />
+                  {cleanVehicleLicenseNumber.length >= 5 && (
+                    <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
+                  )}
+                </View>
+              )}
             </View>
           ))}
 
@@ -281,7 +363,7 @@ export default function DriverDocumentsScreen() {
               confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify biometric'}
               onSuccess={() => {
                 setBiometricVerified(true);
-                Alert.alert('Biometric confirmed', 'You can now submit your driver verification package.');
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }}
               onFailure={(msg) => Alert.alert('Biometric check', msg)}
             />

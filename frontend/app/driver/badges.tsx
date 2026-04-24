@@ -38,9 +38,10 @@ export default function BadgesScreen() {
       try {
         const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/certification`);
         const data = await res.json();
-        const trips = data?.trips_completed || user?.trips_completed || 0;
-        const rating = data?.rating || user?.rating || 0;
-        const cancelRate = data?.cancellation_rate || 0;
+        const stats = data?.stats || {};
+        const trips = Number(stats.total_trips ?? data?.trips_completed ?? user?.total_trips ?? 0);
+        const rating = Number(stats.rating ?? data?.rating ?? user?.rating ?? 0);
+        const cancelRate = Number(data?.cancellation_rate ?? 0);
 
         const computed = BADGE_DEFINITIONS.map(b => {
           let earned = false;

@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 
 interface ActiveTrip {
@@ -97,7 +98,7 @@ export default function ActiveTripBar() {
     if (user?.role === 'rider') {
       router.push({ pathname: '/rider/tracking', params: { tripId: activeTrip.id } } as any);
     } else {
-      router.push('/driver/trips');
+      router.push(DRIVER_TRIPS_TAB_HREF);
     }
   };
 

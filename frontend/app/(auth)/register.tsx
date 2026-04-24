@@ -17,6 +17,7 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
+import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function RegisterScreen() {
@@ -50,13 +51,22 @@ export default function RegisterScreen() {
 
   const handleContinue = () => {
     if (!name.trim()) {
-      Alert.alert('Error', 'Please enter your name');
+      Alert.alert('Almost there', 'Please enter your full name.');
       return;
+    }
+
+    const emailTrim = email.trim();
+    if (selectedRole === 'driver' && emailTrim) {
+      const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim);
+      if (!valid) {
+        Alert.alert('Check email', 'That email address does not look valid. Fix it or clear the field to continue.');
+        return;
+      }
     }
     
     const isEmailAuth = authType === 'email';
     if (!isGoogleAuth && !isEmailAuth && !phoneNumber.trim()) {
-      Alert.alert('Error', 'Please enter your phone number');
+      Alert.alert('Phone required', 'Enter your Nigerian mobile number so we can reach your account.');
       return;
     }
 
@@ -169,6 +179,14 @@ export default function RegisterScreen() {
                 </View>
               </TouchableOpacity>
             </View>
+
+            {selectedRole === 'driver' ? (
+              <DriverOnboardingProgress
+                preview
+                current="terms"
+                subtitle="After Continue: accept driver terms (creates your account), then upload documents and complete your driver profile."
+              />
+            ) : null}
 
             {/* Input Fields */}
             <View style={styles.inputSection}>

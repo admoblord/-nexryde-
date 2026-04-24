@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,14 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import MapView, { Marker } from 'react-native-maps';
+import * as Location from 'expo-location';
 import { COLORS, SPACING } from '@/src/constants/theme';
 import { BACKEND_URL } from '@/src/services/api';
 
@@ -31,6 +34,7 @@ export default function FleetTrackerScreen() {
   const [fleet, setFleet] = useState<FleetDriver[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [mapCenter, setMapCenter] = useState({ lat: 6.5244, lng: 3.3792 });
 
   useEffect(() => {
     fetchFleet();
@@ -40,23 +44,29 @@ export default function FleetTrackerScreen() {
 
   const fetchFleet = async () => {
     try {
-      let lat = 6.5244, lng = 3.3792;
+      let lat = 6.5244;
+      let lng = 3.3792;
       try {
-        const Location = require('expo-location');
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
           lat = loc.coords.latitude;
           lng = loc.coords.longitude;
         }
-      } catch { /* use default */ }
+      } catch {
+        /* keep last center */
+      }
+      setMapCenter({ lat, lng });
       const res = await fetch(`${BACKEND_URL}/api/driver/fleet/nearby?lat=${lat}&lng=${lng}&radius_km=5`);
       const data = await res.json();
       if (data.success) {
-        setFleet(data.fleet || []);
+        setFleet(Array.isArray(data.fleet) ? data.fleet : []);
+      } else {
+        setFleet([]);
       }
     } catch (e) {
-      console.error('Fleet error:', e);
+      if (__DEV__) console.warn('Fleet fetch error', e);
+      setFleet([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -83,6 +93,28 @@ export default function FleetTrackerScreen() {
   const totalOnTrip = fleet.filter((d) => d.status === 'on_trip').length;
   const totalAvailable = fleet.filter((d) => d.status === 'available').length;
   const totalTrips = fleet.reduce((sum, d) => sum + (d.trips_today || 0), 0);
+
+  const mapInitialRegion = useMemo(
+    () => ({
+      latitude: mapCenter.lat,
+      longitude: mapCenter.lng,
+      latitudeDelta: 0.07,
+      longitudeDelta: 0.07,
+    }),
+    [mapCenter.lat, mapCenter.lng]
+  );
+
+  const mapMarkers = useMemo(
+    () =>
+      fleet.filter(
+        (d) =>
+          Number.isFinite(Number(d.lat)) &&
+          Number.isFinite(Number(d.lng)) &&
+          Math.abs(Number(d.lat)) <= 90 &&
+          Math.abs(Number(d.lng)) <= 180
+      ),
+    [fleet]
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -124,14 +156,43 @@ export default function FleetTrackerScreen() {
           </View>
         </View>
 
-        {/* Live Map Placeholder */}
-        <View style={styles.mapPlaceholder}>
-          <LinearGradient colors={['#E0F2FE', '#DBEAFE']} style={styles.mapGradient}>
-            <Ionicons name="map" size={48} color="#2563EB" />
-            <Text style={styles.mapText}>Live Fleet Map</Text>
-            <Text style={styles.mapSubtext}>{fleet.length} drivers within 5km radius</Text>
-          </LinearGradient>
-        </View>
+        {Platform.OS === 'web' ? (
+          <View style={styles.mapPlaceholder}>
+            <LinearGradient colors={['#E0F2FE', '#DBEAFE']} style={styles.mapGradient}>
+              <Ionicons name="map" size={48} color="#2563EB" />
+              <Text style={styles.mapText}>Fleet overview</Text>
+              <Text style={styles.mapSubtext}>
+                {fleet.length} driver{fleet.length === 1 ? '' : 's'} within 5 km. Open the app on iOS or Android for the live map.
+              </Text>
+            </LinearGradient>
+          </View>
+        ) : (
+          <View style={styles.mapPlaceholder}>
+            <MapView
+              key={`${mapCenter.lat.toFixed(4)}_${mapCenter.lng.toFixed(4)}`}
+              style={styles.mapView}
+              initialRegion={mapInitialRegion}
+              showsUserLocation
+              showsMyLocationButton={false}
+              pitchEnabled={false}
+            >
+              {mapMarkers.map((d) => (
+                <Marker
+                  key={d.driver_id}
+                  coordinate={{ latitude: Number(d.lat), longitude: Number(d.lng) }}
+                  title={d.name}
+                  description={`${d.vehicle} · ${getStatusLabel(d.status)}`}
+                />
+              ))}
+            </MapView>
+            <View style={styles.mapCaptionBar}>
+              <Ionicons name="navigate" size={14} color="#1E40AF" />
+              <Text style={styles.mapCaptionText}>
+                {fleet.length} nearby · 5 km radius · centered on you
+              </Text>
+            </View>
+          </View>
+        )}
 
         {/* Fleet Drivers List */}
         <Text style={styles.sectionTitle}>Nearby Drivers</Text>
@@ -195,8 +256,30 @@ const styles = StyleSheet.create({
   },
   summaryNum: { fontSize: 22, fontWeight: '900', color: '#0F172A', marginTop: 4 },
   summaryLabel: { fontSize: 11, fontWeight: '700', color: '#64748B', marginTop: 2 },
-  mapPlaceholder: { borderRadius: 20, overflow: 'hidden', marginBottom: SPACING.lg },
-  mapGradient: { padding: 40, alignItems: 'center' },
+  mapPlaceholder: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    marginBottom: SPACING.lg,
+    height: 220,
+    backgroundColor: '#E2E8F0',
+  },
+  mapView: { width: '100%', height: '100%' },
+  mapCaptionBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#CBD5E1',
+  },
+  mapCaptionText: { flex: 1, fontSize: 12, fontWeight: '700', color: '#1E3A8A' },
+  mapGradient: { flex: 1, padding: 40, alignItems: 'center', justifyContent: 'center' },
   mapText: { fontSize: 18, fontWeight: '900', color: '#1E40AF', marginTop: 8 },
   mapSubtext: { fontSize: 13, color: '#3B82F6', marginTop: 4 },
   sectionTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', marginBottom: SPACING.md },

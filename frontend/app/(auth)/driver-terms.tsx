@@ -6,20 +6,20 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
+import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 
 export default function DriverTermsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { setUser, setIsAuthenticated } = useAppStore();
-  
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   
@@ -56,6 +56,7 @@ export default function DriverTermsScreen() {
       const data = await response.json();
 
       if (response.ok) {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         router.push({
           pathname: '/(auth)/driver-documents',
           params: {
@@ -66,12 +67,11 @@ export default function DriverTermsScreen() {
           },
         });
       } else {
-        const msg = typeof data?.detail === 'string' ? data.detail : 'Registration failed. Please try again.';
-        Alert.alert('Error', msg);
+        const msg = formatApiDetail(data?.detail) || 'Registration failed. Please try again.';
+        Alert.alert('Could not finish signup', msg);
       }
-    } catch (error) {
-      console.error('Registration error:', error);
-      Alert.alert('Connection Error', 'Could not connect to server. Please check your internet connection and try again.');
+    } catch {
+      Alert.alert('Connection error', 'Could not reach the server. Check your network and try again.');
     } finally {
       setLoading(false);
     }
@@ -95,6 +95,10 @@ export default function DriverTermsScreen() {
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
         >
+          <DriverOnboardingProgress
+            current="terms"
+            subtitle="Read the driver partnership terms, accept below, then continue to document upload."
+          />
           <View style={styles.termsCard}>
             <Text style={styles.sectionTitle}>NEXRYDE Driver Terms and Conditions</Text>
             <Text style={styles.lastUpdated}>Last Updated: June 2025</Text>
@@ -231,9 +235,13 @@ export default function DriverTermsScreen() {
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
             >
-              <Text style={[styles.continueText, !accepted && styles.continueTextDisabled]}>
-                {loading ? 'Processing...' : 'Accept & Continue'}
-              </Text>
+              {loading ? (
+                <ActivityIndicator color={COLORS.white} />
+              ) : (
+                <Text style={[styles.continueText, !accepted && styles.continueTextDisabled]}>
+                  Accept and continue to documents
+                </Text>
+              )}
             </LinearGradient>
           </TouchableOpacity>
         </View>

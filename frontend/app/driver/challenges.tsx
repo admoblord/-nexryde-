@@ -56,7 +56,7 @@ export default function ChallengesScreen() {
         setActiveChallenges(merged.filter((x: any) => !x.completed));
         setCompletedChallenges(merged.filter((x: any) => x.completed));
       } catch (e) {
-        console.log('Failed to load challenges:', e);
+        if (__DEV__) console.warn('Failed to load challenges', e);
         setActiveChallenges([]);
         setCompletedChallenges([]);
       } finally {

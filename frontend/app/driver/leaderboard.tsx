@@ -60,7 +60,7 @@ export default function LeaderboardScreen() {
         setUserRank(null);
       }
     } catch (error) {
-      console.log('Error loading leaderboard:', error);
+      if (__DEV__) console.warn('Error loading leaderboard', error);
       setLeaderboard([]);
       setUserRank(null);
     }

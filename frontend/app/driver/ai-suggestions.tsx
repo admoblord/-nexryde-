@@ -40,7 +40,7 @@ export default function AISuggestions() {
         }
       }
     } catch (error) {
-      console.error('Failed to load AI suggestions:', error);
+      if (__DEV__) console.warn('Failed to load AI suggestions', error);
       setSuggestions([]);
     } finally {
       setLoading(false);

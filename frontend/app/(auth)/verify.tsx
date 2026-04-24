@@ -17,7 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
+import {
+  driverTermsRouteParams,
+  driverDocumentsRouteParams,
+  driverProfileRouteParams,
+} from '@/src/utils/driverOnboardingNav';
 import { saveUserSession } from '@/utils/authStorage';
 
 export default function VerifyScreen() {
@@ -65,21 +70,21 @@ export default function VerifyScreen() {
           if (status?.step === 'terms') {
             router.replace({
               pathname: '/(auth)/driver-terms',
-              params: { phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+              params: driverTermsRouteParams(loggedUser),
             });
             return;
           }
           if (status?.step === 'documents') {
             router.replace({
               pathname: '/(auth)/driver-documents',
-              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+              params: driverDocumentsRouteParams(loggedUser),
             });
             return;
           }
           if (status?.step === 'profile') {
             router.replace({
               pathname: '/(auth)/driver-profile',
-              params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '', email: loggedUser.email || '' },
+              params: driverProfileRouteParams(loggedUser),
             });
             return;
           }
@@ -89,13 +94,13 @@ export default function VerifyScreen() {
       } catch {
         router.replace({
           pathname: '/(auth)/driver-documents',
-          params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+          params: driverDocumentsRouteParams(loggedUser),
         });
         return;
       }
       router.replace({
         pathname: '/(auth)/driver-documents',
-        params: { driver_id: loggedUser.id, phone: loggedUser.phone || '', name: loggedUser.name || '' },
+        params: driverDocumentsRouteParams(loggedUser),
       });
       return;
     }
@@ -148,7 +153,8 @@ export default function VerifyScreen() {
       }
       
       if (!response.ok) {
-        throw new Error(data.detail || 'Verification failed');
+        const msg = formatApiDetail(data?.detail) || 'Verification failed';
+        throw new Error(msg);
       }
       
       if (data.is_new_user) {
@@ -198,9 +204,20 @@ export default function VerifyScreen() {
         body: JSON.stringify({ phone: normalizedPhone }),
         signal: controller.signal,
       });
-      
+      const raw = await response.text();
+      let data: Record<string, unknown> = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        data = {};
+      }
+
       if (response.ok) {
-        Alert.alert('Success', 'A new verification code has been sent to your phone');
+        Alert.alert('Code sent', 'A new verification code was sent to your phone.');
+      } else {
+        const msg = formatApiDetail(data?.detail) || 'Could not resend the code. Try again shortly.';
+        Alert.alert('Resend failed', msg);
+        setCanResend(true);
       }
     } catch (error: any) {
       if (error?.name === 'AbortError') {

@@ -87,7 +87,7 @@ export default function AccidentPredictionScreen() {
         setHighRiskAreas(areasJSON.high_risk_areas || []);
       }
     } catch (e) {
-      console.error('Risk data error:', e);
+      if (__DEV__) console.warn('Risk data error', e);
     } finally {
       setLoading(false);
       setRefreshing(false);

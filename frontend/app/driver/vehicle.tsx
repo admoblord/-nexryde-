@@ -37,7 +37,7 @@ export default function VehicleScreen() {
       setVehicleModel(response.data.vehicle_model || '');
       setVehiclePlate(response.data.vehicle_plate || '');
     } catch (error) {
-      console.log('Error loading profile:', error);
+      if (__DEV__) console.warn('Error loading profile', error);
     }
   };
 

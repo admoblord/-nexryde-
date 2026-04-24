@@ -11,13 +11,14 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { BRAND, LAYOUT } from '@/src/constants/designSystem';
+import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 
 type Row = { label: string; desc: string; route: string; icon: React.ComponentProps<typeof Ionicons>['name']; tone: 'safe' | 'danger' | 'info' };
 
 const QUICK: { label: string; route: string; icon: React.ComponentProps<typeof Ionicons>['name']; variant: 'danger' | 'police' | 'witness' | 'neutral' }[] = [
-  { label: 'Emergency', route: '/driver/trips', icon: 'warning', variant: 'danger' },
-  { label: 'Police', route: '/driver/trips', icon: 'shield', variant: 'police' },
-  { label: 'Witness', route: '/driver/trips', icon: 'eye', variant: 'witness' },
+  { label: 'Emergency', route: DRIVER_TRIPS_TAB_HREF, icon: 'warning', variant: 'danger' },
+  { label: 'Police', route: DRIVER_TRIPS_TAB_HREF, icon: 'shield', variant: 'police' },
+  { label: 'Witness', route: DRIVER_TRIPS_TAB_HREF, icon: 'eye', variant: 'witness' },
   { label: 'Settings', route: '/settings', icon: 'settings', variant: 'neutral' },
 ];
 
@@ -54,7 +55,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       {
         label: 'Active trip tools',
         desc: 'Police connect, witness report & SOS during a trip',
-        route: '/driver/trips',
+        route: DRIVER_TRIPS_TAB_HREF,
         icon: 'flash',
         tone: 'danger',
       },
@@ -80,7 +81,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
       {
         label: 'Trip operations',
         desc: 'Receipts, ratings & trip timeline',
-        route: '/driver/trips',
+        route: DRIVER_TRIPS_TAB_HREF,
         icon: 'car',
         tone: 'info',
       },

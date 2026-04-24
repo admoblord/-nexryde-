@@ -30,7 +30,7 @@ export default function PerformanceScreen() {
         const res = await getDriverStats(user.id);
         setStats(res.data || null);
       } catch (e) {
-        console.log('Performance stats load failed:', e);
+        if (__DEV__) console.warn('Performance stats load failed', e);
       } finally {
         setLoading(false);
       }

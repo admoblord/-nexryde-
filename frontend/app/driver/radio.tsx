@@ -51,7 +51,7 @@ export default function DriverRadioScreen() {
       setStations(rows);
       if (!currentStation && rows[0]) setCurrentStation(rows[0]);
     } catch (e) {
-      console.log('Radio stations load failed:', e);
+      if (__DEV__) console.warn('Radio stations load failed', e);
       setStations([]);
     } finally {
       setIsLoading(false);
@@ -82,7 +82,7 @@ export default function DriverRadioScreen() {
       setCurrentStation(station);
       setIsPlaying(true);
     } catch (error) {
-      console.error('Playback error:', error);
+      if (__DEV__) console.warn('Playback error', error);
       Alert.alert(
         'Streaming Error',
         `Could not connect to ${station.name}. Please check your internet connection and try again.`,
@@ -107,7 +107,7 @@ export default function DriverRadioScreen() {
         setIsPlaying(true);
       }
     } catch (error) {
-      console.error('Toggle error:', error);
+      if (__DEV__) console.warn('Toggle error', error);
     }
   };
 
@@ -117,7 +117,7 @@ export default function DriverRadioScreen() {
         playerRef.current.pause();
         playerRef.current.release();
       } catch (error) {
-        console.error('Stop error:', error);
+        if (__DEV__) console.warn('Stop error', error);
       } finally {
         playerRef.current = null;
         setIsPlaying(false);

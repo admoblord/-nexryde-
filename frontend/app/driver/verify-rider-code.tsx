@@ -15,6 +15,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { BACKEND_URL, getAuthHeaders, verifyTripBiometricLock } from '@/src/services/api';
+import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { BiometricScanner } from '@/src/components/tier1';
 
 export default function VerifyRiderCodeScreen() {
@@ -75,11 +76,11 @@ export default function VerifyRiderCodeScreen() {
       Alert.alert('Ride Started', 'Live face verification successful. Trip is now in progress.', [
         {
           text: 'OK',
-          onPress: () => router.replace('/(driver-tabs)/driver-trips'),
+          onPress: () => router.replace(DRIVER_TRIPS_TAB_HREF),
         },
       ]);
     } catch (error) {
-      console.error('Live face verification error:', error);
+      if (__DEV__) console.warn('Live face verification error', error);
       Alert.alert('Error', 'Could not complete live face verification. Please try again.');
     } finally {
       setLoading(false);
@@ -176,7 +177,7 @@ export default function VerifyRiderCodeScreen() {
         }
       }
     } catch (error) {
-      console.error('Verification error:', error);
+      if (__DEV__) console.warn('Verification error', error);
       Alert.alert(
         'Error',
         'Failed to verify code. Please check your connection and try again.'

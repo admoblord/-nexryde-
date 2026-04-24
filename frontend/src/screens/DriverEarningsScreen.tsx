@@ -41,7 +41,7 @@ export default function DriverEarningsScreen() {
       setDashboard(earningsRes.data || null);
       setBankReady(Boolean(bankRes.data?.payout_ready));
     } catch (e) {
-      console.log('Failed to load driver earnings:', e);
+      if (__DEV__) console.warn('Failed to load driver earnings', e);
       setDashboard(null);
       setBankReady(false);
     } finally {

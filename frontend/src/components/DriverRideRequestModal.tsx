@@ -16,8 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import DriverOfferRoutePreview from '@/src/components/DriverOfferRoutePreview';
 import { DS_COLOR, DS_RADIUS, DS_SPACE, DS_TYPE } from '@/src/design/designSystem';
-
-const TIMER_TOTAL = 15;
+import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
+import * as Haptics from 'expo-haptics';
 
 const C = DS_COLOR;
 
@@ -76,7 +76,7 @@ export default function DriverRideRequestModal({
   visible,
   trip,
   countdownSeconds,
-  countdownTotal = TIMER_TOTAL,
+  countdownTotal = DRIVER_OFFER_COUNTDOWN_SECONDS,
   fareInput,
   onFareInputChange,
   accepting,
@@ -455,7 +455,12 @@ export default function DriverRideRequestModal({
             <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, DS_SPACE.sm) + 8 }]}>
               <TouchableOpacity
                 style={[styles.primaryBtn, accepting && { opacity: 0.72 }]}
-                onPress={onAccept}
+                onPress={() => {
+                  if (Platform.OS !== 'web') {
+                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                  }
+                  onAccept();
+                }}
                 disabled={accepting}
                 activeOpacity={0.92}
               >
@@ -480,7 +485,16 @@ export default function DriverRideRequestModal({
                   <Ionicons name="swap-vertical" size={18} color={C.text} />
                   <Text style={styles.secondaryText}>Counter offer</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={styles.rejectBtn} onPress={onIgnore} activeOpacity={0.88}>
+                <TouchableOpacity
+                  style={styles.rejectBtn}
+                  onPress={() => {
+                    if (Platform.OS !== 'web') {
+                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                    onIgnore();
+                  }}
+                  activeOpacity={0.88}
+                >
                   <Ionicons name="close-circle-outline" size={18} color={C.danger} />
                   <Text style={styles.rejectText}>Reject</Text>
                 </TouchableOpacity>
@@ -493,7 +507,7 @@ export default function DriverRideRequestModal({
   );
 }
 
-export { TIMER_TOTAL as DRIVER_OFFER_TIMER_SECONDS };
+export { DRIVER_OFFER_COUNTDOWN_SECONDS as DRIVER_OFFER_TIMER_SECONDS };
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },

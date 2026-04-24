@@ -196,7 +196,7 @@ export default function VehicleRegistrationScreen() {
         Alert.alert('REGISTRATION FAILED', data.detail || 'Failed to register vehicle. Please try again.');
       }
     } catch (error) {
-      console.error('Vehicle registration error:', error);
+      if (__DEV__) console.warn('Vehicle registration error', error);
       Alert.alert('REGISTRATION FAILED', 'Unable to register vehicle right now. Please try again.');
     } finally {
       setIsLoading(false);

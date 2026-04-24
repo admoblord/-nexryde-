@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
 
 interface SmartModeSettings {
   enabled: boolean;
@@ -102,17 +102,22 @@ export default function SmartModeScreen() {
   const loadEarnings = async () => {
     if (!user?.id) return;
     try {
-      const { BACKEND_URL } = require('@/src/services/api');
-      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`);
-      if (res.ok) {
-        const data = await res.json();
-        setEarnings({
-          today: data?.today_earnings || data?.projections?.daily || 0,
-          average: data?.average_daily || data?.projections?.daily || 0,
-          projected: data?.projections?.daily || 0,
-        });
-      }
-    } catch { /* keep defaults */ }
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=today`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      const summary = data?.summary || {};
+      const projections = data?.projections || {};
+      const todayTotal = Number(summary.total_earnings ?? 0) || Number(projections.daily ?? 0);
+      setEarnings({
+        today: todayTotal,
+        average: Number(projections.daily ?? todayTotal) || 0,
+        projected: Number(projections.daily ?? 0) || 0,
+      });
+    } catch {
+      /* keep defaults */
+    }
   };
 
   const saveSettings = async () => {

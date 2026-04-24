@@ -46,7 +46,7 @@ export default function CreatePostScreen() {
       Alert.alert('Success', 'Post created successfully!');
       router.back();
     } catch (error) {
-      console.error('Error creating post:', error);
+      if (__DEV__) console.warn('Error creating post', error);
       Alert.alert('Error', 'Failed to create post. Please try again.');
     } finally {
       setLoading(false);

@@ -179,6 +179,24 @@ export const verifyOTP = (phone: string, otp: string) =>
 export const register = (data: { phone: string; name: string; email?: string; role?: string }) => 
   api.post('/auth/register', data);
 
+/** Driver “Account Fortress” (new device): phone + PIN + live face. Face template is stored on success. */
+export type DriverFortressVerifyResponse = {
+  message?: string;
+  token?: string;
+  user?: Record<string, unknown> & { id?: string; role?: string };
+  face_confidence?: number;
+  face_template_saved?: boolean;
+};
+
+export function postDriverFortressVerify(payload: {
+  challenge_id: string;
+  phone: string;
+  pin: string;
+  face_image: string;
+}) {
+  return api.post<DriverFortressVerifyResponse>('/auth/driver-fortress/verify', payload);
+}
+
 // User APIs
 export const getUser = (userId: string) => 
   api.get(`/users/${userId}`);

@@ -21,7 +21,7 @@ interface HeatZone {
   intensity: number;
   name: string;
   surge: number;
-  demand_level?: 'low' | 'medium' | 'high';
+  demand_level?: string;
 }
 
 export default function DriverHeatmapScreen() {
@@ -39,10 +39,19 @@ export default function DriverHeatmapScreen() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/driver/heatmap`);
       const data = await res.json();
-      setZones(data.zones || []);
-      setRecommendation(data.recommendation || '');
+      const raw = Array.isArray(data.zones) ? data.zones : [];
+      const normalized: HeatZone[] = raw.map((z: Record<string, unknown>) => ({
+        lat: Number(z.lat ?? 0),
+        lng: Number(z.lng ?? 0),
+        intensity: Number(z.intensity ?? 0),
+        name: String(z.zone_name ?? z.name ?? 'Hot zone'),
+        surge: Number(z.surge_multiplier ?? z.surge ?? 1),
+        demand_level: typeof z.demand_level === 'string' ? z.demand_level : undefined,
+      }));
+      setZones(normalized);
+      setRecommendation(typeof data.recommendation === 'string' ? data.recommendation : '');
     } catch (e) {
-      console.error('Load heatmap error:', e);
+      if (__DEV__) console.warn('Load heatmap error', e);
     }
   };
 
@@ -113,7 +122,7 @@ export default function DriverHeatmapScreen() {
           {/* Heatmap Zones */}
           <Text style={styles.sectionTitle}>High Demand Areas</Text>
           
-          {zones.sort((a, b) => b.intensity - a.intensity).map((zone, idx) => (
+          {[...zones].sort((a, b) => b.intensity - a.intensity).map((zone, idx) => (
             <TouchableOpacity key={idx} style={styles.zoneCard}>
               <View style={styles.zoneHeader}>
                 <View style={[
@@ -148,7 +157,13 @@ export default function DriverHeatmapScreen() {
               <View style={styles.zoneFooter}>
                 <View style={styles.zoneStats}>
                   <Ionicons name="car" size={14} color="#64748B" />
-                  <Text style={styles.zoneStat}>{zone.demand_level === 'high' ? 'High demand' : zone.demand_level === 'medium' ? 'Medium demand' : 'Low demand'}</Text>
+                  <Text style={styles.zoneStat}>
+                    {zone.demand_level === 'very_high' || zone.demand_level === 'high'
+                      ? 'High demand'
+                      : zone.demand_level === 'medium'
+                        ? 'Medium demand'
+                        : 'Demand area'}
+                  </Text>
                 </View>
                 <TouchableOpacity style={styles.navigateBtn} onPress={() => {
                   const { Linking } = require('react-native');

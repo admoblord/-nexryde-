@@ -123,7 +123,7 @@ export default function DriverTripsScreen() {
           }),
         });
       } catch (error) {
-        console.log('Trip location update failed:', error);
+        if (__DEV__) console.warn('Trip location update failed', error);
       }
     };
 
@@ -144,7 +144,7 @@ export default function DriverTripsScreen() {
       const response = await getDriverTripOffers(user.id);
       setTrips(response.data);
     } catch (error) {
-      console.log('Error loading trips:', error);
+      if (__DEV__) console.warn('Error loading trips', error);
     } finally {
       setLoading(false);
     }

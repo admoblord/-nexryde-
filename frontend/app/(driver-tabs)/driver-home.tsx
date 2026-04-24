@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -25,7 +25,18 @@ import * as SecureStore from 'expo-secure-store';
 import { useAppStore } from '@/src/store/appStore';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SupportedLanguage } from '@/src/i18n/translations';
-import { BACKEND_URL, getAuthHeaders, getDriverSubscriptionStatus, reportDriverSimSwapSignal } from '@/src/services/api';
+import {
+  BACKEND_URL,
+  getAuthHeaders,
+  getDriverSubscriptionStatus,
+  reportDriverSimSwapSignal,
+  formatApiDetail,
+} from '@/src/services/api';
+import {
+  driverTermsRouteParams,
+  driverDocumentsRouteParams,
+  driverProfileRouteParams,
+} from '@/src/utils/driverOnboardingNav';
 import {
   checkOnlineStatus,
   getQueueSize,
@@ -33,9 +44,11 @@ import {
   queueDriverRideAcceptance,
   syncQueuedRequests,
 } from '@/src/services/offlineMode';
-import DriverRideRequestModal, {
-  DRIVER_OFFER_TIMER_SECONDS,
-} from '@/src/components/DriverRideRequestModal';
+import * as Haptics from 'expo-haptics';
+import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
+import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { buildDriverPriorityFeatures, buildDriverToolFeatures } from '@/src/config/driverHomeFeatures';
+import DriverRideRequestModal from '@/src/components/DriverRideRequestModal';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 import { COLORS } from '@/src/constants/theme';
@@ -48,6 +61,18 @@ const getWsBaseUrl = () => {
   if (url.startsWith('https://')) return url.replace('https://', 'wss://');
   if (url.startsWith('http://')) return url.replace('http://', 'ws://');
   return `wss://${url}`;
+};
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
 };
 
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
@@ -86,22 +111,14 @@ export default function ModernDriverHome() {
   const isOnlineRef = useRef(isOnline);
   isOnlineRef.current = isOnline;
 
-  const PRIORITY_FEATURES = [
-    { id: 'trips', label: t.home.myTrips, icon: 'list-outline', route: '/driver/trips', color: HOME_PALETTE.accentIndigo },
-    { id: 'bank', label: 'Bank & Vault', icon: 'finger-print', route: '/driver/bank', color: COLORS.accentGreen },
-    { id: 'subscription', label: t.wallet.payment, icon: 'card-outline', route: '/driver/subscription', color: COLORS.warning },
-    { id: 'support', label: t.home.support, icon: 'help-circle-outline', route: '/support', color: COLORS.success },
-  ];
-
-  /** Secondary tools only — community, shield & more live in the hub menu (header). */
-  const ALL_FEATURES = [
-    { id: 'vehicle', label: t.verification.vehicleVerified.split(' ')[0] || 'Vehicle', icon: 'car-sport', route: '/driver/vehicle', color: COLORS.accentGreen },
-    { id: 'documents', label: t.verification.uploadDocuments.split(' ')[0] || 'Documents', icon: 'document-text', route: '/driver/documents', color: COLORS.warning },
-    { id: 'fleet-tracker', label: 'Fleet', icon: 'locate', route: '/driver/fleet-tracker', color: HOME_PALETTE.accentTeal },
-    { id: 'traffic', label: 'Traffic', icon: 'speedometer', route: '/driver/traffic', color: COLORS.error },
-    { id: 'safety-alerts', label: t.safety.safetyTips.split(' ')[0] || 'Alerts', icon: 'notifications', route: '/driver/safety-alerts', color: COLORS.error },
-    { id: 'performance', label: t.driver.rating, icon: 'analytics', route: '/driver/performance', color: HOME_PALETTE.accentIndigo },
-  ];
+  const priorityFeatures = useMemo(
+    () => buildDriverPriorityFeatures(t),
+    [language, t.home.myTrips, t.home.support, t.wallet.payment]
+  );
+  const toolFeatures = useMemo(
+    () => buildDriverToolFeatures(t),
+    [language, t.verification.vehicleVerified, t.verification.uploadDocuments, t.safety.safetyTips, t.driver.rating]
+  );
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
   const [earningsGuarantee, setEarningsGuarantee] = useState<any>(null);
 
@@ -111,24 +128,42 @@ export default function ModernDriverHome() {
     let mounted = true;
     const fetchEarnings = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`, {
-          headers: getAuthHeaders(),
-        });
-        const data = await res.json();
-        if (mounted && data) {
+        const [todayRes, weekRes] = await Promise.all([
+          fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=today`, {
+            headers: getAuthHeaders(),
+          }),
+          fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=week`, {
+            headers: getAuthHeaders(),
+          }),
+        ]);
+        if (!todayRes.ok) return;
+        const todayData = await todayRes.json();
+        const weekData = weekRes.ok ? await weekRes.json() : null;
+        const todaySummary = todayData?.summary || {};
+        const weekSummary = weekData?.summary || {};
+        if (mounted && todayData) {
+          const todayEarnings = Number(
+            todaySummary.total_earnings ?? todayData.today_earnings ?? todayData?.projections?.daily ?? 0
+          );
+          const weekEarnings = Number(weekSummary.total_earnings ?? weekData?.projections?.weekly ?? 0);
           setEarnings({
-            today: data.today_earnings || data.projections?.daily || 0,
-            week: data.week_earnings || data.projections?.weekly || 0,
-            trips: data.today_trips || data.total_trips || 0,
+            today: todayEarnings,
+            week: weekEarnings,
+            trips: Number(user?.total_trips ?? todaySummary.total_trips ?? 0),
           });
-          setEarningsGuarantee(data.guarantee || null);
+          setEarningsGuarantee(todayData.guarantee || null);
         }
-      } catch { /* keep defaults */ }
+      } catch {
+        /* keep defaults */
+      }
     };
     fetchEarnings();
     const interval = setInterval(fetchEarnings, 60000);
-    return () => { mounted = false; clearInterval(interval); };
-  }, [user?.id]);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, [user?.id, user?.total_trips]);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [checkingOnboarding, setCheckingOnboarding] = useState(true);
@@ -137,13 +172,15 @@ export default function ModernDriverHome() {
   const driverOffersWsRef = useRef<WebSocket | null>(null);
   const driverOffersReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const driverOffersReconnectAttemptsRef = useRef(0);
-  const [rideCountdown, setRideCountdown] = useState(DRIVER_OFFER_TIMER_SECONDS);
+  const [rideCountdown, setRideCountdown] = useState(DRIVER_OFFER_COUNTDOWN_SECONDS);
   const [counterFareInput, setCounterFareInput] = useState('');
   const [acceptingRide, setAcceptingRide] = useState(false);
   const [showLangPicker, setShowLangPicker] = useState(false);
   const [featureHubOpen, setFeatureHubOpen] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
   const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const lastLocationPushAtRef = useRef<number>(0);
+  const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const [simSignalSent, setSimSignalSent] = useState(false);
   const onlineToggleInFlightRef = useRef(false);
   const navigationInFlightRef = useRef(false);
@@ -180,10 +217,10 @@ export default function ModernDriverHome() {
       const trips = await res.json();
       if (Array.isArray(trips) && trips.length > 0) {
         setIncomingRide((prev: any) => prev || trips[0]);
-        setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+        setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
       }
     } catch (e) {
-      console.error('Offer polling error:', e);
+      if (__DEV__) console.warn('Offer polling error', e);
     }
   }, [user?.id]);
   
@@ -260,6 +297,16 @@ export default function ModernDriverHome() {
   // Push live location to backend for dispatch accuracy and rider tracking
   useEffect(() => {
     if (!isOnline || !user?.id || !driverCoords) return;
+    const now = Date.now();
+    const lastAt = lastLocationPushAtRef.current;
+    const lastCoords = lastLocationPushCoordsRef.current;
+    const minIntervalMs = 15000;
+    const minMoveKm = 0.05; // 50m
+    if (lastAt && now - lastAt < minIntervalMs) return;
+    if (lastCoords) {
+      const movedKm = Math.abs(calculateDistance(driverCoords.lat, driverCoords.lng, lastCoords.lat, lastCoords.lng));
+      if (movedKm < minMoveKm && now - lastAt < 60000) return;
+    }
     const pushLocation = async () => {
       try {
         await fetch(`${BACKEND_URL}/api/drivers/${user.id}/location`, {
@@ -267,6 +314,8 @@ export default function ModernDriverHome() {
           headers: getAuthHeaders(),
           body: JSON.stringify({ latitude: driverCoords.lat, longitude: driverCoords.lng }),
         });
+        lastLocationPushAtRef.current = Date.now();
+        lastLocationPushCoordsRef.current = { lat: driverCoords.lat, lng: driverCoords.lng };
       } catch {}
     };
     pushLocation();
@@ -366,7 +415,7 @@ export default function ModernDriverHome() {
           setIncomingRide((prev: any) => {
             if (prev?.offer_id === mapped.offer_id) return prev;
             setTimeout(() => {
-              setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+              setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
               if (Platform.OS !== 'web') {
                 Vibration.vibrate(400);
               }
@@ -374,7 +423,7 @@ export default function ModernDriverHome() {
             return mapped;
           });
         } catch (e) {
-          console.warn('Driver offers WS message error:', e);
+          if (__DEV__) console.warn('Driver offers WS message error', e);
         }
       };
 
@@ -449,7 +498,7 @@ export default function ModernDriverHome() {
       }
     } catch {}
     setIncomingRide(null);
-    setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+    setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
   }, [incomingRide, user?.id]);
 
   useEffect(() => {
@@ -462,7 +511,7 @@ export default function ModernDriverHome() {
       return;
     }
     offerTimerExpiredRef.current = false;
-    setRideCountdown(DRIVER_OFFER_TIMER_SECONDS);
+    setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
     const id = setInterval(() => {
       setRideCountdown((p) => {
         if (p <= 1) {
@@ -542,6 +591,9 @@ export default function ModernDriverHome() {
       });
       const data = await res.json();
       if (res.ok) {
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
         setCurrentTrip(data);
         const pickup = incomingRide?.pickup_location;
         const pickupAddress =
@@ -572,21 +624,20 @@ export default function ModernDriverHome() {
           [
             {
               text: 'Open Trip',
-              onPress: () => router.push('/driver/trips'),
+              onPress: () => router.push(DRIVER_TRIPS_TAB_HREF),
               style: 'default',
             },
             { text: 'Navigate', onPress: openNavigation, style: 'default' },
             {
               text: 'Later',
               style: 'cancel',
-              onPress: () => router.push('/driver/trips'),
+              onPress: () => router.push(DRIVER_TRIPS_TAB_HREF),
             },
           ]
         );
         setIncomingRide(null);
       } else {
-        const msg = typeof data?.detail === 'string' ? data.detail : 'Could not accept ride';
-        Alert.alert('Error', msg);
+        Alert.alert('Could not accept', formatApiDetail(data?.detail) || 'This offer may have expired. Try the next one.');
       }
     } catch (e) {
       await queueDriverRideAcceptance(
@@ -621,7 +672,7 @@ export default function ModernDriverHome() {
       );
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Status Update Failed', data?.detail || 'Unable to update online status.');
+        Alert.alert('Status update failed', formatApiDetail(data?.detail) || 'Could not change online status.');
         return;
       }
       setIsOnline(nextStatus);
@@ -656,19 +707,19 @@ export default function ModernDriverHome() {
           if (status.step === 'terms') {
             router.replace({
               pathname: '/(auth)/driver-terms',
-              params: { phone: user.phone, name: user.name || '', email: user.email || '' },
+              params: driverTermsRouteParams(user),
             });
             return;
           } else if (status.step === 'documents') {
             router.replace({
               pathname: '/(auth)/driver-documents',
-              params: { driver_id: user.id, phone: user.phone, name: user.name || '' },
+              params: driverDocumentsRouteParams(user),
             });
             return;
           } else if (status.step === 'profile') {
             router.replace({
               pathname: '/(auth)/driver-profile',
-              params: { driver_id: user.id, phone: user.phone, name: user.name || '' },
+              params: driverProfileRouteParams(user),
             });
             return;
           }
@@ -690,7 +741,7 @@ export default function ModernDriverHome() {
         }
       }
     } catch (error) {
-      console.error('Error checking onboarding status:', error);
+      if (__DEV__) console.warn('Error checking onboarding status', error);
     } finally {
       setCheckingOnboarding(false);
     }
@@ -715,15 +766,6 @@ export default function ModernDriverHome() {
     );
   }
   
-  // Keep compliance and setup tools visible even after approval so drivers can
-  // review/update documents, vehicle info, and bank details like major ride apps.
-  const filteredFeatures = ALL_FEATURES.filter(feature => {
-    if (feature.id === 'verification') {
-      return verificationStatus !== 'approved';
-    }
-    return true;
-  });
-
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
@@ -776,9 +818,11 @@ export default function ModernDriverHome() {
               color={isOnline ? COLORS.success : COLORS.error} 
             />
             <View style={styles.statusText}>
-              <Text style={styles.statusTitle}>{isOnline ? t.driver.goOffline.replace(/Go |Fita |Jáde |Pụọ |Go /i, '') + ' ✓' : t.driver.goOnline}</Text>
+              <Text style={styles.statusTitle}>
+                {isOnline ? t.driver.youAreOnline : t.driver.youAreOffline}
+              </Text>
               <Text style={styles.statusSubtitle}>
-                {isOnline ? t.driver.acceptRide : t.driver.earnings}
+                {isOnline ? t.driver.statusReceivingOffers : t.driver.statusGoOnlineHint}
               </Text>
             </View>
           </View>
@@ -865,8 +909,14 @@ export default function ModernDriverHome() {
         )}
         {/* EARNINGS CARDS - PRIORITY */}
         <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
-          <LinearGradient
+          <TouchableOpacity
+            onPress={() => guardedPush('/(driver-tabs)/driver-earnings')}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel="Open driver earnings"
+          >
+            <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
+            <LinearGradient
             colors={['#022c22', '#064e3b', '#0f766e']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
@@ -898,13 +948,14 @@ export default function ModernDriverHome() {
               </View>
             </View>
           </LinearGradient>
+          </TouchableOpacity>
         </Animated.View>
 
         {/* PRIORITY FEATURES - BIG CARDS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>Core Actions</Text>
+          <Text style={styles.sectionTitle}>{t.driver.coreActions}</Text>
           <View style={styles.priorityGrid}>
-            {PRIORITY_FEATURES.map((feature, index) => (
+            {priorityFeatures.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
                 style={styles.priorityCard}
@@ -928,11 +979,12 @@ export default function ModernDriverHome() {
         {/* ALL FEATURES GRID - COMPLETE ACCESS */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Tools</Text>
-            <Text style={styles.featureCount}>{filteredFeatures.length} items</Text>
+            <Text style={styles.sectionTitle}>{t.driver.toolsSection}</Text>
+            <Text style={styles.featureCount}>{toolFeatures.length} items</Text>
           </View>
+          <Text style={styles.toolsHint}>{t.driver.toolsHubHint}</Text>
           <View style={styles.allFeaturesGrid}>
-            {filteredFeatures.map((feature) => (
+            {toolFeatures.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
                 style={styles.featureCard}
@@ -954,7 +1006,7 @@ export default function ModernDriverHome() {
         visible={!!incomingRide}
         trip={incomingRide}
         countdownSeconds={rideCountdown}
-        countdownTotal={DRIVER_OFFER_TIMER_SECONDS}
+        countdownTotal={DRIVER_OFFER_COUNTDOWN_SECONDS}
         fareInput={counterFareInput}
         onFareInputChange={setCounterFareInput}
         accepting={acceptingRide}
@@ -1180,7 +1232,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 8,
+  },
+  toolsHint: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: COLORS.lightTextSecondary,
+    marginBottom: 12,
   },
   sectionTitle: {
     fontSize: 22,

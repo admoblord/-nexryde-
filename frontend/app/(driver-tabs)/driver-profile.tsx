@@ -18,6 +18,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
 import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
 import { BiometricScanner, EmergencyButton, LoadingSpinner, UserCard } from '@/src/components/tier1';
+import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
@@ -210,7 +211,7 @@ export default function DriverProfileScreen() {
               icon: 'list',
               iconColor: COLORS.white,
               iconBg: '#7C3AED',
-              onPress: () => router.push('/driver/trips' as any),
+              onPress: () => router.push(DRIVER_TRIPS_TAB_HREF as any),
             },
             {
               key: 'vehicle',

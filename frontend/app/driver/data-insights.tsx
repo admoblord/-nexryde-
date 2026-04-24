@@ -35,7 +35,7 @@ export default function DataInsightsScreen() {
         setTrips(Array.isArray(tripRes.data) ? tripRes.data : []);
         setEarnings(earningsRes.data || null);
       } catch (e) {
-        console.log('Failed loading insights:', e);
+        if (__DEV__) console.warn('Failed loading insights', e);
       } finally {
         setLoading(false);
       }

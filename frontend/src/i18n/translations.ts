@@ -89,6 +89,7 @@ export const en = {
     earnings: 'Earnings',
     profile: 'Profile',
     requests: 'Requests',
+    updates: 'Updates',
   },
 
   auth: {
@@ -159,6 +160,13 @@ export const en = {
     weeklyEarnings: 'Weekly Earnings',
     totalRides: 'Total Rides',
     rating: 'Rating',
+    youAreOnline: "You're online",
+    youAreOffline: "You're offline",
+    statusReceivingOffers: 'Receiving trip offers',
+    statusGoOnlineHint: 'Turn the switch on to start receiving offers',
+    coreActions: 'Core Actions',
+    toolsSection: 'Tools',
+    toolsHubHint: 'Community, heatmap, fleet & traffic: open the menu (☰) at the top.',
   },
   
   safety: {
@@ -260,6 +268,7 @@ export const yo = {
     earnings: 'Èrè',
     profile: 'Profaili',
     requests: 'Àwọn Ìbéèrè',
+    updates: 'Àwọn Ìfitónilétí',
   },
 
   auth: {
@@ -330,6 +339,13 @@ export const yo = {
     weeklyEarnings: 'Èrè ọ̀sẹ̀',
     totalRides: 'Àpapọ̀ ìrìn-àjò',
     rating: 'Ìdíyelé',
+    youAreOnline: 'O wà lórí ayélujára',
+    youAreOffline: 'O kò sí lórí ayélujára',
+    statusReceivingOffers: 'Ńgba àṣẹ ìrìn-àjò',
+    statusGoOnlineHint: 'Tàn àmì láti bẹ̀rẹ̀ sísí gbigba àṣẹ',
+    coreActions: 'Àwọn Ìgbésẹ̀ Pàtàkì',
+    toolsSection: 'Àwọn Ohun èlò',
+    toolsHubHint: 'Àgbáyé, máàpù ooru, ọkọ̀ àti ọ̀nà: ṣí ààyò (☰) ní òkè.',
   },
   
   safety: {
@@ -425,12 +441,13 @@ export const ig = {
 
   tabs: {
     home: 'Ụlọ',
-    trips: 'Njem M',
+    trips: 'Njem m',
     safety: 'Nchekwa',
     wallet: 'Akpa Ego',
     earnings: 'Ego Nwetara',
     profile: 'Profaịlụ',
     requests: 'Arịrịọ',
+    updates: 'Mmelite',
   },
 
   auth: {
@@ -501,6 +518,13 @@ export const ig = {
     weeklyEarnings: 'Ego izu',
     totalRides: 'Ngụkọta njem',
     rating: 'Akara',
+    youAreOnline: 'Ị nọ n\'ịntanetị',
+    youAreOffline: 'Ị anọghị n\'ịntanetị',
+    statusReceivingOffers: 'Na-anabata ọpọrọ njem',
+    statusGoOnlineHint: 'Gbaa akụrụngwa iji malite ịnabata ọpọrọ',
+    coreActions: 'Omume ndị isi',
+    toolsSection: 'Ngwaọrụ',
+    toolsHubHint: 'Obodo, maapụ ọkụ, ụgbọ ala & okporo ụzọ: mepee menu (☰) n\'elu.',
   },
   
   safety: {
@@ -602,6 +626,7 @@ export const ha = {
     earnings: 'Kuɗi',
     profile: 'Bayanan ni',
     requests: 'Buƙatu',
+    updates: 'Sabbin labarai',
   },
 
   auth: {
@@ -672,6 +697,13 @@ export const ha = {
     weeklyEarnings: 'Abin da ka samu mako',
     totalRides: 'Jimlar tafiyoyi',
     rating: 'Kimanta',
+    youAreOnline: 'Kana kan layi',
+    youAreOffline: 'Ba a kan layi',
+    statusReceivingOffers: 'Ana karɓar buƙatun tafiya',
+    statusGoOnlineHint: 'Kunna maɓallin don fara samun buƙatun',
+    coreActions: 'Manyan ayyuka',
+    toolsSection: 'Kayan aiki',
+    toolsHubHint: 'Al\'umma, taswirar zafi, motoci & hanya: buɗe menu (☰) a sama.',
   },
   
   safety: {
@@ -773,6 +805,7 @@ export const pcm = {
     earnings: 'Earnings',
     profile: 'Profile',
     requests: 'Requests',
+    updates: 'Updates',
   },
 
   auth: {
@@ -843,6 +876,13 @@ export const pcm = {
     weeklyEarnings: 'Money for this week',
     totalRides: 'All the trips',
     rating: 'Your rating',
+    youAreOnline: 'You dey online',
+    youAreOffline: 'You no dey online',
+    statusReceivingOffers: 'Dey get trip offers',
+    statusGoOnlineHint: 'On the switch to start get offers',
+    coreActions: 'Main things',
+    toolsSection: 'Tools',
+    toolsHubHint: 'Community, heat map, fleet & traffic: open menu (☰) for up.',
   },
   
   safety: {

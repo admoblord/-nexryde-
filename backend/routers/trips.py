@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
+import asyncio
 import logging
 import time
 import math
@@ -18,6 +19,7 @@ from cryptography.fernet import Fernet
 import httpx
 
 from database import db
+from face_match import face_match_confidence
 from smart_pricing import (
     area_summary_line,
     build_route_preview_coordinates,
@@ -440,27 +442,6 @@ async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
         await db.trips.update_one({"id": trip.get("id")}, {"$set": updates})
         return await db.trips.find_one({"id": trip.get("id")}, {"_id": 0}) or trip
     return trip
-
-
-def _strip_data_url(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    return value.split(",", 1)[1] if "," in value else value
-
-
-def _face_match_confidence(reference_image: Optional[str], observed_image: Optional[str]) -> float:
-    ref = _strip_data_url(reference_image)
-    obs = _strip_data_url(observed_image)
-    if len(ref) < 100 or len(obs) < 100:
-        return 0.0
-    ref_digest = hashlib.sha256(ref.encode()).hexdigest()
-    obs_digest = hashlib.sha256(obs.encode()).hexdigest()
-    exact_prefix = sum(1 for a, b in zip(ref_digest[:24], obs_digest[:24]) if a == b) / 24.0
-    length_ratio = min(len(ref), len(obs)) / max(len(ref), len(obs))
-    chunk_ref = hashlib.sha256(ref[:1500].encode()).hexdigest()
-    chunk_obs = hashlib.sha256(obs[:1500].encode()).hexdigest()
-    chunk_score = sum(1 for a, b in zip(chunk_ref[:24], chunk_obs[:24]) if a == b) / 24.0
-    return round(((exact_prefix * 0.55) + (chunk_score * 0.25) + (length_ratio * 0.20)) * 100.0, 2)
 
 
 def _gate_code_fernet() -> Fernet:
@@ -896,20 +877,39 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         {"_id": 0},
     ).to_list(500)
 
+    candidate_driver_ids = [
+        p.get("user_id")
+        for p in profiles
+        if p.get("user_id") and p.get("user_id") not in blocked_drivers
+    ]
+    active_busy_rows = await db.trips.find(
+        {
+            "driver_id": {"$in": candidate_driver_ids},
+            "status": {"$in": ["accepted", "arrived", "ongoing"]},
+        },
+        {"_id": 0, "driver_id": 1},
+    ).to_list(1000)
+    busy_driver_ids = {str(r.get("driver_id")) for r in active_busy_rows if r.get("driver_id")}
+
+    active_sub_rows = await db.subscriptions.find(
+        {
+            "driver_id": {"$in": candidate_driver_ids},
+            "status": {"$in": ["active", "trial", "grace_period"]},
+        },
+        {"_id": 0, "driver_id": 1},
+    ).to_list(1000)
+    subscribed_driver_ids = {str(r.get("driver_id")) for r in active_sub_rows if r.get("driver_id")}
+
     eligible = []
     for profile in profiles:
         driver_id = profile.get("user_id")
         if not driver_id or driver_id in blocked_drivers:
             continue
 
-        if await _driver_is_busy(driver_id):
+        if str(driver_id) in busy_driver_ids:
             continue
 
-        sub = await db.subscriptions.find_one(
-            {"driver_id": driver_id, "status": {"$in": ["active", "trial", "grace_period"]}},
-            {"_id": 0, "status": 1},
-        )
-        if not sub:
+        if str(driver_id) not in subscribed_driver_ids:
             continue
 
         loc = profile.get("current_location") or {}
@@ -1034,7 +1034,7 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
         "rider_risk_band": rider_risk_band,
     }
 
-    for offer in offers:
+    async def _dispatch_offer_to_driver(offer: dict) -> None:
         pickup_addr = (trip.get("pickup_location") or {}).get("address", "Pickup")
         dropoff_addr = (trip.get("dropoff_location") or {}).get("address", "Destination")
         route_hint = trip.get("area_summary_line") or area_summary_line(
@@ -1079,6 +1079,9 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
                 "status": "searching",
             },
         )
+
+    if offers:
+        await asyncio.gather(*[_dispatch_offer_to_driver(offer) for offer in offers])
 
     return offers
 
@@ -1733,9 +1736,19 @@ async def get_driver_trip_offers(driver_id: str, request: Request):
             {"$set": {"status": "seen", "seen_at": now_iso}},
         )
 
+    trip_ids = [o.get("trip_id") for o in offers if o.get("trip_id")]
+    trip_rows = await db.trips.find(
+        {
+            "id": {"$in": trip_ids},
+            "status": {"$in": ["pending", "pending_driver_offers"]},
+        },
+        {"_id": 0},
+    ).to_list(100)
+    trip_map = {str(t.get("id")): t for t in trip_rows if t.get("id")}
+
     hydrated = []
     for offer in offers:
-        trip = await db.trips.find_one({"id": offer["trip_id"]}, {"_id": 0})
+        trip = trip_map.get(str(offer.get("trip_id")))
         if not trip or trip.get("status") not in ["pending", "pending_driver_offers"]:
             continue
         trip = enrich_trip_offer_preview(trip)
@@ -2254,7 +2267,7 @@ async def fake_driver_alert_check(trip_id: str, request: FakeDriverAlertRequest,
     if not reference_image:
         raise HTTPException(status_code=400, detail="Driver has no registered face reference")
 
-    confidence = _face_match_confidence(reference_image, request.observed_face_image)
+    confidence = face_match_confidence(reference_image, request.observed_face_image)
     matched = confidence >= 82.0
     now = datetime.now(timezone.utc).isoformat()
 
@@ -2320,7 +2333,7 @@ async def verify_rider_face_pickup(trip_id: str, request: RiderPickupFaceVerific
     if not reference_image:
         raise HTTPException(status_code=400, detail="No registered rider face on file. Complete rider verification first.")
 
-    confidence = _face_match_confidence(reference_image, request.observed_face_image)
+    confidence = face_match_confidence(reference_image, request.observed_face_image)
     matched = confidence >= 82.0
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.trips.update_one(

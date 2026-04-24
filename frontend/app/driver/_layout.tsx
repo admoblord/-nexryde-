@@ -1,6 +1,10 @@
 import { Stack } from 'expo-router';
 import { COLORS } from '@/src/constants/theme';
 
+/**
+ * Stack for all `app/driver/*.tsx` routes. Screens are file-discovered; we only set
+ * global options (same pattern as `app/rider/_layout.tsx`).
+ */
 export default function DriverLayout() {
   return (
     <Stack
@@ -9,11 +13,6 @@ export default function DriverLayout() {
         contentStyle: { backgroundColor: COLORS.background },
         animation: 'slide_from_right',
       }}
-    >
-      <Stack.Screen name="subscription" />
-      <Stack.Screen name="trips" />
-      <Stack.Screen name="vehicle" />
-      <Stack.Screen name="bank" />
-    </Stack>
+    />
   );
 }

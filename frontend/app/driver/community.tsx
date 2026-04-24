@@ -107,7 +107,7 @@ export default function DriverCommunityScreen() {
       const data = await res.json();
       if (data.success) setGroups(data.groups || []);
     } catch (e) {
-      console.error('Fetch groups error:', e);
+      if (__DEV__) console.warn('Fetch groups error', e);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -120,7 +120,7 @@ export default function DriverCommunityScreen() {
       const data = await res.json();
       if (data.success) setEvents(data.events || []);
     } catch (e) {
-      console.error('Fetch events error:', e);
+      if (__DEV__) console.warn('Fetch events error', e);
     }
   };
 
@@ -139,7 +139,7 @@ export default function DriverCommunityScreen() {
       if (pinnedData.success) setPinnedMessages(pinnedData.pinned_messages || []);
       if (pollData.success) setPolls(pollData.polls || []);
     } catch (e) {
-      console.error('Fetch messages error:', e);
+      if (__DEV__) console.warn('Fetch messages error', e);
     } finally {
       setLoadingMessages(false);
     }
@@ -194,7 +194,7 @@ export default function DriverCommunityScreen() {
       await fetch(`${BACKEND_URL}/api/community/messages/${msgId}/like`, { method: 'POST' });
       setMessages((prev) => prev.map((m) => (m._id === msgId ? { ...m, likes: m.likes + 1 } : m)));
     } catch (e) {
-      console.error('Like error:', e);
+      if (__DEV__) console.warn('Like error', e);
     }
   };
 

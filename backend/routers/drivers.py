@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 
 from database import db
+from face_match import FACE_MATCH_SENSITIVE_MIN, face_match_confidence
 from earnings_query import match_completed_trip_paid_for_earnings
 from auth_guard import verify_owner_strict
 from admin_guard import require_admin_request
@@ -253,27 +254,6 @@ async def _trigger_ghost_driver_lock(
             "data": lock_payload,
         }
     )
-
-
-def _strip_data_url(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    return value.split(",", 1)[1] if "," in value else value
-
-
-def _face_match_confidence(reference_image: Optional[str], observed_image: Optional[str]) -> float:
-    ref = _strip_data_url(reference_image)
-    obs = _strip_data_url(observed_image)
-    if len(ref) < 100 or len(obs) < 100:
-        return 0.0
-    ref_digest = hashlib.sha256(ref.encode()).hexdigest()
-    obs_digest = hashlib.sha256(obs.encode()).hexdigest()
-    exact_prefix = sum(1 for a, b in zip(ref_digest[:24], obs_digest[:24]) if a == b) / 24.0
-    length_ratio = min(len(ref), len(obs)) / max(len(ref), len(obs))
-    chunk_ref = hashlib.sha256(ref[:1500].encode()).hexdigest()
-    chunk_obs = hashlib.sha256(obs[:1500].encode()).hexdigest()
-    chunk_score = sum(1 for a, b in zip(chunk_ref[:24], chunk_obs[:24]) if a == b) / 24.0
-    return round(((exact_prefix * 0.55) + (chunk_score * 0.25) + (length_ratio * 0.20)) * 100.0, 2)
 
 
 def _compute_visibility_score(acceptance_rate: float, completion_rate: float, rating: float, cancellations: int, completed_trips: int) -> float:
@@ -606,6 +586,8 @@ async def verify_driver_documents(
     http_request: Request,
     driver_id: str = Form(...),
     nin: Optional[UploadFile] = File(None),
+    nin_number: Optional[str] = Form(None),
+    vehicle_license_number: Optional[str] = Form(None),
     drivers_license: Optional[UploadFile] = File(None),
     passport_photo: Optional[UploadFile] = File(None),
     vehicle_registration: Optional[UploadFile] = File(None),
@@ -647,7 +629,6 @@ async def verify_driver_documents(
             "passport_photo",
             "vehicle_registration",
             "vehicle_license",
-            "hacking_permit",
             "road_worthiness",
             "insurance",
             "vehicle_front",
@@ -655,12 +636,39 @@ async def verify_driver_documents(
             "vehicle_ac",
         ]
 
-        missing_docs = [key for key in required_keys if not doc_files.get(key)]
+        normalized_nin_number = re.sub(r"\D", "", str(nin_number or ""))
+        nin_number_ok = len(normalized_nin_number) == 11
+        normalized_vehicle_license_number = str(vehicle_license_number or "").strip()
+        vehicle_license_number_ok = len(normalized_vehicle_license_number) >= 5
+        missing_docs = [
+            key
+            for key in required_keys
+            if key not in {"nin", "vehicle_license"} and not doc_files.get(key)
+        ]
+        if not doc_files.get("nin") and not nin_number_ok:
+            missing_docs.insert(0, "nin")
+        if not doc_files.get("vehicle_license") and not vehicle_license_number_ok:
+            missing_docs.append("vehicle_license")
         if missing_docs:
             pretty = ", ".join(missing_docs).replace("_", " ")
+            if "nin" in missing_docs:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Provide National ID (NIN) slip image or enter your 11-digit NIN number.",
+                )
+            if "vehicle_license" in missing_docs:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Provide vehicle license upload or enter vehicle license number.",
+                )
             raise HTTPException(status_code=400, detail=f"Missing required documents: {pretty}")
 
         for exp_key, exp_value in expiry_map.items():
+            uploaded_for_key = bool(doc_files.get(exp_key))
+            if exp_key == "vehicle_license" and not uploaded_for_key and vehicle_license_number_ok:
+                continue
+            if not uploaded_for_key:
+                continue
             if not exp_value or len(str(exp_value).strip()) < 7:
                 pretty = exp_key.replace("_", " ")
                 raise HTTPException(status_code=400, detail=f"Expiry date required for {pretty}")
@@ -703,6 +711,10 @@ async def verify_driver_documents(
             "submitted_at": datetime.now(timezone.utc).isoformat(),
             "status": "pending_review",
             "document_count": len(stored_docs),
+            "nin_number": normalized_nin_number if nin_number_ok else None,
+            "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
+            "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None,
+            "vehicle_license_capture_mode": "number_only" if (vehicle_license_number_ok and not doc_files.get("vehicle_license")) else "document_upload",
             "document_hashes": doc_hashes,
             "duplicate_hashes": duplicate_hashes,
             "forgery_flags": fraud_flags,
@@ -723,12 +735,44 @@ async def verify_driver_documents(
                 "submitted_at": datetime.now(timezone.utc).isoformat(),
                 "onboarding_step": "documents",
                 "verification_fraud_flags": fraud_flags,
+                "nin_number": normalized_nin_number if nin_number_ok else None,
+                "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None,
             }},
             upsert=True,
         )
         await db.users.update_one(
             {"id": driver_id},
-            {"$set": {"documents_verified": False, "verification_status": "pending_review"}}
+            {"$set": {"documents_verified": False, "verification_status": "pending_review", "nin": normalized_nin_number if nin_number_ok else None, "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None}}
+        )
+
+        # Ensure admin verification queue always has a row linked to this archived submission.
+        existing_verification = await db.driver_verifications.find_one({"user_id": driver_id}, {"_id": 0, "id": 1, "status": 1})
+        verification_id = (existing_verification or {}).get("id") or str(uuid.uuid4())
+        await db.driver_verifications.update_one(
+            {"user_id": driver_id},
+            {
+                "$set": {
+                    "id": verification_id,
+                    "user_id": driver_id,
+                    "status": "pending",
+                    "submitted_at": datetime.now(timezone.utc),
+                    "reviewed_at": None,
+                    "reviewed_by": None,
+                    "rejection_reason": None,
+                    "documents_summary": {
+                        "document_count": len(stored_docs),
+                        "required_docs_complete": True,
+                        "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
+                        "nin_last4": normalized_nin_number[-4:] if nin_number_ok else None,
+                        "vehicle_license_capture_mode": "number_only" if (vehicle_license_number_ok and not doc_files.get("vehicle_license")) else "document_upload",
+                    },
+                    "documents_archive_ref": {
+                        "driver_id": driver_id,
+                        "submitted_at": doc_archive["submitted_at"],
+                    },
+                }
+            },
+            upsert=True,
         )
 
         logger.info(f"Driver {driver_id}: {len(stored_docs)} documents archived pending admin review")
@@ -934,25 +978,31 @@ async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optiona
         query = {"is_online": True, "verification_status": "approved"}
         if vehicle_type:
             query["vehicle_type"] = vehicle_type
-        drivers = await db.driver_profiles.find(query).to_list(100)
+        drivers = await db.driver_profiles.find(query, {"_id": 0}).to_list(200)
+        driver_ids = [d.get("user_id") for d in drivers if d.get("user_id")]
+        active_subscriptions = await db.subscriptions.find(
+            {"driver_id": {"$in": driver_ids}, "status": {"$in": ["active", "trial", "grace_period"]}},
+            {"_id": 0, "driver_id": 1},
+        ).to_list(500)
+        active_driver_ids = {str(s.get("driver_id")) for s in active_subscriptions if s.get("driver_id")}
         available = []
         for driver in drivers:
-            subscription = await db.subscriptions.find_one({"driver_id": driver.get("user_id"), "status": {"$in": ["active", "trial", "grace_period"]}})
-            if subscription:
-                dd = {"driver_id": driver.get("user_id"), "name": driver.get("name", "Driver"), "rating": driver.get("rating", 4.5), "total_rides": driver.get("total_rides", 0), "vehicle_type": driver.get("vehicle_type", "economy"), "vehicle_plate": driver.get("vehicle_plate", ""), "vehicle_model": driver.get("vehicle_model", ""), "current_location": driver.get("current_location", {})}
-                if lat and lng and driver.get("current_location"):
-                    dlat = driver["current_location"].get("lat")
-                    dlng = driver["current_location"].get("lng")
-                    if dlat and dlng:
-                        R = 6371
-                        d_lat = math.radians(dlat - lat)
-                        d_lng = math.radians(dlng - lng)
-                        a = math.sin(d_lat/2)**2 + math.cos(math.radians(lat)) * math.cos(math.radians(dlat)) * math.sin(d_lng/2)**2
-                        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-                        distance = R * c
-                        dd["distance_km"] = round(distance, 2)
-                        dd["eta_minutes"] = round(distance * 2.5)
-                available.append(dd)
+            if str(driver.get("user_id")) not in active_driver_ids:
+                continue
+            dd = {"driver_id": driver.get("user_id"), "name": driver.get("name", "Driver"), "rating": driver.get("rating", 4.5), "total_rides": driver.get("total_rides", 0), "vehicle_type": driver.get("vehicle_type", "economy"), "vehicle_plate": driver.get("vehicle_plate", ""), "vehicle_model": driver.get("vehicle_model", ""), "current_location": driver.get("current_location", {})}
+            if lat and lng and driver.get("current_location"):
+                dlat = driver["current_location"].get("lat")
+                dlng = driver["current_location"].get("lng")
+                if dlat and dlng:
+                    R = 6371
+                    d_lat = math.radians(dlat - lat)
+                    d_lng = math.radians(dlng - lng)
+                    a = math.sin(d_lat/2)**2 + math.cos(math.radians(lat)) * math.cos(math.radians(dlat)) * math.sin(d_lng/2)**2
+                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                    distance = R * c
+                    dd["distance_km"] = round(distance, 2)
+                    dd["eta_minutes"] = round(distance * 2.5)
+            available.append(dd)
         return {"drivers": available, "count": len(available)}
     except Exception as e:
         logger.error(f"Error fetching available drivers: {str(e)}")
@@ -1912,8 +1962,8 @@ async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultR
     reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference")
-    confidence = _face_match_confidence(reference_face, request.face_image)
-    if confidence < 82.0:
+    confidence = face_match_confidence(reference_face, request.face_image)
+    if confidence < FACE_MATCH_SENSITIVE_MIN:
         raise HTTPException(status_code=403, detail="Face verification failed. Vault funds stay protected.")
     res = await db.users.update_one(
         {"id": driver_id, "earnings_vault_pending_release.amount": release_amount},
@@ -2046,8 +2096,8 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
     reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference found for biometric withdrawal.")
-    confidence = _face_match_confidence(reference_face, request.face_image)
-    if confidence < 82.0:
+    confidence = face_match_confidence(reference_face, request.face_image)
+    if confidence < FACE_MATCH_SENSITIVE_MIN:
         raise HTTPException(status_code=403, detail="Face verification failed. Withdrawal blocked.")
 
     current_balance = float(user.get("wallet_balance", 0.0) or 0.0)

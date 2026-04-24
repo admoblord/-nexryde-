@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { PredictiveMaintenanceAI, type MaintenanceAlert } from '@/src/services/predictiveMaintenance';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 interface DrivingSession {
   startTime: Date;
@@ -94,12 +95,16 @@ export default function DriverWellnessScreen() {
   const loadWellnessData = async () => {
     if (!user?.id) return;
     try {
-      const { BACKEND_URL } = require('@/src/services/api');
-      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}`);
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=week`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) return;
       const data = await res.json();
-      const hours = data?.hours_worked || data?.online_hours || 0;
-      const trips = data?.total_trips || 0;
-      const distanceKm = Number(data?.summary?.total_distance_km || data?.total_distance_km || 0);
+      const summary = data?.summary || {};
+      const timeMins = Number(summary.total_time_mins ?? 0);
+      const hours = timeMins > 0 ? timeMins / 60 : Number(data?.hours_worked || data?.online_hours || 0);
+      const trips = Number(summary.total_trips ?? data?.total_trips ?? 0);
+      const distanceKm = Number(summary.total_distance_km || data?.total_distance_km || 0);
       setWeeklyStats({
         totalDrivingTime: Math.round(hours * 60),
         averageSessionTime: trips > 0 ? Math.round((hours * 60) / Math.max(trips, 1)) : 0,
@@ -272,7 +277,7 @@ export default function DriverWellnessScreen() {
         <Text style={styles.headerTitle}>Driver Wellness</Text>
         <TouchableOpacity 
           style={styles.settingsButton}
-          onPress={() => {/* TODO: Settings */}}
+          onPress={() => router.push('/settings')}
         >
           <Ionicons name="settings" size={24} color={COLORS.white} />
         </TouchableOpacity>

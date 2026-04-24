@@ -59,6 +59,8 @@ async def ensure_indexes(db):
         # Ride bids
         await db.ride_bids.create_index("trip_id")
         await db.ride_bids.create_index("driver_id")
+        await db.ride_bids.create_index([("status", 1), ("expires_at", 1)])
+        await db.ride_bids.create_index([("trip_id", 1), ("status", 1), ("expires_at", 1)])
         
         # Safety and high-write incident collections
         await db.sos_alerts.create_index("id", unique=True, sparse=True)

@@ -15,6 +15,13 @@ from email.message import EmailMessage
 import httpx
 
 from database import db
+from face_match import (
+    face_template_match_confidence,
+    FACE_MATCH_SENSITIVE_MIN,
+    FACE_MATCH_STRONG_MIN,
+    FACE_TEMPLATE_FORTRESS_REJECT_BELOW,
+    FACE_TEMPLATE_SIMSWAP_MIN,
+)
 from security_advanced import create_jwt_token, auth_limiter, otp_limiter, check_brute_force, record_failed_login, clear_login_attempts
 
 logger = logging.getLogger('server')
@@ -24,6 +31,7 @@ auth_router = APIRouter(prefix="/api", tags=["Auth"])
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
 TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
 TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
+TERMII_CHANNEL = (os.environ.get('TERMII_CHANNEL', 'dnd') or 'dnd').strip().lower()
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # OTP Configuration
@@ -32,6 +40,11 @@ OTP_MAX_ATTEMPTS = 3
 OTP_RESEND_COOLDOWN_SECONDS = 60
 OTP_MAX_DAILY_REQUESTS = 10
 EMAIL_OTP_VERIFICATION_TTL_HOURS = 24
+# Aliases for driver fortress (see face_match.py for semantics).
+FORTRESS_FACE_MIN_CONFIDENCE = FACE_MATCH_STRONG_MIN
+# Phone-style “same person” template match; not used for wallet/vault (those use face_match_confidence in drivers).
+FORTRESS_FACE_BLOCK_BELOW = FACE_TEMPLATE_FORTRESS_REJECT_BELOW
+FORTRESS_FACE_SIMSWAP_MIN = FACE_TEMPLATE_SIMSWAP_MIN
 
 otp_store = {}
 
@@ -42,28 +55,6 @@ def is_valid_nigerian_e164(phone: str) -> bool:
 
 def generate_otp() -> str:
     return str(random.randint(100000, 999999))
-
-
-def _strip_data_url(value: Optional[str]) -> str:
-    if not value:
-        return ""
-    return value.split(",", 1)[1] if "," in value else value
-
-
-def _face_match_confidence(reference_image: Optional[str], observed_image: Optional[str]) -> float:
-    ref = _strip_data_url(reference_image)
-    obs = _strip_data_url(observed_image)
-    if len(ref) < 100 or len(obs) < 100:
-        return 0.0
-    import hashlib
-    ref_hash = hashlib.sha256(ref.encode()).hexdigest()
-    obs_hash = hashlib.sha256(obs.encode()).hexdigest()
-    exact_prefix = sum(1 for a, b in zip(ref_hash[:24], obs_hash[:24]) if a == b) / 24.0
-    length_ratio = min(len(ref), len(obs)) / max(len(ref), len(obs))
-    chunk_ref = hashlib.sha256(ref[:1500].encode()).hexdigest()
-    chunk_obs = hashlib.sha256(obs[:1500].encode()).hexdigest()
-    chunk_score = sum(1 for a, b in zip(chunk_ref[:24], chunk_obs[:24]) if a == b) / 24.0
-    return round(((exact_prefix * 0.55) + (chunk_score * 0.25) + (length_ratio * 0.20)) * 100.0, 2)
 
 
 def _pin_hash(user_id: str, pin: str) -> str:
@@ -417,7 +408,19 @@ async def _create_and_send_email_otp(email: str) -> None:
                 wait = int(OTP_RESEND_COOLDOWN_SECONDS - elapsed)
                 raise HTTPException(status_code=429, detail=f"Please wait {wait} seconds before requesting another email OTP.")
     otp_code = generate_otp()
-    _send_email_otp(normalized, otp_code)
+    try:
+        _send_email_otp(normalized, otp_code)
+    except RuntimeError:
+        raise HTTPException(
+            status_code=503,
+            detail="Email verification is temporarily unavailable. Please try again shortly.",
+        )
+    except Exception as exc:
+        logger.exception("Email OTP send failed for %s: %s", normalized, str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail="Could not send email OTP right now. Please try again.",
+        )
     await save_email_otp_record(normalized, otp_code)
 
 async def send_sms_notification(phone: str, message: str):
@@ -539,64 +542,81 @@ async def send_otp(request: OTPRequest, http_request: Request):
             async with httpx.AsyncClient() as http_client:
                 termii_phone = normalized_phone.lstrip('+')
                 
-                payload = {
-                    "api_key": TERMII_API_KEY,
-                    "to": termii_phone,
-                    "from": "NEXRYDE",
-                    "channel": "dnd",
-                    "type": "plain",
-                    "sms": f"Your NEXRYDE verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                }
-                
-                logger.info(
-                    "[OTP:%s] Sending to Termii phone=%s sender=%s channel=%s base=%s",
-                    request_id,
-                    termii_phone,
-                    "NEXRYDE",
-                    "dnd",
-                    TERMII_BASE_URL,
-                )
-                
-                response = await http_client.post(
-                    f"{TERMII_BASE_URL}/api/sms/send",
-                    json=payload,
-                    timeout=30.0
-                )
-                
-                logger.info("[OTP:%s] Termii status=%s", request_id, response.status_code)
-                logger.info("[OTP:%s] Termii body=%s", request_id, response.text)
-                
-                if response.status_code == 200:
-                    try:
-                        data = response.json()
-                    except Exception:
-                        logger.error("[OTP:%s] Termii returned non-JSON body=%s", request_id, response.text)
-                        raise HTTPException(status_code=500, detail="OTP provider returned invalid response.")
-                    if data.get("code") != "ok":
-                        logger.error("[OTP:%s] Termii rejected response=%s", request_id, data)
-                        raise HTTPException(status_code=500, detail="Failed to send OTP. Please try again.")
-                    
-                    message_id = data.get('message_id')
-                    
-                    await save_otp_record(
-                        phone=normalized_phone,
-                        otp=otp_code,
-                        provider="termii",
-                        message_id=message_id
-                    )
-                    
-                    logger.info("[OTP:%s] OTP sent successfully normalized_phone=%s message_id=%s", request_id, normalized_phone, message_id)
-                    return {
-                        "success": True,
-                        "message": "OTP sent successfully via SMS",
-                        "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                        "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                        "provider": "termii"
+                preferred_channel = TERMII_CHANNEL if TERMII_CHANNEL in {"dnd", "generic"} else "dnd"
+                channels_to_try = [preferred_channel] + [c for c in ("generic", "dnd") if c != preferred_channel]
+
+                for channel in channels_to_try:
+                    payload = {
+                        "api_key": TERMII_API_KEY,
+                        "to": termii_phone,
+                        "from": TERMII_FROM_ID or "NEXRYDE",
+                        "channel": channel,
+                        "type": "plain",
+                        "sms": f"Your NEXRYDE verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
                     }
-                else:
+
+                    logger.info(
+                        "[OTP:%s] Sending to Termii phone=%s sender=%s channel=%s base=%s",
+                        request_id,
+                        termii_phone,
+                        TERMII_FROM_ID or "NEXRYDE",
+                        channel,
+                        TERMII_BASE_URL,
+                    )
+
+                    response = await http_client.post(
+                        f"{TERMII_BASE_URL}/api/sms/send",
+                        json=payload,
+                        timeout=30.0
+                    )
+
+                    logger.info("[OTP:%s] Termii status=%s channel=%s", request_id, response.status_code, channel)
+                    logger.info("[OTP:%s] Termii body=%s", request_id, response.text)
+
+                    if response.status_code == 200:
+                        try:
+                            data = response.json()
+                        except Exception:
+                            logger.error("[OTP:%s] Termii returned non-JSON body=%s", request_id, response.text)
+                            raise HTTPException(status_code=500, detail="OTP provider returned invalid response.")
+                        if data.get("code") != "ok":
+                            logger.error("[OTP:%s] Termii rejected response=%s", request_id, data)
+                            continue
+
+                        message_id = data.get('message_id')
+                        await save_otp_record(
+                            phone=normalized_phone,
+                            otp=otp_code,
+                            provider="termii",
+                            message_id=message_id
+                        )
+
+                        logger.info(
+                            "[OTP:%s] OTP sent successfully normalized_phone=%s message_id=%s channel=%s",
+                            request_id,
+                            normalized_phone,
+                            message_id,
+                            channel,
+                        )
+                        return {
+                            "success": True,
+                            "message": "OTP sent successfully via SMS",
+                            "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                            "provider": "termii",
+                            "channel": channel,
+                        }
+
+                    low = response.text.lower()
+                    route_issue = "no route" in low or "route" in low or "channel" in low
+                    if route_issue and channel != channels_to_try[-1]:
+                        logger.warning("[OTP:%s] Termii route issue on channel=%s; retrying fallback.", request_id, channel)
+                        continue
+
                     logger.error("[OTP:%s] Termii API non-200 status=%s body=%s", request_id, response.status_code, response.text)
-                    # If provider call fails, return error immediately
                     raise HTTPException(status_code=500, detail="Failed to send SMS")
+
+                raise HTTPException(status_code=500, detail="Failed to send SMS")
         except HTTPException:
             raise
         except Exception as e:
@@ -1020,11 +1040,10 @@ async def email_sign_in(request: EmailSignInRequest):
         }
 
     suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "Nexryde User"
-    await _create_and_send_email_otp(email)
     return {
-        "message": "Email OTP sent. Verify to continue.",
+        "message": "Email sign-in accepted. Continue registration.",
         "is_new_user": True,
-        "email_verification_required": True,
+        "email_verification_required": False,
         "email_data": {
             "email": email,
             "name": suggested_name,
@@ -1139,11 +1158,81 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
 
     profile = await db.driver_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "face_image": 1, "fortress_known_devices": 1}) or {}
     reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    confidence: float
     if not reference_face:
-        raise HTTPException(status_code=400, detail="Driver face reference missing. Complete face verification first.")
-    confidence = _face_match_confidence(reference_face, request.face_image)
-    if confidence < 82.0:
-        raise HTTPException(status_code=403, detail="Face scan mismatch. Fortress access denied.")
+        # No template yet: enroll (same idea as first Face ID scan).
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$set": {
+                    "face_image": request.face_image,
+                    "face_enrolled_at": now_iso,
+                    "face_enrolled_source": "driver_fortress_bootstrap",
+                    "face_template_stored_at": now_iso,
+                    "face_verified": True,
+                    "face_unlock_enrolled": True,
+                }
+            },
+        )
+        await db.driver_profiles.update_one(
+            {"user_id": user["id"]},
+            {
+                "$set": {
+                    "face_image": request.face_image,
+                    "face_enrolled_at": now_iso,
+                    "face_enrolled_source": "driver_fortress_bootstrap",
+                    "face_template_stored_at": now_iso,
+                }
+            },
+            upsert=True,
+        )
+        confidence = 100.0
+    else:
+        # Same person + PIN + phone: match like phone face unlock, then save this scan as the new template.
+        confidence = face_template_match_confidence(reference_face, request.face_image)
+        if confidence < FORTRESS_FACE_BLOCK_BELOW:
+            logger.warning(
+                "driver_fortress: face template match too low user_id=%s confidence=%s",
+                user.get("id"),
+                confidence,
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="Face does not match your saved face. Use good light, look at the camera, and try again.",
+            )
+        refresh_source = (
+            "driver_fortress_strong_match"
+            if confidence >= FORTRESS_FACE_MIN_CONFIDENCE
+            else "driver_fortress_same_person_unlock"
+        )
+        await db.users.update_one(
+            {"id": user["id"]},
+            {
+                "$set": {
+                    "face_image": request.face_image,
+                    "face_refreshed_at": now_iso,
+                    "face_refreshed_source": refresh_source,
+                    "face_last_confidence": confidence,
+                    "face_template_stored_at": now_iso,
+                    "face_verified": True,
+                    "face_unlock_enrolled": True,
+                }
+            },
+        )
+        await db.driver_profiles.update_one(
+            {"user_id": user["id"]},
+            {
+                "$set": {
+                    "face_image": request.face_image,
+                    "face_refreshed_at": now_iso,
+                    "face_refreshed_source": refresh_source,
+                    "face_last_confidence": confidence,
+                    "face_template_stored_at": now_iso,
+                }
+            },
+            upsert=True,
+        )
 
     device_id = challenge.get("device_id")
     known_devices = list(profile.get("fortress_known_devices") or [])
@@ -1153,15 +1242,15 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
         {"user_id": user["id"]},
         {"$set": {
             "fortress_known_devices": known_devices,
-            "last_fortress_verified_at": datetime.now(timezone.utc).isoformat(),
+            "last_fortress_verified_at": now_iso,
             "pending_identity_reconfirm": False,
-            "ghost_driver_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"},
+            "ghost_driver_lock": {"active": False, "cleared_at": now_iso, "source": "driver_fortress_reconfirm"},
         }},
         upsert=True,
     )
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"ghost_driver_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"}, "sim_swap_lock": {"active": False, "cleared_at": datetime.now(timezone.utc).isoformat(), "source": "driver_fortress_reconfirm"}, "earnings_frozen": False}},
+        {"$set": {"ghost_driver_lock": {"active": False, "cleared_at": now_iso, "source": "driver_fortress_reconfirm"}, "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "driver_fortress_reconfirm"}, "earnings_frozen": False}},
     )
     await db.driver_login_fortress_challenges.update_one(
         {"id": request.challenge_id},
@@ -1170,7 +1259,13 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
     user = await db.users.find_one({"id": user["id"]})
     user["_id"] = str(user["_id"])
     token = create_jwt_token(user["id"], user.get("role", "driver"))
-    return {"message": "Driver Account Fortress verified", "user": user, "token": token, "face_confidence": confidence}
+    return {
+        "message": "Driver Account Fortress verified. Your face is saved for the next time you unlock.",
+        "user": user,
+        "token": token,
+        "face_confidence": confidence,
+        "face_template_saved": True,
+    }
 
 
 @auth_router.post("/auth/driver-sim-swap/reconfirm")
@@ -1191,18 +1286,42 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
     reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference found")
-    confidence = _face_match_confidence(reference_face, request.face_image)
-    if confidence < 82.0:
-        raise HTTPException(status_code=403, detail="Face scan mismatch")
+    confidence = face_template_match_confidence(reference_face, request.face_image)
+    if confidence < FORTRESS_FACE_SIMSWAP_MIN:
+        raise HTTPException(
+            status_code=403,
+            detail="Face does not match your saved face. Use good light, look at the camera, and try again.",
+        )
 
     now_iso = datetime.now(timezone.utc).isoformat()
     await db.users.update_one(
         {"id": user["id"]},
-        {"$set": {"sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"}, "earnings_frozen": False}},
+        {
+            "$set": {
+                "face_image": request.face_image,
+                "face_template_stored_at": now_iso,
+                "face_refreshed_at": now_iso,
+                "face_refreshed_source": "sim_swap_reconfirm",
+                "face_last_confidence": confidence,
+                "face_verified": True,
+                "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
+                "earnings_frozen": False,
+            }
+        },
     )
     await db.driver_profiles.update_one(
         {"user_id": user["id"]},
-        {"$set": {"sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"}, "pending_identity_reconfirm": False}},
+        {
+            "$set": {
+                "face_image": request.face_image,
+                "face_template_stored_at": now_iso,
+                "face_refreshed_at": now_iso,
+                "face_refreshed_source": "sim_swap_reconfirm",
+                "face_last_confidence": confidence,
+                "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
+                "pending_identity_reconfirm": False,
+            }
+        },
         upsert=True,
     )
     fresh = await db.users.find_one({"id": user["id"]})
@@ -1213,6 +1332,7 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
         "user": fresh,
         "token": token,
         "face_confidence": confidence,
+        "face_template_saved": True,
     }
 
 @auth_router.post("/auth/register")
@@ -1228,18 +1348,7 @@ async def register(request: RegisterRequest):
         existing = await db.users.find_one({"email": normalized_email})
         if existing:
             raise HTTPException(status_code=400, detail="User with this email already exists")
-        if not request.google_id:
-            email_verification = await db.email_verifications.find_one(
-                {"email": normalized_email, "consumed": False}
-            )
-            if not email_verification:
-                raise HTTPException(status_code=400, detail="Email must be OTP-verified before registration")
-            expires_at = email_verification.get("expires_at")
-            if isinstance(expires_at, datetime):
-                if expires_at.tzinfo is None:
-                    expires_at = expires_at.replace(tzinfo=timezone.utc)
-                if datetime.now(timezone.utc) > expires_at:
-                    raise HTTPException(status_code=400, detail="Email verification expired. Verify email again.")
+        # Email OTP verification intentionally disabled for now.
     
     if request.google_id:
         existing = await db.users.find_one({"google_id": request.google_id})
@@ -1275,11 +1384,7 @@ async def register(request: RegisterRequest):
         driver_profile = create_driver_profile_dict(user["id"])
         await db.driver_profiles.insert_one(driver_profile)
 
-    if request.email and not request.google_id:
-        await db.email_verifications.update_one(
-            {"email": request.email.strip().lower()},
-            {"$set": {"consumed": True, "consumed_at": datetime.now(timezone.utc), "user_id": user["id"]}},
-        )
+    # Keep email_verifications collection untouched when OTP flow is disabled.
     
     token = create_jwt_token(user["id"], user.get("role", "rider"))
     return {"message": "Registration successful", "user": user, "token": token}

@@ -39,7 +39,7 @@ export default function FuelTrackerScreen() {
         const parsed = raw ? JSON.parse(raw) : [];
         setRecentLogs(Array.isArray(parsed) ? parsed : []);
       } catch (e) {
-        console.log('Failed to load fuel logs:', e);
+        if (__DEV__) console.warn('Failed to load fuel logs', e);
       }
     };
     load();
@@ -68,7 +68,7 @@ export default function FuelTrackerScreen() {
     try {
       await AsyncStorage.setItem(storageKey, JSON.stringify(updated));
     } catch (e) {
-      console.log('Failed to persist fuel logs:', e);
+      if (__DEV__) console.warn('Failed to persist fuel logs', e);
     }
     Alert.alert('Success', `Fuel purchase of ${CURRENCY}${amountNum.toLocaleString()} (${litersNum}L) logged!`);
     setFuelAmount('');

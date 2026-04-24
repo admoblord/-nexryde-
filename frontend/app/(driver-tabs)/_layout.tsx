@@ -82,7 +82,7 @@ export default function DriverTabLayout() {
         <Tabs.Screen
           name="driver-notifications"
           options={{
-            title: 'Updates',
+            title: t.tabs.updates,
             tabBarIcon: ({ color, focused }) => (
               <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
                 <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={24} color={color} />

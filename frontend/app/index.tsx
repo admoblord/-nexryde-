@@ -7,6 +7,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL } from '@/src/services/api';
+import {
+  driverTermsRouteParams,
+  driverDocumentsRouteParams,
+  driverProfileRouteParams,
+} from '@/src/utils/driverOnboardingNav';
 
 const { width, height } = Dimensions.get('window');
 
@@ -139,9 +144,19 @@ export default function SplashScreen() {
                   const data = await st.json();
                   if (!st.ok || !data?.completed) {
                     const step = data?.step;
-                    if (step === 'terms') router.replace('/(auth)/driver-terms');
-                    else if (step === 'profile') router.replace('/(auth)/driver-profile');
-                    else router.replace('/(auth)/driver-documents');
+                    const u = {
+                      id: userData.id,
+                      phone: userData.phone,
+                      name: userData.name,
+                      email: userData.email,
+                    };
+                    if (step === 'terms') {
+                      router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
+                    } else if (step === 'profile') {
+                      router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
+                    } else {
+                      router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
+                    }
                     return;
                   }
                   router.replace('/(driver-tabs)/driver-home');

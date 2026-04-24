@@ -45,6 +45,9 @@ proto-plus>=1.20.0
 # Rate limiting (per-IP on selected routes)
 slowapi==0.1.9
 
+# Image / face similarity (perceptual hash; used for driver & ride face checks)
+Pillow>=10.0.0
+
 # Utilities
 python-dotenv==1.2.1
 email-validator==2.3.0
