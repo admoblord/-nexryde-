@@ -980,7 +980,7 @@ export default function ModernDriverHome() {
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>{t.driver.toolsSection}</Text>
-            <Text style={styles.featureCount}>{toolFeatures.length} items</Text>
+            <Text style={styles.featureCount}>{toolFeatures.length}</Text>
           </View>
           <Text style={styles.toolsHint}>{t.driver.toolsHubHint}</Text>
           <View style={styles.allFeaturesGrid}>
