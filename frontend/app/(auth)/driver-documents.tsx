@@ -30,8 +30,8 @@ const DOCUMENTS: DocItem[] = [
   { key: 'nin', label: 'National ID (NIN)', icon: 'card', required: true, hasExpiry: false },
   { key: 'drivers_license', label: "Driver's License", icon: 'car', required: true, hasExpiry: true },
   { key: 'passport_photo', label: 'Passport Photo', icon: 'person', required: true, hasExpiry: false },
-  { key: 'vehicle_registration', label: 'Plate Number Upload', icon: 'document-text', required: true, hasExpiry: true },
-  { key: 'vehicle_license', label: 'Vehicle License Number / Upload', icon: 'receipt', required: true, hasExpiry: true },
+  { key: 'vehicle_registration', label: 'Plate Number Upload', icon: 'document-text', required: true, hasExpiry: false },
+  { key: 'vehicle_license', label: 'Vehicle License Document', icon: 'receipt', required: true, hasExpiry: true },
   { key: 'hacking_permit', label: 'Hackney Permit / Carriage (Optional)', icon: 'shield-checkmark', required: false, hasExpiry: true },
   { key: 'road_worthiness', label: 'Road Worthiness Certificate', icon: 'construct', required: true, hasExpiry: true },
   { key: 'insurance', label: 'Vehicle Insurance', icon: 'umbrella', required: true, hasExpiry: true },
@@ -47,7 +47,6 @@ export default function DriverDocumentsScreen() {
   const [docs, setDocs] = useState<Record<string, string | null>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
   const [ninNumber, setNinNumber] = useState('');
-  const [vehicleLicenseNumber, setVehicleLicenseNumber] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [biometricVerified, setBiometricVerified] = useState(false);
 
@@ -116,20 +115,21 @@ export default function DriverDocumentsScreen() {
   const requiredDocs = DOCUMENTS.filter(d => d.required);
   const cleanNinNumber = ninNumber.replace(/\D/g, '');
   const ninSatisfied = Boolean(docs.nin) || cleanNinNumber.length === 11;
-  const cleanVehicleLicenseNumber = vehicleLicenseNumber.trim();
-  const vehicleLicenseSatisfied = Boolean(docs.vehicle_license) || cleanVehicleLicenseNumber.length >= 5;
   const allRequiredUploaded = requiredDocs.every((d) => {
     if (d.key === 'nin') return ninSatisfied;
-    if (d.key === 'vehicle_license') return vehicleLicenseSatisfied;
     return !!docs[d.key];
   });
-  const expiryDocsWithDate = DOCUMENTS.filter(d => d.hasExpiry);
-  const allExpiriesFilled = expiryDocsWithDate.every(d => !docs[d.key] || (expiry[d.key] && expiry[d.key].length >= 7));
+  // Only required docs should block submission.
+  const requiredExpiryDocs = DOCUMENTS.filter((d) => d.required && d.hasExpiry);
+  const missingRequiredExpiryDocs = requiredExpiryDocs.filter(
+    (d) => docs[d.key] && (!expiry[d.key] || expiry[d.key].length < 7)
+  );
+  const allRequiredExpiriesFilled = missingRequiredExpiryDocs.length === 0;
+  const canSubmit = allRequiredUploaded && biometricVerified;
 
   const handleSubmit = async () => {
     const missing = requiredDocs.filter((d) => {
       if (d.key === 'nin') return !ninSatisfied;
-      if (d.key === 'vehicle_license') return !vehicleLicenseSatisfied;
       return !docs[d.key];
     });
     const missingWithNinFallback = missing.filter((d) => d.key !== 'nin');
@@ -141,7 +141,7 @@ export default function DriverDocumentsScreen() {
       return;
     }
 
-    const missingExpiry = expiryDocsWithDate.filter(d => docs[d.key] && (!expiry[d.key] || expiry[d.key].length < 7));
+    const missingExpiry = missingRequiredExpiryDocs;
     if (missingExpiry.length > 0) {
       Alert.alert('Expiry Dates Required', `Please enter expiry date for: ${missingExpiry.map(d => d.label).join(', ')}`);
       return;
@@ -158,10 +158,6 @@ export default function DriverDocumentsScreen() {
       if (cleanNinNumber.length === 11) {
         formData.append('nin_number', cleanNinNumber);
       }
-      if (cleanVehicleLicenseNumber.length >= 5) {
-        formData.append('vehicle_license_number', cleanVehicleLicenseNumber);
-      }
-
       for (const doc of DOCUMENTS) {
         if (docs[doc.key]) {
           formData.append(doc.key, {
@@ -238,7 +234,6 @@ export default function DriverDocumentsScreen() {
 
   const requiredCompleteCount = requiredDocs.filter((d) => {
     if (d.key === 'nin') return ninSatisfied;
-    if (d.key === 'vehicle_license') return vehicleLicenseSatisfied;
     return !!docs[d.key];
   }).length;
 
@@ -258,13 +253,14 @@ export default function DriverDocumentsScreen() {
         <ScrollView style={st.scroll} contentContainerStyle={st.scrollContent} showsVerticalScrollIndicator={false}>
           <DriverOnboardingProgress
             current="documents"
-            subtitle="Upload clear photos or enter NIN / license number where shown. Vehicle interior and AC must be live camera shots."
+            subtitle="Upload clear photos. You can enter NIN where shown. Vehicle interior and AC must be live camera shots."
           />
           <View style={st.infoCard}>
             <Ionicons name="shield-checkmark" size={40} color={COLORS.accentGreen} />
             <Text style={st.infoTitle}>Documents and checks</Text>
             <Text style={st.infoText}>
-              Use bright, glare-free light. Expiry fields use MM/YYYY. When every required row shows a green check (including NIN or 11-digit number, and license file or number), confirm biometrics and submit once.
+              Use bright, glare-free light. Expiry fields use MM/YYYY for required documents that have expiry.
+              Once required rows are complete and biometrics are confirmed, submit.
             </Text>
           </View>
 
@@ -331,23 +327,6 @@ export default function DriverDocumentsScreen() {
                   )}
                 </View>
               )}
-              {doc.key === 'vehicle_license' && !docs.vehicle_license && (
-                <View style={st.expiryRow}>
-                  <Ionicons name="document-text" size={16} color={COLORS.lightTextSecondary} />
-                  <TextInput
-                    style={st.expiryInput}
-                    placeholder="Or enter vehicle license number"
-                    placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
-                    value={vehicleLicenseNumber}
-                    onChangeText={setVehicleLicenseNumber}
-                    autoCapitalize="characters"
-                    maxLength={32}
-                  />
-                  {cleanVehicleLicenseNumber.length >= 5 && (
-                    <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
-                  )}
-                </View>
-              )}
             </View>
           ))}
 
@@ -371,13 +350,21 @@ export default function DriverDocumentsScreen() {
         </ScrollView>
 
         <View style={st.bottom}>
+          {!allRequiredExpiriesFilled && (
+            <View style={st.submitHint}>
+              <Ionicons name="alert-circle-outline" size={16} color={COLORS.warning} />
+              <Text style={st.submitHintText}>
+                Add expiry date (MM/YYYY) for: {missingRequiredExpiryDocs.map((d) => d.label).join(', ')}.
+              </Text>
+            </View>
+          )}
           <TouchableOpacity
-            style={[st.submitBtn, (!allRequiredUploaded || !allExpiriesFilled || !biometricVerified) && st.submitDisabled]}
+            style={[st.submitBtn, (!canSubmit || !allRequiredExpiriesFilled) && st.submitDisabled]}
             onPress={handleSubmit}
-            disabled={!allRequiredUploaded || !allExpiriesFilled || !biometricVerified || verifying}
+            disabled={!canSubmit || verifying}
           >
             <LinearGradient
-              colors={allRequiredUploaded && allExpiriesFilled && biometricVerified
+              colors={canSubmit
                 ? [COLORS.accentGreen, COLORS.accentBlue]
                 : [COLORS.lightBorder, COLORS.lightBorder]}
               style={st.submitGrad}
@@ -385,7 +372,7 @@ export default function DriverDocumentsScreen() {
             >
               {verifying
                 ? <ActivityIndicator color={COLORS.white} />
-                : <Text style={[st.submitText, (!allRequiredUploaded || !allExpiriesFilled || !biometricVerified) && st.submitTextOff]}>
+                : <Text style={[st.submitText, !canSubmit && st.submitTextOff]}>
                     Submit for Verification
                   </Text>
               }
@@ -454,6 +441,25 @@ const st = StyleSheet.create({
   bottom: {
     backgroundColor: COLORS.white, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.lg,
     borderTopWidth: 1, borderTopColor: COLORS.lightBorder,
+  },
+  submitHint: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.xs,
+    marginBottom: SPACING.sm,
+    backgroundColor: '#FFFBEB',
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: SPACING.xs,
+  },
+  submitHintText: {
+    flex: 1,
+    fontSize: FONT_SIZE.xs,
+    color: '#92400E',
+    lineHeight: 18,
+    fontWeight: '600',
   },
   submitBtn: {
     borderRadius: BORDER_RADIUS.xl, overflow: 'hidden',
