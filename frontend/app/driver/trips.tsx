@@ -764,7 +764,7 @@ export default function DriverTripsScreen() {
     const riskColor = riskBand === 'red' ? '#dc2626' : riskBand === 'yellow' ? '#d97706' : '#16a34a';
 
     return (
-    <Card style={[styles.tripCard, isPreferred && { borderColor: '#f59e0b', borderWidth: 2 }]}>
+    <Card style={isPreferred ? { ...styles.tripCard, borderColor: '#f59e0b', borderWidth: 2 } : styles.tripCard}>
       {isPreferred && (
         <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
           <Ionicons name="star" size={13} color="#f59e0b" />

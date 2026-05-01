@@ -93,7 +93,7 @@ export default function ModernRiderHome() {
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
     // Request push notification permission so riders get driver alerts
-    void notificationService.requestPermissions().catch(() => {});
+    void notificationService.initialize().catch(() => {});
   }, []);
 
   useEffect(() => {

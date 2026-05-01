@@ -8,7 +8,7 @@ import { useLanguage } from '@/src/i18n/LanguageContext';
 import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/api/client';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 function NotifIcon({ color, focused, count }: { color: string; focused: boolean; count: number }) {
   return (
