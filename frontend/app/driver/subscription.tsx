@@ -11,6 +11,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  Linking,
   AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -86,6 +87,8 @@ export default function SubscriptionScreen() {
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [payingTier, setPayingTier] = useState<'city_rider' | 'road_warrior' | null>(null);
+  const [verifyingPayment, setVerifyingPayment] = useState(false);
   const [virtualAccount, setVirtualAccount] = useState<VirtualAccountDetails | null>(null);
   /** Latest Squad subscription checkout ref (ref avoids stale interval closures). */
   const pendingSubCheckoutRef = useRef<string | null>(null);
@@ -315,6 +318,7 @@ export default function SubscriptionScreen() {
       return;
     }
     setSubmitting(true);
+    setPayingTier(tier);
     try {
       const response = await initiateSubscriptionCheckout(tier);
       const data = response.data || {};
@@ -333,8 +337,10 @@ export default function SubscriptionScreen() {
         // Awaits until the browser is dismissed — no fire-and-forget external browser.
         await openSquadCheckoutUrl(data.checkout_url);
 
-        // Browser closed — immediately verify with Squad backend (silent: no extra alert on success)
+        // Browser closed — silently verify with Squad backend and show a brief indicator
+        setVerifyingPayment(true);
         await confirmPendingCheckoutRef.current({ silent: true });
+        setVerifyingPayment(false);
       } else {
         Alert.alert(
           'Checkout started',
@@ -347,8 +353,11 @@ export default function SubscriptionScreen() {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
       Alert.alert('Payment Error', detail ? String(detail) : 'Payment not completed. Please try again.');
+    } finally {
+      setSubmitting(false);
+      setPayingTier(null);
+      setVerifyingPayment(false);
     }
-    setSubmitting(false);
   };
 
   const confirmPendingCheckout = async (opts?: { silent?: boolean }) => {
@@ -367,16 +376,20 @@ export default function SubscriptionScreen() {
         }
         await fetchSubscriptionStatus();
       } else {
-        const vr = data.verify_result as Record<string, unknown> | undefined;
-        const squadStatus = (vr?.transaction_status as string | undefined) || '';
-        const reason =
-          data.detail === 'amount_mismatch'
-            ? 'Amount mismatch. If Squad shows success, try again in a minute or contact support.'
-            : squadStatus === 'pending' || squadStatus === 'processing'
-              ? 'Payment pending. Please complete authentication (OTP / bank approval) and try again.'
-              : typeof vr?.reason === 'string'
-                ? vr.reason
-                : 'Payment not confirmed yet. Try again shortly.';
+        const reasonCode = (data.reason as string | undefined) || '';
+        const txStatus = (data.transaction_status as string | undefined) || '';
+        let reason: string;
+        if (data.detail === 'amount_mismatch') {
+          reason = 'Amount mismatch detected. If Squad shows a deduction, contact support with your reference.';
+        } else if (reasonCode === 'payment_pending' || txStatus === 'pending' || txStatus === 'processing') {
+          reason = 'Payment pending. Please complete your bank OTP or card authentication and try again.';
+        } else if (reasonCode === 'payment_failed' || txStatus === 'failed' || txStatus === 'declined') {
+          reason = 'Payment was declined. Please try a different card or payment method.';
+        } else if (reasonCode === 'network_timeout') {
+          reason = 'Network timeout. Check your internet connection and try again.';
+        } else {
+          reason = 'Payment not confirmed yet. Please try again in a moment.';
+        }
         if (!silent) Alert.alert('Not yet confirmed', reason);
       }
     } catch (e: unknown) {
@@ -396,6 +409,7 @@ export default function SubscriptionScreen() {
 
   confirmPendingCheckoutRef.current = confirmPendingCheckout;
 
+  // AppState: auto-verify on foreground return (e.g. user finished payment in external browser)
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const sub = AppState.addEventListener('change', (state) => {
@@ -408,6 +422,31 @@ export default function SubscriptionScreen() {
       if (t) clearTimeout(t);
       sub.remove();
     };
+  }, []);
+
+  // Deep link: handle nexryde://subscription/return?reference=xxx (Squad callback)
+  useEffect(() => {
+    const handleUrl = ({ url }: { url: string }) => {
+      if (!url.includes('subscription/return')) return;
+      // Extract reference from the deep link query string
+      const match = url.match(/[?&]reference=([^&]+)/);
+      const ref = match ? decodeURIComponent(match[1]) : null;
+      if (ref && ref !== pendingSubCheckoutRef.current) {
+        pendingSubCheckoutRef.current = ref;
+        AsyncStorage.setItem(PENDING_SUB_REF_KEY, ref).catch(() => {});
+      }
+      // Trigger verification after a short delay (browser dismiss animation)
+      setTimeout(() => {
+        setVerifyingPayment(true);
+        confirmPendingCheckoutRef.current({ silent: true }).finally(() => {
+          setVerifyingPayment(false);
+          fetchSubscriptionStatus();
+        });
+      }, 600);
+    };
+
+    const sub = Linking.addEventListener('url', handleUrl);
+    return () => sub.remove();
   }, []);
 
 
@@ -490,11 +529,25 @@ export default function SubscriptionScreen() {
           contentContainerStyle={styles.scrollContent}
         >
           {subscriptionIsPending && (
-            <View style={styles.pendingFlowBanner}>
-              <Ionicons name="time" size={18} color="#FBBF24" />
-              <Text style={styles.flowBannerText}>
-                {pendingTierLabel} payment is being processed. Your plan activates automatically once confirmed.
-              </Text>
+            <View style={[styles.flowBanner, styles.pendingFlowBanner]}>
+              <Ionicons name="time" size={18} color="#FBBF24" style={{ marginTop: 2 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.flowBannerText}>
+                  {pendingTierLabel} payment is processing. Your plan activates once confirmed.
+                </Text>
+                <TouchableOpacity
+                  style={styles.inlineVerifyBtn}
+                  onPress={() => void confirmPendingCheckout()}
+                  disabled={submitting || verifyingPayment}
+                  activeOpacity={0.8}
+                >
+                  {verifyingPayment ? (
+                    <ActivityIndicator size="small" color="#FBBF24" />
+                  ) : (
+                    <Text style={styles.inlineVerifyBtnText}>Tap to verify now</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -657,7 +710,7 @@ export default function SubscriptionScreen() {
                   </View>
                 ) : (subscription?.tier === 'none' || !subscription) ? (
                   <TouchableOpacity
-                    style={styles.selectButton}
+                    style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
                     onPress={() => payWithSquadCheckout('city_rider')}
                     disabled={submitting}
                     activeOpacity={0.85}
@@ -666,12 +719,14 @@ export default function SubscriptionScreen() {
                       colors={['#00D084', '#00C853']}
                       style={styles.selectButtonGradient}
                     >
-                      {submitting ? (
+                      {payingTier === 'city_rider' ? (
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
                         <>
-                          <Ionicons name="card" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Pay Now — City Rider</Text>
+                          <Ionicons name="card" size={20} color={submitting ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
+                          <Text style={[styles.selectButtonText, submitting ? { opacity: 0.5 } : null]}>
+                            Pay Now — City Rider
+                          </Text>
                         </>
                       )}
                     </LinearGradient>
@@ -768,7 +823,7 @@ export default function SubscriptionScreen() {
                   </View>
                 ) : (subscription?.tier === 'none' || !subscription) ? (
                   <TouchableOpacity
-                    style={styles.selectButton}
+                    style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
                     onPress={() => payWithSquadCheckout('road_warrior')}
                     disabled={submitting}
                     activeOpacity={0.85}
@@ -777,12 +832,14 @@ export default function SubscriptionScreen() {
                       colors={['#FFD700', '#FFA500']}
                       style={styles.selectButtonGradient}
                     >
-                      {submitting ? (
+                      {payingTier === 'road_warrior' ? (
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
                         <>
-                          <Ionicons name="card" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Pay Now — Road Warrior</Text>
+                          <Ionicons name="card" size={20} color={submitting ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
+                          <Text style={[styles.selectButtonText, submitting ? { opacity: 0.5 } : null]}>
+                            Pay Now — Road Warrior
+                          </Text>
                         </>
                       )}
                     </LinearGradient>
@@ -792,30 +849,40 @@ export default function SubscriptionScreen() {
             </Animated.View>
           </View>
 
-          {/* Verify Payment Card — slim, always visible */}
-          <Animated.View style={[styles.verifyCard, { opacity: fadeAnim }]}>
-            <View style={styles.verifyCardRow}>
-              <View style={styles.verifyCardLeft}>
-                <Ionicons name="shield-checkmark-outline" size={22} color="#00D084" />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.verifyCardTitle}>Already paid?</Text>
-                  <Text style={styles.verifyCardSub}>Tap to confirm your payment with Squad and activate your plan instantly.</Text>
+          {/* Verify Payment Card — only shown when payment is pending or in-progress */}
+          {!subscriptionIsActive && (
+            <Animated.View style={[styles.verifyCard, { opacity: fadeAnim }]}>
+              {verifyingPayment && (
+                <View style={styles.verifyingBanner}>
+                  <ActivityIndicator size="small" color="#00D084" />
+                  <Text style={styles.verifyingBannerText}>Verifying your payment with Squad…</Text>
                 </View>
+              )}
+              <View style={styles.verifyCardRow}>
+                <View style={styles.verifyCardLeft}>
+                  <Ionicons name="shield-checkmark-outline" size={22} color="#00D084" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.verifyCardTitle}>Already paid?</Text>
+                    <Text style={styles.verifyCardSub}>
+                      Tap to confirm payment with Squad and activate your plan instantly.
+                    </Text>
+                  </View>
+                </View>
+                <TouchableOpacity
+                  style={[styles.verifyCardBtn, (submitting || verifyingPayment) ? styles.verifyCardBtnDisabled : null]}
+                  onPress={() => void confirmPendingCheckout()}
+                  disabled={submitting || verifyingPayment}
+                  activeOpacity={0.8}
+                >
+                  {submitting || verifyingPayment ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <Text style={styles.verifyCardBtnText}>Verify</Text>
+                  )}
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                style={styles.verifyCardBtn}
-                onPress={() => void confirmPendingCheckout()}
-                disabled={submitting}
-                activeOpacity={0.8}
-              >
-                {submitting ? (
-                  <ActivityIndicator size="small" color="#FFF" />
-                ) : (
-                  <Text style={styles.verifyCardBtnText}>Verify</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
+            </Animated.View>
+          )}
 
           <View style={{ height: 40 }} />
         </ScrollView>
@@ -1575,9 +1642,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     minWidth: 72,
   },
+  verifyCardBtnDisabled: {
+    opacity: 0.55,
+  },
   verifyCardBtnText: {
     fontSize: 14,
     fontWeight: '900',
     color: '#FFFFFF',
+  },
+  verifyingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0, 208, 132, 0.1)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  verifyingBannerText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#00D084',
+  },
+  inlineVerifyBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(251, 191, 36, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.5)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+  },
+  inlineVerifyBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FBBF24',
+  },
+  selectButtonDisabled: {
+    opacity: 0.6,
   },
 });

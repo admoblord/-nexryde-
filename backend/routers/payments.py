@@ -1833,10 +1833,18 @@ async def verify_pending_subscription_checkout(
                 driver_id, ref, verify_result.get("verified"), verify_result.get("reason"))
     if not verify_result.get("verified"):
         reason_txt = str(verify_result.get("reason") or "").lower()
-        reason_code = (
-            "network_timeout"
-            if ("timeout" in reason_txt or "failed" in reason_txt)
-            else "gateway_failed"
+        tx_status = str(verify_result.get("transaction_status") or "").lower()
+        if "timeout" in reason_txt or "connect" in reason_txt:
+            reason_code = "network_timeout"
+        elif tx_status in ("pending", "processing"):
+            reason_code = "payment_pending"
+        elif tx_status in ("failed", "declined", "reversed"):
+            reason_code = "payment_failed"
+        else:
+            reason_code = "gateway_failed"
+        logger.info(
+            "sub_verify_not_verified: driver=%s ref=%s reason=%s tx_status=%s",
+            driver_id, ref, reason_code, tx_status,
         )
         await db.subscription_payment_intents.update_one(
             {"id": intent.get("id"), "status": "pending"},
@@ -1849,7 +1857,12 @@ async def verify_pending_subscription_checkout(
                 }
             },
         )
-        return {"verified": False, "verify_result": verify_result, "reason": reason_code}
+        return {
+            "verified": False,
+            "reason": reason_code,
+            "verify_result": verify_result,
+            "transaction_status": tx_status or None,
+        }
 
     expected_amount = _normalize_amount(intent.get("amount_ngn"))
     paid_amount = _reconcile_squad_amount_with_intent(
