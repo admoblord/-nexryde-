@@ -323,6 +323,28 @@ def _build_salary_mode_plan(target: float, achieved: float, now: datetime) -> di
 
 # ==================== MODELS ====================
 
+# Canonical ride categories supported by dispatch
+VALID_RIDE_CATEGORIES = {"economy", "comfort", "xl", "premium", "female_only"}
+# Friendly alias normalisation (client may send "standard")
+CATEGORY_ALIASES: dict[str, str] = {"standard": "economy"}
+
+
+def _normalize_category(cat: str) -> Optional[str]:
+    """Return canonical category key or None if invalid."""
+    c = cat.strip().lower()
+    c = CATEGORY_ALIASES.get(c, c)
+    return c if c in VALID_RIDE_CATEGORIES else None
+
+
+def _normalize_categories(cats: list[str]) -> list[str]:
+    result = []
+    for c in cats:
+        nc = _normalize_category(c)
+        if nc and nc not in result:
+            result.append(nc)
+    return result
+
+
 class DriverProfileUpdate(BaseModel):
     vehicle_type: Optional[str] = None
     vehicle_model: Optional[str] = None
@@ -336,6 +358,10 @@ class DriverProfileUpdate(BaseModel):
     bank_name: Optional[str] = None
     account_number: Optional[str] = None
     account_name: Optional[str] = None
+
+
+class DriverCategoriesUpdate(BaseModel):
+    active_categories: list[str] = Field(default_factory=list)
 
 class LocationUpdate(BaseModel):
     latitude: float
@@ -429,6 +455,40 @@ async def update_driver_profile(user_id: str, request: Request, body: DriverProf
     profile = await db.driver_profiles.find_one({"user_id": user_id})
     profile["_id"] = str(profile["_id"])
     return profile
+
+
+@drivers_router.put("/drivers/{user_id}/categories")
+async def update_driver_categories(user_id: str, http_request: Request, body: DriverCategoriesUpdate):
+    """Update which ride categories this driver is willing to accept."""
+    verify_owner_strict(http_request, user_id)
+    normalized = _normalize_categories(body.active_categories)
+    if not normalized:
+        raise HTTPException(
+            status_code=400,
+            detail="At least one valid category is required. Supported: economy (standard), comfort, xl, premium.",
+        )
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {"active_categories": normalized}},
+        upsert=True,
+    )
+    return {"active_categories": normalized, "message": "Categories updated"}
+
+
+@drivers_router.get("/drivers/{user_id}/categories")
+async def get_driver_categories(user_id: str, http_request: Request):
+    """Return the driver's currently active ride categories."""
+    verify_owner_strict(http_request, user_id)
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "active_categories": 1, "vehicle_type": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+    cats = profile.get("active_categories") or []
+    # If no explicit categories set, fall back to vehicle_type as the single category
+    if not cats and profile.get("vehicle_type"):
+        vt = CATEGORY_ALIASES.get(profile["vehicle_type"], profile["vehicle_type"])
+        cats = [vt] if vt in VALID_RIDE_CATEGORIES else ["economy"]
+    return {"active_categories": cats}
+
 
 @drivers_router.put("/drivers/{user_id}/location")
 async def update_driver_location(user_id: str, request: LocationUpdate, http_request: Request):

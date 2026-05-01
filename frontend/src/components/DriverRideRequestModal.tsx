@@ -153,6 +153,18 @@ export default function DriverRideRequestModal({
     paymentRaw === 'cash'
       ? 'Cash'
       : paymentRaw.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
+
+  // Category display
+  const rawCat = String(trip?.service_type || trip?.vehicle_type || 'economy').toLowerCase();
+  const normCat = rawCat === 'standard' ? 'economy' : rawCat;
+  const CATEGORY_META: Record<string, { label: string; color: string; icon: string }> = {
+    economy:     { label: 'Standard',  color: '#00D46A', icon: 'car-outline' },
+    comfort:     { label: 'Comfort',   color: '#0EA5E9', icon: 'car-sport-outline' },
+    xl:          { label: 'XL',        color: '#FFB800', icon: 'bus-outline' },
+    premium:     { label: 'Premium',   color: '#9333EA', icon: 'rocket-outline' },
+    female_only: { label: 'Women Only',color: '#EC4899', icon: 'woman-outline' },
+  };
+  const catMeta = CATEGORY_META[normCat] ?? { label: normCat.toUpperCase(), color: '#94A3B8', icon: 'car-outline' };
   const ridePreferences = Array.isArray(trip?.ride_preferences)
     ? (trip.ride_preferences as string[])
         .map((item) => RIDE_PREFERENCE_LABELS[item] || item.replace(/_/g, ' '))
@@ -282,7 +294,14 @@ export default function DriverRideRequestModal({
 
               {/* PRICE = largest */}
               <View style={styles.priceHero}>
-                <Text style={styles.priceHeroLabel}>Rider offer (you earn)</Text>
+                <View style={styles.priceHeroTop}>
+                  <Text style={styles.priceHeroLabel}>Rider offer (you earn)</Text>
+                  {/* Category badge — always shown so driver knows exactly what type this is */}
+                  <View style={[styles.catBadge, { backgroundColor: catMeta.color + '20', borderColor: catMeta.color + '55' }]}>
+                    <Ionicons name={catMeta.icon as any} size={13} color={catMeta.color} />
+                    <Text style={[styles.catBadgeText, { color: catMeta.color }]}>{catMeta.label}</Text>
+                  </View>
+                </View>
                 <Text style={styles.priceHeroAmount}>₦{riderOffer.toLocaleString()}</Text>
                 <View style={styles.priceHeroMeta}>
                   {distanceKm != null && (
@@ -637,12 +656,31 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  priceHeroTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
   priceHeroLabel: {
     ...DS_TYPE.caption,
     color: C.muted,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
-    marginBottom: 4,
+  },
+  catBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  catBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.3,
   },
   priceHeroAmount: {
     ...DS_TYPE.display,

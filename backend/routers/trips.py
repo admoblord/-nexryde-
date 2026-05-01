@@ -929,10 +929,20 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         if not isinstance(loc, dict) or loc.get("lat") is None or loc.get("lng") is None:
             continue
 
-        if service_type and profile.get("vehicle_type") and profile.get("vehicle_type") != service_type:
-            # Keep preferred driver eligible even if vehicle type metadata is stale.
-            if driver_id != preferred_driver_id:
-                continue
+        if service_type:
+            # Prefer active_categories; fall back to single vehicle_type for older profiles.
+            active_cats = profile.get("active_categories") or []
+            if not active_cats and profile.get("vehicle_type"):
+                # Legacy profile: derive single-category list from vehicle_type
+                vt = profile["vehicle_type"].strip().lower()
+                active_cats = ["economy" if vt == "standard" else vt]
+            if active_cats:
+                # Normalize requested service_type for comparison
+                req_cat = "economy" if service_type.strip().lower() == "standard" else service_type.strip().lower()
+                if req_cat not in active_cats:
+                    # Preferred driver bypass: keep eligible even on stale metadata
+                    if driver_id != preferred_driver_id:
+                        continue
 
         distance = calculate_distance_haversine(
             pickup_lat,

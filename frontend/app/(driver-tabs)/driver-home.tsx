@@ -207,6 +207,75 @@ export default function ModernDriverHome() {
   const [toggleSyncing, setToggleSyncing] = useState(false);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
+
+  // ─── Ride category selection ─────────────────────────────────────────────
+  const CATEGORY_OPTIONS = [
+    { id: 'economy', label: 'Standard', icon: 'car-outline' as const, color: '#00D46A', desc: 'Affordable rides' },
+    { id: 'comfort', label: 'Comfort', icon: 'car-sport-outline' as const, color: '#0EA5E9', desc: 'More space & style' },
+    { id: 'xl', label: 'XL', icon: 'bus-outline' as const, color: '#FFB800', desc: '6-seat vehicles' },
+    { id: 'premium', label: 'Premium', icon: 'rocket-outline' as const, color: '#9333EA', desc: 'Luxury experience' },
+  ] as const;
+  const [activeCategories, setActiveCategories] = useState<string[]>(['economy']);
+  const [categorySyncing, setCategorySyncing] = useState(false);
+  const [idleBoostVisible, setIdleBoostVisible] = useState(false);
+  const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Load driver categories on mount
+  useEffect(() => {
+    if (!user?.id) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/categories`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok && mounted) {
+          const data = await res.json();
+          if (Array.isArray(data.active_categories) && data.active_categories.length > 0) {
+            setActiveCategories(data.active_categories);
+          }
+        }
+      } catch { /* silent — default to economy */ }
+    })();
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  const toggleCategory = async (catId: string) => {
+    if (categorySyncing) return;
+    let next: string[];
+    if (activeCategories.includes(catId)) {
+      if (activeCategories.length === 1) {
+        Alert.alert('At least one category required', 'You must stay active in at least one ride category.');
+        return;
+      }
+      next = activeCategories.filter((c) => c !== catId);
+    } else {
+      next = [...activeCategories, catId];
+    }
+    setActiveCategories(next);
+    setCategorySyncing(true);
+    try {
+      await fetch(`${BACKEND_URL}/api/drivers/${user!.id}/categories`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ active_categories: next }),
+      });
+    } catch { /* revert on failure */ setActiveCategories(activeCategories); }
+    finally { setCategorySyncing(false); }
+  };
+
+  // Smart idle boost — suggest enabling more categories after 8 min idle while online
+  useEffect(() => {
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (isOnline && !incomingRide && activeCategories.length < CATEGORY_OPTIONS.length) {
+      idleTimerRef.current = setTimeout(() => setIdleBoostVisible(true), 8 * 60 * 1000);
+    } else {
+      setIdleBoostVisible(false);
+    }
+    return () => { if (idleTimerRef.current) clearTimeout(idleTimerRef.current); };
+  }, [isOnline, incomingRide, activeCategories.length]);
+  // ─────────────────────────────────────────────────────────────────────────
+
   const tabPad = useTabBottomPad(16);
   const navigationInFlightRef = useRef(false);
   const guardedPush = useCallback(
@@ -955,6 +1024,59 @@ export default function ModernDriverHome() {
       </LinearGradient>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
+
+        {/* ── RIDE CATEGORY SELECTOR ─────────────────────────────────────── */}
+        {driverCanReceiveOffers && (
+          <View style={styles.catCard}>
+            <View style={styles.catCardHeader}>
+              <Ionicons name="layers-outline" size={18} color="#94A3B8" />
+              <Text style={styles.catCardTitle}>Ride Categories</Text>
+              {categorySyncing && <ActivityIndicator size="small" color="#00D46A" style={{ marginLeft: 6 }} />}
+              <Text style={styles.catCardHint}>Select the types of rides you want to receive</Text>
+            </View>
+            <View style={styles.catGrid}>
+              {CATEGORY_OPTIONS.map((cat) => {
+                const active = activeCategories.includes(cat.id);
+                return (
+                  <TouchableOpacity
+                    key={cat.id}
+                    style={[styles.catTile, active && { borderColor: cat.color, backgroundColor: cat.color + '18' }]}
+                    onPress={() => toggleCategory(cat.id)}
+                    activeOpacity={0.75}
+                  >
+                    <View style={[styles.catTileIcon, { backgroundColor: cat.color + (active ? '30' : '15') }]}>
+                      <Ionicons name={cat.icon} size={22} color={active ? cat.color : '#64748B'} />
+                    </View>
+                    <Text style={[styles.catTileLabel, active && { color: cat.color }]}>{cat.label}</Text>
+                    <Text style={styles.catTileDesc}>{cat.desc}</Text>
+                    {active && (
+                      <View style={[styles.catCheck, { backgroundColor: cat.color }]}>
+                        <Ionicons name="checkmark" size={10} color="#FFF" />
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
+        {/* ── IDLE BOOST SUGGESTION ──────────────────────────────────────── */}
+        {idleBoostVisible && (
+          <TouchableOpacity
+            style={styles.idleBoostBanner}
+            onPress={() => { setIdleBoostVisible(false); }}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="bulb-outline" size={18} color="#FFB800" />
+            <Text style={styles.idleBoostText}>
+              You've been idle a while. Enable more categories to get more rides!
+            </Text>
+            <Ionicons name="close" size={16} color="#94A3B8" />
+          </TouchableOpacity>
+        )}
+        {/* ─────────────────────────────────────────────────────────────── */}
+
         {verificationLocked && (
           <Animated.View style={[styles.verificationRoadmap, { opacity: fadeAnim }]}>
             <View style={styles.roadmapHeader}>
@@ -1723,5 +1845,98 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     color: COLORS.lightTextPrimary,
+  },
+  // ── Category selector ───────────────────────────────────────────────────
+  catCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    marginHorizontal: 16,
+    marginTop: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  catCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    marginBottom: 14,
+    gap: 6,
+  },
+  catCardTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    marginLeft: 4,
+  },
+  catCardHint: {
+    fontSize: 11,
+    color: '#94A3B8',
+    flex: 1,
+    textAlign: 'right',
+  },
+  catGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  catTile: {
+    width: '47%',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    backgroundColor: '#F8FAFC',
+    padding: 12,
+    position: 'relative',
+  },
+  catTileIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  catTileLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 2,
+  },
+  catTileDesc: {
+    fontSize: 11,
+    color: '#94A3B8',
+  },
+  catCheck: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  // ── Idle boost banner ──────────────────────────────────────────────────
+  idleBoostBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#FFF8E7',
+    borderRadius: 14,
+    marginHorizontal: 16,
+    marginTop: 8,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#FFB80040',
+  },
+  idleBoostText: {
+    flex: 1,
+    fontSize: 13,
+    color: '#92400E',
+    fontWeight: '500',
   },
 });

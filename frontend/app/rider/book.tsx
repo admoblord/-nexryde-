@@ -1643,23 +1643,58 @@ function BookInDriveStyle() {
             </View>
           ) : null}
 
-          {/* Vehicle */}
-          <TouchableOpacity style={[s.vehicleCard, !veh && s.vehicleCardPrompt]} onPress={() => setShowVehicleModal(true)} accessibilityLabel="Select vehicle type" accessibilityRole="button">
-            <View style={[s.vehIcon, { backgroundColor: (veh?.color || COLORS.dim) + '20' }]}>
-              <Ionicons name={(veh?.icon || 'car') as any} size={32} color={veh?.color || COLORS.dim} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={[s.vehName, !veh && { color: COLORS.muted }]}>{veh ? veh.name : 'Select Vehicle Type'}</Text>
-              <Text style={s.vehDesc}>
-                {veh
-                  ? `${veh.time} • ${veh.desc}`
-                  : String(user?.gender || '').toLowerCase() === 'female'
-                    ? 'Tap to choose Standard, Comfort, XL, Premium or Women Only'
-                    : 'Tap to choose Standard, Comfort, XL or Premium'}
-              </Text>
-            </View>
-            <Ionicons name="chevron-down" size={20} color={veh ? COLORS.muted : COLORS.green} />
-          </TouchableOpacity>
+          {/* ── Inline Ride Categories (all visible, no modal required) ── */}
+          <View style={s.inlineCatSection}>
+            <Text style={s.inlineCatTitle}>Choose your ride</Text>
+            {availableVehicles.map((v) => {
+              const price = fareMatrix[v.id];
+              const isSelected = selectedVehicle === v.id;
+              const loadingPrice = !!(pickup && destination && !price && isLoading);
+              return (
+                <TouchableOpacity
+                  key={v.id}
+                  style={[s.inlineCatRow, isSelected && s.inlineCatRowActive, isSelected && { borderColor: v.color }]}
+                  onPress={() => {
+                    setSelectedVehicle(v.id);
+                    if (price && price > 0) {
+                      setCurrentFare(price);
+                    } else if (pickup && destination) {
+                      setCurrentFare(0);
+                      setFareDetails(null);
+                      handleCalculateFare(v.id);
+                    }
+                  }}
+                  activeOpacity={0.75}
+                >
+                  <View style={[s.inlineCatIcon, { backgroundColor: v.color + (isSelected ? '28' : '18') }]}>
+                    <Ionicons name={v.icon as any} size={26} color={isSelected ? v.color : COLORS.muted} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[s.inlineCatName, isSelected && { color: v.color }]}>{v.name}</Text>
+                    <Text style={s.inlineCatMeta}>{v.time} · {v.desc}</Text>
+                  </View>
+                  <View style={s.inlineCatPriceCol}>
+                    {loadingPrice ? (
+                      <ActivityIndicator size="small" color={v.color} />
+                    ) : price > 0 ? (
+                      <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
+                        ₦{price.toLocaleString()}
+                      </Text>
+                    ) : (
+                      <Text style={s.inlineCatPriceMuted}>
+                        {pickup && destination ? '—' : 'Enter route'}
+                      </Text>
+                    )}
+                  </View>
+                  {isSelected && (
+                    <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
+                      <Ionicons name="checkmark" size={12} color="#FFF" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
 
           {/* Fare / Calculate */}
           {currentFare > 0 ? (
@@ -2338,6 +2373,72 @@ const s = StyleSheet.create({
   vehIcon: { width: 48, height: 48, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   vehName: { fontSize: 16, fontWeight: '800', color: COLORS.white },
   vehDesc: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
+  // ── Inline ride category selector ──────────────────────────────────────
+  inlineCatSection: { marginBottom: 16 },
+  inlineCatTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.muted,
+    marginBottom: 10,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  inlineCatRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 16,
+    padding: 12,
+    marginBottom: 8,
+    gap: 12,
+    borderWidth: 1.5,
+    borderColor: 'rgba(148,163,184,0.14)',
+    position: 'relative',
+  },
+  inlineCatRowActive: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  inlineCatIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineCatName: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: COLORS.white,
+  },
+  inlineCatMeta: {
+    fontSize: 12,
+    color: COLORS.muted,
+    marginTop: 2,
+  },
+  inlineCatPriceCol: {
+    alignItems: 'flex-end',
+    minWidth: 72,
+  },
+  inlineCatPrice: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.white,
+  },
+  inlineCatPriceMuted: {
+    fontSize: 13,
+    color: COLORS.dim,
+    fontWeight: '600',
+  },
+  inlineCatCheck: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
   routeSafetyCard: {
     backgroundColor: '#1E293B',
     borderRadius: 16,
