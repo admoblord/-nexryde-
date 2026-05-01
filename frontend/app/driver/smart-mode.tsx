@@ -139,22 +139,24 @@ export default function SmartModeScreen() {
   const toggleSmartMode = () => {
     if (!settings.enabled) {
       Alert.alert(
-        '🤖 Enable Smart Mode?',
-        'Smart Mode will automatically accept rides that match your preferences. You can disable it anytime.',
+        'Enable Smart Mode?',
+        'Smart Mode highlights rides that match your distance and rating preferences. You still tap to accept — set your filters below and save.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Enable',
             onPress: () => {
-              setSettings({ ...settings, enabled: true });
-              saveSettings();
-            }
-          }
+              // Use functional update to avoid stale-state race
+              setSettings((prev) => ({ ...prev, enabled: true }));
+              // saveSettings reads salaryMode — call after state flushes
+              setTimeout(saveSettings, 0);
+            },
+          },
         ]
       );
     } else {
-      setSettings({ ...settings, enabled: false });
-      saveSettings();
+      setSettings((prev) => ({ ...prev, enabled: false }));
+      setTimeout(saveSettings, 0);
     }
   };
 
@@ -222,12 +224,12 @@ export default function SmartModeScreen() {
                 </View>
                 <View style={styles.toggleInfo}>
                   <Text style={styles.toggleTitle}>
-                    {settings.enabled ? '🤖 Smart Mode Active' : '🔴 Smart Mode Off'}
+                    {settings.enabled ? 'Smart Mode Active' : 'Smart Mode Off'}
                   </Text>
                   <Text style={styles.toggleSubtitle}>
-                    {settings.enabled 
-                      ? 'Auto-accepting rides that match your rules' 
-                      : 'Tap to enable automatic ride acceptance'}
+                    {settings.enabled
+                      ? 'Filtering rides by your distance & rating rules'
+                      : 'Tap to apply distance, rating & surge filters'}
                   </Text>
                 </View>
               </View>
@@ -256,12 +258,12 @@ export default function SmartModeScreen() {
                 <Text style={styles.earningValue}>₦{earnings.average.toLocaleString()}</Text>
               </View>
               <View style={styles.earningItem}>
-                <Text style={styles.earningLabel}>With Smart Mode</Text>
+                <Text style={styles.earningLabel}>Estimated (filtered)</Text>
                 <Text style={[styles.earningValue, styles.earningProjected]}>
                   ₦{estimateEarnings().toLocaleString()}
                 </Text>
                 <Text style={styles.earningIncrease}>
-                  +{Math.round(((estimateEarnings() - earnings.average) / earnings.average) * 100)}% 🚀
+                  projection based on filters
                 </Text>
               </View>
             </View>
@@ -510,12 +512,12 @@ export default function SmartModeScreen() {
             <Text style={styles.aiTitle}>How Smart Mode Works</Text>
           </View>
           <View style={styles.aiList}>
-            <AIFeature icon="analytics" text="Analyzes distance, rating, and surge pricing" />
-            <AIFeature icon="calculator" text="Calculates profitability score for each ride" />
-            <AIFeature icon="checkmark-done" text="Auto-accepts rides meeting your criteria" />
-            <AIFeature icon="close-circle" text="Auto-rejects rides below your standards" />
-            <AIFeature icon="trending-up" text="Learns from your preferences over time" />
-            <AIFeature icon="wallet" text="Salary Mode raises your dispatch priority when you are behind monthly target" />
+            <AIFeature icon="analytics" text="Filters rides by distance, rider rating, and surge multiplier" />
+            <AIFeature icon="calculator" text="Previews estimated acceptance rate based on your rules" />
+            <AIFeature icon="flag" text="Highlights matching rides so you can accept faster" />
+            <AIFeature icon="close-circle" text="Dims rides below your minimum standards" />
+            <AIFeature icon="wallet" text="Salary Mode raises your dispatch priority when behind monthly target" />
+            <AIFeature icon="settings" text="All filters are local preferences — you still accept each ride" />
           </View>
         </View>
 

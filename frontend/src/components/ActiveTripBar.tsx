@@ -132,7 +132,7 @@ export default function ActiveTripBar() {
 
   const statusLabel =
     effectiveStatus === 'pending' || effectiveStatus === 'pending_driver_offers'
-      ? 'Finding nearby drivers'
+      ? (isRider ? 'Finding nearby drivers' : 'Waiting for rider confirmation')
       : effectiveStatus === 'accepted'
         ? `${otherParty} is on the way`
         : effectiveStatus === 'arrived'

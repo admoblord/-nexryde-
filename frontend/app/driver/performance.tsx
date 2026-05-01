@@ -19,28 +19,30 @@ export default function PerformanceScreen() {
   const { user } = useAppStore();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
+  const [loadError, setLoadError] = useState(false);
+
+  const loadStats = async () => {
+    if (!user?.id) { setLoading(false); return; }
+    setLoadError(false);
+    setLoading(true);
+    try {
+      const res = await getDriverStats(user.id);
+      setStats(res.data || null);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const load = async () => {
-      if (!user?.id) {
-        setLoading(false);
-        return;
-      }
-      try {
-        const res = await getDriverStats(user.id);
-        setStats(res.data || null);
-      } catch (e) {
-        if (__DEV__) console.warn('Performance stats load failed', e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    load();
+    loadStats();
   }, [user?.id]);
 
   const metrics = useMemo(() => {
     const completionRate = Number(stats?.completion_rate || 0);
-    const acceptanceRate = Number(stats?.acceptance_rate || completionRate);
+    // Use acceptance_rate directly — never fall back to completionRate (different metric)
+    const acceptanceRate = Number(stats?.acceptance_rate || 0);
     const rating = Number(stats?.rating || 0);
     const cancellationRate = Math.max(0, 100 - completionRate);
     const onTime = Math.min(100, Math.round((completionRate + acceptanceRate) / 2));
@@ -82,6 +84,22 @@ export default function PerformanceScreen() {
           <View style={styles.loadingWrap}>
             <ActivityIndicator size="large" color={COLORS.primary} />
             <Text style={styles.loadingText}>Loading performance...</Text>
+          </View>
+        ) : loadError ? (
+          <View style={styles.loadingWrap}>
+            <Ionicons name="cloud-offline-outline" size={48} color={COLORS.gray400} />
+            <Text style={[styles.loadingText, { marginTop: 12 }]}>Could not load stats</Text>
+            <TouchableOpacity onPress={loadStats} style={styles.retryButton}>
+              <Text style={styles.retryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
+        ) : !stats ? (
+          <View style={styles.loadingWrap}>
+            <Ionicons name="bar-chart-outline" size={48} color={COLORS.gray300} />
+            <Text style={[styles.loadingText, { marginTop: 12 }]}>No performance data yet</Text>
+            <Text style={[styles.loadingText, { fontSize: FONT_SIZE.sm, color: COLORS.gray400, marginTop: 4 }]}>
+              Complete trips to see your metrics here.
+            </Text>
           </View>
         ) : (
           <>
@@ -263,5 +281,17 @@ const styles = StyleSheet.create({
     color: COLORS.gray600,
     marginTop: 4,
     lineHeight: 20,
+  },
+  retryButton: {
+    marginTop: SPACING.lg,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  retryText: {
+    color: COLORS.white,
+    fontWeight: '700',
+    fontSize: FONT_SIZE.md,
   },
 });

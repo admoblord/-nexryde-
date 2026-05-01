@@ -15,10 +15,11 @@ import {
   Linking,
   Platform,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { usePrayerTimes, PrayerTime, Mosque } from '../../src/services/prayerTimes';
+import { usePrayerTimes, PrayerTime, Mosque } from '@/src/services/prayerTimes';
 import { router } from 'expo-router';
 
 const { width } = Dimensions.get('window');
@@ -74,51 +75,40 @@ const DriverPrayerTimesScreen = () => {
   };
   
   const getPrayerColor = (prayerName: string): string => {
-    switch (prayerName) {
-      case 'fajr':
-        return '#4A90E2';
-      case 'dhuhr':
-        return '#FFB800';
-      case 'asr':
-        return '#FF9500';
-      case 'maghrib':
-        return '#FF6B6B';
-      case 'isha':
-        return '#9D4EDD';
-      default:
-        return COLORS.primary;
+    switch (prayerName.toLowerCase()) {
+      case 'fajr':    return '#4A90E2';
+      case 'dhuhr':   return '#FFB800';
+      case 'asr':     return '#FF9500';
+      case 'maghrib': return '#FF6B6B';
+      case 'isha':    return '#9D4EDD';
+      default:        return COLORS.primary;
     }
   };
-  
+
   const getPrayerIcon = (prayerName: string): string => {
-    switch (prayerName) {
-      case 'fajr':
-        return 'sunny-outline';
-      case 'dhuhr':
-        return 'sunny';
-      case 'asr':
-        return 'partly-sunny';
-      case 'maghrib':
-        return 'moon-outline';
-      case 'isha':
-        return 'moon';
-      default:
-        return 'time';
+    switch (prayerName.toLowerCase()) {
+      case 'fajr':    return 'sunny-outline';
+      case 'dhuhr':   return 'sunny';
+      case 'asr':     return 'partly-sunny';
+      case 'maghrib': return 'moon-outline';
+      case 'isha':    return 'moon';
+      default:        return 'time';
     }
   };
   
   if (loading && !prayerTimes) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}>
+        <LinearGradient colors={['#9D4EDD', '#7B2CBF']} style={styles.header}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color={COLORS.white} />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Prayer Times</Text>
           <View style={{ width: 40 }} />
-        </View>
+        </LinearGradient>
         <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading prayer times...</Text>
+          <ActivityIndicator size="large" color={COLORS.purple} />
+          <Text style={[styles.loadingText, { marginTop: 16 }]}>Loading prayer times...</Text>
         </View>
       </View>
     );
@@ -187,12 +177,6 @@ const DriverPrayerTimesScreen = () => {
           </View>
         </View>
         
-        {settings.enabled && (
-          <>
-            {/* Today's Prayer Times - ALWAYS SHOW */}
-          </>
-        )}
-
             {/* Today's Prayer Times */}
             {prayerTimes && (
               <View style={styles.section}>

@@ -101,17 +101,28 @@ export function usePrayerTimes() {
 
   const saveSettings = async (newSettings: Partial<PrayerSettings>) => {
     try {
-      const updated = { ...settings, ...newSettings };
+      // Mirror alertBefore ↔ alertMinutesBefore so both fields stay in sync
+      const patch = { ...newSettings };
+      if (patch.alertBefore !== undefined && patch.alertMinutesBefore === undefined) {
+        patch.alertMinutesBefore = patch.alertBefore;
+      } else if (patch.alertMinutesBefore !== undefined && patch.alertBefore === undefined) {
+        patch.alertBefore = patch.alertMinutesBefore;
+      }
+      // Enabling the feature also enables notifications so alerts actually fire
+      if (patch.enabled === true && !settings.notificationsEnabled) {
+        patch.notificationsEnabled = true;
+      }
+      const updated = { ...settings, ...patch };
       setSettings(updated);
       await AsyncStorage.setItem('prayer_settings', JSON.stringify(updated));
-      
+
       if (updated.enabled && updated.notificationsEnabled) {
         await scheduleNotifications();
       } else {
         await Notifications.cancelAllScheduledNotificationsAsync();
       }
-    } catch (error) {
-      console.error('Failed to save prayer settings:', error);
+    } catch {
+      // Silently handle save errors — settings are already updated in state
     }
   };
 
@@ -142,8 +153,8 @@ export function usePrayerTimes() {
           latitude = userLocation.coords.latitude;
           longitude = userLocation.coords.longitude;
         }
-      } catch (locError) {
-        console.log('Location unavailable, using Lagos defaults');
+      } catch {
+        // Location unavailable — continue with Lagos default coordinates
       }
 
       setLocation({ lat: latitude, lng: longitude });
@@ -239,7 +250,7 @@ export function usePrayerTimes() {
         }
       }
       
-      console.log(`Scheduled ${prayerTimes.length} prayer notifications`);
+      // Prayer notifications scheduled successfully
     } catch (error) {
       console.error('Failed to schedule notifications:', error);
     }

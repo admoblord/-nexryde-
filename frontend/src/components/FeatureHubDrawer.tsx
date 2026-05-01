@@ -60,7 +60,6 @@ const DRIVER_SECTIONS: HubSection[] = [
     title: 'Account & payments',
     items: [
       { label: 'Subscription', route: '/driver/subscription', icon: 'card-outline', hint: 'Plan & billing' },
-      { label: 'Support', route: '/support', icon: 'help-circle-outline', hint: 'Help & incidents' },
     ],
   },
   {

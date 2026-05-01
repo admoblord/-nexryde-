@@ -20,6 +20,7 @@ export default function VehicleScreen() {
   const router = useRouter();
   const { user, driverProfile, setDriverProfile } = useAppStore();
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [vehicleType, setVehicleType] = useState('');
   const [vehicleModel, setVehicleModel] = useState('');
   const [vehiclePlate, setVehiclePlate] = useState('');
@@ -30,14 +31,15 @@ export default function VehicleScreen() {
 
   const loadProfile = async () => {
     if (!user?.id) return;
+    setLoadError(false);
     try {
       const response = await getDriverProfile(user.id);
       setDriverProfile(response.data);
       setVehicleType(response.data.vehicle_type || '');
       setVehicleModel(response.data.vehicle_model || '');
       setVehiclePlate(response.data.vehicle_plate || '');
-    } catch (error) {
-      if (__DEV__) console.warn('Error loading profile', error);
+    } catch {
+      setLoadError(true);
     }
   };
 
@@ -65,12 +67,22 @@ export default function VehicleScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+        <View style={styles.header}>          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
             <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
           </TouchableOpacity>
           <Text style={styles.title}>Vehicle Details</Text>
         </View>
+
+        {/* Load error banner */}
+        {loadError && (
+          <View style={styles.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={18} color={COLORS.error} />
+            <Text style={styles.errorBannerText}>Could not load vehicle info.</Text>
+            <TouchableOpacity onPress={loadProfile}>
+              <Text style={styles.errorBannerRetry}>Retry</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* Vehicle Type */}
         <Text style={styles.label}>Vehicle Type</Text>
@@ -145,9 +157,13 @@ export default function VehicleScreen() {
             </View>
           </View>
 
-          <TouchableOpacity style={styles.uploadButton}>
+          <TouchableOpacity
+            style={styles.uploadButton}
+            onPress={() => router.push('/(auth)/driver-documents')}
+            activeOpacity={0.8}
+          >
             <Ionicons name="cloud-upload" size={20} color={COLORS.primary} />
-            <Text style={styles.uploadButtonText}>Upload Documents</Text>
+            <Text style={styles.uploadButtonText}>Upload / Update Documents</Text>
           </TouchableOpacity>
         </Card>
 
@@ -277,5 +293,27 @@ const styles = StyleSheet.create({
   },
   saveButton: {
     marginTop: 'auto',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.errorSoft,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: COLORS.error + '40',
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.error,
+    fontWeight: '600',
+  },
+  errorBannerRetry: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.primary,
+    fontWeight: '700',
   },
 });
