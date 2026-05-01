@@ -40,6 +40,7 @@ from smart_pricing import (
 from auth_guard import verify_owner_strict, verify_trip_participant, require_authenticated
 from admin_guard import require_admin_request
 from security_advanced import general_limiter
+from route_cache import get_cached_directions, store_cached_directions, log_api_call, haversine_route_estimate
 
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
@@ -90,10 +91,21 @@ def set_payments_fare_estimate_store(store):
     global fare_estimate_store
     fare_estimate_store = store
 
-async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng):
+async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng, trip_id: str = None):
+    """Cached wrapper — checks MongoDB + LRU before calling Google API."""
+    cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
+    if cached:
+        await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+        return cached
+
     if _get_directions_fn:
-        return await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
-    return None
+        result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
+        if result:
+            await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+            return result
+
+    return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
 
 def calculate_fare(dist, dur, traffic, svc="economy", city="lagos"):
     if _calculate_fare_fn:
@@ -117,8 +129,11 @@ def calculate_distance_haversine(lat1, lon1, lat2, lon2):
 # Subscription config
 SUBSCRIPTION_CONFIG = {
     "monthly_fee": 18000,
-    "trial_hours": 48,
-    "trial_trips": 0,
+    # Activity-based trial: driver can operate free until they complete TRIAL_TRIPS_TARGET trips.
+    # NO time-based trial. Trial extends if < 10 trips after 7 days.
+    "trial_trips_target": 20,
+    "trial_extension_days": 7,
+    "trial_extension_min_trips": 10,
     "currency": "NGN",
     "bank_details": {
         "provider": "SquadCo",
@@ -591,7 +606,13 @@ async def _credit_wallet_checkout_intent(
 
 
 async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dict]:
-    """Auto-provision a 48-hour trial once driver verification/profile is complete."""
+    """Auto-provision an activity-based trial once driver verification is complete.
+
+    The trial is active while the driver has completed fewer than
+    SUBSCRIPTION_CONFIG['trial_trips_target'] (20) trips.
+    No time-based expiry.  After 7 days, if the driver has fewer than 10 trips
+    the trial is extended (flagged) but the driver is NOT locked out.
+    """
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     if existing:
         return existing
@@ -602,7 +623,6 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
         return None
 
     now = datetime.utcnow()
-    trial_end = now + timedelta(hours=SUBSCRIPTION_CONFIG["trial_hours"])
     city_price = await _get_dynamic_tier_price("city_rider")
     trial_doc = {
         "id": str(uuid.uuid4()),
@@ -611,16 +631,76 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
         "tier": "city_rider",
         "status": "trial",
         "start_date": now,
-        "trial_end_date": trial_end,
-        "trial_unlimited_city_only": True,
-        "end_date": trial_end,
+        "trial_start_date": now,
+        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_trips_completed": 0,
+        "trial_completed": False,
+        "trial_extended": False,
+        "trial_active": True,
         "is_trial": True,
         "created_at": now,
         "updated_at": now,
     }
     await db.subscriptions.insert_one(trial_doc)
-    logger.info(f"Auto-trial activated for verified driver={driver_id} trial_end={trial_end.isoformat()}")
+    logger.info(
+        f"Activity-based trial activated for verified driver={driver_id} "
+        f"target={SUBSCRIPTION_CONFIG['trial_trips_target']} trips"
+    )
     return trial_doc
+
+
+async def _evaluate_driver_trial(driver_id: str, subscription: dict) -> dict:
+    """Enrich a trial subscription with live trip-count state.
+
+    Counts ONLY completed trips (not cancelled/accepted).
+    Persists status changes to DB when the trial is exhausted or extended.
+    Returns an enriched copy.
+    """
+    now = datetime.utcnow()
+    target = subscription.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"]
+    completed_trips = await db.trips.count_documents({"driver_id": driver_id, "status": "completed"})
+
+    sub = dict(subscription)
+    sub["trial_trips_completed"] = completed_trips
+    sub["trial_trips_remaining"] = max(0, target - completed_trips)
+    sub["trial_trips_target"] = target
+
+    if completed_trips >= target:
+        # Trial exhausted — require subscription.
+        if sub.get("status") == "trial":
+            await db.subscriptions.update_one(
+                {"id": sub["id"]},
+                {"$set": {"status": "pending_payment", "trial_completed": True,
+                          "trial_active": False, "updated_at": now}},
+            )
+        sub["status"] = "pending_payment"
+        sub["trial_completed"] = True
+        sub["trial_active"] = False
+        sub["trial_trips_remaining"] = 0
+        sub["days_remaining"] = 0
+    else:
+        sub["trial_active"] = True
+        sub["days_remaining"] = 0
+
+        # Check whether to extend (7 days elapsed, < 10 trips).
+        trial_start = sub.get("trial_start_date") or sub.get("start_date")
+        if isinstance(trial_start, str):
+            try:
+                trial_start = datetime.fromisoformat(trial_start.replace("Z", "+00:00")).replace(tzinfo=None)
+            except Exception:
+                trial_start = None
+        if trial_start:
+            days_elapsed = (now - trial_start).days
+            ext_days = SUBSCRIPTION_CONFIG["trial_extension_days"]
+            ext_min = SUBSCRIPTION_CONFIG["trial_extension_min_trips"]
+            if days_elapsed >= ext_days and completed_trips < ext_min and not sub.get("trial_extended"):
+                await db.subscriptions.update_one(
+                    {"id": sub["id"]},
+                    {"$set": {"trial_extended": True, "updated_at": now}},
+                )
+                sub["trial_extended"] = True
+
+    return sub
 
 
 def _extract_data_url_payload(data_url: str) -> tuple[str, bytes]:
@@ -813,20 +893,21 @@ async def _sync_driver_subscription_flags(driver_id: str) -> dict:
         if isinstance(expiry, datetime):
             expiry = _to_utc_naive(expiry)
 
-        if status in {"active", "trial", "grace_period"}:
-            if status in {"active", "grace_period"} and expiry and expiry <= now:
+        if status == "trial":
+            # Activity-based trial: active while trips < target.
+            evaluated = await _evaluate_driver_trial(driver_id, subscription)
+            status = evaluated.get("status", "trial")
+            subscription_active = status == "trial"
+        elif status in {"active", "grace_period"}:
+            if expiry and expiry <= now:
                 await db.subscriptions.update_one(
                     {"id": subscription.get("id")},
                     {"$set": {"status": "expired", "updated_at": now}},
                 )
                 status = "expired"
-            subscription_active = status in {"active", "trial", "grace_period"}
-
-        if status != subscription.get("status"):
-            await db.subscriptions.update_one(
-                {"id": subscription.get("id")},
-                {"$set": {"status": status, "updated_at": now}},
-            )
+            subscription_active = status in {"active", "grace_period"}
+        else:
+            subscription_active = False
 
     await db.users.update_one(
         {"id": driver_id},
@@ -996,15 +1077,48 @@ FARE_CONFIG = {
 }
 
 # ==================== SUBSCRIPTION ENDPOINTS ====================
+async def _assert_driver_can_activate_subscription(driver_id: str):
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+    if not profile.get("documents_verified") or profile.get("verification_status") != "approved":
+        raise HTTPException(
+            status_code=403,
+            detail="Driver documents must be approved before subscription or payment activation.",
+        )
+
+
+async def _road_warrior_upgrade_requirements(driver_id: str) -> dict:
+    user = await db.users.find_one({"id": driver_id}) or {}
+    rating = float(user.get("rating") or 0)
+    trips = int(user.get("total_trips") or 0)
+    return {
+        "rating_met": rating >= 4.5,
+        "trips_met": trips >= 50,
+        "current_rating": rating,
+        "current_trips": trips,
+    }
+
+
+async def _assert_subscription_tier_allowed(driver_id: str, tier: str):
+    if tier != "road_warrior":
+        return
+    requirements = await _road_warrior_upgrade_requirements(driver_id)
+    if not requirements["rating_met"] or not requirements["trips_met"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Road Warrior unlocks after 50 trips and a 4.5+ driver rating.",
+        )
+
+
 @payments_router.get("/subscriptions/config")
 async def get_subscription_config():
     """Get subscription configuration including bank details"""
     return {
         "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
-        "trial_hours": SUBSCRIPTION_CONFIG["trial_hours"],
-        "trial_trips": SUBSCRIPTION_CONFIG["trial_trips"],
+        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_extension_days": SUBSCRIPTION_CONFIG["trial_extension_days"],
+        "trial_extension_min_trips": SUBSCRIPTION_CONFIG["trial_extension_min_trips"],
         "currency": SUBSCRIPTION_CONFIG["currency"],
-        "bank_details": SUBSCRIPTION_CONFIG["bank_details"]
+        "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
     }
 
 
@@ -1012,6 +1126,8 @@ async def get_subscription_config():
 async def create_virtual_account(request: CreateVirtualAccountRequest, http_request: Request):
     verify_owner_strict(http_request, request.driver_id)
     await _assert_driver_account(request.driver_id)
+    await _assert_driver_can_activate_subscription(request.driver_id)
+    await _assert_subscription_tier_allowed(request.driver_id, request.tier or "city_rider")
 
     if request.plan_amount <= 0:
         raise HTTPException(status_code=400, detail="plan_amount must be greater than zero")
@@ -1477,6 +1593,7 @@ async def initiate_subscription_checkout(
     """
     driver_id = require_authenticated(http_request)
     await _assert_driver_account(driver_id)
+    await _assert_driver_can_activate_subscription(driver_id)
     if not SQUAD_SECRET_KEY or not SQUAD_PUBLIC_KEY:
         raise HTTPException(
             status_code=500,
@@ -1486,6 +1603,7 @@ async def initiate_subscription_checkout(
     tier = body.tier or "city_rider"
     if tier not in {"city_rider", "road_warrior"}:
         tier = "city_rider"
+    await _assert_subscription_tier_allowed(driver_id, tier)
 
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     if existing and existing.get("status") in {"active", "trial", "grace_period"}:
@@ -1621,6 +1739,7 @@ async def verify_pending_subscription_checkout(
     driver_id = require_authenticated(http_request)
     await general_limiter.check_rate_limit(http_request, f"sub_verify:{driver_id}")
     await _assert_driver_account(driver_id)
+    await _assert_driver_can_activate_subscription(driver_id)
 
     ref_filter: dict = {}
     if body.transaction_ref and str(body.transaction_ref).strip():
@@ -2347,62 +2466,34 @@ async def verify_wallet_payment_by_reference(transaction_ref: str, request: Requ
 
 @payments_router.get("/subscriptions/{driver_id}")
 async def get_subscription(driver_id: str, request: Request):
-    """Get driver's subscription status"""
+    """Get driver's subscription status (activity-based trial)."""
     verify_owner_strict(request, driver_id)
     await _assert_driver_account(driver_id)
     subscription = await _ensure_auto_trial_for_verified_driver(driver_id)
     if not subscription:
-        subscription = await db.subscriptions.find_one({
-            "driver_id": driver_id
-        }, sort=[("created_at", -1)])
+        subscription = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     flag_state = await _sync_driver_subscription_flags(driver_id)
-    
+
     if subscription:
         if subscription.get("_id") is not None:
             subscription["_id"] = str(subscription["_id"])
-        
-        # Calculate days remaining
+
         now = datetime.utcnow()
-        trial_end = subscription.get("trial_end_date")
-        end_date = subscription.get("end_date")
-        if isinstance(trial_end, str):
-            try:
-                subscription["trial_end_date"] = datetime.fromisoformat(trial_end.replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                pass
-        if isinstance(end_date, str):
-            try:
-                subscription["end_date"] = datetime.fromisoformat(end_date.replace("Z", "+00:00")).replace(tzinfo=None)
-            except Exception:
-                pass
-        
-        # Check trial status
+
         if subscription.get("status") == "trial":
-            trial_end = subscription.get("trial_end_date")
-            trial_expired_by_time = bool(trial_end and now > trial_end)
-            if trial_expired_by_time:
-                # Trial expired
-                await db.subscriptions.update_one(
-                    {"id": subscription["id"]},
-                    {"$set": {"status": "pending_payment"}}
-                )
-                subscription["status"] = "pending_payment"
-                subscription["trial_expired"] = True
-                subscription["days_remaining"] = 0
-            else:
-                hours_remaining = int(max(0, (trial_end - now).total_seconds() // 3600)) if trial_end else 0
-                subscription["trial_hours_remaining"] = hours_remaining
-                subscription["trial_unlimited_city_only"] = True
-                subscription["days_remaining"] = 0
-                subscription["trial_expired"] = False
+            # Evaluate live trip-count based trial state.
+            subscription = await _evaluate_driver_trial(driver_id, subscription)
         elif subscription.get("status") == "active":
             end_date = subscription.get("end_date")
+            if isinstance(end_date, str):
+                try:
+                    end_date = datetime.fromisoformat(end_date.replace("Z", "+00:00")).replace(tzinfo=None)
+                except Exception:
+                    end_date = None
             if end_date:
                 if now > end_date:
-                    # Subscription expired
                     await db.subscriptions.update_one(
-                        {"id": subscription["id"]},
-                        {"$set": {"status": "expired"}}
+                        {"id": subscription["id"]}, {"$set": {"status": "expired"}}
                     )
                     subscription["status"] = "expired"
                     subscription["days_remaining"] = 0
@@ -2412,24 +2503,26 @@ async def get_subscription(driver_id: str, request: Request):
                 subscription["days_remaining"] = 0
         else:
             subscription["days_remaining"] = 0
-        
-        # Add bank details
+
         subscription["bank_details"] = SUBSCRIPTION_CONFIG["bank_details"]
         subscription["monthly_fee"] = await _get_dynamic_tier_price(subscription.get("tier", "city_rider"))
-        
         subscription["subscription_active"] = flag_state["subscription_active"]
         subscription["subscription_expiry"] = flag_state["subscription_expiry"]
         return subscription
-    
-    # No subscription found - return default data for new drivers
+
+    # No subscription yet — driver hasn't completed verification or profile.
     return {
         "status": "none",
         "days_remaining": 0,
+        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_trips_completed": 0,
+        "trial_trips_remaining": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_active": False,
         "monthly_fee": await _get_dynamic_tier_price("city_rider"),
         "bank_details": SUBSCRIPTION_CONFIG["bank_details"],
         "subscription_active": False,
         "subscription_expiry": None,
-        "message": "Complete verification to get an automatic 48-hour unlimited city-rides trial."
+        "message": "Complete verification to unlock your free 20-trip activity trial.",
     }
 
 
@@ -2441,19 +2534,40 @@ async def get_driver_subscription_status(request: Request):
     subscription = await _ensure_auto_trial_for_verified_driver(driver_id)
     if not subscription:
         subscription = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
+
+    # Live-evaluate trial state.
+    if subscription and subscription.get("status") == "trial":
+        subscription = await _evaluate_driver_trial(driver_id, subscription)
+
     virtual_account = await db.subscription_virtual_accounts.find_one({"driver_id": driver_id})
     if virtual_account:
         virtual_account.pop("_id", None)
         virtual_account.pop("provider_response", None)
+    upgrade_requirements = await _road_warrior_upgrade_requirements(driver_id)
+    status = (subscription or {}).get("status", "none")
+    tier = (subscription or {}).get("tier")
+    can_upgrade = (
+        tier == "city_rider"
+        and status in {"trial", "active", "grace_period"}
+        and upgrade_requirements["rating_met"]
+        and upgrade_requirements["trips_met"]
+    )
 
     return {
         "driver_id": driver_id,
         "subscription_active": flag_state["subscription_active"],
         "subscription_expiry": flag_state["subscription_expiry"],
-        "status": (subscription or {}).get("status", "none"),
-        "tier": (subscription or {}).get("tier"),
+        "status": status,
+        "tier": tier,
         "amount_expected": (subscription or {}).get("amount"),
-        "trial_unlimited_city_only": bool((subscription or {}).get("status") == "trial"),
+        "trial_active": (subscription or {}).get("trial_active", status == "trial"),
+        "trial_trips_completed": (subscription or {}).get("trial_trips_completed", 0),
+        "trial_trips_remaining": (subscription or {}).get("trial_trips_remaining", SUBSCRIPTION_CONFIG["trial_trips_target"]),
+        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_extended": (subscription or {}).get("trial_extended", False),
+        "trial_completed": (subscription or {}).get("trial_completed", False),
+        "can_upgrade": can_upgrade,
+        "upgrade_requirements": upgrade_requirements,
         "virtual_account": virtual_account,
     }
 
@@ -2897,15 +3011,17 @@ async def get_subscription_history(driver_id: str, request: Request):
 
 @payments_router.post("/subscriptions/{driver_id}/start-trial")
 async def start_trial(driver_id: str, request: Request):
-    """Legacy endpoint: trial is auto-activated after verification."""
+    """Trial is auto-activated on verification approval. This endpoint ensures it exists."""
     verify_owner_strict(request, driver_id)
     await _assert_driver_account(driver_id)
     existing = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
     if existing:
         if existing.get("_id") is not None:
             existing["_id"] = str(existing["_id"])
+        if existing.get("status") == "trial":
+            existing = await _evaluate_driver_trial(driver_id, existing)
         return {
-            "message": "Subscription record already exists. Trial activation is automatic after verification.",
+            "message": "Activity trial already active.",
             "subscription": existing,
         }
 
@@ -2913,15 +3029,14 @@ async def start_trial(driver_id: str, request: Request):
     if not subscription:
         raise HTTPException(
             status_code=403,
-            detail="Driver must complete verification stage to receive automatic 48-hour trial.",
+            detail="Complete verification to unlock your free 20-trip activity trial.",
         )
 
     return {
-        "message": f"Free {SUBSCRIPTION_CONFIG['trial_hours']}-hour unlimited city-rides trial activated!",
+        "message": f"Free activity trial activated! Complete {SUBSCRIPTION_CONFIG['trial_trips_target']} trips to unlock full access.",
         "subscription": subscription,
-        "trial_end_date": subscription.get("trial_end_date").isoformat() if isinstance(subscription.get("trial_end_date"), datetime) else None,
-        "trial_hours_remaining": SUBSCRIPTION_CONFIG["trial_hours"],
-        "trial_unlimited_city_only": True
+        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
+        "trial_active": True,
     }
 
 
@@ -2933,10 +3048,12 @@ async def create_or_renew_subscription(driver_id: str, request: Request, body: O
     """
     verify_owner_strict(request, driver_id)
     await _assert_driver_account(driver_id)
+    await _assert_driver_can_activate_subscription(driver_id)
 
     requested_tier = (body.tier if body else None) or "city_rider"
     if requested_tier not in {"city_rider", "road_warrior"}:
         requested_tier = "city_rider"
+    await _assert_subscription_tier_allowed(driver_id, requested_tier)
 
     dynamic_price = await _get_dynamic_tier_price(requested_tier)
     payment_method = (body.payment_method if body else None) or "bank_transfer"
@@ -2990,6 +3107,7 @@ async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission, 
     """Submit payment screenshot and run AI + provider verification."""
     verify_owner_strict(http_request, driver_id)
     await _assert_driver_account(driver_id)
+    await _assert_driver_can_activate_subscription(driver_id)
     if request.driver_id != driver_id:
         raise HTTPException(status_code=400, detail="driver_id mismatch")
 
@@ -3016,6 +3134,7 @@ async def submit_payment_proof(driver_id: str, request: PaymentProofSubmission, 
     # Save proof first for traceability
     now = datetime.utcnow()
     inferred_tier = request.tier or subscription.get("tier", "city_rider")
+    await _assert_subscription_tier_allowed(driver_id, inferred_tier)
     dynamic_price = await _get_dynamic_tier_price(inferred_tier)
     expected_amount = float(dynamic_price)
     await db.subscriptions.update_one(
@@ -3203,16 +3322,22 @@ async def check_restrictions(driver_id: str, request: Request):
     now = datetime.utcnow()
     
     if status == "trial":
-        trial_end = subscription.get("trial_end_date")
-        if trial_end and now > trial_end:
+        # Activity-based trial: check trip count, not time.
+        evaluated = await _evaluate_driver_trial(driver_id, subscription)
+        if evaluated.get("status") == "pending_payment":
             restrictions["show_payment_popup"] = True
-            restrictions["message"] = "Your free trial has expired. Please make payment to continue."
+            restrictions["message"] = "You've completed your 20-trip trial. Subscribe to continue."
         else:
-            days_left = (trial_end - now).days if trial_end else 0
+            trips_done = evaluated.get("trial_trips_completed", 0)
+            target = evaluated.get("trial_trips_target", SUBSCRIPTION_CONFIG["trial_trips_target"])
+            extended = evaluated.get("trial_extended", False)
             restrictions["can_go_online"] = True
             restrictions["can_accept_rides"] = True
             restrictions["can_withdraw_earnings"] = True
-            restrictions["message"] = f"Trial period: {days_left} days remaining"
+            if extended:
+                restrictions["message"] = f"Trial extended — {trips_done}/{target} trips completed"
+            else:
+                restrictions["message"] = f"Free trial: {trips_done}/{target} trips completed"
     
     elif status == "active":
         end_date = subscription.get("end_date")

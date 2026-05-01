@@ -15,6 +15,7 @@ ADMIN_DIR = Path(__file__).resolve().parent.parent / "admin"
 
 from database import db, SUBSCRIPTION_CONFIG
 from auth_guard import require_authenticated, verify_owner_strict
+from route_cache import get_api_usage_summary
 
 logger = logging.getLogger('server')
 admin_router = APIRouter(prefix="/api", tags=["Admin"])
@@ -272,6 +273,8 @@ async def admin_get_driver_full_profile(driver_id: str):
             "documents_verified": profile.get("documents_verified", False),
             "profile_completed": profile.get("profile_completed", False),
             "profile_completed_at": profile.get("profile_completed_at"),
+            # verification_status: prefer profile copy, fall back to users record.
+            "verification_status": profile.get("verification_status") or user.get("verification_status"),
         },
         "guarantor": profile.get("guarantor"),
         "bank_details": {
@@ -291,7 +294,11 @@ async def admin_get_driver_full_profile(driver_id: str):
         "stats": {
             "completed_trips": trips_count,
             "subscription_active": subscription is not None,
-            "subscription_plan": subscription.get("plan") if subscription else None,
+            "subscription_status": subscription.get("status") if subscription else "none",
+            "subscription_plan": subscription.get("tier") if subscription else None,
+            "trial_trips_completed": (subscription or {}).get("trial_trips_completed", trips_count),
+            "trial_trips_target": (subscription or {}).get("trial_trips_target", 20),
+            "trial_active": (subscription or {}).get("trial_active", False),
         },
     }
 
@@ -1454,5 +1461,49 @@ async def cleanup_test_data():
             "wallets": t5.deleted_count,
         },
         "remaining_pending_trips": remaining_pending,
+    }
+
+
+@admin_router.get("/admin/api-usage")
+async def get_api_usage(days: int = 7, http_request: Request = None):
+    """Return Google Maps API usage stats and cache hit rates for the last N days."""
+    from admin_guard import require_admin_request
+    require_admin_request(http_request)
+    rows = await get_api_usage_summary(db, days=days)
+    total_real = sum(r.get("real_calls", 0) for r in rows)
+    total_cached = sum(r.get("cached_hits", 0) for r in rows)
+    total_all = total_real + total_cached
+    cache_hit_rate = round((total_cached / total_all * 100) if total_all else 0, 1)
+
+    # Estimated cost: Google Maps Directions API ~$0.005 per request ≈ ₦8
+    cost_per_call_ngn = 8
+    estimated_cost_ngn = total_real * cost_per_call_ngn
+
+    return {
+        "period_days": days,
+        "total_api_calls": total_all,
+        "real_google_calls": total_real,
+        "cached_hits": total_cached,
+        "cache_hit_rate_pct": cache_hit_rate,
+        "estimated_cost_ngn": estimated_cost_ngn,
+        "daily_breakdown": rows,
+    }
+
+
+@admin_router.get("/admin/route-cache/stats")
+async def get_route_cache_stats(http_request: Request = None):
+    """Return current route cache size and expiry info."""
+    from admin_guard import require_admin_request
+    from route_cache import _lru
+    require_admin_request(http_request)
+    cached_count = await db.route_cache.count_documents({})
+    lru_count = len(_lru)
+    # Purge expired entries from MongoDB
+    now_iso = datetime.utcnow().isoformat()
+    purge_result = await db.route_cache.delete_many({"expires_at": {"$lt": now_iso}})
+    return {
+        "mongo_cached_routes": cached_count,
+        "lru_cached_routes": lru_count,
+        "purged_expired": purge_result.deleted_count,
     }
 

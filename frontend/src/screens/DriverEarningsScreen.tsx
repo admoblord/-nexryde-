@@ -25,6 +25,7 @@ export default function DriverEarningsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState<any>(null);
   const [bankReady, setBankReady] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
     if (!user?.id) {
@@ -33,6 +34,7 @@ export default function DriverEarningsScreen() {
       setLoading(false);
       return;
     }
+    setLoadError(false);
     try {
       const [earningsRes, bankRes] = await Promise.all([
         getDriverEarningsDashboard(user.id, period),
@@ -44,6 +46,7 @@ export default function DriverEarningsScreen() {
       if (__DEV__) console.warn('Failed to load driver earnings', e);
       setDashboard(null);
       setBankReady(false);
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -93,6 +96,17 @@ export default function DriverEarningsScreen() {
         contentContainerStyle={styles.content}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
+        {loadError && !refreshing && (
+          <TouchableOpacity
+            style={styles.errorCard}
+            onPress={() => { setRefreshing(true); load(); }}
+            activeOpacity={0.8}
+          >
+            <Ionicons name="cloud-offline-outline" size={20} color={COLORS.error} />
+            <Text style={styles.errorText}>Couldn't load earnings — tap to retry</Text>
+            <Ionicons name="refresh" size={18} color={COLORS.error} />
+          </TouchableOpacity>
+        )}
         <View style={styles.earningsCard}>
           <Text style={styles.earningsLabel}>Total Earnings</Text>
           {loading ? (
@@ -282,6 +296,18 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.white, letterSpacing: -0.5 },
   headerSubtext: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.accent, marginTop: SPACING.xs },
   content: { padding: SPACING.lg },
+  errorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.md,
+  },
+  errorText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.error },
   earningsCard: { backgroundColor: COLORS.primary, borderRadius: BORDER_RADIUS.xxl, padding: SPACING.xl, marginBottom: SPACING.lg, ...SHADOWS.lg },
   earningsLabel: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.gray400, textTransform: 'uppercase', letterSpacing: 1 },
   earningsAmount: {

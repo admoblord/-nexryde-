@@ -1465,6 +1465,12 @@ app.include_router(support_router)
 from routers.shield import shield_router
 app.include_router(shield_router)
 
+from routers.incentives import incentives_router
+app.include_router(incentives_router)
+
+from routers.driver_control import driver_control_router
+app.include_router(driver_control_router)
+
 # ==================== SQUAD WEBHOOK DLQ AUTO-RETRY ====================
 async def _squad_webhook_dlq_autoreplay_loop():
     """Replay DLQ payloads after a short delay (transient DB errors). Disable: SQUAD_DLQ_AUTOREPLAY=0."""

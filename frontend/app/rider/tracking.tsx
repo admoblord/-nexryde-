@@ -399,7 +399,7 @@ export default function TrackingScreen() {
         incidentType,
         `Reported from trip tracking while status=${tripStatus}`,
       );
-      Alert.alert('Incident logged', 'Your encrypted trip recording will be preserved for review.');
+      Alert.alert('Incident logged', 'Your trip safety recording will be preserved for review.');
     } catch {
       Alert.alert('Could not save report', 'Please try again in a moment.');
     }
@@ -934,7 +934,7 @@ export default function TrackingScreen() {
               </View>
               <Text style={styles.recordingText}>
                 {recordingStatus === 'recording'
-                  ? 'Audio is being captured for incident protection with encrypted retention.'
+                  ? 'Audio is being captured for incident protection with protected retention.'
                   : 'Recording auto-starts when your active trip enters the protected trip flow.'}
               </Text>
               {currentRecording ? (

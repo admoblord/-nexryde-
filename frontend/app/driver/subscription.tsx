@@ -18,11 +18,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import { useAppStore } from '@/src/store/appStore';
 import {
   getSubscriptionConfig,
-  createVirtualAccount,
   getDriverSubscriptionStatus,
   initiateSubscriptionCheckout,
   verifyPendingSubscriptionCheckout,
@@ -49,11 +47,14 @@ interface PricingData {
 
 interface SubscriptionStatus {
   tier: 'city_rider' | 'road_warrior' | 'none';
-  status: 'trial' | 'active' | 'expired' | 'pending_verification' | 'pending_payment' | 'grace_period';
+  status: 'none' | 'trial' | 'active' | 'expired' | 'pending_verification' | 'pending_payment' | 'grace_period';
   monthly_price: number;
   trial_active: boolean;
-  trial_hours_remaining?: number;
+  trial_trips_completed?: number;
   trial_trips_remaining?: number;
+  trial_trips_target?: number;
+  trial_extended?: boolean;
+  trial_completed?: boolean;
   days_remaining?: number;
   can_upgrade: boolean;
   upgrade_requirements?: {
@@ -81,7 +82,6 @@ export default function SubscriptionScreen() {
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [virtualAccount, setVirtualAccount] = useState<VirtualAccountDetails | null>(null);
   /** Latest Squad subscription checkout ref (ref avoids stale interval closures). */
   const pendingSubCheckoutRef = useRef<string | null>(null);
@@ -126,6 +126,8 @@ export default function SubscriptionScreen() {
 
   const initializeData = async () => {
     try {
+      const eligible = await ensureDriverEligibleForActivation();
+      if (!eligible) return;
       await Promise.all([fetchPricing(), fetchSubscriptionStatus()]);
     } catch (error) {
       if (__DEV__) console.warn('Error initializing subscription', error);
@@ -133,6 +135,32 @@ export default function SubscriptionScreen() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const ensureDriverEligibleForActivation = async () => {
+    if (!user?.id) return true;
+    const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/onboarding-status`, {
+      headers: getAuthHeaders(),
+    });
+    const status = await response.json();
+    const step = status?.step;
+    if (step === 'dashboard_limited' || step === 'documents_review') {
+      Alert.alert(
+        'Verification in review',
+        'Your documents are saved. Subscription and payment activation unlock after approval.',
+        [{ text: 'Go to driver home', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+      );
+      router.replace('/(driver-tabs)/driver-home');
+      return false;
+    }
+    if (step === 'documents_rejected') {
+      router.replace({
+        pathname: '/(auth)/driver-verification-status',
+        params: { driver_id: user.id, phone: user.phone, name: user.name, email: user.email },
+      });
+      return false;
+    }
+    return true;
   };
 
   const fetchPricing = async () => {
@@ -201,8 +229,9 @@ export default function SubscriptionScreen() {
       const data = response.data || {};
       
       // Map API response to expected format
-      const normalizedStatus: SubscriptionStatus['status'] = data.status || 'expired';
-      const tier = data.tier || (data.subscription_active ? 'city_rider' : 'none');
+      const normalizedStatus: SubscriptionStatus['status'] = data.status || 'none';
+      const activeOrPending = ['trial', 'active', 'grace_period', 'pending_payment', 'pending_verification'].includes(normalizedStatus);
+      const tier = activeOrPending ? (data.tier || 'city_rider') : 'none';
       if (data.virtual_account?.account_number && data.virtual_account?.bank_name) {
         setVirtualAccount({
           account_number: data.virtual_account.account_number,
@@ -220,8 +249,11 @@ export default function SubscriptionScreen() {
         status: normalizedStatus,
         monthly_price: data.amount_expected || pricing?.city_rider?.current_price || 18000,
         trial_active: data.trial_active || data.status === 'trial',
-        trial_hours_remaining: data.trial_hours_remaining,
+        trial_trips_completed: data.trial_trips_completed ?? 0,
         trial_trips_remaining: data.trial_trips_remaining,
+        trial_trips_target: data.trial_trips_target ?? 20,
+        trial_extended: data.trial_extended ?? false,
+        trial_completed: data.trial_completed ?? false,
         days_remaining: data.days_remaining,
         can_upgrade: data.can_upgrade ?? (data.status === 'active' || data.status === 'trial'),
         upgrade_requirements: data.upgrade_requirements,
@@ -261,53 +293,6 @@ export default function SubscriptionScreen() {
     }
   };
 
-  const startTrial = async (tier: 'city_rider' | 'road_warrior') => {
-    if (!user?.id) {
-      Alert.alert('Error', 'Please login first');
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      const amount = tier === 'city_rider'
-        ? (pricing?.city_rider?.current_price || 18000)
-        : (pricing?.road_warrior?.current_price || 30000);
-      const response = await createVirtualAccount({
-        driver_id: user.id,
-        plan_amount: amount,
-        tier,
-      });
-      const data = response.data || {};
-      const acct = data.account_number != null ? String(data.account_number).trim() : '';
-      const bank = data.bank_name != null ? String(data.bank_name).trim() : '';
-
-      if (acct && bank) {
-        setVirtualAccount(data as VirtualAccountDetails);
-        ensureStatusPolling();
-        Alert.alert(
-          'Virtual Account Ready',
-          `Transfer exactly ₦${amount.toLocaleString()} to:\n${bank}\n${acct}\n\nCard / bank checkout is the fastest option. If you use this transfer account, activation is automatic once payment is confirmed.`,
-          [{ text: 'OK', onPress: () => fetchSubscriptionStatus() }]
-        );
-      } else {
-        setVirtualAccount(null);
-        Alert.alert(
-          'Bank transfer',
-          'Unable to generate bank account. Please try again or use card payment.',
-        );
-      }
-    } catch (error: unknown) {
-      const msg =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-      Alert.alert(
-        'Bank transfer',
-        typeof msg === 'string' && msg.trim()
-          ? msg
-          : 'Unable to generate bank account. Please try again or use card payment.',
-      );
-    }
-    setSubmitting(false);
-  };
 
   const payWithSquadCheckout = async (tier: 'city_rider' | 'road_warrior') => {
     if (!user?.id) {
@@ -404,40 +389,7 @@ export default function SubscriptionScreen() {
     };
   }, []);
 
-  const upgradeToRoadWarrior = async () => {
-    if (!user?.id) return;
 
-    setSubmitting(true);
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/subscription/upgrade-to-road-warrior/${user.id}`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-      });
-      const data = await response.json();
-      
-      if (response.ok) {
-        Alert.alert(
-          'Upgraded! 🚀',
-          'You are now a Road Warrior! Enjoy unlimited inter-city trips and advanced AI features.',
-          [{ text: 'Awesome!', onPress: () => {
-            setShowUpgradeModal(false);
-            fetchSubscriptionStatus();
-          }}]
-        );
-      } else {
-        Alert.alert('Cannot Upgrade', data.detail || 'Requirements not met');
-      }
-    } catch (error) {
-      Alert.alert('Error', 'Failed to upgrade');
-    }
-    setSubmitting(false);
-  };
-
-  const copyToClipboard = async (text: string, field: string) => {
-    await Clipboard.setStringAsync(text);
-    setCopiedField(field);
-    setTimeout(() => setCopiedField(null), 2000);
-  };
 
   const getTierBadgeConfig = (tier: string) => {
     if (tier === 'city_rider') {
@@ -481,7 +433,10 @@ export default function SubscriptionScreen() {
     );
   }
 
-  const tierConfig = getTierBadgeConfig(subscription?.tier || 'none');
+  const subscriptionIsActive = subscription ? ['trial', 'active', 'grace_period'].includes(subscription.status) : false;
+  const subscriptionIsPending = subscription ? ['pending_payment', 'pending_verification'].includes(subscription.status) : false;
+  const pendingTierLabel = subscription?.tier === 'road_warrior' ? 'Road Warrior' : 'City Rider';
+  const tierConfig = getTierBadgeConfig(subscriptionIsActive ? (subscription?.tier || 'none') : 'none');
 
   return (
     <View style={styles.container}>
@@ -497,7 +452,14 @@ export default function SubscriptionScreen() {
             <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Subscription Tiers</Text>
-          <TouchableOpacity style={styles.helpButton}>
+          <TouchableOpacity
+            style={styles.helpButton}
+            onPress={() => Alert.alert(
+              'Subscription Help',
+              'City Rider: unlimited city trips (max 50 km) for ₦18,000/month.\n\nRoad Warrior: unlimited nationwide trips for ₦30,000/month. Requires 4.5★ + 50 trips.\n\nPay with card via Squad for instant activation. Contact support if you need help.',
+              [{ text: 'OK' }]
+            )}
+          >
             <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
           </TouchableOpacity>
         </View>
@@ -506,15 +468,17 @@ export default function SubscriptionScreen() {
           showsVerticalScrollIndicator={false} 
           contentContainerStyle={styles.scrollContent}
         >
-          <View style={styles.flowBanner}>
-            <Ionicons name="flash" size={18} color="#00D084" />
-            <Text style={styles.flowBannerText}>
-              Recommended: use card / bank checkout for the fastest activation. Transfer account details remain available below as fallback.
-            </Text>
-          </View>
+          {subscriptionIsPending && (
+            <View style={styles.pendingFlowBanner}>
+              <Ionicons name="time" size={18} color="#FBBF24" />
+              <Text style={styles.flowBannerText}>
+                {pendingTierLabel} payment is being processed. Your plan activates automatically once confirmed.
+              </Text>
+            </View>
+          )}
 
           {/* Current Subscription Badge */}
-          {subscription && subscription.tier !== 'none' && (
+          {subscription && subscriptionIsActive && subscription.tier !== 'none' && (
             <Animated.View style={[styles.currentTierCard, { opacity: fadeAnim }]}>
               <LinearGradient
                 colors={tierConfig.gradient}
@@ -530,11 +494,33 @@ export default function SubscriptionScreen() {
                     ₦{subscription.monthly_price.toLocaleString()}/month
                   </Text>
                   {subscription.trial_active && (
-                    <View style={styles.trialBadge}>
-                      <Ionicons name="gift" size={14} color="#FFFFFF" />
-                      <Text style={styles.trialBadgeText}>
-                        Trial: {subscription.trial_hours_remaining}h left (Unlimited city rides)
+                    <View style={styles.trialProgressContainer}>
+                      <View style={styles.trialBadge}>
+                        <Ionicons name="flash" size={14} color="#FFFFFF" />
+                        <Text style={styles.trialBadgeText}>
+                          {subscription.trial_extended
+                            ? 'Trial extended — low activity'
+                            : 'Free until 20 trips'}
+                        </Text>
+                      </View>
+                      <Text style={styles.trialProgressLabel}>
+                        Trips completed: {subscription.trial_trips_completed ?? 0} / {subscription.trial_trips_target ?? 20}
                       </Text>
+                      <View style={styles.trialProgressBarBg}>
+                        <View
+                          style={[
+                            styles.trialProgressBarFill,
+                            {
+                              width: `${Math.min(100, ((subscription.trial_trips_completed ?? 0) / (subscription.trial_trips_target ?? 20)) * 100)}%` as any,
+                            },
+                          ]}
+                        />
+                      </View>
+                      {subscription.trial_extended && (
+                        <Text style={styles.trialExtendedNote}>
+                          Trial extended due to low ride activity
+                        </Text>
+                      )}
                     </View>
                   )}
                   {!subscription.trial_active && subscription.status === 'active' && subscription.days_remaining && (
@@ -544,6 +530,43 @@ export default function SubscriptionScreen() {
                   )}
                 </View>
               </LinearGradient>
+            </Animated.View>
+          )}
+
+          {subscription && subscriptionIsPending && subscription.tier !== 'none' && (
+            <Animated.View style={[styles.pendingTierCard, { opacity: fadeAnim }]}>
+              <View style={styles.pendingTierIcon}>
+                <Ionicons name="hourglass-outline" size={24} color="#FBBF24" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.pendingTierTitle}>{pendingTierLabel} payment pending</Text>
+                <Text style={styles.pendingTierText}>
+                  You selected this tier, but it is not active. Complete payment or tap verify after paying.
+                </Text>
+              </View>
+            </Animated.View>
+          )}
+
+          {/* Bank Transfer Fallback — only shown when VA was previously generated */}
+          {virtualAccount?.account_number && virtualAccount?.bank_name && (
+            <Animated.View style={[styles.vaCard, { opacity: fadeAnim }]}>
+              <View style={styles.vaHeader}>
+                <Ionicons name="card" size={18} color="#00D084" />
+                <Text style={styles.vaTitle}>Bank transfer option</Text>
+              </View>
+              <View style={styles.vaRow}>
+                <Text style={styles.vaLabel}>Bank</Text>
+                <Text style={styles.vaValue}>{virtualAccount.bank_name}</Text>
+              </View>
+              <View style={styles.vaRow}>
+                <Text style={styles.vaLabel}>Account Name</Text>
+                <Text style={styles.vaValue}>{virtualAccount.account_name || user?.name || 'Driver'}</Text>
+              </View>
+              <View style={[styles.vaRow, styles.vaRowHighlight]}>
+                <Text style={styles.vaLabel}>Account Number</Text>
+                <Text style={[styles.vaValue, { color: '#00D084', fontSize: 18, fontWeight: '900' }]}>{virtualAccount.account_number}</Text>
+              </View>
+              <Text style={styles.vaNote}>Transfer the exact tier amount. Activation is automatic once confirmed by the bank.</Text>
             </Animated.View>
           )}
 
@@ -601,16 +624,22 @@ export default function SubscriptionScreen() {
                   ))}
                 </View>
 
-                {subscription?.tier === 'city_rider' ? (
+                {subscriptionIsActive && subscription?.tier === 'city_rider' ? (
                   <View style={styles.currentTierButton}>
                     <Ionicons name="checkmark-circle" size={20} color="#00D084" />
-                    <Text style={styles.currentTierButtonText}>Current Tier</Text>
+                    <Text style={styles.currentTierButtonText}>Active — Current Tier</Text>
                   </View>
-                ) : subscription?.tier === 'none' || !subscription ? (
-                  <TouchableOpacity 
+                ) : subscriptionIsPending && subscription?.tier === 'city_rider' ? (
+                  <View style={styles.pendingTierButton}>
+                    <Ionicons name="time" size={18} color="#FBBF24" />
+                    <Text style={styles.pendingTierButtonText}>Payment processing — not yet active</Text>
+                  </View>
+                ) : (subscription?.tier === 'none' || !subscription) ? (
+                  <TouchableOpacity
                     style={styles.selectButton}
-                    onPress={() => startTrial('city_rider')}
+                    onPress={() => payWithSquadCheckout('city_rider')}
                     disabled={submitting}
+                    activeOpacity={0.85}
                   >
                     <LinearGradient
                       colors={['#00D084', '#00C853']}
@@ -620,8 +649,8 @@ export default function SubscriptionScreen() {
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
                         <>
-                          <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Get City Rider fallback transfer details</Text>
+                          <Ionicons name="card" size={20} color="#FFFFFF" />
+                          <Text style={styles.selectButtonText}>Pay Now — City Rider</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -687,36 +716,41 @@ export default function SubscriptionScreen() {
                   ))}
                 </View>
 
-                {subscription?.tier === 'road_warrior' ? (
+                {subscriptionIsActive && subscription?.tier === 'road_warrior' ? (
                   <View style={[styles.currentTierButton, { backgroundColor: '#FFD70020', borderColor: '#FFD700' }]}>
                     <Ionicons name="checkmark-circle" size={20} color="#FFD700" />
-                    <Text style={[styles.currentTierButtonText, { color: '#FFD700' }]}>Current Tier</Text>
+                    <Text style={[styles.currentTierButtonText, { color: '#FFD700' }]}>Active — Current Tier</Text>
                   </View>
-                ) : subscription?.tier === 'city_rider' && subscription?.can_upgrade ? (
-                  <TouchableOpacity 
+                ) : subscriptionIsPending && subscription?.tier === 'road_warrior' ? (
+                  <View style={styles.pendingTierButton}>
+                    <Ionicons name="time" size={18} color="#FBBF24" />
+                    <Text style={styles.pendingTierButtonText}>Payment processing — not yet active</Text>
+                  </View>
+                ) : subscriptionIsActive && subscription?.tier === 'city_rider' && subscription?.can_upgrade ? (
+                  <TouchableOpacity
                     style={styles.selectButton}
                     onPress={() => setShowUpgradeModal(true)}
+                    activeOpacity={0.85}
                   >
                     <LinearGradient
                       colors={['#FFD700', '#FFA500']}
                       style={styles.selectButtonGradient}
                     >
                       <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
-                      <Text style={styles.selectButtonText}>Upgrade Now</Text>
+                      <Text style={styles.selectButtonText}>Upgrade to Road Warrior</Text>
                     </LinearGradient>
                   </TouchableOpacity>
-                ) : subscription?.tier === 'city_rider' && !subscription?.can_upgrade ? (
+                ) : subscriptionIsActive && subscription?.tier === 'city_rider' && !subscription?.can_upgrade ? (
                   <View style={styles.lockedButton}>
                     <Ionicons name="lock-closed" size={18} color="#94A3B8" />
-                    <Text style={styles.lockedButtonText}>
-                      Requires: 4.5★ + 50 trips
-                    </Text>
+                    <Text style={styles.lockedButtonText}>Unlocks after 4.5★ rating + 50 trips</Text>
                   </View>
-                ) : subscription?.tier === 'none' || !subscription ? (
-                  <TouchableOpacity 
+                ) : (subscription?.tier === 'none' || !subscription) ? (
+                  <TouchableOpacity
                     style={styles.selectButton}
-                    onPress={() => startTrial('road_warrior')}
+                    onPress={() => payWithSquadCheckout('road_warrior')}
                     disabled={submitting}
+                    activeOpacity={0.85}
                   >
                     <LinearGradient
                       colors={['#FFD700', '#FFA500']}
@@ -726,8 +760,8 @@ export default function SubscriptionScreen() {
                         <ActivityIndicator color="#FFFFFF" />
                       ) : (
                         <>
-                          <Ionicons name="gift" size={20} color="#FFFFFF" />
-                          <Text style={styles.selectButtonText}>Get Road Warrior fallback transfer details</Text>
+                          <Ionicons name="card" size={20} color="#FFFFFF" />
+                          <Text style={styles.selectButtonText}>Pay Now — Road Warrior</Text>
                         </>
                       )}
                     </LinearGradient>
@@ -737,146 +771,28 @@ export default function SubscriptionScreen() {
             </Animated.View>
           </View>
 
-          {/* Bank Details Card */}
-          <Animated.View style={[styles.bankCard, { opacity: fadeAnim }]}>
-            <View style={styles.bankHeader}>
-              <LinearGradient
-                colors={['#00D084', '#00C853']}
-                style={styles.bankIconBg}
-              >
-                <Ionicons name="card" size={20} color="#FFFFFF" />
-              </LinearGradient>
-              <Text style={styles.bankTitle}>Payment activation</Text>
-            </View>
-            
-            <View style={styles.bankDetailsContainer}>
-              {virtualAccount?.account_number && virtualAccount?.bank_name ? (
-                <>
-                  <BankDetailRow
-                    label="Bank Name"
-                    value={virtualAccount.bank_name}
-                    copied={copiedField === 'bank'}
-                    onCopy={() => copyToClipboard(virtualAccount.bank_name, 'bank')}
-                  />
-                  <BankDetailRow
-                    label="Account Name"
-                    value={virtualAccount.account_name || user?.name || 'Nexryde Driver'}
-                    copied={copiedField === 'name'}
-                    onCopy={() =>
-                      copyToClipboard(virtualAccount.account_name || user?.name || 'Nexryde Driver', 'name')
-                    }
-                  />
-                  <BankDetailRow
-                    label="Account Number"
-                    value={virtualAccount.account_number}
-                    copied={copiedField === 'number'}
-                    onCopy={() => copyToClipboard(virtualAccount.account_number, 'number')}
-                    highlight
-                  />
-                </>
-              ) : (
-                <Text style={styles.stepText}>
-                  Recommended: pay with card / bank checkout below for the fastest activation. You can also generate transfer details if needed.
-                </Text>
-              )}
-            </View>
-
-            <View style={styles.stepsContainer}>
-              <Text style={styles.stepsTitle}>How activation works</Text>
-              {[
-                'Preferred: tap a Pay button below to complete card / bank checkout',
-                'Fallback: generate a transfer account only if you need bank transfer details',
-                'Pay the exact plan amount for your selected tier',
-                'Your status updates automatically once Squad confirms payment',
-              ].map((step, index) => (
-                <View key={index} style={styles.stepRow}>
-                  <View style={styles.stepNumber}>
-                    <Text style={styles.stepNumberText}>{index + 1}</Text>
-                  </View>
-                  <Text style={styles.stepText}>{step}</Text>
-                </View>
-              ))}
-            </View>
-
-            <View style={styles.proofActionsRow}>
-              <TouchableOpacity
-                style={styles.proofActionButton}
-                onPress={() => startTrial('city_rider')}
-              >
-                <Ionicons name="card-outline" size={18} color="#00D084" />
-                <Text style={styles.proofActionText}>City Rider transfer details</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.proofActionButton}
-                onPress={() => startTrial('road_warrior')}
-              >
-                <Ionicons name="card-outline" size={18} color="#FFD700" />
-                <Text style={styles.proofActionText}>Road Warrior transfer details</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={[styles.proofActionsRow, { marginTop: 10 }]}>
-              <TouchableOpacity
-                style={styles.proofActionButton}
-                onPress={() => payWithSquadCheckout('city_rider')}
-                disabled={submitting}
-              >
-                <Ionicons name="open-outline" size={18} color="#818CF8" />
-                <Text style={styles.proofActionText}>Pay City Rider now</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.proofActionButton}
-                onPress={() => payWithSquadCheckout('road_warrior')}
-                disabled={submitting}
-              >
-                <Ionicons name="open-outline" size={18} color="#818CF8" />
-                <Text style={styles.proofActionText}>Pay Road Warrior now</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.proofActionButton, { marginTop: 10, alignSelf: 'center' }]}
-              onPress={() => void confirmPendingCheckout()}
-              disabled={submitting}
-            >
-              <Ionicons name="refresh" size={18} color="#94A3B8" />
-              <Text style={[styles.proofActionText, { color: '#94A3B8' }]}>Verify card / bank payment</Text>
-            </TouchableOpacity>
-          </Animated.View>
-
-          {/* Crypto Payment Coming Soon */}
-          <Animated.View style={[styles.cryptoCard, { opacity: fadeAnim }]}>
-            <View style={styles.cryptoHeader}>
-              <View style={styles.cryptoIconBg}>
-                <Ionicons name="logo-bitcoin" size={24} color="#F7931A" />
-              </View>
-              <View style={styles.cryptoHeaderText}>
-                <Text style={styles.cryptoTitle}>Crypto Payments</Text>
-                <View style={styles.cryptoBadge}>
-                  <Text style={styles.cryptoBadgeText}>COMING SOON</Text>
+          {/* Verify Payment Card — slim, always visible */}
+          <Animated.View style={[styles.verifyCard, { opacity: fadeAnim }]}>
+            <View style={styles.verifyCardRow}>
+              <View style={styles.verifyCardLeft}>
+                <Ionicons name="shield-checkmark-outline" size={22} color="#00D084" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.verifyCardTitle}>Already paid?</Text>
+                  <Text style={styles.verifyCardSub}>Tap to confirm your payment with Squad and activate your plan instantly.</Text>
                 </View>
               </View>
-            </View>
-            <Text style={styles.cryptoDesc}>
-              Pay your subscription with Bitcoin, USDT, and other cryptocurrencies. Lower fees, instant processing.
-            </Text>
-            <View style={styles.cryptoCoins}>
-              {[
-                { symbol: '₿', label: 'BTC' },
-                { symbol: 'Ξ', label: 'ETH' },
-                { symbol: '$', label: 'USDT' },
-                { symbol: '◎', label: 'SOL' },
-              ].map((coin) => (
-                <View key={coin.label} style={styles.cryptoCoin}>
-                  <Text style={styles.cryptoCoinSymbol}>{coin.symbol}</Text>
-                  <Text style={styles.cryptoCoinLabel}>{coin.label}</Text>
-                </View>
-              ))}
-            </View>
-            <View style={styles.cryptoNotifyBtn}>
-              <Ionicons name="notifications-outline" size={18} color="#F7931A" />
-              <Text style={styles.cryptoNotifyText}>Notify me when available</Text>
+              <TouchableOpacity
+                style={styles.verifyCardBtn}
+                onPress={() => void confirmPendingCheckout()}
+                disabled={submitting}
+                activeOpacity={0.8}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#FFF" />
+                ) : (
+                  <Text style={styles.verifyCardBtnText}>Verify</Text>
+                )}
+              </TouchableOpacity>
             </View>
           </Animated.View>
 
@@ -929,16 +845,19 @@ export default function SubscriptionScreen() {
                   >
                     <Text style={styles.upgradeCancelText}>Cancel</Text>
                   </TouchableOpacity>
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     style={styles.upgradeConfirmButton}
-                    onPress={upgradeToRoadWarrior}
+                    onPress={async () => {
+                      setShowUpgradeModal(false);
+                      await payWithSquadCheckout('road_warrior');
+                    }}
                     disabled={submitting || !subscription?.can_upgrade}
                   >
                     {submitting ? (
                       <ActivityIndicator color="#FFFFFF" />
                     ) : (
                       <Text style={styles.upgradeConfirmText}>
-                        Upgrade - ₦{pricing?.road_warrior.current_price.toLocaleString()}
+                        Pay Now — ₦{pricing?.road_warrior.current_price.toLocaleString() ?? '30,000'}
                       </Text>
                     )}
                   </TouchableOpacity>
@@ -952,35 +871,6 @@ export default function SubscriptionScreen() {
   );
 }
 
-const BankDetailRow = ({ 
-  label, 
-  value, 
-  copied, 
-  onCopy,
-  highlight 
-}: { 
-  label: string; 
-  value: string; 
-  copied: boolean;
-  onCopy: () => void;
-  highlight?: boolean;
-}) => (
-  <View style={[styles.bankDetailRow, highlight && styles.bankDetailRowHighlight]}>
-    <View>
-      <Text style={styles.bankDetailLabel}>{label}</Text>
-      <Text style={[styles.bankDetailValue, highlight && styles.bankDetailValueHighlight]}>
-        {value}
-      </Text>
-    </View>
-    <TouchableOpacity style={styles.copyButton} onPress={onCopy}>
-      <Ionicons 
-        name={copied ? "checkmark" : "copy-outline"} 
-        size={20} 
-        color={copied ? "#00D084" : "#94A3B8"} 
-      />
-    </TouchableOpacity>
-  </View>
-);
 
 const styles = StyleSheet.create({
   container: {
@@ -1043,6 +933,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 14,
     marginBottom: 16,
+  },
+  pendingFlowBanner: {
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    backgroundColor: 'rgba(69, 26, 3, 0.35)',
   },
   flowBannerText: {
     flex: 1,
@@ -1109,11 +1003,69 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#FFFFFF',
   },
+  trialProgressContainer: {
+    marginTop: 10,
+  },
+  trialProgressLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.9)',
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  trialProgressBarBg: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    overflow: 'hidden',
+  },
+  trialProgressBarFill: {
+    height: '100%',
+    borderRadius: 3,
+    backgroundColor: '#00FF9D',
+  },
+  trialExtendedNote: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#FFD700',
+    marginTop: 4,
+  },
   daysRemainingText: {
     fontSize: 13,
     fontWeight: '700',
     color: 'rgba(255, 255, 255, 0.8)',
     marginTop: 6,
+  },
+  pendingTierCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: 'rgba(251, 191, 36, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.35)',
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 18,
+  },
+  pendingTierIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: 'rgba(251, 191, 36, 0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingTierTitle: {
+    color: '#FDE68A',
+    fontSize: 16,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  pendingTierText: {
+    color: '#CBD5E1',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
   },
 
   // Tiers Container
@@ -1263,6 +1215,22 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#00D084',
   },
+  pendingTierButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251, 191, 36, 0.12)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(251, 191, 36, 0.45)',
+  },
+  pendingTierButtonText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#FDE68A',
+  },
   selectButton: {
     borderRadius: 14,
     overflow: 'hidden',
@@ -1297,137 +1265,6 @@ const styles = StyleSheet.create({
   },
 
   // Bank Card
-  bankCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 20,
-    padding: 20,
-    marginTop: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  bankHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-  },
-  bankIconBg: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  bankTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  bankDetailsContainer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 14,
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  bankDetailRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  bankDetailRowHighlight: {
-    backgroundColor: 'rgba(0, 208, 132, 0.1)',
-  },
-  bankDetailLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#94A3B8',
-    marginBottom: 4,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  bankDetailValue: {
-    fontSize: 15,
-    fontWeight: '900',
-    color: '#FFFFFF',
-  },
-  bankDetailValueHighlight: {
-    color: '#00D084',
-    fontSize: 18,
-    letterSpacing: 1.5,
-  },
-  copyButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepsContainer: {
-    backgroundColor: 'rgba(245, 158, 11, 0.1)',
-    borderRadius: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.2)',
-  },
-  proofActionsRow: {
-    marginTop: 14,
-    gap: 10,
-  },
-  proofActionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(15,23,42,0.7)',
-    borderRadius: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 10,
-  },
-  proofActionText: {
-    color: '#E2E8F0',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  stepsTitle: {
-    fontSize: 13,
-    fontWeight: '900',
-    color: '#F59E0B',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    marginBottom: 8,
-  },
-  stepNumber: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#F59E0B',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  stepNumberText: {
-    fontSize: 12,
-    fontWeight: '900',
-    color: '#000000',
-  },
-  stepText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#FDE68A',
-    flex: 1,
-  },
 
   // Payment Modal
   modalContainer: {
@@ -1626,93 +1463,100 @@ const styles = StyleSheet.create({
   },
 
   // Crypto Coming Soon
-  cryptoCard: {
-    backgroundColor: 'rgba(247, 147, 26, 0.08)',
-    borderRadius: 20,
-    padding: 20,
-    marginTop: 16,
+  vaCard: {
+    backgroundColor: 'rgba(0, 208, 132, 0.06)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 12,
+    marginBottom: 4,
     borderWidth: 1,
-    borderColor: 'rgba(247, 147, 26, 0.25)',
+    borderColor: 'rgba(0, 208, 132, 0.2)',
   },
-  cryptoHeader: {
+  vaHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
     marginBottom: 12,
   },
-  cryptoIconBg: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    backgroundColor: 'rgba(247, 147, 26, 0.15)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  cryptoHeaderText: {
-    flex: 1,
-  },
-  cryptoTitle: {
-    fontSize: 18,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  cryptoBadge: {
-    backgroundColor: '#F59E0B',
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  cryptoBadgeText: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 1,
-  },
-  cryptoDesc: {
+  vaTitle: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#94A3B8',
-    lineHeight: 20,
-    marginBottom: 16,
+    fontWeight: '800',
+    color: '#E2E8F0',
   },
-  cryptoCoins: {
+  vaRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 14,
-    paddingVertical: 14,
-    marginBottom: 16,
-  },
-  cryptoCoin: {
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  cryptoCoinSymbol: {
-    fontSize: 22,
-    color: '#FFFFFF',
-    fontWeight: '700',
-    marginBottom: 4,
+  vaRowHighlight: {
+    backgroundColor: 'rgba(0,208,132,0.08)',
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    borderBottomWidth: 0,
   },
-  cryptoCoinLabel: {
+  vaLabel: {
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
     color: '#64748B',
   },
-  cryptoNotifyBtn: {
+  vaValue: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#E2E8F0',
+  },
+  vaNote: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 10,
+    lineHeight: 16,
+  },
+  verifyCard: {
+    backgroundColor: 'rgba(0, 208, 132, 0.06)',
+    borderRadius: 16,
+    padding: 16,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 132, 0.25)',
+  },
+  verifyCardRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(247, 147, 26, 0.12)',
-    borderRadius: 14,
-    paddingVertical: 14,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(247, 147, 26, 0.3)',
+    gap: 12,
   },
-  cryptoNotifyText: {
+  verifyCardLeft: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  verifyCardTitle: {
     fontSize: 14,
-    fontWeight: '700',
-    color: '#F7931A',
+    fontWeight: '800',
+    color: '#E2E8F0',
+    marginBottom: 2,
+  },
+  verifyCardSub: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#64748B',
+    lineHeight: 16,
+  },
+  verifyCardBtn: {
+    backgroundColor: '#00D084',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 72,
+  },
+  verifyCardBtnText: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#FFFFFF',
   },
 });

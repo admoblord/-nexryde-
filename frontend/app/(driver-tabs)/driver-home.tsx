@@ -79,11 +79,13 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
 function mapWsRideOfferToTrip(data: Record<string, unknown>) {
   const riderOffer = data.rider_offer_price;
   const rec = data.recommended_fare;
+  const pickup = (data.pickup ?? data.pickup_coordinates) as Record<string, unknown> | string | undefined;
+  const dropoff = (data.dropoff ?? data.destination_coordinates) as Record<string, unknown> | string | undefined;
   return {
     id: String(data.trip_id ?? ''),
     offer_id: String(data.offer_id ?? ''),
-    pickup_location: (data.pickup ?? data.pickup_coordinates) as Record<string, unknown> | string | undefined,
-    dropoff_location: (data.dropoff ?? data.destination_coordinates) as Record<string, unknown> | string | undefined,
+    pickup_location: pickup,
+    dropoff_location: dropoff,
     offered_fare: riderOffer,
     fare: riderOffer,
     min_price: data.minimum_allowed_price,
@@ -98,6 +100,12 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
     status: data.status,
     preferred: data.preferred,
     offer_expires_at: data.expires_at,
+    // Map preview data — forwarded so DriverOfferRoutePreview renders correctly
+    route_preview_coordinates: data.route_preview_coordinates ?? data.polyline_coords ?? null,
+    map_preview_region: data.map_preview_region ?? null,
+    area_summary_line: data.area_summary_line ?? data.area_label ?? null,
+    surge_multiplier: data.surge_multiplier ?? 1,
+    payment_method: data.payment_method ?? 'cash',
   };
 }
 
@@ -105,7 +113,7 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
 
 export default function ModernDriverHome() {
   const router = useRouter();
-  const { user, token, setCurrentTrip } = useAppStore();
+  const { user, token, setCurrentTrip, setCurrentLocation } = useAppStore();
   const { language, setLanguage, availableLanguages, t } = useLanguage();
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(isOnline);
@@ -166,6 +174,13 @@ export default function ModernDriverHome() {
   }, [user?.id, user?.total_trips]);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
+  const [trialTripsCompleted, setTrialTripsCompleted] = useState<number>(0);
+  const [trialTripsTarget, setTrialTripsTarget] = useState<number>(20);
+  const [trialExtended, setTrialExtended] = useState<boolean>(false);
+  const driverApproved = verificationStatus === 'approved';
+  const trialReady = subscriptionStatus ? ['trial', 'active', 'grace_period'].includes(subscriptionStatus) : false;
+  const driverCanReceiveOffers = driverApproved && trialReady;
+  const verificationLocked = Boolean(verificationStatus && !driverApproved);
   const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const [driverOffersWsConnected, setDriverOffersWsConnected] = useState(false);
@@ -264,23 +279,31 @@ export default function ModernDriverHome() {
 
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (mounted && lastKnown) {
-          setDriverCoords({ lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude });
+          const c = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude };
+          setDriverCoords(c);
+          setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
 
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         if (mounted) {
-          setDriverCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+          const c = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+          setDriverCoords(c);
+          setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
 
         locationSub = await Location.watchPositionAsync(
           {
-            accuracy: Location.Accuracy.High,
-            timeInterval: 5000,
-            distanceInterval: 10,
+            // 12 s interval + 40 m movement threshold — reduces battery drain ~60%
+            // Backend push is further debounced (15 s + 50 m) so no extra API calls
+            accuracy: Location.Accuracy.Balanced,
+            timeInterval: 12000,
+            distanceInterval: 40,
           },
           (update) => {
             if (mounted) {
-              setDriverCoords({ lat: update.coords.latitude, lng: update.coords.longitude });
+              const c = { lat: update.coords.latitude, lng: update.coords.longitude };
+              setDriverCoords(c);
+              setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
             }
           }
         );
@@ -294,19 +317,25 @@ export default function ModernDriverHome() {
     };
   }, []);
 
-  // Push live location to backend for dispatch accuracy and rider tracking
+  // Push live location to backend — smart throttle to minimise API calls
   useEffect(() => {
     if (!isOnline || !user?.id || !driverCoords) return;
     const now = Date.now();
     const lastAt = lastLocationPushAtRef.current;
     const lastCoords = lastLocationPushCoordsRef.current;
-    const minIntervalMs = 15000;
-    const minMoveKm = 0.05; // 50m
+
+    // While moving: update every 15 s if moved >30 m
+    // While idle  : update at most every 30 s (heartbeat only)
+    const movedKm = lastCoords
+      ? Math.abs(calculateDistance(driverCoords.lat, driverCoords.lng, lastCoords.lat, lastCoords.lng))
+      : 999;
+    const isIdle = movedKm < 0.03; // <30 m = idle
+    const minIntervalMs = isIdle ? 30000 : 15000;
+    const minMoveKm = 0.03; // 30 m movement threshold
+
     if (lastAt && now - lastAt < minIntervalMs) return;
-    if (lastCoords) {
-      const movedKm = Math.abs(calculateDistance(driverCoords.lat, driverCoords.lng, lastCoords.lat, lastCoords.lng));
-      if (movedKm < minMoveKm && now - lastAt < 60000) return;
-    }
+    if (lastCoords && movedKm < minMoveKm && now - lastAt < 60000) return;
+
     const pushLocation = async () => {
       try {
         await fetch(`${BACKEND_URL}/api/drivers/${user.id}/location`, {
@@ -664,6 +693,24 @@ export default function ModernDriverHome() {
     }
 
     const nextStatus = !isOnline;
+    if (nextStatus && !driverApproved) {
+      Alert.alert(
+        'Verification in review',
+        'Your documents are saved with NEXRYDE. You can use the dashboard now, but you can go online and receive rides only after approval. You get a free 20-trip activity trial once approved.',
+      );
+      return;
+    }
+    if (nextStatus && !trialReady) {
+      Alert.alert(
+        'Activation needed',
+        'Your driver account is approved, but your ride access is not active yet. Start the verified-driver trial or complete payment before going online.',
+        [
+          { text: 'Later', style: 'cancel' },
+          { text: 'Open activation', onPress: () => guardedPush('/driver/subscription') },
+        ],
+      );
+      return;
+    }
     onlineToggleInFlightRef.current = true;
     try {
       const res = await fetch(
@@ -702,6 +749,7 @@ export default function ModernDriverHome() {
       if (response.ok) {
         const status = await response.json();
         
+        setVerificationStatus(status.verification_status || (status.completed ? 'approved' : 'pending_review'));
         if (!status.completed) {
           // Redirect driver to the appropriate onboarding step
           if (status.step === 'terms') {
@@ -715,6 +763,17 @@ export default function ModernDriverHome() {
               pathname: '/(auth)/driver-documents',
               params: driverDocumentsRouteParams(user),
             });
+            return;
+          } else if (status.step === 'documents_rejected') {
+            router.replace({
+              pathname: '/(auth)/driver-verification-status',
+              params: driverDocumentsRouteParams(user),
+            });
+            return;
+          } else if (status.step === 'dashboard_limited' || status.step === 'documents_review') {
+            setSubscriptionStatus('locked_until_approval');
+            setIsOnline(false);
+            setCheckingOnboarding(false);
             return;
           } else if (status.step === 'profile') {
             router.replace({
@@ -731,13 +790,11 @@ export default function ModernDriverHome() {
           const subRes = await getDriverSubscriptionStatus();
           const sub = subRes.data || {};
           setSubscriptionStatus(sub.status || 'none');
-          if (!['trial', 'active', 'grace_period'].includes(sub.status || 'none')) {
-            router.replace('/driver/subscription');
-            return;
-          }
+          setTrialTripsCompleted(sub.trial_trips_completed ?? 0);
+          setTrialTripsTarget(sub.trial_trips_target ?? 20);
+          setTrialExtended(sub.trial_extended ?? false);
         } catch {
-          router.replace('/driver/subscription');
-          return;
+          setSubscriptionStatus('none');
         }
       }
     } catch (error) {
@@ -813,21 +870,27 @@ export default function ModernDriverHome() {
         >
           <View style={styles.statusLeft}>
             <Ionicons 
-              name={isOnline ? "radio-button-on" : "radio-button-off"} 
+              name={isOnline ? "radio-button-on" : driverCanReceiveOffers ? "radio-button-off" : "shield-half"}
               size={24} 
-              color={isOnline ? COLORS.success : COLORS.error} 
+              color={isOnline ? COLORS.success : driverCanReceiveOffers ? COLORS.error : COLORS.warning}
             />
             <View style={styles.statusText}>
               <Text style={styles.statusTitle}>
-                {isOnline ? t.driver.youAreOnline : t.driver.youAreOffline}
+                {!driverApproved ? 'Dashboard access only' : !trialReady ? 'Activation needed' : isOnline ? t.driver.youAreOnline : t.driver.youAreOffline}
               </Text>
               <Text style={styles.statusSubtitle}>
-                {isOnline ? t.driver.statusReceivingOffers : t.driver.statusGoOnlineHint}
+                {!driverApproved
+                  ? 'Documents saved. Ride access unlocks after approval (free 20-trip trial).'
+                  : !trialReady
+                    ? 'Your account is approved. Activate your driver access before going online.'
+                  : subscriptionStatus === 'trial'
+                    ? `Free trial: ${trialTripsCompleted}/${trialTripsTarget} trips completed${trialExtended ? ' (extended)' : ''}`
+                  : isOnline ? t.driver.statusReceivingOffers : t.driver.statusGoOnlineHint}
               </Text>
             </View>
           </View>
           <TouchableOpacity 
-            style={[styles.toggleButton, isOnline && styles.toggleButtonActive]}
+            style={[styles.toggleButton, isOnline && styles.toggleButtonActive, !driverCanReceiveOffers && styles.toggleButtonDisabled]}
             onPress={handleToggleOnline}
             activeOpacity={0.8}
           >
@@ -838,24 +901,24 @@ export default function ModernDriverHome() {
         <View style={styles.headerPills}>
           <View style={styles.headerPill}>
             <Ionicons
-              name={subscriptionStatus && ['trial', 'active', 'grace_period'].includes(subscriptionStatus) ? 'checkmark-circle' : 'alert-circle'}
+              name={trialReady ? 'checkmark-circle' : driverApproved ? 'alert-circle' : 'lock-closed'}
               size={16}
-              color={subscriptionStatus && ['trial', 'active', 'grace_period'].includes(subscriptionStatus) ? '#22E180' : '#FBBF24'}
+              color={trialReady ? '#22E180' : '#FBBF24'}
             />
             <Text style={styles.headerPillText}>
-              {subscriptionStatus && ['trial', 'active', 'grace_period'].includes(subscriptionStatus)
+              {trialReady
                 ? 'Subscription ready'
-                : 'Subscription attention'}
+                : driverApproved ? 'Activation needed' : 'Trial locked until approval'}
             </Text>
           </View>
           <View style={styles.headerPill}>
             <Ionicons
-              name={verificationStatus === 'approved' ? 'shield-checkmark' : 'shield-half'}
+              name={driverApproved ? 'shield-checkmark' : 'shield-half'}
               size={16}
-              color={verificationStatus === 'approved' ? '#22E180' : '#FBBF24'}
+              color={driverApproved ? '#22E180' : '#FBBF24'}
             />
             <Text style={styles.headerPillText}>
-              {verificationStatus === 'approved' ? 'Driver verified' : 'Verification review'}
+              {driverApproved ? 'Driver verified' : 'Verification under review'}
             </Text>
           </View>
           <View style={styles.headerPill}>
@@ -872,6 +935,86 @@ export default function ModernDriverHome() {
       </LinearGradient>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {verificationLocked && (
+          <Animated.View style={[styles.verificationRoadmap, { opacity: fadeAnim }]}>
+            <View style={styles.roadmapHeader}>
+              <LinearGradient colors={[COLORS.accentGreen, '#00C853']} style={styles.roadmapIconGrad}>
+                <Ionicons name="shield-checkmark-outline" size={22} color="#FFF" />
+              </LinearGradient>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.roadmapBadge}>REVIEW IN PROGRESS</Text>
+                <Text style={styles.roadmapTitle}>Documents submitted ✓</Text>
+                <Text style={styles.roadmapSubtitle}>
+                  Our team is reviewing your documents. You'll receive a notification once approved.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.roadmapSteps}>
+              <View style={styles.roadmapStep}>
+                <View style={[styles.roadmapStepDot, { backgroundColor: COLORS.accentGreen }]}>
+                  <Ionicons name="checkmark" size={11} color="#FFF" />
+                </View>
+                <Text style={styles.roadmapStepText}>Documents submitted</Text>
+              </View>
+              <View style={styles.roadmapStepLine} />
+              <View style={styles.roadmapStep}>
+                <View style={[styles.roadmapStepDot, { backgroundColor: COLORS.warning }]}>
+                  <ActivityIndicator size="small" color="#FFF" style={{ transform: [{ scale: 0.7 }] }} />
+                </View>
+                <Text style={styles.roadmapStepText}>Company review in progress</Text>
+              </View>
+              <View style={styles.roadmapStepLine} />
+              <View style={styles.roadmapStep}>
+                <View style={[styles.roadmapStepDot, { backgroundColor: '#CBD5E1' }]}>
+                  <Ionicons name="lock-closed" size={11} color="#FFF" />
+                </View>
+                <Text style={[styles.roadmapStepText, { color: '#94A3B8' }]}>Free 20-trip activity trial</Text>
+              </View>
+            </View>
+
+            <View style={styles.roadmapActions}>
+              <TouchableOpacity style={styles.roadmapPrimary} onPress={() => void checkOnboardingStatus()}>
+                <Ionicons name="refresh" size={16} color="#FFF" />
+                <Text style={styles.roadmapPrimaryText}>Refresh status</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.roadmapSecondary} onPress={() => guardedPush('/support')}>
+                <Text style={styles.roadmapSecondaryText}>Contact support</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )}
+
+        {driverApproved && !trialReady && (
+          <Animated.View style={[styles.verificationRoadmap, styles.activationRoadmap, { opacity: fadeAnim }]}>
+            <View style={styles.roadmapHeader}>
+              <LinearGradient colors={['#F59E0B', '#D97706']} style={styles.roadmapIconGrad}>
+                <Ionicons name="checkmark-circle" size={22} color="#FFF" />
+              </LinearGradient>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.roadmapBadge, { color: '#F59E0B' }]}>APPROVED — ACTION NEEDED</Text>
+                <Text style={styles.roadmapTitle}>Account approved! 🎉</Text>
+                <Text style={styles.roadmapSubtitle}>
+                  Your account is verified! Activate your free 20-trip activity trial to start receiving ride offers now.
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.roadmapActions}>
+              <TouchableOpacity
+                style={[styles.roadmapPrimary, { backgroundColor: '#F59E0B' }]}
+                onPress={() => guardedPush('/driver/subscription')}
+              >
+                <Ionicons name="flash" size={16} color="#FFF" />
+                <Text style={styles.roadmapPrimaryText}>Activate 20-trip trial</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.roadmapSecondary} onPress={() => void checkOnboardingStatus()}>
+                <Text style={styles.roadmapSecondaryText}>Refresh</Text>
+              </TouchableOpacity>
+            </View>
+          </Animated.View>
+        )}
+
         {offlineQueueCount > 0 && (
           <View style={styles.offlineSyncCard}>
             <View style={styles.offlineSyncIcon}>
@@ -1012,6 +1155,8 @@ export default function ModernDriverHome() {
         accepting={acceptingRide}
         onAccept={handleAcceptRide}
         onIgnore={handleDeclineRide}
+        driverLat={driverCoords?.lat}
+        driverLng={driverCoords?.lng}
       />
 
       {/* Language Picker Modal */}
@@ -1145,6 +1290,11 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 0 },
     elevation: 6,
   },
+  toggleButtonDisabled: {
+    backgroundColor: '#F8FAFC',
+    borderColor: '#FBBF24',
+    opacity: 0.75,
+  },
   toggleThumb: {
     width: 30,
     height: 30,
@@ -1184,6 +1334,127 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 20,
+  },
+  verificationRoadmap: {
+    marginTop: 18,
+    padding: 18,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    shadowColor: '#16A34A',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 4,
+  },
+  activationRoadmap: {
+    borderColor: '#FDE68A',
+    shadowColor: '#F59E0B',
+  },
+  roadmapHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  roadmapIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#ECFDF5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  roadmapIconGrad: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activationIcon: {
+    backgroundColor: '#FEF3C7',
+  },
+  roadmapBadge: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: COLORS.accentGreen,
+    letterSpacing: 0.8,
+    marginBottom: 3,
+  },
+  roadmapTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    marginBottom: 4,
+  },
+  roadmapSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    color: COLORS.lightTextSecondary,
+  },
+  roadmapSteps: {
+    marginTop: 16,
+    gap: 10,
+  },
+  roadmapStep: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  roadmapStepDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  roadmapStepLine: {
+    width: 2,
+    height: 12,
+    backgroundColor: '#E2E8F0',
+    marginLeft: 10,
+  },
+  roadmapStepText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: COLORS.lightTextPrimary,
+  },
+  roadmapActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 18,
+  },
+  roadmapPrimary: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: COLORS.accentGreen,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  roadmapPrimaryText: {
+    color: COLORS.white,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  roadmapSecondary: {
+    flex: 1,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: COLORS.lightBorder,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  roadmapSecondaryText: {
+    color: COLORS.lightTextPrimary,
+    fontSize: 13,
+    fontWeight: '900',
   },
   offlineSyncCard: {
     marginTop: 18,

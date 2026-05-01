@@ -30,55 +30,51 @@ const COLORS = {
   textMuted: '#94A3B8',
 };
 
+const DRIVER_CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
+const STARTUP_STATUS_TIMEOUT_MS = 8000;
+
 export default function SplashScreen() {
   const router = useRouter();
   // Start with checking = false for web compatibility (SecureStore doesn't work on web)
   const [checking, setChecking] = useState(Platform.OS === 'web' ? false : true);
   
-  // ✅ SAFE STORE ACCESS WITH ERROR HANDLING
-  const [storeError, setStoreError] = useState<Error | null>(null);
-  let setUser: ((user: any) => void) | undefined;
-  let setIsAuthenticated: ((value: boolean) => void) | undefined;
-  let setToken: ((token: string | null) => void) | undefined;
-  
-  try {
-    const store = useAppStore() as any;
-    setUser = store.setUser;
-    setIsAuthenticated = store.setIsAuthenticated;
-    setToken = store.setToken;
-  } catch (error) {
-    console.error('🚨 STORE ACCESS ERROR:', error);
-    setStoreError(error as Error);
-  }
+  const setUser = useAppStore((s) => s.setUser);
+  const setIsAuthenticated = useAppStore((s) => s.setIsAuthenticated);
+  const setToken = useAppStore((s) => s.setToken);
   
   // Start with visible values for web compatibility, animate on mobile
   const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
-  
-  // Show error screen if store fails
-  if (storeError) {
-    return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <Text style={{ color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginBottom: 10 }}>
-          Failed to initialize app
-        </Text>
-        <Text style={{ color: '#94A3B8', fontSize: 14, textAlign: 'center', paddingHorizontal: 40 }}>
-          Store Error: {storeError.message}
-        </Text>
-        <TouchableOpacity 
-          style={{ marginTop: 20, backgroundColor: '#22C55E', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 }}
-          onPress={() => {
-            setStoreError(null);
-            setChecking(true);
-          }}
-        >
-          <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>Retry</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+
+  const isDriverCameraResumeActive = async (userData: any) => {
+    if (userData?.role !== 'driver') return false;
+    try {
+      const raw = await AsyncStorage.getItem(DRIVER_CAMERA_RESUME_KEY);
+      if (!raw) return false;
+      const resume = JSON.parse(raw) as { driverId?: string; expiresAt?: number };
+      if (!resume?.expiresAt || resume.expiresAt < Date.now()) {
+        await AsyncStorage.removeItem(DRIVER_CAMERA_RESUME_KEY);
+        return false;
+      }
+      return !resume.driverId || String(resume.driverId) === String(userData.id);
+    } catch {
+      return false;
+    }
+  };
+
+  const fetchJsonWithTimeout = async (url: string, options: RequestInit = {}) => {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), STARTUP_STATUS_TIMEOUT_MS);
+    try {
+      const response = await fetch(url, { ...options, signal: controller.signal });
+      const data = await response.json().catch(() => ({}));
+      return { response, data };
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
 
   // 🔐 CHECK FOR SAVED LOGIN ON APP START
   useEffect(() => {
@@ -100,21 +96,28 @@ export default function SplashScreen() {
 
   const checkSavedLogin = async () => {
     try {
-      console.log('🔍 Checking for saved login session...');
+      if (__DEV__) console.warn('Checking for saved login session...');
       
       // Wrap in try-catch to handle SecureStore errors gracefully
       try {
         const isLoggedIn = await isUserLoggedIn();
         
         if (isLoggedIn) {
+          const userData = await getUserSession();
+          if (!userData) {
+            setChecking(false);
+            return;
+          }
+
           // Import biometric functions
           const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } = await import('@/utils/authStorage');
           
           // Check if biometric login is enabled
           const biometricEnabled = await isBiometricEnabled();
           const biometricSupported = await isBiometricSupported();
+          const cameraResumeActive = await isDriverCameraResumeActive(userData);
           
-          if (biometricEnabled && biometricSupported) {
+          if (biometricEnabled && biometricSupported && !cameraResumeActive) {
             // Request biometric authentication
             const authResult = await authenticateWithBiometrics();
             
@@ -124,59 +127,75 @@ export default function SplashScreen() {
             }
             
           }
-          
-          const userData = await getUserSession();
-          
-          if (userData) {
-            // Restore user state
-            if (setUser) setUser(userData);
-            if (setToken) setToken(userData.token || null);
-            if (setIsAuthenticated) setIsAuthenticated(true);
-            
-            // Enforce full verification on restore (no shortcut access).
-            const authHeaders: Record<string, string> = userData.token
-              ? { Authorization: `Bearer ${userData.token}` }
-              : {};
-            setTimeout(async () => {
-              try {
-                if (userData.role === 'driver') {
-                  const st = await fetch(`${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`, { headers: authHeaders });
-                  const data = await st.json();
-                  if (!st.ok || !data?.completed) {
-                    const step = data?.step;
-                    const u = {
-                      id: userData.id,
-                      phone: userData.phone,
-                      name: userData.name,
-                      email: userData.email,
-                    };
-                    if (step === 'terms') {
-                      router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
-                    } else if (step === 'profile') {
-                      router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
-                    } else {
-                      router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
-                    }
-                    return;
-                  }
-                  router.replace('/(driver-tabs)/driver-home');
-                  return;
-                }
 
-                const riderStatusRes = await fetch(`${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`, { headers: authHeaders });
-                const riderStatus = await riderStatusRes.json();
-                if (!riderStatusRes.ok || !riderStatus?.completed) {
-                  router.replace('/(auth)/rider-verification');
+          // Restore user state
+          setUser(userData);
+          setToken(userData.token || null);
+          setIsAuthenticated(true);
+          
+          // Enforce full verification on restore (no shortcut access).
+          const authHeaders: Record<string, string> = userData.token
+            ? { Authorization: `Bearer ${userData.token}` }
+            : {};
+          setTimeout(async () => {
+            try {
+              if (userData.role === 'driver') {
+                const u = {
+                  id: userData.id,
+                  phone: userData.phone,
+                  name: userData.name,
+                  email: userData.email,
+                };
+                const { response: st, data } = await fetchJsonWithTimeout(
+                  `${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`,
+                  { headers: authHeaders },
+                );
+                if (!st.ok || !data?.completed) {
+                  const step = data?.step;
+                  if (step === 'terms') {
+                    router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
+                  } else if (step === 'profile') {
+                    router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
+                  } else if (step === 'documents_review' || step === 'documents_rejected') {
+                    router.replace({ pathname: '/(auth)/driver-verification-status', params: driverDocumentsRouteParams(u) });
+                  } else if (step === 'dashboard_limited') {
+                    router.replace('/(driver-tabs)/driver-home');
+                  } else {
+                    router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
+                  }
                   return;
                 }
-                router.replace('/(rider-tabs)/rider-home');
-              } catch {
-                router.replace('/(auth)/login');
+                router.replace('/(driver-tabs)/driver-home');
+                return;
               }
-            }, 1000); // Small delay for smooth transition
-            
-            return;
-          }
+
+              const { response: riderStatusRes, data: riderStatus } = await fetchJsonWithTimeout(
+                `${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`,
+                { headers: authHeaders },
+              );
+              if (!riderStatusRes.ok || !riderStatus?.completed) {
+                router.replace('/(auth)/rider-verification');
+                return;
+              }
+              router.replace('/(rider-tabs)/rider-home');
+            } catch {
+              if (userData.role === 'driver') {
+                router.replace({
+                  pathname: '/(auth)/driver-documents',
+                  params: driverDocumentsRouteParams({
+                    id: userData.id,
+                    phone: userData.phone,
+                    name: userData.name,
+                    email: userData.email,
+                  }),
+                });
+                return;
+              }
+              router.replace('/(auth)/login');
+            }
+          }, 700); // Small delay for smooth transition
+
+          return;
         }
       } catch {
         /* storage unavailable */
@@ -190,7 +209,7 @@ export default function SplashScreen() {
       
       setChecking(false);
     } catch (error) {
-      console.error('❌ Error checking saved login:', error);
+      if (__DEV__) console.warn('Error checking saved login:', error);
       setChecking(false);
     }
   };

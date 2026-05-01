@@ -28,6 +28,7 @@ import {
   formatApiDetail,
   isWalletCheckoutInitOk,
   WALLET_CHECKOUT_USER_ERROR,
+  getAuthHeaders,
 } from '@/src/services/api';
 import {
   saveWalletCheckoutSession,
@@ -52,6 +53,9 @@ export default function RiderWalletScreen() {
   const { user } = useAppStore();
   const insets = useSafeAreaInsets();
   const [balance, setBalance] = useState(0);
+  const [promoCreditBalance, setPromoCreditBalance] = useState(0);
+  const [firstRideCompleted, setFirstRideCompleted] = useState(false);
+  const [firstRideRewardGranted, setFirstRideRewardGranted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [amountStr, setAmountStr] = useState('2000');
@@ -105,23 +109,36 @@ export default function RiderWalletScreen() {
       return;
     }
     let cancelled = false;
-    const loadReferral = async () => {
+    const loadIncentives = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/referral/code/${uid}`);
-        const data = await res.json();
-        if (!cancelled) {
-          setReferralCode(typeof data?.referral_code === 'string' ? data.referral_code : '');
+        // Load referral code
+        const hdr = await getAuthHeaders();
+        const [refRes, creditRes, firstRideRes] = await Promise.allSettled([
+          fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: hdr }),
+          fetch(`${BACKEND_URL}/api/incentives/my-credits`, { headers: hdr }),
+          fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, { headers: hdr }),
+        ]);
+        if (refRes.status === 'fulfilled' && refRes.value.ok) {
+          const data = await refRes.value.json();
+          if (!cancelled) setReferralCode(data.referral_code ?? '');
+        }
+        if (creditRes.status === 'fulfilled' && creditRes.value.ok) {
+          const data = await creditRes.value.json();
+          if (!cancelled) setPromoCreditBalance(data.promo_credit_balance ?? 0);
+        }
+        if (firstRideRes.status === 'fulfilled' && firstRideRes.value.ok) {
+          const data = await firstRideRes.value.json();
+          if (!cancelled) {
+            setFirstRideCompleted(data.first_ride_completed ?? false);
+            setFirstRideRewardGranted(data.reward_granted ?? false);
+          }
         }
       } catch {
-        if (!cancelled) {
-          setReferralCode('');
-        }
+        if (!cancelled) setReferralCode('');
       }
     };
-    void loadReferral();
-    return () => {
-      cancelled = true;
-    };
+    void loadIncentives();
+    return () => { cancelled = true; };
   }, [uid]);
 
   const syncPendingCheckout = useCallback(async () => {
@@ -176,16 +193,29 @@ export default function RiderWalletScreen() {
     return Number.isFinite(n) ? n : 0;
   };
 
-  const applyPromoCode = () => {
+  const applyPromoCode = async () => {
     const code = promoCode.trim().toUpperCase();
     if (!code) {
-      Alert.alert('Promo code', 'Enter a promo code to continue.');
+      Alert.alert('Referral code', 'Enter a referral code to continue.');
       return;
     }
-    Alert.alert(
-      'Promo code',
-      'Promo redemption will be available soon. Your wallet remains the home for promo credits and rewards.',
-    );
+    try {
+      const hdr = await getAuthHeaders();
+      const res = await fetch(`${BACKEND_URL}/api/incentives/apply-referral-code`, {
+        method: 'POST',
+        headers: { ...hdr, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_code: code }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        Alert.alert('Code applied! 🎉', data.message || 'Complete your first ride to earn ₦500.');
+        setPromoCode('');
+      } else {
+        Alert.alert('Could not apply code', data.detail || 'Invalid or already-used code.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not apply code. Please try again.');
+    }
   };
 
   const persistAndOpenCheckout = async (data: {
@@ -532,27 +562,87 @@ export default function RiderWalletScreen() {
           )}
         </TouchableOpacity>
 
-        <Text style={styles.sectionTitle}>Rewards & promo</Text>
+        <Text style={styles.sectionTitle}>Rewards & Bonuses</Text>
         <Text style={styles.sectionHint}>
-          Keep your referral rewards and promo credits in one place. Share your code or enter a promo when available.
+          Earn rewards through real trips only — no fake credits, no abuse.
         </Text>
-        <View style={styles.rewardsCard}>
+
+        {/* First-ride reward card */}
+        <View style={[styles.rewardsCard, { borderLeftWidth: 4, borderLeftColor: firstRideRewardGranted ? '#22C55E' : '#F59E0B' }]}>
           <View style={styles.rewardsRow}>
-            <View style={[styles.rewardsIcon, { backgroundColor: '#E0E7FF' }]}>
-              <Ionicons name="gift-outline" size={20} color="#4338CA" />
+            <View style={[styles.rewardsIcon, { backgroundColor: firstRideRewardGranted ? '#DCFCE7' : '#FEF3C7' }]}>
+              <Ionicons name={firstRideRewardGranted ? 'checkmark-circle' : 'flash'} size={22} color={firstRideRewardGranted ? '#16A34A' : '#D97706'} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rewardsTitle}>Invite & earn</Text>
+              <Text style={styles.rewardsTitle}>
+                {firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}
+              </Text>
               <Text style={styles.rewardsText}>
-                {referralCode ? `Referral code ${referralCode}` : 'Referral code will appear here when ready.'}
+                {firstRideRewardGranted
+                  ? '₦500 promo credit has been added to your wallet.'
+                  : 'Complete your first ride and get ₦500 bonus credit instantly.'}
               </Text>
             </View>
           </View>
+        </View>
+
+        {/* Promo credit balance */}
+        {promoCreditBalance > 0 && (
+          <View style={[styles.rewardsCard, { backgroundColor: '#F0FDF4' }]}>
+            <View style={styles.rewardsRow}>
+              <View style={[styles.rewardsIcon, { backgroundColor: '#DCFCE7' }]}>
+                <Ionicons name="wallet" size={22} color="#16A34A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.rewardsTitle}>Promo Credit Balance</Text>
+                <Text style={[styles.rewardsText, { color: '#16A34A', fontWeight: '700', fontSize: 18 }]}>
+                  ₦{promoCreditBalance.toLocaleString()}
+                </Text>
+                <Text style={[styles.rewardsText, { fontSize: 11, color: '#6B7280' }]}>
+                  Applied automatically (max ₦500 / 40% of fare per ride · expires in 7 days)
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
+        {/* Referral card */}
+        <View style={styles.rewardsCard}>
+          <View style={styles.rewardsRow}>
+            <View style={[styles.rewardsIcon, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="people" size={20} color="#7C3AED" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.rewardsTitle}>Invite Friends — Earn ₦500 Each</Text>
+              <Text style={styles.rewardsText}>
+                When your friend completes their first ride you both earn ₦500 credit.
+              </Text>
+              {referralCode ? (
+                <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <View style={{ backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
+                    <Text style={{ fontWeight: '800', fontSize: 16, color: '#111827', letterSpacing: 2 }}>{referralCode}</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={{ backgroundColor: '#7C3AED', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                    onPress={() => {
+                      const { Share } = require('react-native');
+                      Share.share({ message: `Join Nexryde with my code ${referralCode} and we both earn ₦500 after your first ride! Download: https://nexryde.app` });
+                    }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Share</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={[styles.rewardsText, { color: '#9CA3AF', marginTop: 4 }]}>Loading your code…</Text>
+              )}
+            </View>
+          </View>
+          {/* Apply a referral code */}
           <View style={styles.promoBox}>
-            <Text style={styles.promoLabel}>Promo code</Text>
+            <Text style={styles.promoLabel}>Have a referral code?</Text>
             <TextInput
               style={styles.promoInput}
-              placeholder="e.g. NEXRYDE2026"
+              placeholder="Enter code e.g. NX1A2B3C"
               placeholderTextColor={COLORS.gray400}
               value={promoCode}
               onChangeText={setPromoCode}
@@ -560,7 +650,7 @@ export default function RiderWalletScreen() {
               autoCorrect={false}
             />
             <TouchableOpacity style={styles.promoBtn} onPress={applyPromoCode}>
-              <Text style={styles.promoBtnText}>Apply code</Text>
+              <Text style={styles.promoBtnText}>Apply</Text>
             </TouchableOpacity>
           </View>
         </View>

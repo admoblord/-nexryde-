@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -16,9 +16,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY, SUBSCRIPTION_PRICE } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
-import { useAppStore } from '@/src/store/appStore';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -32,12 +31,19 @@ export default function RegisterScreen() {
   const googleId = params.google_id as string;
   const authType = params.auth_type as string;
   
-  const { setUser, setIsAuthenticated } = useAppStore();
-
   const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
   const [name, setName] = useState(googleName || '');
   const [email, setEmail] = useState(googleEmail || '');
   const [phoneNumber, setPhoneNumber] = useState(phone || '');
+  const normalizePhone = (value: string) => {
+    const cleaned = (value || '').replace(/[\s\-()]/g, '');
+    if (!cleaned) return '';
+    if (cleaned.startsWith('+')) return cleaned;
+    if (cleaned.startsWith('234') && cleaned.length === 13) return `+${cleaned}`;
+    if (cleaned.startsWith('0') && cleaned.length === 11) return `+234${cleaned.slice(1)}`;
+    if (cleaned.length === 10 && /^\d+$/.test(cleaned)) return `+234${cleaned}`;
+    return cleaned;
+  };
   const openLegal = async (path: string) => {
     try {
       const { BACKEND_URL } = await import('@/src/services/api');
@@ -76,7 +82,7 @@ export default function RegisterScreen() {
       router.push({
         pathname: '/(auth)/driver-terms',
         params: {
-          phone: phoneNumber ? `+234${phoneNumber}` : '',
+          phone: normalizePhone(phoneNumber),
           name: name,
           email: email || '',
           google_id: googleId || '',
@@ -88,7 +94,7 @@ export default function RegisterScreen() {
       router.push({
         pathname: '/(auth)/rider-nin',
         params: {
-          phone: phoneNumber ? `+234${phoneNumber}` : '',
+          phone: normalizePhone(phoneNumber),
           name: name,
           email: email || '',
           google_id: googleId || '',

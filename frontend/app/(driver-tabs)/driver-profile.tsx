@@ -240,6 +240,46 @@ export default function DriverProfileScreen() {
           ]}
         />
 
+        {/* Subscription Status Row */}
+        <TouchableOpacity
+          style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push('/driver/subscription')}
+          activeOpacity={0.88}
+        >
+          <View style={styles.subscriptionHeader}>
+            {(() => {
+              const subStatus = (subscription as any)?.status as string | undefined;
+              const subTier = (subscription as any)?.tier as string | undefined;
+              const isActive = subStatus === 'trial' || subStatus === 'active' || subStatus === 'grace_period';
+              const bgColor = isActive ? '#D1FAE5' : '#FEF3C7';
+              const iconColor = isActive ? '#16A34A' : '#D97706';
+              const iconName: React.ComponentProps<typeof Ionicons>['name'] = isActive ? 'checkmark-circle' : 'time';
+              return (
+                <>
+                  <View style={[styles.subscriptionIcon, { backgroundColor: bgColor }]}>
+                    <Ionicons name={iconName} size={22} color={iconColor} />
+                  </View>
+                  <View style={styles.subscriptionInfo}>
+                    <Text style={[styles.subscriptionTitle, { color: colors.text }]}>
+                      {subStatus === 'trial'
+                        ? 'Free trial active'
+                        : subStatus === 'active'
+                          ? `${subTier === 'road_warrior' ? 'Road Warrior' : 'City Rider'} — Active`
+                          : subStatus === 'pending_payment'
+                            ? 'Payment pending'
+                            : 'No active subscription'}
+                    </Text>
+                    <Text style={[styles.subscriptionSubtext, { color: colors.textMuted }]}>
+                      {isActive ? 'Tap to manage or upgrade your plan' : 'Tap to activate your driver plan'}
+                    </Text>
+                  </View>
+                </>
+              );
+            })()}
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
+        </TouchableOpacity>
+
         <View style={[styles.subscriptionCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.subscriptionHeader}>
             <View style={[styles.subscriptionIcon, { backgroundColor: '#CFFAFE' }]}>

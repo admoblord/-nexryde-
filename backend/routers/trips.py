@@ -42,7 +42,8 @@ from wallet_ops import (
 )
 from earnings_query import match_completed_trip_paid_for_earnings
 from user_scores import calculate_rider_risk_score
-from security_advanced import general_limiter
+from security_advanced import general_limiter, trip_request_limiter
+from route_cache import get_cached_directions, store_cached_directions, log_api_call, haversine_route_estimate
 
 logger = logging.getLogger('server')
 trips_router = APIRouter(prefix="/api", tags=["Trips"])
@@ -72,10 +73,22 @@ def set_shared_functions(get_directions, calc_fare, calc_distance):
     _calculate_fare_fn = calc_fare
     _calculate_distance_fn = calc_distance
 
-async def get_directions_from_google(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng):
+async def get_directions_from_google(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, trip_id: str = None):
+    """Cached wrapper — checks MongoDB + LRU before calling Google API."""
+    cached = await get_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    if cached:
+        await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+        return cached
+
     if _get_directions_fn:
-        return await _get_directions_fn(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-    return None
+        result = await _get_directions_fn(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+        if result:
+            await store_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, result)
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+            return result
+
+    # Fallback: Haversine estimate (zero API cost)
+    return haversine_route_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
 
 def _normalize_service_type(service_type: Optional[str]) -> str:
     normalized = (service_type or "economy").strip().lower()
@@ -1110,6 +1123,7 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
     """Create trip with user's custom price offer"""
     try:
         verify_owner_strict(http_request, request.rider_id)
+        await trip_request_limiter.check_rate_limit(http_request, f"trip_request:{request.rider_id}")
         rider = await db.users.find_one({"id": request.rider_id})
         if not rider:
             raise HTTPException(status_code=404, detail="User not found")
@@ -1352,7 +1366,7 @@ class LocationUpdate(BaseModel):
 
 @trips_router.post("/trips/request")
 async def request_trip(rider_id: str, request: TripRequest, http_request: Request):
-    await general_limiter.check_rate_limit(http_request, f"trip_request:{rider_id}")
+    await trip_request_limiter.check_rate_limit(http_request, f"trip_request:{rider_id}")
     verify_owner_strict(http_request, rider_id)
     status_check = await check_user_status(rider_id)
     if not status_check.get("allowed", True):
@@ -3040,14 +3054,21 @@ async def complete_trip(trip_id: str, request: Request):
     # Update stats
     if trip.get("driver_id"):
         await db.users.update_one({"id": trip["driver_id"]}, {"$inc": {"total_trips": 1}})
-        # Update streak
-        await db.users.update_one(
-            {"id": trip["driver_id"]},
-            {"$inc": {"streaks.current": 1}}
-        )
-        # Trial expiration is strictly time-based (48h), unlimited city rides during trial.
-    
+        await db.users.update_one({"id": trip["driver_id"]}, {"$inc": {"streaks.current": 1}})
+
     await db.users.update_one({"id": trip["rider_id"]}, {"$inc": {"total_trips": 1}})
+
+    # Apply incentives (first-ride reward, referral, driver trial progress).
+    try:
+        from routers.incentives import on_trip_completed as _on_trip_completed
+        await _on_trip_completed(
+            trip_id=trip_id,
+            rider_id=trip["rider_id"],
+            driver_id=trip.get("driver_id", ""),
+            fare=float(trip.get("fare") or 0),
+        )
+    except Exception as _ie:
+        logger.warning(f"Incentive hook failed for trip={trip_id}: {_ie}")
     
     trip["_id"] = str(trip["_id"])
     await _log_trip_event(trip_id, "trip_completed", trip.get("driver_id"), {"fare": trip.get("fare")})

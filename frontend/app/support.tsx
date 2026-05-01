@@ -5,14 +5,11 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import * as Location from 'expo-location';
+import {
+  ExpoSpeechRecognitionModule,
+  useSpeechRecognitionEvent,
+} from 'expo-speech-recognition';
 import policeContacts from '@/src/data/policeContacts';
-let ExpoSpeechRecognitionModule: any = null;
-let useSpeechRecognitionEvent: any = (_name: string, _cb: any) => {};
-try {
-  const speechMod = require('expo-speech-recognition');
-  ExpoSpeechRecognitionModule = speechMod.ExpoSpeechRecognitionModule || null;
-  useSpeechRecognitionEvent = speechMod.useSpeechRecognitionEvent || ((_n: string, _c: any) => {});
-} catch {}
 import { askSupportVoiceBot, getSupportContacts, reportTripIssue } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 
@@ -27,20 +24,16 @@ function SupportVoiceHandler({
   onError: (msg: string) => void;
   onResult: (transcript: string) => void;
 }) {
-  try {
-    useSpeechRecognitionEvent('start', () => onListeningStart());
-    useSpeechRecognitionEvent('end', () => onListeningEnd());
-    useSpeechRecognitionEvent('error', (event: any) => {
-      onError(event?.message || 'Unable to capture voice right now.');
-    });
-    useSpeechRecognitionEvent('result', (event: any) => {
-      if (!event?.isFinal) return;
-      const transcript = event?.results?.[0]?.transcript?.trim();
-      if (transcript) onResult(transcript);
-    });
-  } catch {
-    // Native speech module unavailable
-  }
+  useSpeechRecognitionEvent('start', () => onListeningStart());
+  useSpeechRecognitionEvent('end', () => onListeningEnd());
+  useSpeechRecognitionEvent('error', (event: any) => {
+    onError(event?.message || 'Unable to capture voice right now.');
+  });
+  useSpeechRecognitionEvent('result', (event: any) => {
+    if (!event?.isFinal) return;
+    const transcript = event?.results?.[0]?.transcript?.trim();
+    if (transcript) onResult(transcript);
+  });
   return null;
 }
 

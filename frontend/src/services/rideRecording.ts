@@ -140,7 +140,7 @@ export class RideRecordingService {
         startTime: Date.now(),
         duration: 0,
         fileSize: 0,
-        encrypted: true,
+        encrypted: false,
         expiresAt: Date.now() + (this.AUTO_DELETE_DAYS * 24 * 60 * 60 * 1000),
         isDeleted: false,
         metadata: {
@@ -159,7 +159,7 @@ export class RideRecordingService {
       
       return { recording, recordingId };
     } catch (error) {
-      console.error('Failed to start recording:', error);
+      if (__DEV__) console.warn('Failed to start recording:', error);
       return { recording: null, recordingId: '' };
     }
   }
@@ -195,27 +195,11 @@ export class RideRecordingService {
       
       await this.saveRecordingMetadata(updated);
       
-      // Encrypt file metadata path (encryption hook).
-      await this.encryptRecording(uri);
-      
       return updated;
     } catch (error) {
-      console.error('Failed to stop recording:', error);
+      if (__DEV__) console.warn('Failed to stop recording:', error);
       return null;
     }
-  }
-  
-  /**
-   * Encrypt recording
-   */
-  private static async encryptRecording(uri: string): Promise<void> {
-    // Placeholder hook for encryption pipeline.
-    console.log(`Encrypting recording: ${uri}`);
-    
-    // TODO: Implement actual encryption
-    // - Use expo-crypto or react-native-aes-crypto
-    // - AES-256 encryption
-    // - Secure key storage in Keychain/Keystore
   }
   
   /**
@@ -231,7 +215,7 @@ export class RideRecordingService {
       const nextIndex = index.includes(recording.id) ? index : [...index, recording.id];
       await AsyncStorage.setItem('@recording_index', JSON.stringify(nextIndex));
     } catch (error) {
-      console.error('Failed to save recording metadata:', error);
+      if (__DEV__) console.warn('Failed to save recording metadata:', error);
     }
   }
   
@@ -244,7 +228,7 @@ export class RideRecordingService {
       const data = await AsyncStorage.getItem(key);
       return data ? JSON.parse(data) : null;
     } catch (error) {
-      console.error('Failed to get recording metadata:', error);
+      if (__DEV__) console.warn('Failed to get recording metadata:', error);
       return null;
     }
   }
@@ -278,7 +262,7 @@ export class RideRecordingService {
       
       return recordings;
     } catch (error) {
-      console.error('Failed to get all recordings:', error);
+      if (__DEV__) console.warn('Failed to get all recordings:', error);
       return [];
     }
   }
@@ -361,7 +345,7 @@ export class RideRecordingService {
       
       return deletedCount;
     } catch (error) {
-      console.error('Failed to delete expired recordings:', error);
+      if (__DEV__) console.warn('Failed to delete expired recordings:', error);
       return 0;
     }
   }
@@ -390,7 +374,7 @@ export class RideRecordingService {
       
       return true;
     } catch (error) {
-      console.error('Failed to delete recording:', error);
+      if (__DEV__) console.warn('Failed to delete recording:', error);
       return false;
     }
   }
@@ -505,8 +489,8 @@ export const useRideRecording = () => {
       // Notify other party
       if (settings.notifyOtherParty) {
         Alert.alert(
-          '📹 Recording Active',
-          'This trip is being recorded for safety purposes. The recording will be encrypted and auto-deleted after 7 days.',
+          'Recording Active',
+          'This trip is being recorded for safety purposes. Local recordings are retained for 7 days unless preserved for an incident.',
           [{ text: 'OK' }]
         );
       }

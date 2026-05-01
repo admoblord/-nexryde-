@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react';
 import {
   Linking,
   View,
@@ -9,15 +9,287 @@ import {
   RefreshControl,
   Alert,
   ActivityIndicator,
+  Animated,
+  Easing,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Card, Badge, Button } from '@/src/components/UI';
 import { useAppStore, Trip } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, getDriverTripOffers, acceptTrip, arriveTrip, startTrip, completeTrip, cancelTrip, getTrip, explainGeoFenceDeviation, triggerOneTouchPoliceConnect, submitDriverWitnessReport, submitDriverStopReason } from '@/src/services/api';
 import notificationService from '@/src/services/notifications';
+
+/* ─── Dark map style ─── */
+const DARK_MAP_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0f172a' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0f172a' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1e3a5f' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#1d4ed8' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0ea5e9' }, { lightness: -60 }] },
+  { featureType: 'landscape', elementType: 'geometry', stylers: [{ color: '#0f1f35' }] },
+];
+
+/* ─── Live Trip Map sub-component ─── */
+type LiveMapProps = {
+  driverLat: number | null;
+  driverLng: number | null;
+  pickupLat: number | null;
+  pickupLng: number | null;
+  dropLat: number | null;
+  dropLng: number | null;
+  status: string;
+  riderLat?: number | null;
+  riderLng?: number | null;
+};
+
+function PulsingDriverDot() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.5, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+      ])
+    ).start();
+  }, [pulse]);
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: 40, height: 40 }}>
+      <Animated.View style={{
+        position: 'absolute', width: 36, height: 36, borderRadius: 18,
+        backgroundColor: 'rgba(59,130,246,0.3)', transform: [{ scale: pulse }],
+      }} />
+      <LinearGradient colors={['#60a5fa', '#3b82f6']} style={{
+        width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
+        borderWidth: 2.5, borderColor: '#FFF',
+      }}>
+        <Ionicons name="car" size={12} color="#FFF" />
+      </LinearGradient>
+    </View>
+  );
+}
+
+const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat, pickupLng, dropLat, dropLng, status, riderLat, riderLng }: LiveMapProps) {
+  const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef<any>(null);
+
+  // Stable initial region (only computed once — avoids map reload)
+  const focalLat = driverLat ?? pickupLat ?? 6.5244;
+  const focalLng = driverLng ?? pickupLng ?? 3.3792;
+  const initialRegion = useMemo(() => ({
+    latitude: focalLat,
+    longitude: focalLng,
+    latitudeDelta: 0.04,
+    longitudeDelta: 0.04,
+  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Animate camera to driver position when it changes
+  useEffect(() => {
+    if (mapReady && mapRef.current && driverLat && driverLng) {
+      mapRef.current.animateCamera({
+        center: { latitude: driverLat, longitude: driverLng },
+        zoom: 15,
+      }, { duration: 800 });
+    }
+  }, [driverLat, driverLng, mapReady]);
+
+  const showPickup = status !== 'ongoing' && pickupLat != null && Number.isFinite(pickupLat);
+  const showDrop = dropLat != null && Number.isFinite(dropLat);
+  const showDriver = driverLat != null && Number.isFinite(driverLat);
+  const showRider = riderLat != null && Number.isFinite(riderLat!);
+
+  // polyline: driver → pickup (accepted) or pickup → drop (ongoing)
+  const polyline: { latitude: number; longitude: number }[] = [];
+  if (status === 'accepted' && showDriver && pickupLat != null) {
+    polyline.push({ latitude: driverLat!, longitude: driverLng! });
+    polyline.push({ latitude: pickupLat, longitude: pickupLng! });
+  } else if ((status === 'arrived' || status === 'ongoing') && pickupLat != null && dropLat != null) {
+    if (showDriver) polyline.push({ latitude: driverLat!, longitude: driverLng! });
+    if (pickupLat != null) polyline.push({ latitude: pickupLat, longitude: pickupLng! });
+    polyline.push({ latitude: dropLat, longitude: dropLng! });
+  }
+
+  if (Platform.OS === 'web') {
+    return (
+      <View style={tripMapStyles.webFallback}>
+        <Ionicons name="map" size={22} color="#475569" />
+        <Text style={{ color: '#64748b', fontSize: 12, marginTop: 4 }}>Live map on mobile app</Text>
+      </View>
+    );
+  }
+
+  // Lazy-load MapView to avoid import issues on web
+  const MapView = require('react-native-maps').default;
+  const { Marker, Polyline, PROVIDER_GOOGLE } = require('react-native-maps');
+
+  return (
+    <View style={tripMapStyles.container}>
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        provider={PROVIDER_GOOGLE}
+        customMapStyle={DARK_MAP_STYLE}
+        initialRegion={initialRegion}
+        scrollEnabled={false}
+        zoomEnabled={false}
+        rotateEnabled={false}
+        pitchEnabled={false}
+        toolbarEnabled={false}
+        showsPointsOfInterest={false}
+        showsBuildings={false}
+        showsCompass={false}
+        showsTraffic={false}
+        onMapReady={() => setMapReady(true)}
+      >
+        {/* Route polyline */}
+        {polyline.length >= 2 && (
+          <>
+            <Polyline coordinates={polyline} strokeColor="rgba(14,165,233,0.3)" strokeWidth={8} />
+            <Polyline coordinates={polyline} strokeColor="#0ea5e9" strokeWidth={3} lineDashPattern={status === 'accepted' ? [8, 5] : undefined} />
+          </>
+        )}
+
+        {/* Driver position */}
+        {showDriver && (
+          <Marker
+            coordinate={{ latitude: driverLat!, longitude: driverLng! }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <PulsingDriverDot />
+          </Marker>
+        )}
+
+        {/* Pickup marker */}
+        {showPickup && (
+          <Marker
+            coordinate={{ latitude: pickupLat!, longitude: pickupLng! }}
+            anchor={{ x: 0.5, y: 1 }}
+            tracksViewChanges={false}
+          >
+            <View style={tripMapStyles.markerWrap}>
+              <LinearGradient colors={['#22c55e', '#16a34a']} style={tripMapStyles.markerCircle}>
+                <Ionicons name="location" size={13} color="#FFF" />
+              </LinearGradient>
+              <View style={tripMapStyles.markerStem} />
+              <View style={tripMapStyles.markerLabel}>
+                <Text style={tripMapStyles.markerLabelText}>Pickup</Text>
+              </View>
+            </View>
+          </Marker>
+        )}
+
+        {/* Dropoff marker */}
+        {showDrop && (
+          <Marker
+            coordinate={{ latitude: dropLat!, longitude: dropLng! }}
+            anchor={{ x: 0.5, y: 1 }}
+            tracksViewChanges={false}
+          >
+            <View style={tripMapStyles.markerWrap}>
+              <LinearGradient colors={['#ef4444', '#dc2626']} style={tripMapStyles.markerCircle}>
+                <Ionicons name="flag" size={12} color="#FFF" />
+              </LinearGradient>
+              <View style={[tripMapStyles.markerStem, { backgroundColor: '#ef4444' }]} />
+              <View style={tripMapStyles.markerLabel}>
+                <Text style={tripMapStyles.markerLabelText}>Drop-off</Text>
+              </View>
+            </View>
+          </Marker>
+        )}
+
+        {/* Rider position (if available from backend) */}
+        {showRider && (
+          <Marker
+            coordinate={{ latitude: riderLat!, longitude: riderLng! }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <View style={tripMapStyles.riderDot}>
+              <Ionicons name="person" size={10} color="#FFF" />
+            </View>
+          </Marker>
+        )}
+      </MapView>
+
+      {/* Status chip */}
+      <View style={tripMapStyles.statusChip}>
+        <View style={[tripMapStyles.statusDot, {
+          backgroundColor:
+            status === 'ongoing' ? '#22c55e' :
+            status === 'arrived' ? '#f59e0b' :
+            status === 'accepted' ? '#0ea5e9' : '#64748b'
+        }]} />
+        <Text style={tripMapStyles.statusText}>
+          {status === 'accepted' ? 'En route to pickup' :
+           status === 'arrived' ? 'At pickup point' :
+           status === 'ongoing' ? 'Trip in progress' :
+           status.replace(/_/g, ' ')}
+        </Text>
+      </View>
+    </View>
+  );
+});
+
+const tripMapStyles = StyleSheet.create({
+  container: {
+    height: 200,
+    borderRadius: 14,
+    overflow: 'hidden',
+    marginBottom: 12,
+    backgroundColor: '#0f172a',
+  },
+  webFallback: {
+    height: 80,
+    backgroundColor: '#1e293b',
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  statusChip: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 6,
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { fontSize: 11, fontWeight: '800', color: '#e2e8f0' },
+  markerWrap: { alignItems: 'center' },
+  markerCircle: {
+    width: 28, height: 28, borderRadius: 14,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#FFF',
+  },
+  markerStem: { width: 2, height: 5, backgroundColor: '#22c55e' },
+  markerLabel: {
+    backgroundColor: 'rgba(15,23,42,0.85)', borderRadius: 5,
+    paddingHorizontal: 5, paddingVertical: 1,
+    borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.15)',
+  },
+  markerLabelText: { fontSize: 9, fontWeight: '800', color: '#FFF' },
+  riderDot: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: '#f59e0b',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: '#FFF',
+  },
+});
 
 export default function DriverTripsScreen() {
   const router = useRouter();
@@ -139,12 +411,13 @@ export default function DriverTripsScreen() {
   }, [currentTrip?.id, currentTrip?.status, currentLocation?.latitude, currentLocation?.longitude]);
 
   const loadPendingTrips = async () => {
-    if (!user?.id) return;
+    if (!user?.id) { setLoading(false); return; }
     try {
       const response = await getDriverTripOffers(user.id);
       setTrips(response.data);
     } catch (error) {
       if (__DEV__) console.warn('Error loading trips', error);
+      // Retain existing trips on error — don't wipe the list
     } finally {
       setLoading(false);
     }
@@ -587,6 +860,21 @@ export default function DriverTripsScreen() {
             />
             <Text style={styles.currentTripFare}>{CURRENCY}{currentTrip.fare.toLocaleString()}</Text>
           </View>
+
+          {/* Live map — shows driver position, pickup, dropoff */}
+          {['accepted', 'arrived', 'ongoing'].includes(currentTrip.status) && (
+            <TripLiveMap
+              driverLat={currentLocation?.latitude ?? null}
+              driverLng={currentLocation?.longitude ?? null}
+              pickupLat={typeof currentTrip.pickup_location === 'object' ? (currentTrip.pickup_location as any)?.lat : null}
+              pickupLng={typeof currentTrip.pickup_location === 'object' ? (currentTrip.pickup_location as any)?.lng : null}
+              dropLat={typeof currentTrip.dropoff_location === 'object' ? (currentTrip.dropoff_location as any)?.lat : null}
+              dropLng={typeof currentTrip.dropoff_location === 'object' ? (currentTrip.dropoff_location as any)?.lng : null}
+              status={currentTrip.status}
+              riderLat={(currentTrip as any)?.rider_current_lat ?? null}
+              riderLng={(currentTrip as any)?.rider_current_lng ?? null}
+            />
+          )}
           
           <View style={styles.tripRoute}>
             <View style={styles.routePoint}>

@@ -1025,6 +1025,69 @@ async def list_trip_recordings_for_admin(request: Request, trip_id: Optional[str
     ).sort("created_at", -1).to_list(safe_limit)
     return {"success": True, "count": len(rows), "recordings": rows}
 
+
+@support_router.get("/admin/trip-recordings/{recording_id}/video")
+async def stream_trip_recording_video(recording_id: str, request: Request, token: Optional[str] = None):
+    """Stream a single trip video recording for admin review.
+    Accepts admin token via x-admin-token header or ?token= query param.
+    """
+    import base64 as _b64
+    from fastapi.responses import Response as _Resp
+
+    if token:
+        import hashlib as _hl
+        from datetime import datetime as _dt, timezone as _tz
+        token_hash = _hl.sha256(token.encode()).hexdigest()
+        session = await db.admin_sessions.find_one(
+            {"token_hash": token_hash, "revoked": {"$ne": True}, "expires_at": {"$gt": _dt.now(_tz.utc)}},
+            {"_id": 0, "email": 1},
+        )
+        if not session:
+            raise HTTPException(status_code=403, detail="Invalid or expired admin token")
+    else:
+        await require_admin_request(request)
+
+    rec = await db.trip_recordings.find_one({"id": recording_id}, {"_id": 0})
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    b64 = rec.get("video_base64")
+    if not b64:
+        raise HTTPException(status_code=404, detail="No video data stored for this recording")
+    try:
+        raw = _b64.b64decode(b64)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decode video data")
+    mime = rec.get("mime_type") or "video/mp4"
+    await db.trip_recordings.update_one({"id": recording_id}, {"$set": {"admin_review_status": "viewed"}})
+    return _Resp(
+        content=raw,
+        media_type=mime,
+        headers={"Content-Disposition": f'inline; filename="{rec.get("filename", "trip-video.mp4")}"', "Cache-Control": "private, max-age=3600"},
+    )
+
+
+@support_router.get("/admin/trip-audio")
+async def list_trip_audio_for_admin(request: Request, trip_id: Optional[str] = None, limit: int = 100):
+    """List trip audio recordings available for admin review."""
+    await require_admin_request(request)
+    safe_limit = max(1, min(limit, 200))
+    query = {"trip_id": trip_id} if trip_id else {}
+    rows = await db.shield_trip_audio.find(
+        query,
+        {"_id": 0, "cipher_blob": 0},
+    ).sort("created_at", -1).to_list(safe_limit)
+    return {"success": True, "count": len(rows), "recordings": rows}
+
+
+@support_router.patch("/admin/trip-recordings/{recording_id}/review-status")
+async def update_recording_review_status(recording_id: str, request: Request):
+    """Mark a recording as reviewed by admin."""
+    await require_admin_request(request)
+    body = await request.json()
+    status = body.get("status", "reviewed")
+    await db.trip_recordings.update_one({"id": recording_id}, {"$set": {"admin_review_status": status}})
+    return {"success": True}
+
 # ==================== INSURANCE ====================
 
 @support_router.get("/trips/{trip_id}/insurance")

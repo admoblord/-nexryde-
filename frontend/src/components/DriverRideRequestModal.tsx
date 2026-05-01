@@ -57,6 +57,9 @@ type Props = {
   accepting: boolean;
   onAccept: () => void;
   onIgnore: () => void;
+  /** Driver's current GPS position for the map dot */
+  driverLat?: number | null;
+  driverLng?: number | null;
 };
 
 const CHIP_PRESETS = [
@@ -82,6 +85,8 @@ export default function DriverRideRequestModal({
   accepting,
   onAccept,
   onIgnore,
+  driverLat,
+  driverLng,
 }: Props) {
   const { height: windowH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
@@ -254,6 +259,12 @@ export default function DriverRideRequestModal({
                 areaSummaryLine={trip?.area_summary_line}
                 distanceKm={distanceKm}
                 durationMins={durationMins}
+                distToPickupKm={distPickup}
+                etaToPickupMin={etaPickupMin}
+                pickupAddress={pickupLine !== 'Pickup area' ? pickupLine : null}
+                dropAddress={dropLine !== 'Destination area' ? dropLine : null}
+                driverLat={driverLat}
+                driverLng={driverLng}
                 mapHeight={mapHeight}
                 interactive
                 interactionLocked
@@ -303,28 +314,64 @@ export default function DriverRideRequestModal({
 
               {/* ROUTE = second priority */}
               <View style={styles.routeCompact}>
+                {/* Pickup row */}
                 <View style={styles.routeCompactRow}>
                   <View style={[styles.badge, { backgroundColor: C.routeBlue }]}>
                     <Text style={styles.badgeText}>A</Text>
                   </View>
-                  <Text style={styles.routeCompactText} numberOfLines={2}>
-                    {pickupLine}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.routeCompactText} numberOfLines={1}>
+                      {pickupLine}
+                    </Text>
+                    {etaPickupMin != null && (
+                      <Text style={styles.routeCompactSub}>
+                        <Ionicons name="navigate" size={10} color="#0ea5e9" />
+                        {' '}~{etaPickupMin} min to reach pickup
+                        {distPickup != null ? ` · ${distPickup < 1 ? `${Math.round(distPickup * 1000)}m` : `${distPickup.toFixed(1)}km`} away` : ''}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                <View style={styles.routeArrow}>
-                  <Ionicons name="arrow-down" size={14} color={C.muted} />
+                {/* Connector */}
+                <View style={styles.routeConnector}>
+                  <View style={styles.routeConnectorLine} />
+                  {distanceKm != null && (
+                    <View style={styles.routeDistancePill}>
+                      <Text style={styles.routeDistancePillText}>
+                        {Number(distanceKm).toFixed(distanceKm >= 10 ? 0 : 1)} km · ~{durationMins ?? '?'} min trip
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.routeConnectorLine} />
                 </View>
+                {/* Dropoff row */}
                 <View style={styles.routeCompactRow}>
                   <View style={[styles.badge, { backgroundColor: C.primary }]}>
                     <Text style={[styles.badgeText, { color: C.primaryInk }]}>B</Text>
                   </View>
-                  <Text style={styles.routeCompactText} numberOfLines={2}>
-                    {dropLine}
-                  </Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.routeCompactText} numberOfLines={1}>
+                      {dropLine}
+                    </Text>
+                    {pricePerKm != null && (
+                      <Text style={styles.routeCompactSub}>
+                        ₦{pricePerKm}/km · {paymentLabel}
+                      </Text>
+                    )}
+                  </View>
                 </View>
-                <View style={styles.payChip}>
-                  <Ionicons name="wallet-outline" size={14} color={C.primary} />
-                  <Text style={styles.payChipText}>{paymentLabel}</Text>
+                {/* Bottom chips */}
+                <View style={styles.routeBottomChips}>
+                  <View style={styles.payChip}>
+                    <Ionicons name="wallet-outline" size={13} color={C.primary} />
+                    <Text style={styles.payChipText}>{paymentLabel}</Text>
+                  </View>
+                  {highDemand && (
+                    <View style={[styles.payChip, { borderColor: '#f59e0b55', gap: 4 }]}>
+                      <Ionicons name="flash" size={13} color="#f59e0b" />
+                      <Text style={[styles.payChipText, { color: '#f59e0b' }]}>{surgeMul.toFixed(1)}× surge</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
@@ -626,6 +673,21 @@ const styles = StyleSheet.create({
   },
   routeCompactRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   routeArrow: { marginLeft: 13, marginVertical: 2 },
+  routeCompactSub: { fontSize: 11, color: '#64748b', marginTop: 2, fontWeight: '600' },
+  routeConnector: {
+    flexDirection: 'row', alignItems: 'center', marginLeft: 14, marginVertical: 4, gap: 6,
+  },
+  routeConnectorLine: { flex: 1, height: 1, backgroundColor: 'rgba(148,163,184,0.2)' },
+  routeDistancePill: {
+    backgroundColor: 'rgba(14,165,233,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    borderWidth: 0.5,
+    borderColor: 'rgba(14,165,233,0.3)',
+  },
+  routeDistancePillText: { fontSize: 10, fontWeight: '800', color: '#0ea5e9' },
+  routeBottomChips: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
   badge: {
     width: 28,
     height: 28,
@@ -635,7 +697,6 @@ const styles = StyleSheet.create({
   },
   badgeText: { fontSize: 14, fontWeight: '900', color: '#FFF' },
   routeCompactText: {
-    flex: 1,
     ...DS_TYPE.body,
     lineHeight: 21,
     color: C.text,
@@ -645,7 +706,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    marginTop: 10,
     backgroundColor: 'rgba(34, 197, 94, 0.12)',
     paddingHorizontal: 12,
     paddingVertical: 6,

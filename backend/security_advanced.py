@@ -190,9 +190,10 @@ class RateLimiter:
 
 
 # Rate limiters for different endpoints
-general_limiter = RateLimiter(max_requests=100, window_seconds=60)  # 100 req/min
-auth_limiter = RateLimiter(max_requests=10, window_seconds=60)  # 10 req/min (login)
-otp_limiter = RateLimiter(max_requests=5, window_seconds=60)  # 5 req/min (OTP)
+general_limiter = RateLimiter(max_requests=100, window_seconds=60)   # 100 req/min
+auth_limiter = RateLimiter(max_requests=10, window_seconds=60)        # 10 req/min (login)
+otp_limiter = RateLimiter(max_requests=5, window_seconds=60)          # 5 req/min (OTP)
+trip_request_limiter = RateLimiter(max_requests=5, window_seconds=60) # 5 trip requests/min per user (spam guard)
 
 
 # ==================== REQUEST SIGNING (ANTI-REPLAY) ====================

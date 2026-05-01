@@ -22,7 +22,7 @@ export const isBiometricSupported = async (): Promise<boolean> => {
     const compatible = await LocalAuthentication.hasHardwareAsync();
     return compatible;
   } catch (error) {
-    console.error('Biometric support check error:', error);
+    if (__DEV__) console.warn('Biometric support check error:', error);
     return false;
   }
 };
@@ -35,7 +35,7 @@ export const isBiometricEnrolled = async (): Promise<boolean> => {
     const enrolled = await LocalAuthentication.isEnrolledAsync();
     return enrolled;
   } catch (error) {
-    console.error('Biometric enrollment check error:', error);
+    if (__DEV__) console.warn('Biometric enrollment check error:', error);
     return false;
   }
 };
@@ -62,7 +62,7 @@ export const getBiometricTypes = async (): Promise<string[]> => {
     
     return typeNames;
   } catch (error) {
-    console.error('Get biometric types error:', error);
+    if (__DEV__) console.warn('Get biometric types error:', error);
     return [];
   }
 };
@@ -112,7 +112,7 @@ export const authenticateWithBiometric = async (
     }
     
   } catch (error: any) {
-    console.error('Biometric auth error:', error);
+    if (__DEV__) console.warn('Biometric auth error:', error);
     return {
       success: false,
       error: error.message || 'Biometric authentication error'
@@ -139,7 +139,7 @@ export const enableBiometricLogin = async (userId: string): Promise<boolean> => 
     await AsyncStorage.setItem(`@biometric_enabled_${userId}`, 'true');
     
     Alert.alert(
-      '✅ Biometric Login Enabled!',
+      'Biometric Login Enabled',
       Platform.OS === 'ios'
         ? 'You can now use Face ID to login quickly'
         : 'You can now use fingerprint to login quickly'
@@ -148,7 +148,7 @@ export const enableBiometricLogin = async (userId: string): Promise<boolean> => 
     return true;
     
   } catch (error) {
-    console.error('Enable biometric error:', error);
+    if (__DEV__) console.warn('Enable biometric error:', error);
     return false;
   }
 };

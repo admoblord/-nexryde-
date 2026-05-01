@@ -81,7 +81,7 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     rows: [
       {
         label: 'Trip recording',
-        desc: 'Optional encrypted-style trip capture',
+        desc: 'Optional protected trip capture',
         route: '/rider/ride-recording',
         icon: 'mic',
         tone: 'info',

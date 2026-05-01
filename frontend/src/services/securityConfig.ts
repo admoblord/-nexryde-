@@ -45,5 +45,5 @@ export function validateApiUrl(url: string): boolean {
  */
 export const SECURITY_HEADERS = {
   'X-Requested-With': 'NEXRYDE-App',
-  'X-App-Version': '1.0.1',
+  'X-App-Version': '1.1.6',
 };

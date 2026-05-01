@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { View, StyleSheet, Dimensions, Platform } from 'react-native';
 import Animated, {
+  type SharedValue,
   useSharedValue,
   useAnimatedStyle,
   withRepeat,
@@ -327,6 +328,38 @@ export const StaticOrbs: React.FC<StaticOrbsProps> = ({ count = 8 }) => {
   );
 };
 
+const RoadLine: React.FC<{ index: number; progress: SharedValue<number> }> = ({ index, progress }) => {
+  const animatedStyle = useAnimatedStyle(() => {
+    const baseDelay = index * 0.2;
+    const adjustedProgress = (progress.value + baseDelay) % 1;
+
+    const translateY = interpolate(
+      adjustedProgress,
+      [0, 1],
+      [SCREEN_HEIGHT * 0.7, -50]
+    );
+
+    const opacity = interpolate(
+      adjustedProgress,
+      [0, 0.2, 0.8, 1],
+      [0, 1, 1, 0]
+    );
+
+    const scaleY = interpolate(
+      adjustedProgress,
+      [0, 0.5, 1],
+      [0.3, 1, 0.5]
+    );
+
+    return {
+      transform: [{ translateY }, { scaleY }],
+      opacity,
+    };
+  });
+
+  return <Animated.View style={[styles.roadLine, animatedStyle]} />;
+};
+
 // Road lines animation (for splash screen)
 export const RoadLines: React.FC = () => {
   const progress = useSharedValue(0);
@@ -339,46 +372,11 @@ export const RoadLines: React.FC = () => {
     );
   }, []);
 
-  const lines = [0, 1, 2, 3, 4];
-
   return (
     <View style={styles.roadContainer} pointerEvents="none">
-      {lines.map((_, index) => {
-        const animatedStyle = useAnimatedStyle(() => {
-          const baseDelay = index * 0.2;
-          const adjustedProgress = (progress.value + baseDelay) % 1;
-          
-          const translateY = interpolate(
-            adjustedProgress,
-            [0, 1],
-            [SCREEN_HEIGHT * 0.7, -50]
-          );
-          
-          const opacity = interpolate(
-            adjustedProgress,
-            [0, 0.2, 0.8, 1],
-            [0, 1, 1, 0]
-          );
-
-          const scaleY = interpolate(
-            adjustedProgress,
-            [0, 0.5, 1],
-            [0.3, 1, 0.5]
-          );
-
-          return {
-            transform: [{ translateY }, { scaleY }],
-            opacity,
-          };
-        });
-
-        return (
-          <Animated.View
-            key={index}
-            style={[styles.roadLine, animatedStyle]}
-          />
-        );
-      })}
+      {[0, 1, 2, 3, 4].map((index) => (
+        <RoadLine key={index} index={index} progress={progress} />
+      ))}
     </View>
   );
 };

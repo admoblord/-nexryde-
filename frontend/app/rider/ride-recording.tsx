@@ -64,7 +64,7 @@ export default function RideRecordingScreen() {
         );
       }
     } catch (error) {
-      console.error('Permission error:', error);
+      if (__DEV__) console.warn('Permission error:', error);
     }
   };
 
@@ -103,7 +103,7 @@ export default function RideRecordingScreen() {
         startedAtRef.current = Date.now();
         
         Alert.alert(
-          '🎙️ Audio Recording Started',
+          'Audio Recording Started',
           'Recording will be saved securely and can be used as evidence if needed.'
         );
       } else {
@@ -152,12 +152,12 @@ export default function RideRecordingScreen() {
         setRecordingTime(0);
 
         Alert.alert(
-          '✅ Video Uploaded',
+          'Video Uploaded',
           'Trip video recording has been uploaded to backend and is now available in the admin review queue.'
         );
       }
     } catch (error) {
-      console.error('Start recording error:', error);
+      if (__DEV__) console.warn('Start recording error:', error);
       Alert.alert('Error', 'Failed to start recording. Please try again.');
       if (activeTripId) {
         try {
@@ -176,11 +176,9 @@ export default function RideRecordingScreen() {
         await audioRecording.stopAndUnloadAsync();
         const uri = audioRecording.getURI();
         
-        Alert.alert(
-          '✅ Audio Recording Saved',
-          `Your ${formatTime(recordingTime)} audio recording has been saved securely at: ${uri?.substring(0, 50)}...`,
-          [{ text: 'OK' }]
-        );
+        Alert.alert('Audio Recording Saved', `Your ${formatTime(recordingTime)} audio recording has been saved securely.`, [
+          { text: 'OK' },
+        ]);
         
         setAudioRecording(null);
         if (activeTripId) {
@@ -188,7 +186,7 @@ export default function RideRecordingScreen() {
         }
       } else {
         Alert.alert(
-          '✅ Recording Saved',
+          'Recording Saved',
           `Your ${recordingType} recording (${formatTime(recordingTime)}) has been saved securely.`,
           [{ text: 'OK' }]
         );
@@ -198,7 +196,7 @@ export default function RideRecordingScreen() {
       setRecordingType(null);
       startedAtRef.current = null;
     } catch (error) {
-      console.error('Stop recording error:', error);
+      if (__DEV__) console.warn('Stop recording error:', error);
       Alert.alert('Error', 'Failed to stop recording properly.');
       setIsRecording(false);
     }
@@ -287,9 +285,9 @@ export default function RideRecordingScreen() {
             <View style={styles.infoContent}>
               <Text style={styles.infoTitle}>Privacy & Security</Text>
               <Text style={styles.infoText}>
-                • Recordings are encrypted and stored securely{"\n"}
-                • Only accessible by you and NEXRYDE support{"\n"}
-                • Auto-deleted after 30 days if not flagged{"\n"}
+                • Recordings are stored securely on your device or uploaded when supported{"\n"}
+                • Only accessible for safety review when submitted{"\n"}
+                • Auto-deleted by backend retention rules if not flagged{"\n"}
                 • Can be used as evidence in disputes
               </Text>
             </View>

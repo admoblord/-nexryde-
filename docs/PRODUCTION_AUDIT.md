@@ -1,4 +1,4 @@
-# Nexryde Production Readiness Audit
+                                                                                                                # Nexryde Production Readiness Audit
 
 Scope: full repo walkthrough (`backend/` FastAPI+Mongo, `frontend/` Expo RN).  
 Method: code-path audit only (no assumptions from screen names).  

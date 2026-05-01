@@ -46,13 +46,13 @@ REQUIRED_DRIVER_DOC_KEYS = {
     "passport_photo",
     "vehicle_registration",
     "vehicle_license",
-    "hacking_permit",
     "road_worthiness",
     "insurance",
     "vehicle_front",
     "vehicle_interior",
     "vehicle_ac",
 }
+# hacking_permit is optional — driver may or may not have it; never block approval
 
 
 def _missing_required_archived_docs(doc_record: Optional[dict]) -> list[str]:
@@ -114,15 +114,44 @@ async def _find_cross_driver_hash_duplicates(doc_hashes: dict[str, str], current
     return duplicates
 
 
-async def _snapshot_approved_documents(driver_id: str, verification_id: str, approved_by: str, notes: Optional[str] = None) -> dict:
-    """Create immutable approved-doc snapshot for admin recheck/audit trail."""
+async def _snapshot_approved_documents(
+    driver_id: str,
+    verification_id: str,
+    approved_by: str,
+    notes: Optional[str] = None,
+    force: bool = False,
+) -> dict:
+    """Create immutable approved-doc snapshot for admin recheck/audit trail.
+
+    Image data (base64) is intentionally NOT stored in the snapshot to avoid
+    the MongoDB 16 MB BSON document limit.  The admin panel fetches image data
+    on demand via /admin/verifications/{id}/document-image/{doc_key} which reads
+    directly from the driver_documents collection.
+
+    When ``force=True`` the missing-docs guard is skipped so admin can approve
+    even when the document archive is incomplete.
+    """
     archived = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0}) or {}
     missing = _missing_required_archived_docs(archived)
-    if missing:
+    if missing and not force:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot snapshot approved docs. Missing required archived documents: {', '.join(missing)}"
+            detail=f"Cannot approve. Missing required documents: {', '.join(missing)}"
         )
+
+    raw_docs = archived.get("documents") or {}
+    # Store only metadata — strip binary data so the snapshot stays well under 16 MB
+    docs_meta = {
+        k: {
+            "filename": v.get("filename"),
+            "content_type": v.get("content_type"),
+            "size_bytes": v.get("size_bytes"),
+            "sha256": v.get("sha256"),
+            "uploaded_at": v.get("uploaded_at"),
+            "expiry_date": v.get("expiry_date"),
+        }
+        for k, v in raw_docs.items()
+    }
 
     snapshot = {
         "id": str(uuid.uuid4()),
@@ -132,8 +161,8 @@ async def _snapshot_approved_documents(driver_id: str, verification_id: str, app
         "approved_at": datetime.now(timezone.utc),
         "status": "approved",
         "notes": notes,
-        "document_count": len((archived.get("documents") or {}).keys()),
-        "documents": archived.get("documents") or {},
+        "document_count": len(docs_meta),
+        "documents": docs_meta,
         "source_submitted_at": archived.get("submitted_at"),
     }
     await db.driver_document_audit.insert_one(snapshot)
@@ -587,7 +616,6 @@ async def verify_driver_documents(
     driver_id: str = Form(...),
     nin: Optional[UploadFile] = File(None),
     nin_number: Optional[str] = Form(None),
-    vehicle_license_number: Optional[str] = Form(None),
     drivers_license: Optional[UploadFile] = File(None),
     passport_photo: Optional[UploadFile] = File(None),
     vehicle_registration: Optional[UploadFile] = File(None),
@@ -619,7 +647,7 @@ async def verify_driver_documents(
             "vehicle_interior": vehicle_interior, "vehicle_ac": vehicle_ac,
         }
         expiry_map = {
-            "drivers_license": drivers_license_expiry, "vehicle_registration": vehicle_registration_expiry,
+            "drivers_license": drivers_license_expiry,
             "vehicle_license": vehicle_license_expiry, "hacking_permit": hacking_permit_expiry,
             "road_worthiness": road_worthiness_expiry, "insurance": insurance_expiry,
         }
@@ -638,17 +666,13 @@ async def verify_driver_documents(
 
         normalized_nin_number = re.sub(r"\D", "", str(nin_number or ""))
         nin_number_ok = len(normalized_nin_number) == 11
-        normalized_vehicle_license_number = str(vehicle_license_number or "").strip()
-        vehicle_license_number_ok = len(normalized_vehicle_license_number) >= 5
         missing_docs = [
             key
             for key in required_keys
-            if key not in {"nin", "vehicle_license"} and not doc_files.get(key)
+            if key != "nin" and not doc_files.get(key)
         ]
         if not doc_files.get("nin") and not nin_number_ok:
             missing_docs.insert(0, "nin")
-        if not doc_files.get("vehicle_license") and not vehicle_license_number_ok:
-            missing_docs.append("vehicle_license")
         if missing_docs:
             pretty = ", ".join(missing_docs).replace("_", " ")
             if "nin" in missing_docs:
@@ -656,17 +680,10 @@ async def verify_driver_documents(
                     status_code=400,
                     detail="Provide National ID (NIN) slip image or enter your 11-digit NIN number.",
                 )
-            if "vehicle_license" in missing_docs:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Provide vehicle license upload or enter vehicle license number.",
-                )
             raise HTTPException(status_code=400, detail=f"Missing required documents: {pretty}")
 
         for exp_key, exp_value in expiry_map.items():
             uploaded_for_key = bool(doc_files.get(exp_key))
-            if exp_key == "vehicle_license" and not uploaded_for_key and vehicle_license_number_ok:
-                continue
             if not uploaded_for_key:
                 continue
             if not exp_value or len(str(exp_value).strip()) < 7:
@@ -704,17 +721,20 @@ async def verify_driver_documents(
             fraud_flags.append("cross_driver_duplicate_document_hash")
         if identical_hashes_within_submission:
             fraud_flags.append("duplicate_hash_within_submission")
+        automated_approved = not fraud_flags and all(doc_files.get(key) for key in required_keys)
+        verification_status = "approved" if automated_approved else "pending_review"
+        queue_status = "approved" if automated_approved else "pending"
+        now_iso = datetime.now(timezone.utc).isoformat()
 
         doc_archive = {
             "driver_id": driver_id,
             "documents": stored_docs,
-            "submitted_at": datetime.now(timezone.utc).isoformat(),
-            "status": "pending_review",
+            "submitted_at": now_iso,
+            "status": verification_status,
             "document_count": len(stored_docs),
             "nin_number": normalized_nin_number if nin_number_ok else None,
             "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
-            "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None,
-            "vehicle_license_capture_mode": "number_only" if (vehicle_license_number_ok and not doc_files.get("vehicle_license")) else "document_upload",
+            "vehicle_license_capture_mode": "document_upload",
             "document_hashes": doc_hashes,
             "duplicate_hashes": duplicate_hashes,
             "forgery_flags": fraud_flags,
@@ -728,21 +748,25 @@ async def verify_driver_documents(
         await db.driver_profiles.update_one(
             {"user_id": driver_id},
             {"$set": {
-                "verification_status": "pending_review",
-                "documents_verified": False,
+                "verification_status": verification_status,
+                "documents_verified": automated_approved,
                 "documents_submitted": True,
                 "document_count": len(stored_docs),
-                "submitted_at": datetime.now(timezone.utc).isoformat(),
-                "onboarding_step": "documents",
+                "submitted_at": now_iso,
+                "documents_approved_at": now_iso if automated_approved else None,
+                "onboarding_step": "profile" if automated_approved else "documents",
                 "verification_fraud_flags": fraud_flags,
                 "nin_number": normalized_nin_number if nin_number_ok else None,
-                "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None,
+                "nin_verified": automated_approved,
+                "license_uploaded": bool(drivers_license),
+                "vehicle_docs_uploaded": bool(vehicle_registration and vehicle_license and road_worthiness and insurance),
+                "selfie_verified": bool(passport_photo),
             }},
             upsert=True,
         )
         await db.users.update_one(
             {"id": driver_id},
-            {"$set": {"documents_verified": False, "verification_status": "pending_review", "nin": normalized_nin_number if nin_number_ok else None, "vehicle_license_number": normalized_vehicle_license_number if vehicle_license_number_ok else None}}
+            {"$set": {"documents_verified": automated_approved, "verification_status": verification_status, "nin": normalized_nin_number if nin_number_ok else None}}
         )
 
         # Ensure admin verification queue always has a row linked to this archived submission.
@@ -754,36 +778,61 @@ async def verify_driver_documents(
                 "$set": {
                     "id": verification_id,
                     "user_id": driver_id,
-                    "status": "pending",
+                    "status": queue_status,
                     "submitted_at": datetime.now(timezone.utc),
-                    "reviewed_at": None,
-                    "reviewed_by": None,
+                    "reviewed_at": datetime.now(timezone.utc) if automated_approved else None,
+                    "reviewed_by": "SYSTEM_AUTO_CHECK" if automated_approved else None,
                     "rejection_reason": None,
+                    "notes": "Approved by automated completeness, image validity, and duplicate-document checks." if automated_approved else None,
                     "documents_summary": {
                         "document_count": len(stored_docs),
                         "required_docs_complete": True,
                         "nin_capture_mode": "number_only" if (nin_number_ok and not doc_files.get("nin")) else "document_upload",
                         "nin_last4": normalized_nin_number[-4:] if nin_number_ok else None,
-                        "vehicle_license_capture_mode": "number_only" if (vehicle_license_number_ok and not doc_files.get("vehicle_license")) else "document_upload",
+                        "vehicle_license_capture_mode": "document_upload",
                     },
                     "documents_archive_ref": {
                         "driver_id": driver_id,
                         "submitted_at": doc_archive["submitted_at"],
                     },
+                    "last_document_submission_id": verification_id,
                 }
             },
             upsert=True,
         )
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {"last_document_submission_id": verification_id}},
+            upsert=True,
+        )
 
-        logger.info(f"Driver {driver_id}: {len(stored_docs)} documents archived pending admin review")
+        if automated_approved:
+            snapshot = await _snapshot_approved_documents(
+                driver_id=driver_id,
+                verification_id=verification_id,
+                approved_by="SYSTEM_AUTO_CHECK",
+                notes="Automated document checks passed.",
+            )
+            await db.driver_verifications.update_one(
+                {"id": verification_id},
+                {"$set": {"approved_documents_snapshot_id": snapshot.get("id")}},
+            )
+            await send_driver_verification_notification(driver_id, "approved")
+
+        logger.info(f"Driver {driver_id}: {len(stored_docs)} documents archived status={verification_status}")
         return {
             "success": True,
-            "verification_status": "pending_review",
+            "verification_status": verification_status,
             "driver_id": driver_id,
+            "verification_id": verification_id,
             "documents_stored": len(stored_docs),
             "forgery_flags": fraud_flags,
             "duplicate_hashes_count": len(duplicate_hashes),
-            "message": "Documents uploaded and archived. Verification is pending admin review.",
+            "message": (
+                "Documents passed automated checks. Continue to driver profile."
+                if automated_approved
+                else "Documents uploaded and archived. Verification is pending review."
+            ),
         }
     except HTTPException:
         raise
@@ -805,10 +854,41 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         profile = await db.driver_profiles.find_one({"user_id": driver_id})
         if not profile:
             return {"step": "documents", "completed": False}
-        if not profile.get("documents_verified"):
-            return {"step": "documents", "completed": False}
-        if profile.get("verification_status") != "approved":
-            return {"step": "documents", "completed": False}
+        verification_status = profile.get("verification_status")
+        documents_submitted = bool(profile.get("documents_submitted"))
+        if verification_status in {"pending", "pending_review", "under_review", "ai_reviewing"} or (
+            documents_submitted and not profile.get("documents_verified")
+        ):
+            verification = await db.driver_verifications.find_one(
+                {"user_id": driver_id},
+                {"_id": 0, "id": 1, "status": 1, "submitted_at": 1, "rejection_reason": 1, "notes": 1},
+                sort=[("submitted_at", -1)],
+            )
+            return {
+                "step": "dashboard_limited",
+                "completed": True,
+                "verification_status": verification_status or (verification or {}).get("status", "pending_review"),
+                "documents_submitted": True,
+                "can_go_online": False,
+                "trial_eligible": False,
+                "limited_access_reason": "Documents are submitted and waiting for approval.",
+                "verification": verification,
+            }
+        if verification_status == "rejected":
+            verification = await db.driver_verifications.find_one(
+                {"user_id": driver_id},
+                {"_id": 0, "id": 1, "status": 1, "rejection_reason": 1, "reviewed_at": 1},
+                sort=[("submitted_at", -1)],
+            )
+            return {
+                "step": "documents_rejected",
+                "completed": False,
+                "verification_status": "rejected",
+                "documents_submitted": documents_submitted,
+                "verification": verification,
+            }
+        if not profile.get("documents_verified") or verification_status != "approved":
+            return {"step": "documents", "completed": False, "verification_status": verification_status or "not_submitted"}
         if not profile.get("profile_completed"):
             return {"step": "profile", "completed": False}
 
@@ -857,45 +937,15 @@ async def get_driver_documents(driver_id: str, request: Request):
     }
 
 
-async def _ensure_48h_trial_for_verified_driver(driver_id: str) -> Optional[datetime]:
-    """Automatically grant trial once driver has completed verification stage."""
-    latest = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
-    if latest:
-        if latest.get("status") == "trial":
-            return latest.get("trial_end_date")
-        return None
-
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
-    is_eligible = (profile.get("verification_status") == "approved") and bool(profile.get("profile_completed"))
-    if not is_eligible:
-        return None
-
-    trial_start = datetime.utcnow()
-    trial_end = trial_start + timedelta(hours=48)
-    await db.subscriptions.insert_one({
-        "id": str(uuid.uuid4()),
-        "driver_id": driver_id,
-        "amount": 18000,
-        "tier": "city_rider",
-        "status": "trial",
-        "start_date": trial_start,
-        "trial_end_date": trial_end,
-        "trial_unlimited_city_only": True,
-        "end_date": trial_end,
-        "is_trial": True,
-        "created_at": trial_start,
-        "updated_at": trial_start,
-    })
-    await db.driver_profiles.update_one(
-        {"user_id": driver_id},
-        {"$set": {"subscription_active": True, "subscription_expiry": trial_end}},
-    )
-    await db.users.update_one(
-        {"id": driver_id},
-        {"$set": {"subscription_active": True, "subscription_expiry": trial_end}},
-    )
-    logger.info(f"48-hour trial auto-activated for verified driver={driver_id}")
-    return trial_end
+async def _ensure_48h_trial_for_verified_driver(driver_id: str):
+    """Replaced by activity-based trial. Delegates to payments router helper.
+    Kept for backwards compatibility with call sites.
+    """
+    from routers.payments import _ensure_auto_trial_for_verified_driver
+    sub = await _ensure_auto_trial_for_verified_driver(driver_id)
+    if sub:
+        logger.info(f"Activity trial ensured for driver={driver_id}")
+    return sub
 
 @drivers_router.post("/drivers/complete-profile")
 async def complete_driver_profile(request: dict, http_request: Request):
@@ -958,12 +1008,19 @@ async def complete_driver_profile(request: dict, http_request: Request):
         }.items() if v is not None}
         await db.driver_profiles.update_one({"user_id": driver_id}, {"$set": profile_update}, upsert=True)
         await db.users.update_one({"id": driver_id}, {"$set": {"is_verified": True, "profile_completed": True, "onboarding_complete": True}})
-        trial_end = await _ensure_48h_trial_for_verified_driver(driver_id)
+        trial_sub = await _ensure_48h_trial_for_verified_driver(driver_id)
         user = await db.users.find_one({"id": driver_id})
         if user:
             user["_id"] = str(user["_id"])
             user["onboarding_complete"] = True
-        return {"success": True, "user": user, "trial_activated": bool(trial_end), "trial_expires_at": trial_end.isoformat() if isinstance(trial_end, datetime) else None, "message": "Profile completed! 48-hour trial activated. You can accept 3 trips."}
+        from routers.payments import SUBSCRIPTION_CONFIG as _SC
+        return {
+            "success": True,
+            "user": user,
+            "trial_activated": bool(trial_sub),
+            "trial_trips_target": _SC["trial_trips_target"],
+            "message": f"Profile completed! Free activity trial activated — complete {_SC['trial_trips_target']} trips before subscribing.",
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -1344,25 +1401,121 @@ async def get_driver_verification_status(user_id: str, request: Request):
 
 # ==================== ADMIN VERIFICATION ====================
 
+
+def _driver_document_summary(doc_record: Optional[dict]) -> dict:
+    docs = (doc_record or {}).get("documents") or {}
+    nin_number = (doc_record or {}).get("nin_number")
+    missing = _missing_required_archived_docs(doc_record)
+    return {
+        "document_count": (doc_record or {}).get("document_count", len(docs)),
+        "required_docs_complete": not missing,
+        "missing_required_docs": missing,
+        "document_types": sorted(docs.keys()),
+        "submitted_at": (doc_record or {}).get("submitted_at"),
+        "archive_status": (doc_record or {}).get("status"),
+        "nin_capture_mode": (doc_record or {}).get("nin_capture_mode"),
+        "nin_last4": str(nin_number)[-4:] if nin_number else None,
+        "vehicle_license_capture_mode": (doc_record or {}).get("vehicle_license_capture_mode"),
+    }
+
+
+async def _ensure_admin_verification_queue_rows():
+    """Repair the admin queue from archived driver documents so submissions never disappear."""
+    doc_records = await db.driver_documents.find(
+        {"documents_submitted": {"$ne": False}},
+        {"_id": 0, "documents.data": 0},
+    ).sort("submitted_at", -1).to_list(1000)
+    for doc_record in doc_records:
+        driver_id = doc_record.get("driver_id")
+        if not driver_id:
+            continue
+        existing = await db.driver_verifications.find_one({"user_id": driver_id}, {"_id": 0, "id": 1})
+        if existing:
+            continue
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
+        archive_status = doc_record.get("status") or profile.get("verification_status") or "pending_review"
+        queue_status = "approved" if archive_status == "approved" else ("rejected" if archive_status == "rejected" else "pending")
+        verification_id = profile.get("last_document_submission_id") or str(uuid.uuid4())
+        submitted_at_raw = doc_record.get("submitted_at") or profile.get("submitted_at")
+        submitted_at = datetime.now(timezone.utc)
+        if isinstance(submitted_at_raw, datetime):
+            submitted_at = submitted_at_raw
+        elif isinstance(submitted_at_raw, str):
+            try:
+                submitted_at = datetime.fromisoformat(submitted_at_raw.replace("Z", "+00:00"))
+            except Exception:
+                submitted_at = datetime.now(timezone.utc)
+        await db.driver_verifications.update_one(
+            {"user_id": driver_id},
+            {
+                "$set": {
+                    "id": verification_id,
+                    "user_id": driver_id,
+                    "status": queue_status,
+                    "submitted_at": submitted_at,
+                    "reviewed_at": submitted_at if queue_status == "approved" else None,
+                    "reviewed_by": "SYSTEM_AUTO_CHECK" if queue_status == "approved" else None,
+                    "documents_summary": _driver_document_summary(doc_record),
+                    "documents_archive_ref": {
+                        "driver_id": driver_id,
+                        "submitted_at": doc_record.get("submitted_at"),
+                    },
+                    "last_document_submission_id": verification_id,
+                    "notes": "Recovered from archived driver document submission.",
+                }
+            },
+            upsert=True,
+        )
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {"last_document_submission_id": verification_id}},
+            upsert=True,
+        )
+
+
 @drivers_router.get("/admin/verifications")
 async def admin_get_verifications(request: Request, status: str = None, limit: int = 100, skip: int = 0):
     await require_admin_request(request)
-    query = {"status": status} if status else {}
+    await _ensure_admin_verification_queue_rows()
+    status_aliases = {
+        "pending": ["pending", "pending_review", "under_review", "ai_reviewing"],
+        "under_review": ["under_review", "ai_reviewing"],
+        "approved": ["approved"],
+        "rejected": ["rejected"],
+    }
+    query = {"status": {"$in": status_aliases.get(status, [status])}} if status else {}
     verifications = await db.driver_verifications.find(query, {"_id": 0}).sort("submitted_at", -1).skip(skip).limit(limit).to_list(limit)
     enriched = []
     for v in verifications:
-        user = await db.users.find_one({"id": v.get("user_id")}, {"name": 1, "phone": 1, "_id": 0})
+        driver_id = v.get("user_id") or v.get("driver_id")
+        user = await db.users.find_one({"id": driver_id}, {"name": 1, "phone": 1, "email": 1, "_id": 0})
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
+        archived_docs = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0, "documents.data": 0}) or {}
         latest_snapshot = await db.driver_document_audit.find_one(
-            {"driver_id": v.get("user_id"), "verification_id": v.get("id")},
+            {"driver_id": driver_id, "verification_id": v.get("id")},
             {"_id": 0, "id": 1, "approved_at": 1, "document_count": 1},
             sort=[("approved_at", -1)],
         )
         ai_result = v.get("ai_verification_result") or {}
+        doc_summary = v.get("documents_summary") or _driver_document_summary(archived_docs)
         enriched.append({
             **v,
+            "user_id": driver_id,
+            "driver_id": driver_id,
             "user_name": user.get("name") if user else "Unknown",
             "user_phone": user.get("phone") if user else "Unknown",
+            "user_email": user.get("email") if user else None,
+            "documents_summary": doc_summary,
+            "documents_archive": {
+                "submitted_at": archived_docs.get("submitted_at"),
+                "status": archived_docs.get("status"),
+                "document_count": archived_docs.get("document_count", len((archived_docs.get("documents") or {}))),
+            },
             "approved_documents_snapshot": latest_snapshot,
+            "vehicle_make": profile.get("vehicle_make") or v.get("vehicle_make"),
+            "vehicle_model": profile.get("vehicle_model") or v.get("vehicle_model"),
+            "vehicle_plate": profile.get("vehicle_plate_number") or profile.get("vehicle_plate") or v.get("vehicle_plate"),
+            "vehicle_color": profile.get("vehicle_color") or v.get("vehicle_color"),
             "review_metrics": {
                 "confidence": ai_result.get("confidence"),
                 "risk_score": ai_result.get("risk_score"),
@@ -1371,8 +1524,18 @@ async def admin_get_verifications(request: Request, status: str = None, limit: i
                 "mismatches_count": len(ai_result.get("mismatches") or []),
             },
         })
-    counts = {s: await db.driver_verifications.count_documents({"status": s}) for s in ["pending", "under_review", "approved", "rejected"]}
-    counts["total"] = sum(counts.values())
+    pending_count = await db.driver_verifications.count_documents({"status": {"$in": status_aliases["pending"]}})
+    under_review_count = await db.driver_verifications.count_documents({"status": {"$in": status_aliases["under_review"]}})
+    approved_count = await db.driver_verifications.count_documents({"status": "approved"})
+    rejected_count = await db.driver_verifications.count_documents({"status": "rejected"})
+    counts = {
+        "pending": pending_count,
+        "under_review": under_review_count,
+        "approved": approved_count,
+        "rejected": rejected_count,
+        "document_archives": await db.driver_documents.count_documents({}),
+    }
+    counts["total"] = pending_count + approved_count + rejected_count
     return {"verifications": enriched, "counts": counts}
 
 @drivers_router.post("/admin/verifications/{verification_id}/review")
@@ -1393,7 +1556,18 @@ async def admin_start_verification_review(verification_id: str, request: Request
     return {"success": True, "message": "Verification marked as under review"}
 
 @drivers_router.post("/admin/verifications/{verification_id}/approve")
-async def admin_approve_verification(verification_id: str, request: Request, notes: str = None):
+async def admin_approve_verification(
+    verification_id: str,
+    request: Request,
+    notes: str = None,
+    force: bool = False,
+):
+    """Approve a driver verification.
+
+    Set ``?force=true`` to override the document-completeness check when the
+    admin explicitly wants to approve a driver whose document archive is
+    incomplete or missing.  A warning note is appended to the audit log.
+    """
     admin_email = await require_admin_request(request)
     verification = await db.driver_verifications.find_one({"id": verification_id})
     if not verification:
@@ -1404,40 +1578,58 @@ async def admin_approve_verification(verification_id: str, request: Request, not
 
     archived = await db.driver_documents.find_one({"driver_id": user_id}) or {}
     missing = _missing_required_archived_docs(archived)
-    if missing:
+    if missing and not force:
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot approve. Missing required archived documents: {', '.join(missing)}"
+            detail=f"Cannot approve — missing required documents: {', '.join(missing)}. Use force=true to override.",
+            headers={"X-Missing-Docs": ",".join(missing)},
         )
+
+    now_utc = datetime.now(timezone.utc)
+    effective_notes = (notes or "") + (" [FORCE-APPROVED by admin — some documents may be missing]" if force and missing else "")
 
     snapshot = await _snapshot_approved_documents(
         driver_id=user_id,
         verification_id=verification_id,
         approved_by=admin_email or "admin",
-        notes=notes,
+        notes=effective_notes or None,
+        force=force,
     )
 
-    await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "approved", "reviewed_at": datetime.now(timezone.utc), "reviewed_by": admin_email or "admin", "notes": notes}})
+    await db.driver_verifications.update_one(
+        {"id": verification_id},
+        {"$set": {
+            "status": "approved",
+            "reviewed_at": now_utc,
+            "reviewed_by": admin_email or "admin",
+            "notes": effective_notes or None,
+            "force_approved": force and bool(missing),
+        }},
+    )
     await _append_verification_audit_event(
         driver_id=user_id,
         verification_id=verification_id,
         action="approved",
         actor_type="admin",
         actor_id=admin_email or "admin",
-        details={"notes": notes},
+        details={"notes": effective_notes, "force": force},
     )
     profile = await db.driver_profiles.find_one({"user_id": user_id}) or {}
     next_onboarding_step = "approved" if profile.get("profile_completed") else "profile"
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"verification_status": "approved", "documents_verified": True}}
+        {"$set": {
+            "verification_status": "approved",
+            "documents_verified": True,
+            "approved_at": now_utc.isoformat(),
+        }},
     )
     await db.driver_profiles.update_one(
         {"user_id": user_id},
         {"$set": {
             "documents_verified": True,
             "verification_status": "approved",
-            "documents_approved_at": datetime.now(timezone.utc).isoformat(),
+            "documents_approved_at": now_utc.isoformat(),
             "nin_verified": True,
             "license_uploaded": True,
             "vehicle_docs_uploaded": True,
@@ -1449,10 +1641,21 @@ async def admin_approve_verification(verification_id: str, request: Request, not
             "onboarding_step": next_onboarding_step,
             "approved_documents_snapshot_id": snapshot.get("id"),
         }},
-        upsert=True
+        upsert=True,
     )
     await _ensure_48h_trial_for_verified_driver(user_id)
-    return {"success": True, "message": "Driver verification approved"}
+    try:
+        await send_driver_verification_notification(user_id, "approved")
+    except Exception:
+        pass
+    return {
+        "success": True,
+        "message": "Driver verification approved",
+        "driver_id": user_id,
+        "verification_id": verification_id,
+        "force_approved": force and bool(missing),
+        "snapshot_id": snapshot.get("id"),
+    }
 
 @drivers_router.post("/admin/verifications/{verification_id}/reject")
 async def admin_reject_verification(verification_id: str, request: Request, reason: str = "Documents do not meet requirements"):
@@ -1461,15 +1664,25 @@ async def admin_reject_verification(verification_id: str, request: Request, reas
     if not verification:
         raise HTTPException(status_code=404, detail="Verification not found")
     await db.driver_verifications.update_one({"id": verification_id}, {"$set": {"status": "rejected", "reviewed_at": datetime.now(timezone.utc), "reviewed_by": admin_email or "admin", "rejection_reason": reason}})
-    await db.users.update_one({"id": verification.get("user_id")}, {"$set": {"verification_status": "rejected"}})
+    user_id_for_notif = verification.get("user_id")
+    await db.users.update_one({"id": user_id_for_notif}, {"$set": {"verification_status": "rejected"}})
+    await db.driver_profiles.update_one(
+        {"user_id": user_id_for_notif},
+        {"$set": {"verification_status": "rejected", "rejection_reason": reason}},
+        upsert=True,
+    )
     await _append_verification_audit_event(
-        driver_id=verification.get("user_id"),
+        driver_id=user_id_for_notif,
         verification_id=verification_id,
         action="rejected",
         actor_type="admin",
         actor_id=admin_email or "admin",
         details={"reason": reason},
     )
+    try:
+        await send_driver_verification_notification(user_id_for_notif, "rejected", reason)
+    except Exception:
+        pass
     return {"success": True, "message": "Driver verification rejected", "reason": reason}
 
 
@@ -1495,7 +1708,12 @@ async def admin_get_approved_driver_documents(driver_id: str, request: Request, 
 
 @drivers_router.get("/admin/verifications/{verification_id}/approved-documents")
 async def admin_get_verification_approved_documents(verification_id: str, request: Request, include_data: bool = False):
-    """Admin recheck endpoint for one approved verification snapshot."""
+    """Admin document review endpoint.
+
+    For approved drivers it returns the immutable approved snapshot. For pending
+    drivers it falls back to the current archived submission so admins can review
+    documents before approval.
+    """
     await require_admin_request(request)
     projection = {"_id": 0}
     if not include_data:
@@ -1506,9 +1724,94 @@ async def admin_get_verification_approved_documents(verification_id: str, reques
         projection,
         sort=[("approved_at", -1)],
     )
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="No approved document snapshot found for this verification")
-    return snapshot
+    if snapshot:
+        return snapshot
+
+    verification = await db.driver_verifications.find_one({"id": verification_id}, {"_id": 0})
+    if not verification:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    driver_id = verification.get("user_id") or verification.get("driver_id")
+    archived = await db.driver_documents.find_one({"driver_id": driver_id}, projection)
+    if not archived:
+        raise HTTPException(status_code=404, detail="No archived document submission found for this verification")
+    raw_docs = archived.get("documents") or {}
+    # Return metadata only — image data served on-demand via /document-image/{doc_key}
+    docs_meta = {
+        k: {
+            "filename": v.get("filename") if isinstance(v, dict) else None,
+            "content_type": v.get("content_type") if isinstance(v, dict) else "image/jpeg",
+            "size_bytes": v.get("size_bytes") if isinstance(v, dict) else None,
+            "sha256": v.get("sha256") if isinstance(v, dict) else None,
+            "uploaded_at": v.get("uploaded_at") if isinstance(v, dict) else None,
+            "expiry_date": v.get("expiry_date") if isinstance(v, dict) else None,
+        }
+        for k, v in raw_docs.items()
+    }
+    return {
+        "id": archived.get("id") or f"archive-{verification_id}",
+        "verification_id": verification_id,
+        "driver_id": driver_id,
+        "status": archived.get("status") or verification.get("status"),
+        "approved_by": None,
+        "approved_at": None,
+        "submitted_at": archived.get("submitted_at"),
+        "document_count": archived.get("document_count", len(docs_meta)),
+        "documents": docs_meta,
+        "source": "pending_archive",
+    }
+
+
+@drivers_router.get("/admin/verifications/{verification_id}/document-image/{doc_key}")
+async def admin_get_verification_document_image(
+    verification_id: str,
+    doc_key: str,
+    request: Request,
+    token: Optional[str] = None,
+):
+    """Return a single document image as binary.
+
+    Accepts the admin session token via either:
+      - x-admin-token request header (standard API calls)
+      - ?token=xxx query parameter   (for direct <img src="..."> browser use)
+    """
+    import base64 as _b64
+    from fastapi.responses import Response as _Resp
+
+    # Validate via query-param token if provided (same lookup as require_admin_request)
+    if token:
+        import hashlib as _hl
+        from datetime import datetime as _dt, timezone as _tz
+        token_hash = _hl.sha256(token.encode()).hexdigest()
+        now = _dt.now(_tz.utc)
+        session = await db.admin_sessions.find_one(
+            {"token_hash": token_hash, "revoked": {"$ne": True}, "expires_at": {"$gt": now}},
+            {"_id": 0, "email": 1},
+        )
+        if not session:
+            raise HTTPException(status_code=403, detail="Invalid or expired admin token")
+    else:
+        await require_admin_request(request)
+
+    verification = await db.driver_verifications.find_one({"id": verification_id}, {"_id": 0})
+    if not verification:
+        raise HTTPException(status_code=404, detail="Verification not found")
+    driver_id = verification.get("user_id") or verification.get("driver_id")
+    archived = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0})
+    if not archived:
+        raise HTTPException(status_code=404, detail="No document archive for this driver")
+    doc = (archived.get("documents") or {}).get(doc_key)
+    if not doc or not isinstance(doc, dict) or not doc.get("data"):
+        raise HTTPException(status_code=404, detail=f"Document '{doc_key}' not found or has no image data")
+    try:
+        raw_bytes = _b64.b64decode(doc["data"])
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decode document image")
+    content_type = doc.get("content_type") or "image/jpeg"
+    return _Resp(
+        content=raw_bytes,
+        media_type=content_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @drivers_router.post("/admin/drivers/{driver_id}/verification/revoke")

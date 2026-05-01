@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
   Image, ActivityIndicator, TextInput,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
@@ -40,6 +42,34 @@ const DOCUMENTS: DocItem[] = [
   { key: 'vehicle_ac', label: 'AC System Photo (LIVE camera only)', icon: 'snow', required: true, hasExpiry: false },
 ];
 
+const BIOMETRIC_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
+const CAMERA_RESUME_TTL_MS = 10 * 60 * 1000;
+const DRAFT_VERSION = 1;
+const CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
+
+const formatExpiryInput = (value: string) => {
+  const digits = value.replace(/\D/g, '').slice(0, 6);
+  if (digits.length <= 2) return digits;
+  if (digits.length === 4) return `${digits.slice(0, 2)}/20${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+};
+
+const getExpiryValidationMessage = (value?: string) => {
+  const formatted = formatExpiryInput(value || '');
+  if (formatted.length < 7) return 'missing';
+
+  const [monthText, yearText] = formatted.split('/');
+  const month = Number(monthText);
+  const year = Number(yearText);
+  if (!Number.isInteger(month) || month < 1 || month > 12 || !Number.isInteger(year) || year < 2000) {
+    return 'invalid';
+  }
+
+  const now = new Date();
+  const expiryEndOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+  return expiryEndOfMonth >= now ? null : 'expired';
+};
+
 export default function DriverDocumentsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -49,8 +79,160 @@ export default function DriverDocumentsScreen() {
   const [ninNumber, setNinNumber] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [biometricVerified, setBiometricVerified] = useState(false);
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [activePickerKey, setActivePickerKey] = useState<DocKey | null>(null);
 
   const CAMERA_ONLY_KEYS: DocKey[] = ['vehicle_interior', 'vehicle_ac', 'vehicle_front'];
+  const driverId = String(params.driver_id || '');
+  const draftCacheKey = useMemo(
+    () => `@driver_documents_draft_${driverId || String(params.phone || 'unknown')}`,
+    [driverId, params.phone],
+  );
+  const pendingPickerKey = useMemo(
+    () => `@driver_documents_pending_picker_${driverId || String(params.phone || 'unknown')}`,
+    [driverId, params.phone],
+  );
+  const biometricCacheKey = useMemo(
+    () => `@driver_documents_biometric_confirmed_${driverId || 'unknown'}`,
+    [driverId],
+  );
+
+  const persistableDocUri = async (key: DocKey, uri: string) => {
+    if (!uri || !FileSystem.documentDirectory) return uri;
+    if (uri.startsWith(FileSystem.documentDirectory)) return uri;
+
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!info.exists) return uri;
+
+      const dir = `${FileSystem.documentDirectory}driver-document-drafts/${driverId || 'unknown'}/`;
+      await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+      const extMatch = uri.split('?')[0].match(/\.(jpe?g|png|webp)$/i);
+      const ext = extMatch?.[1]?.toLowerCase() || 'jpg';
+      const target = `${dir}${key}-${Date.now()}.${ext}`;
+      await FileSystem.copyAsync({ from: uri, to: target });
+      return target;
+    } catch {
+      return uri;
+    }
+  };
+
+  const saveDocUri = async (key: DocKey, uri: string) => {
+    const stableUri = await persistableDocUri(key, uri);
+    setDocs(prev => ({ ...prev, [key]: stableUri }));
+  };
+
+  const markCameraResume = async (key: DocKey) => {
+    try {
+      await AsyncStorage.setItem(CAMERA_RESUME_KEY, JSON.stringify({
+        driverId,
+        docKey: key,
+        expiresAt: Date.now() + CAMERA_RESUME_TTL_MS,
+      }));
+    } catch {
+      // This only improves resume behavior after Android camera restarts.
+    }
+  };
+
+  const clearCameraResume = async () => {
+    try {
+      await AsyncStorage.removeItem(CAMERA_RESUME_KEY);
+    } catch {
+      // Nothing to clean up.
+    }
+  };
+
+  useEffect(() => {
+    let mounted = true;
+    const restoreDraft = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(draftCacheKey);
+        if (!raw) return;
+        const draft = JSON.parse(raw) as {
+          version?: number;
+          docs?: Record<string, string | null>;
+          expiry?: Record<string, string>;
+          ninNumber?: string;
+        };
+        if (!mounted || draft.version !== DRAFT_VERSION) return;
+        setDocs(draft.docs || {});
+        setExpiry(draft.expiry || {});
+        setNinNumber(draft.ninNumber || '');
+      } catch {
+        // Draft recovery is best-effort; the user can still upload again.
+      } finally {
+        if (mounted) setDraftLoaded(true);
+      }
+    };
+    void restoreDraft();
+    return () => {
+      mounted = false;
+    };
+  }, [draftCacheKey]);
+
+  useEffect(() => {
+    if (!draftLoaded) return;
+    const draft = JSON.stringify({
+      version: DRAFT_VERSION,
+      docs,
+      expiry,
+      ninNumber,
+      savedAt: Date.now(),
+    });
+    void AsyncStorage.setItem(draftCacheKey, draft);
+  }, [docs, draftCacheKey, draftLoaded, expiry, ninNumber]);
+
+  useEffect(() => {
+    let mounted = true;
+    const recoverPendingImagePickerResult = async () => {
+      const getPendingResultAsync = (ImagePicker as any).getPendingResultAsync;
+      if (typeof getPendingResultAsync !== 'function') return;
+      try {
+        const pendingKey = (await AsyncStorage.getItem(pendingPickerKey)) as DocKey | null;
+        if (!pendingKey) return;
+        const result = await getPendingResultAsync();
+        if (!mounted || !result || result.canceled || !result.assets?.[0]?.uri) return;
+        await saveDocUri(pendingKey, result.assets[0].uri);
+      } catch {
+        // Android may not always expose a pending result; normal picker flow still works.
+      } finally {
+        await AsyncStorage.removeItem(pendingPickerKey);
+      }
+    };
+    void recoverPendingImagePickerResult();
+    return () => {
+      mounted = false;
+    };
+  }, [pendingPickerKey]);
+
+  useEffect(() => {
+    let mounted = true;
+    const restoreBiometricConfirmation = async () => {
+      if (!driverId) return;
+      try {
+        const raw = await AsyncStorage.getItem(biometricCacheKey);
+        const confirmedAt = raw ? Number(raw) : 0;
+        if (mounted && confirmedAt && Date.now() - confirmedAt < BIOMETRIC_CONFIRMATION_TTL_MS) {
+          setBiometricVerified(true);
+        }
+      } catch {
+        // A failed cache read should not block onboarding.
+      }
+    };
+    void restoreBiometricConfirmation();
+    return () => {
+      mounted = false;
+    };
+  }, [biometricCacheKey, driverId]);
+
+  const rememberBiometricConfirmation = async () => {
+    setBiometricVerified(true);
+    try {
+      await AsyncStorage.setItem(biometricCacheKey, String(Date.now()));
+    } catch {
+      // The in-memory confirmation is enough for the current screen.
+    }
+  };
 
   const pickImage = (key: DocKey) => {
     if (CAMERA_ONLY_KEYS.includes(key)) {
@@ -73,31 +255,40 @@ export default function DriverDocumentsScreen() {
 
   const openCamera = async (key: DocKey) => {
     try {
+      setActivePickerKey(key);
       const { status } = await ImagePicker.requestCameraPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'Camera access is required to take document photos.');
         return;
       }
+      await markCameraResume(key);
+      await AsyncStorage.setItem(pendingPickerKey, key);
       const result = await ImagePicker.launchCameraAsync({
         allowsEditing: true,
         quality: 0.85,
         exif: false,
       });
       if (!result.canceled && result.assets?.[0]) {
-        setDocs(prev => ({ ...prev, [key]: result.assets[0].uri }));
+        await saveDocUri(key, result.assets[0].uri);
       }
+      await AsyncStorage.removeItem(pendingPickerKey);
+      await clearCameraResume();
     } catch {
       Alert.alert('Error', 'Could not open camera.');
+    } finally {
+      setActivePickerKey(null);
     }
   };
 
   const openGallery = async (key: DocKey) => {
     try {
+      setActivePickerKey(key);
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission needed', 'Gallery access is required to select documents.');
         return;
       }
+      await AsyncStorage.setItem(pendingPickerKey, key);
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
@@ -105,10 +296,13 @@ export default function DriverDocumentsScreen() {
         exif: false,
       });
       if (!result.canceled && result.assets?.[0]) {
-        setDocs(prev => ({ ...prev, [key]: result.assets[0].uri }));
+        await saveDocUri(key, result.assets[0].uri);
       }
+      await AsyncStorage.removeItem(pendingPickerKey);
     } catch {
       Alert.alert('Error', 'Could not open gallery.');
+    } finally {
+      setActivePickerKey(null);
     }
   };
 
@@ -121,11 +315,12 @@ export default function DriverDocumentsScreen() {
   });
   // Only required docs should block submission.
   const requiredExpiryDocs = DOCUMENTS.filter((d) => d.required && d.hasExpiry);
-  const missingRequiredExpiryDocs = requiredExpiryDocs.filter(
-    (d) => docs[d.key] && (!expiry[d.key] || expiry[d.key].length < 7)
-  );
+  const missingRequiredExpiryDocs = requiredExpiryDocs.filter((d) => {
+    if (!docs[d.key]) return false;
+    return Boolean(getExpiryValidationMessage(expiry[d.key]));
+  });
   const allRequiredExpiriesFilled = missingRequiredExpiryDocs.length === 0;
-  const canSubmit = allRequiredUploaded && biometricVerified;
+  const canSubmit = allRequiredUploaded && allRequiredExpiriesFilled && biometricVerified;
 
   const handleSubmit = async () => {
     const missing = requiredDocs.filter((d) => {
@@ -143,7 +338,10 @@ export default function DriverDocumentsScreen() {
 
     const missingExpiry = missingRequiredExpiryDocs;
     if (missingExpiry.length > 0) {
-      Alert.alert('Expiry Dates Required', `Please enter expiry date for: ${missingExpiry.map(d => d.label).join(', ')}`);
+      Alert.alert(
+        'Expiry Dates Required',
+        `Enter a valid future expiry date as MM/YYYY for: ${missingExpiry.map(d => d.label).join(', ')}`
+      );
       return;
     }
     if (!biometricVerified) {
@@ -187,6 +385,8 @@ export default function DriverDocumentsScreen() {
       }
 
       if (response.ok && data.verification_status === 'approved') {
+        await AsyncStorage.removeItem(draftCacheKey);
+        await AsyncStorage.removeItem(biometricCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
           'Documents approved',
@@ -208,12 +408,17 @@ export default function DriverDocumentsScreen() {
             },
           ],
         );
-      } else if (data.verification_status === 'pending') {
+      } else if (data.verification_status === 'pending' || data.verification_status === 'pending_review') {
+        await AsyncStorage.removeItem(draftCacheKey);
+        await AsyncStorage.removeItem(biometricCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
           'Submitted for review',
-          'Your package is with the NEXRYDE team. You will get an in-app update when review finishes. You can sign in later to check status.',
-          [{ text: 'Back to sign in', onPress: () => router.replace('/(auth)/login') }],
+          'Your package is with the NEXRYDE team. You can enter the driver dashboard now, but online driving and the 48-hour trial unlock only after approval.',
+          [{
+            text: 'Go to driver home',
+            onPress: () => router.replace('/(driver-tabs)/driver-home'),
+          }],
         );
       } else {
         const msg =
@@ -286,7 +491,9 @@ export default function DriverDocumentsScreen() {
                         : 'Tap to upload (camera or gallery)'}
                   </Text>
                 </View>
-                {docs[doc.key] ? (
+                {activePickerKey === doc.key ? (
+                  <ActivityIndicator color={COLORS.accentGreen} />
+                ) : docs[doc.key] ? (
                   <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />
                 ) : (
                   <Ionicons name="cloud-upload" size={22} color={COLORS.lightTextSecondary} />
@@ -301,11 +508,11 @@ export default function DriverDocumentsScreen() {
                     placeholder="Expiry date (MM/YYYY)"
                     placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
                     value={expiry[doc.key] || ''}
-                    onChangeText={(text) => setExpiry(prev => ({ ...prev, [doc.key]: text }))}
-                    keyboardType="numeric"
+                    onChangeText={(text) => setExpiry(prev => ({ ...prev, [doc.key]: formatExpiryInput(text) }))}
+                    keyboardType="number-pad"
                     maxLength={7}
                   />
-                  {expiry[doc.key] && expiry[doc.key].length >= 7 && (
+                  {expiry[doc.key] && !getExpiryValidationMessage(expiry[doc.key]) && (
                     <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
                   )}
                 </View>
@@ -332,16 +539,18 @@ export default function DriverDocumentsScreen() {
 
           <View style={st.note}>
             <Ionicons name="lock-closed" size={14} color={COLORS.accentGreen} />
-            <Text style={st.noteText}>Your documents are encrypted and only used for verification</Text>
+            <Text style={st.noteText}>Your documents are stored securely and only used for verification</Text>
           </View>
 
           <View style={st.biometricCard}>
             <BiometricScanner
               title="Confirm biometrics before submission"
-              subtitle="This reduces fraudulent onboarding and protects your driver account setup."
-              confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify biometric'}
+              subtitle={biometricVerified
+                ? 'Face or fingerprint confirmation is remembered for this secure submission session.'
+                : 'Use your device face unlock or fingerprint to protect your driver account setup.'}
+              confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify face or fingerprint'}
               onSuccess={() => {
-                setBiometricVerified(true);
+                void rememberBiometricConfirmation();
                 void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
               }}
               onFailure={(msg) => Alert.alert('Biometric check', msg)}
@@ -354,14 +563,14 @@ export default function DriverDocumentsScreen() {
             <View style={st.submitHint}>
               <Ionicons name="alert-circle-outline" size={16} color={COLORS.warning} />
               <Text style={st.submitHintText}>
-                Add expiry date (MM/YYYY) for: {missingRequiredExpiryDocs.map((d) => d.label).join(', ')}.
+                Add valid future expiry date (MM/YYYY) for: {missingRequiredExpiryDocs.map((d) => d.label).join(', ')}.
               </Text>
             </View>
           )}
           <TouchableOpacity
             style={[st.submitBtn, (!canSubmit || !allRequiredExpiriesFilled) && st.submitDisabled]}
             onPress={handleSubmit}
-            disabled={!canSubmit || verifying}
+            disabled={verifying}
           >
             <LinearGradient
               colors={canSubmit

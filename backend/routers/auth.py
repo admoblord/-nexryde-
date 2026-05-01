@@ -1336,11 +1336,51 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
     }
 
 @auth_router.post("/auth/register")
-async def register(request: RegisterRequest):
+async def register(request: RegisterRequest, http_request: Request):
     # Check for existing user by phone or email
+    normalized_phone = normalize_phone(request.phone) if request.phone else None
     if request.phone:
-        existing = await db.users.find_one({"phone": request.phone})
+        existing = await db.users.find_one({"phone": normalized_phone})
         if existing:
+            if request.role == "driver" and existing.get("role") == "driver":
+                authenticated_user_id = getattr(http_request.state, "user_id", None)
+                if authenticated_user_id != existing.get("id"):
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "code": "PHONE_EXISTS_VERIFY_REQUIRED",
+                            "message": "This phone already has a driver account. Verify the phone or sign in to continue registration.",
+                        },
+                    )
+
+                now_iso = datetime.now(timezone.utc).isoformat()
+                await db.users.update_one(
+                    {"id": existing["id"]},
+                    {
+                        "$set": {
+                            "name": request.name or existing.get("name"),
+                            "email": request.email.strip().lower() if request.email else existing.get("email"),
+                            "google_id": request.google_id or existing.get("google_id"),
+                            "profile_image": request.profile_image or existing.get("profile_image"),
+                            "terms_accepted": bool(request.terms_accepted) or existing.get("terms_accepted"),
+                            "terms_accepted_at": request.terms_accepted_at or existing.get("terms_accepted_at") or now_iso,
+                            "is_verified": True,
+                        }
+                    },
+                )
+                existing_profile = await db.driver_profiles.find_one({"user_id": existing["id"]})
+                if not existing_profile:
+                    await db.driver_profiles.insert_one(create_driver_profile_dict(existing["id"]))
+                fresh = await db.users.find_one({"id": existing["id"]})
+                fresh["_id"] = str(fresh["_id"])
+                token = create_jwt_token(fresh["id"], fresh.get("role", "driver"))
+                return {
+                    "message": "Driver registration resumed",
+                    "user": fresh,
+                    "token": token,
+                    "resumed": True,
+                    "is_new_user": False,
+                }
             raise HTTPException(status_code=400, detail="User with this phone already exists")
     
     if request.email:
@@ -1363,7 +1403,7 @@ async def register(request: RegisterRequest):
         raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
     
     user = create_user_dict(
-        phone=request.phone or "",
+        phone=normalized_phone or "",
         name=request.name, 
         email=(request.email.strip().lower() if request.email else None), 
         role=request.role, 

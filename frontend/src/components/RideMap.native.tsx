@@ -222,6 +222,12 @@ export default function RideMap({
         showsUserLocation
         showsMyLocationButton={false}
         loadingEnabled
+        showsTraffic={false}
+        showsBuildings={false}
+        showsPointsOfInterest={false}
+        showsCompass={false}
+        showsIndoors={false}
+        toolbarEnabled={false}
       >
         <Marker
           coordinate={{ latitude: pickupLL.lat, longitude: pickupLL.lng }}

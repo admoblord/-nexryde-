@@ -142,6 +142,17 @@ export default function LoginScreen() {
             });
             return;
           }
+          if (status?.step === 'documents_review' || status?.step === 'documents_rejected') {
+            if (status?.step === 'documents_rejected') {
+              router.replace({
+                pathname: '/(auth)/driver-verification-status',
+                params: driverDocumentsRouteParams(loggedUser),
+              });
+            } else {
+              router.replace('/(driver-tabs)/driver-home');
+            }
+            return;
+          }
           if (status?.step === 'profile') {
             router.replace({
               pathname: '/(auth)/driver-profile',
