@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -19,11 +19,13 @@ import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgr
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
+import { useBottomInset } from '@/src/hooks/useBottomPad';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const { bottom } = useBottomInset();
   
   const [fullName, setFullName] = useState(params.name as string || '');
   const [phone, setPhone] = useState(params.phone as string || '');
@@ -55,6 +57,44 @@ export default function DriverProfileScreen() {
   const [hasAC, setHasAC] = useState(false);
   
   const [submitting, setSubmitting] = useState(false);
+  const [loadingExisting, setLoadingExisting] = useState(false);
+
+  // Pre-populate any fields already saved (e.g. driver revisits the screen)
+  useEffect(() => {
+    const driverId = params.driver_id as string || '';
+    if (!driverId) return;
+    setLoadingExisting(true);
+    fetch(`${BACKEND_URL}/api/drivers/${driverId}/profile`, { headers: getAuthHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        if (data.full_name) setFullName(data.full_name);
+        if (data.phone) setPhone(data.phone);
+        if (data.email) setEmail(data.email);
+        if (data.address) setAddress(data.address);
+        if (data.city) setCity(data.city);
+        if (data.state) setState(data.state);
+        if (data.date_of_birth) setDateOfBirth(data.date_of_birth);
+        if (data.state_of_origin) setStateOfOrigin(data.state_of_origin);
+        if (data.emergency_contact) setEmergencyContact(data.emergency_contact);
+        if (data.guarantor?.name) setGuarantorName(data.guarantor.name);
+        if (data.guarantor?.phone) setGuarantorPhone(data.guarantor.phone);
+        if (data.guarantor?.address) setGuarantorAddress(data.guarantor.address);
+        if (data.guarantor?.relationship) setGuarantorRelationship(data.guarantor.relationship);
+        if (data.bank_name) setBankName(data.bank_name);
+        if (data.account_number) setAccountNumber(data.account_number);
+        if (data.account_name) setAccountName(data.account_name);
+        if (data.vehicle_type) setVehicleType(data.vehicle_type);
+        if (data.vehicle_make) setVehicleMake(data.vehicle_make);
+        if (data.vehicle_model) setVehicleModel(data.vehicle_model);
+        if (data.vehicle_year) setVehicleYear(data.vehicle_year);
+        if (data.vehicle_plate_number) setVehiclePlateNumber(data.vehicle_plate_number);
+        if (data.vehicle_color) setVehicleColor(data.vehicle_color);
+        if (data.has_ac) setHasAC(true);
+      })
+      .catch(() => { /* silent — form starts empty */ })
+      .finally(() => setLoadingExisting(false));
+  }, []);
 
   const VEHICLE_TYPES = [
     { id: 'economy', label: 'Economy', icon: 'car', desc: 'Standard vehicles' },
@@ -179,33 +219,34 @@ export default function DriverProfileScreen() {
       const data = await response.json();
 
       if (response.ok && data.success) {
+        const resolvedToken = data?.token || data?.user?.token || null;
         const loggedInUser = data.user
-          ? {
-              ...data.user,
-              onboarding_complete: true,
-            }
+          ? { ...data.user, profile_completed: true, onboarding_complete: data.awaiting_approval ? false : true }
           : null;
 
-        if (data.user) {
-          const resolvedToken = data?.token || data?.user?.token || null;
+        if (loggedInUser) {
           setUser(loggedInUser);
-          setToken(resolvedToken);
+          if (resolvedToken) setToken(resolvedToken);
           await saveUserSession({ ...loggedInUser, token: resolvedToken });
         }
         setIsAuthenticated(true);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Alert.alert(
-          'Profile Saved — Pending Review',
-          'Your documents have been submitted to the NEXRYDE team for verification. You will be notified once approved. Once approved, you get a free 20-trip activity trial to get started.',
-          [
-            {
-              text: 'Go to Dashboard',
-              onPress: () => router.replace('/(driver-tabs)/driver-home'),
-            },
-          ],
-        );
+
+        if (data.awaiting_approval) {
+          Alert.alert(
+            'Profile Saved',
+            'Your profile has been saved. Your documents are under review by the NEXRYDE team. You will be notified once approved — then your free 20-trip trial begins!',
+            [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+          );
+        } else {
+          Alert.alert(
+            'Profile Updated',
+            data.message || 'Profile saved successfully.',
+            [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+          );
+        }
       } else {
-        const msg = formatApiDetail(data?.detail) || 'Could not complete profile. Check required fields and try again.';
+        const msg = formatApiDetail(data?.detail) || 'Could not save profile. Check all required fields and try again.';
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
         Alert.alert('Profile not saved', msg);
       }
@@ -580,11 +621,13 @@ export default function DriverProfileScreen() {
         </ScrollView>
 
         {/* Submit Button */}
-        <View style={styles.bottomSection}>
+        <View style={[styles.bottomSection, { paddingBottom: Math.max(bottom + 12, 16) }]}>
           <TouchableOpacity 
             style={styles.submitButton}
             onPress={handleSubmit}
-            disabled={submitting}
+            disabled={submitting || loadingExisting}
+            accessibilityLabel="Save profile and continue"
+            accessibilityRole="button"
           >
             <LinearGradient
               colors={[COLORS.accentGreen, COLORS.accentBlue]}
@@ -596,12 +639,15 @@ export default function DriverProfileScreen() {
                 <ActivityIndicator color={COLORS.white} />
               ) : (
                 <>
-                  <Text style={styles.submitText}>Complete & Start Trial</Text>
+                  <Text style={styles.submitText}>Save Profile</Text>
                   <Ionicons name="arrow-forward" size={20} color={COLORS.white} />
                 </>
               )}
             </LinearGradient>
           </TouchableOpacity>
+          <Text style={styles.submitNote}>
+            Your documents will be reviewed by our team after saving.
+          </Text>
         </View>
       </SafeAreaView>
     </View>
@@ -725,6 +771,12 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
     color: COLORS.white,
+  },
+  submitNote: {
+    fontSize: FONT_SIZE.xs,
+    color: COLORS.lightTextMuted,
+    textAlign: 'center',
+    marginTop: SPACING.sm,
   },
   vehicleTypeGrid: {
     flexDirection: 'row',

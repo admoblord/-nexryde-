@@ -14,6 +14,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -299,6 +300,7 @@ export default function DriverTripsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const hasActiveTrip = Boolean(currentTrip?.id);
+  const tabPad = useTabBottomPad(16);
   const [lastSpeedSpikeAlertAt, setLastSpeedSpikeAlertAt] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 
@@ -1113,7 +1115,7 @@ export default function DriverTripsScreen() {
                 data={trips}
                 renderItem={renderTrip}
                 keyExtractor={(item) => item.id}
-                contentContainerStyle={styles.listContent}
+                contentContainerStyle={[styles.listContent, { paddingBottom: tabPad }]}
                 refreshControl={
                   <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
                 }

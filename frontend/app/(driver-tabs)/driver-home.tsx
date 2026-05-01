@@ -32,6 +32,7 @@ import {
   reportDriverSimSwapSignal,
   formatApiDetail,
 } from '@/src/services/api';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   driverTermsRouteParams,
   driverDocumentsRouteParams,
@@ -206,6 +207,7 @@ export default function ModernDriverHome() {
   const [toggleSyncing, setToggleSyncing] = useState(false);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
+  const tabPad = useTabBottomPad(16);
   const navigationInFlightRef = useRef(false);
   const guardedPush = useCallback(
     (route: string) => {
@@ -952,7 +954,7 @@ export default function ModernDriverHome() {
         </View>
       </LinearGradient>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
         {verificationLocked && (
           <Animated.View style={[styles.verificationRoadmap, { opacity: fadeAnim }]}>
             <View style={styles.roadmapHeader}>

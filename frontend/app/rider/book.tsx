@@ -4,7 +4,7 @@ import {
   ScrollView, Modal, TextInput, Platform, Animated, Easing, KeyboardAvoidingView,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -131,6 +131,7 @@ function BookInDriveStyle() {
   const { user, token, setCurrentTrip } = useAppStore();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
+  const insets = useSafeAreaInsets();
 
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
@@ -1406,7 +1407,7 @@ function BookInDriveStyle() {
       {/* BOTTOM SHEET */}
       <Animated.View style={[s.sheet, { transform: [{ translateY: sheetSlide }] }]}>
         <ScrollView
-          contentContainerStyle={s.sheetContent}
+          contentContainerStyle={[s.sheetContent, { paddingBottom: Math.max(insets.bottom + 16, 56) }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
@@ -2303,7 +2304,7 @@ const s = StyleSheet.create({
   preferredBanner: { position: 'absolute', bottom: 16, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
   preferredText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
-  sheetContent: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 56 },
+  sheetContent: { paddingHorizontal: 20, paddingTop: 8 },
   scheduledCard: {
     backgroundColor: '#10213A',
     borderRadius: 16,

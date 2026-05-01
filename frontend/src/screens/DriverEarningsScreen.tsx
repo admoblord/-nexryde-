@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   ActivityIndicator,
   RefreshControl,
@@ -22,6 +23,7 @@ export default function DriverEarningsScreen() {
   const { user } = useAppStore();
   const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(true);
+  const tabPad = useTabBottomPad(16);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState<any>(null);
   const [bankReady, setBankReady] = useState(false);
@@ -93,7 +95,7 @@ export default function DriverEarningsScreen() {
         <Text style={styles.headerSubtext}>Keep 100% of your earnings</Text>
       </View>
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: tabPad }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
         {loadError && !refreshing && (

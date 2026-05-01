@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   View,
   Text,
@@ -177,6 +178,7 @@ export default function RiderSafetyScreen() {
   const { user, currentTrip } = useAppStore();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
+  const tabPad = useTabBottomPad(16);
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
   const sosPulse = useRef(new Animated.Value(1)).current;
@@ -316,7 +318,7 @@ export default function RiderSafetyScreen() {
         <Text style={styles.heroSub}>Verification, emergencies, and trip protection — organized in one screen.</Text>
       </View>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabPad }]} showsVerticalScrollIndicator={false}>
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
@@ -508,7 +510,6 @@ const styles = StyleSheet.create({
   },
   scroll: {
     padding: SPACING.lg,
-    paddingBottom: SPACING.huge,
   },
   quickLabel: {
     fontSize: FONT_SIZE.xs,

@@ -859,6 +859,16 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         if verification_status in {"pending", "pending_review", "under_review", "ai_reviewing"} or (
             documents_submitted and not profile.get("documents_verified")
         ):
+            # If the driver hasn't completed Step 3 yet, send them there first.
+            # profile_completed is set by /drivers/complete-profile and is independent
+            # of admin approval — drivers fill this in while their docs are being reviewed.
+            if not profile.get("profile_completed"):
+                return {
+                    "step": "profile",
+                    "completed": False,
+                    "verification_status": verification_status or "pending_review",
+                    "documents_submitted": documents_submitted,
+                }
             verification = await db.driver_verifications.find_one(
                 {"user_id": driver_id},
                 {"_id": 0, "id": 1, "status": 1, "submitted_at": 1, "rejection_reason": 1, "notes": 1},
@@ -941,17 +951,19 @@ async def _ensure_48h_trial_for_verified_driver(driver_id: str):
 
 @drivers_router.post("/drivers/complete-profile")
 async def complete_driver_profile(request: dict, http_request: Request):
+    """Save driver personal/vehicle/guarantor profile at Step 3 of onboarding.
+
+    This endpoint is intentionally callable BEFORE admin approval so drivers can
+    complete Step 3 while their documents are still under review. The approval
+    gate has been removed — profile data is stored independently of doc status.
+    The trial is activated separately when admin approves the documents.
+    """
     try:
         driver_id = request.get("driver_id")
         if not driver_id:
             raise HTTPException(status_code=400, detail="driver_id is required")
         verify_owner_strict(http_request, driver_id)
         existing_profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
-        if not existing_profile.get("documents_verified") or existing_profile.get("verification_status") != "approved":
-            raise HTTPException(
-                status_code=403,
-                detail="Driver documents must be approved before profile completion and trial activation."
-            )
 
         required_fields = {
             "full_name": "Full name",
@@ -969,7 +981,7 @@ async def complete_driver_profile(request: dict, http_request: Request):
             "vehicle_plate_number": "Vehicle plate number",
             "vehicle_color": "Vehicle color",
         }
-        missing = [label for field, label in required_fields.items() if not request.get(field, "").strip()]
+        missing = [label for field, label in required_fields.items() if not str(request.get(field) or "").strip()]
         if missing:
             raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
 
@@ -985,33 +997,68 @@ async def complete_driver_profile(request: dict, http_request: Request):
             raise HTTPException(status_code=400, detail="Guarantor phone number is required")
         if not guarantor_data.get("address", "").strip():
             raise HTTPException(status_code=400, detail="Guarantor address is required")
+
+        # Determine the correct onboarding_step without touching admin-controlled fields
+        already_approved = (
+            existing_profile.get("documents_verified") and
+            existing_profile.get("verification_status") == "approved"
+        )
+        onboarding_step = "approved" if already_approved else "profile_completed"
+
         profile_update = {k: v for k, v in {
-            "full_name": request.get("full_name"), "phone": request.get("phone"), "email": request.get("email"),
-            "address": request.get("address"), "city": request.get("city"), "state": request.get("state"),
+            "full_name": request.get("full_name"),
+            "phone": request.get("phone"),
+            "email": request.get("email"),
+            "address": request.get("address"),
+            "city": request.get("city"),
+            "state": request.get("state"),
             "state_of_origin": request.get("state_of_origin"),
-            "date_of_birth": request.get("date_of_birth"), "emergency_contact": request.get("emergency_contact"),
+            "date_of_birth": request.get("date_of_birth"),
+            "emergency_contact": request.get("emergency_contact"),
             "guarantor": guarantor_data if isinstance(guarantor_data, dict) else None,
-            "bank_name": request.get("bank_name"), "account_number": request.get("account_number"), "account_name": request.get("account_name"),
-            "vehicle_type": request.get("vehicle_type"), "vehicle_make": request.get("vehicle_make"), "vehicle_model": request.get("vehicle_model"),
-            "vehicle_year": request.get("vehicle_year"), "vehicle_plate_number": request.get("vehicle_plate_number"), "vehicle_color": request.get("vehicle_color"),
+            "bank_name": request.get("bank_name"),
+            "account_number": request.get("account_number"),
+            "account_name": request.get("account_name"),
+            "vehicle_type": request.get("vehicle_type"),
+            "vehicle_make": request.get("vehicle_make"),
+            "vehicle_model": request.get("vehicle_model"),
+            "vehicle_year": request.get("vehicle_year"),
+            "vehicle_plate_number": request.get("vehicle_plate_number"),
+            "vehicle_color": request.get("vehicle_color"),
             "has_ac": bool(request.get("has_ac", False)),
-            "vehicle_registered": True, "profile_completed": True, "onboarding_step": "approved", "verification_status": "approved",
+            "vehicle_registered": True,
+            "profile_completed": True,
+            "onboarding_step": onboarding_step,
             "profile_completed_at": datetime.now(timezone.utc).isoformat(),
+            # NOTE: do NOT set documents_verified or verification_status here —
+            # those are controlled exclusively by the admin approval flow.
         }.items() if v is not None}
+
         await db.driver_profiles.update_one({"user_id": driver_id}, {"$set": profile_update}, upsert=True)
-        await db.users.update_one({"id": driver_id}, {"$set": {"is_verified": True, "profile_completed": True, "onboarding_complete": True}})
-        trial_sub = await _ensure_48h_trial_for_verified_driver(driver_id)
+        await db.users.update_one({"id": driver_id}, {"$set": {"profile_completed": True}})
+
+        # Activate trial only if the driver is already approved (re-submission after approval)
+        trial_sub = None
+        if already_approved:
+            trial_sub = await _ensure_48h_trial_for_verified_driver(driver_id)
+
         user = await db.users.find_one({"id": driver_id})
         if user:
             user["_id"] = str(user["_id"])
-            user["onboarding_complete"] = True
-        from routers.payments import SUBSCRIPTION_CONFIG as _SC
+            user["profile_completed"] = True
+
+        if already_approved:
+            from routers.payments import SUBSCRIPTION_CONFIG as _SC
+            message = f"Profile updated! Activity trial active — complete {_SC['trial_trips_target']} trips before subscribing."
+        else:
+            message = "Profile saved! Your documents are under review. We will notify you once approved."
+
         return {
             "success": True,
             "user": user,
             "trial_activated": bool(trial_sub),
-            "trial_trips_target": _SC["trial_trips_target"],
-            "message": f"Profile completed! Free activity trial activated — complete {_SC['trial_trips_target']} trips before subscribing.",
+            "awaiting_approval": not already_approved,
+            "message": message,
         }
     except HTTPException:
         raise

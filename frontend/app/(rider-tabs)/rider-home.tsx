@@ -12,6 +12,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -48,6 +49,7 @@ export default function ModernRiderHome() {
   const [votingDriverId, setVotingDriverId] = useState<string | null>(null);
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
   const [recentTripsLoading, setRecentTripsLoading] = useState(false);
+  const tabPad = useTabBottomPad(16);
 
   const QUICK_FEATURES = [
     {
@@ -298,7 +300,7 @@ export default function ModernRiderHome() {
         </TouchableOpacity>
       </Modal>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
         {/* PRIORITY ACTIONS — full-bleed green hero, then two equal cards */}
         <Animated.View
           style={[

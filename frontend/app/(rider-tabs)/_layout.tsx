@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, Platform, Text } from 'react-native';
+import { View, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONT_SIZE, SHADOWS } from '@/src/constants/theme';
 import { BRAND } from '@/src/constants/designSystem';
 import { useLanguage } from '@/src/i18n/LanguageContext';
@@ -9,6 +10,7 @@ import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
 
 function NotifIcon({ color, focused, count }: { color: string; focused: boolean; count: number }) {
   return (
@@ -27,6 +29,7 @@ export default function RiderTabLayout() {
   const { t } = useLanguage();
   const { user, token } = useAppStore();
   const [unreadCount, setUnreadCount] = useState(0);
+  const insets = useSafeAreaInsets();
   useActiveTripCoordinator();
   usePanicShakeGuard();
 
@@ -60,9 +63,9 @@ export default function RiderTabLayout() {
           backgroundColor: '#FFFFFF',
           borderTopWidth: 1,
           borderTopColor: '#E2E8F0',
-          height: Platform.OS === 'ios' ? 88 : 68,
-          paddingBottom: Platform.OS === 'ios' ? 28 : 12,
-          paddingTop: 10,
+          height: TAB_BAR_HEIGHT + insets.bottom,
+          paddingBottom: insets.bottom + 4,
+          paddingTop: 8,
           ...SHADOWS.lg,
         },
         tabBarLabelStyle: {

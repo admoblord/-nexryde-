@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
@@ -24,6 +25,7 @@ export default function RiderTripsScreen() {
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const tabPad = useTabBottomPad(16);
   const [trips, setTrips] = useState<any[]>([]);
 
   const loadTrips = useCallback(async () => {
@@ -146,7 +148,7 @@ export default function RiderTripsScreen() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, { paddingBottom: tabPad }]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadTrips(); }} />}
         >
           {visibleTrips.length === 0 ? (
@@ -193,7 +195,7 @@ const styles = StyleSheet.create({
   tabActive: { borderBottomColor: COLORS.primary },
   tabText: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.gray500 },
   tabTextActive: { color: COLORS.primary, fontWeight: '800' },
-  content: { padding: SPACING.lg },
+  content: { padding: SPACING.lg, paddingBottom: SPACING.lg }, // paddingBottom overridden inline with tabPad
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { marginTop: SPACING.sm, color: COLORS.gray500, fontWeight: '600' },
   emptyState: { alignItems: 'center', paddingVertical: SPACING.xxl },

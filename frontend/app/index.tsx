@@ -179,19 +179,14 @@ export default function SplashScreen() {
               }
               router.replace('/(rider-tabs)/rider-home');
             } catch {
+              // Network/server error on startup — fall back to role-based home rather than
+              // forcing re-onboarding (the driver may already be fully onboarded; sending
+              // them to documents/profile on a transient error creates a bad loop).
               if (userData.role === 'driver') {
-                router.replace({
-                  pathname: '/(auth)/driver-documents',
-                  params: driverDocumentsRouteParams({
-                    id: userData.id,
-                    phone: userData.phone,
-                    name: userData.name,
-                    email: userData.email,
-                  }),
-                });
+                router.replace('/(driver-tabs)/driver-home');
                 return;
               }
-              router.replace('/(auth)/login');
+              router.replace('/(rider-tabs)/rider-home');
             }
           }, 700); // Small delay for smooth transition
 

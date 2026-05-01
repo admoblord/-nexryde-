@@ -9,12 +9,14 @@ import {
   Linking,
   Animated,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
+import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
 
 interface ActiveTrip {
   id: string;
@@ -33,6 +35,7 @@ export default function ActiveTripBar() {
   const { user, currentTrip, setCurrentTrip } = useAppStore();
   const [calling, setCalling] = useState(false);
   const slideAnim = useRef(new Animated.Value(100)).current;
+  const insets = useSafeAreaInsets();
 
   const activeTrip = (currentTrip || null) as ActiveTrip | null;
 
@@ -140,8 +143,10 @@ export default function ActiveTripBar() {
               ? 'Payment pending'
               : 'Active trip';
 
+  const barBottom = TAB_BAR_HEIGHT + insets.bottom + 8;
+
   return (
-    <Animated.View style={[styles.container, { transform: [{ translateY: slideAnim }] }]}>
+    <Animated.View style={[styles.container, { bottom: barBottom, transform: [{ translateY: slideAnim }] }]}>
       <TouchableOpacity style={styles.bar} activeOpacity={0.9} onPress={openActiveTrip}>
         <View style={styles.info}>
           <View style={styles.statusDot} />
@@ -182,7 +187,6 @@ export default function ActiveTripBar() {
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    bottom: 90,
     left: 16,
     right: 16,
     zIndex: 999,

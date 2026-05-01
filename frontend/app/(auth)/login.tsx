@@ -164,17 +164,11 @@ export default function LoginScreen() {
         router.replace('/(driver-tabs)/driver-home');
         return;
       } catch {
-        router.replace({
-          pathname: '/(auth)/driver-documents',
-          params: driverDocumentsRouteParams(loggedUser),
-        });
+        // Network error checking onboarding status — go to home rather than forcing
+        // re-onboarding on a transient error. The home screen will re-check status.
+        router.replace('/(driver-tabs)/driver-home');
         return;
       }
-      router.replace({
-        pathname: '/(auth)/driver-documents',
-        params: driverDocumentsRouteParams(loggedUser),
-      });
-      return;
     }
 
     try {
