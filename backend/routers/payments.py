@@ -1456,11 +1456,19 @@ def _parse_squad_dynamic_va_response(
 
 
 def _squad_callback_url() -> Optional[str]:
+    """Wallet payment callback URL."""
     if SQUAD_CALLBACK_URL:
         return SQUAD_CALLBACK_URL
     if not NEXRYDE_PUBLIC_URL:
         return None
     return f"{NEXRYDE_PUBLIC_URL.rstrip('/')}/api/wallet/callback"
+
+
+def _squad_subscription_callback_url() -> Optional[str]:
+    """Subscription-specific callback URL — redirects driver back to the subscription screen."""
+    if not NEXRYDE_PUBLIC_URL:
+        return _squad_callback_url()
+    return f"{NEXRYDE_PUBLIC_URL.rstrip('/')}/api/payment/subscription/callback"
 
 
 def _squad_inline_checkout_transaction_ref(prefix: str = "NXWR") -> str:
@@ -1476,10 +1484,12 @@ def _squad_initiate_inline_body(
     transaction_ref: str,
     customer_name: str,
     metadata: dict,
+    callback_url_override: Optional[str] = None,
 ) -> dict:
     """
     Squad POST /transaction/initiate (inline checkout).
     Use snake_case `transaction_ref` only. Payload is allow-listed before HTTP (see sanitize_squad_transaction_initiate_payload).
+    Pass `callback_url_override` to use a context-specific callback (e.g. subscription vs wallet).
     """
     if int(amount_kobo) <= 0:
         raise HTTPException(status_code=400, detail="Invalid payment amount")
@@ -1502,7 +1512,7 @@ def _squad_initiate_inline_body(
     name = (customer_name or "").strip()
     if name:
         body["customer_name"] = name[:200]
-    cb = _squad_callback_url()
+    cb = callback_url_override or _squad_callback_url()
     if cb:
         body["callback_url"] = cb
     body["payment_channels"] = ["card", "bank", "ussd", "transfer"]
@@ -1634,6 +1644,11 @@ async def initiate_subscription_checkout(
             "tier": tier,
             "purpose": "driver_subscription",
         },
+        callback_url_override=_squad_subscription_callback_url(),
+    )
+    logger.info(
+        "squad_subscription_init: driver=%s tier=%s ref=%s callback_url=%s",
+        driver_id, tier, transaction_ref, init_body.get("callback_url", "(none)"),
     )
     transaction_ref = str(init_body["transaction_ref"])
 
@@ -1740,6 +1755,7 @@ async def verify_pending_subscription_checkout(
     await general_limiter.check_rate_limit(http_request, f"sub_verify:{driver_id}")
     await _assert_driver_account(driver_id)
     await _assert_driver_can_activate_subscription(driver_id)
+    logger.info("sub_verify_pending: driver=%s ref=%s", driver_id, body.transaction_ref or "(none)")
 
     ref_filter: dict = {}
     if body.transaction_ref and str(body.transaction_ref).strip():
@@ -1811,7 +1827,10 @@ async def verify_pending_subscription_checkout(
         }
 
     ref = str(intent.get("transaction_ref") or "")
+    logger.info("sub_verify_squad_call: driver=%s ref=%s", driver_id, ref)
     verify_result = await _verify_squad_transaction(ref)
+    logger.info("sub_verify_squad_result: driver=%s ref=%s verified=%s reason=%s",
+                driver_id, ref, verify_result.get("verified"), verify_result.get("reason"))
     if not verify_result.get("verified"):
         reason_txt = str(verify_result.get("reason") or "").lower()
         reason_code = (
@@ -3638,6 +3657,38 @@ async def wallet_callback_v2(reference: Optional[str] = None):
   </body>
 </html>
 """
+    return HTMLResponse(content=html)
+
+
+@payments_router.get("/payment/subscription/callback")
+async def subscription_payment_callback(reference: Optional[str] = None):
+    """
+    Squad redirects here after driver subscription checkout completes (success, cancel, or failure).
+    We redirect back to the app via deep link so the in-app browser (WebBrowser.openBrowserAsync)
+    closes and the subscription screen auto-verifies the payment.
+    """
+    ref = (reference or "").strip()
+    deep_link = f"nexryde://subscription/return?reference={ref}" if ref else "nexryde://subscription/return"
+    html = f"""
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" /></head>
+  <body style="background:#0A0A0A;color:#fff;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:24px;box-sizing:border-box;">
+    <div>
+      <div style="font-size:48px;margin-bottom:16px;">✅</div>
+      <h2 style="margin:0 0 8px;font-size:22px;">Returning to Nexryde</h2>
+      <p style="color:#aaa;margin:0 0 24px;">Your payment is being verified. Please wait…</p>
+      <a href="{deep_link}" style="display:inline-block;background:#00D084;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">
+        Tap here if app did not open
+      </a>
+    </div>
+    <script>
+      setTimeout(function() {{ window.location.href = "{deep_link}"; }}, 800);
+    </script>
+  </body>
+</html>
+"""
+    logger.info("subscription_payment_callback: ref=%s deep_link=%s", ref or "(none)", deep_link)
     return HTMLResponse(content=html)
 
 

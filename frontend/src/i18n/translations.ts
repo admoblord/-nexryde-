@@ -166,7 +166,7 @@ export const en = {
     statusGoOnlineHint: 'Turn the switch on to start receiving offers',
     coreActions: 'Core Actions',
     toolsSection: 'Tools',
-    toolsHubHint: 'Community, heatmap, fleet & traffic: open the menu (☰) at the top.',
+    toolsHubHint: 'Community, heatmap, challenges & more: open the menu (☰) at the top.',
   },
   
   safety: {
@@ -345,7 +345,7 @@ export const yo = {
     statusGoOnlineHint: 'Tàn àmì láti bẹ̀rẹ̀ sísí gbigba àṣẹ',
     coreActions: 'Àwọn Ìgbésẹ̀ Pàtàkì',
     toolsSection: 'Àwọn Ohun èlò',
-    toolsHubHint: 'Àgbáyé, máàpù ooru, ọkọ̀ àti ọ̀nà: ṣí ààyò (☰) ní òkè.',
+    toolsHubHint: 'Àgbáyé, máàpù ooru, ìdíje àti àwọn nǹkan mìíràn: ṣí ààyò (☰) ní òkè.',
   },
   
   safety: {
@@ -524,7 +524,7 @@ export const ig = {
     statusGoOnlineHint: 'Gbaa akụrụngwa iji malite ịnabata ọpọrọ',
     coreActions: 'Omume ndị isi',
     toolsSection: 'Ngwaọrụ',
-    toolsHubHint: 'Obodo, maapụ ọkụ, ụgbọ ala & okporo ụzọ: mepee menu (☰) n\'elu.',
+    toolsHubHint: 'Obodo, maapụ ọkụ, asọmpi & ihe ndị ọzọ: mepee menu (☰) n\'elu.',
   },
   
   safety: {
@@ -703,7 +703,7 @@ export const ha = {
     statusGoOnlineHint: 'Kunna maɓallin don fara samun buƙatun',
     coreActions: 'Manyan ayyuka',
     toolsSection: 'Kayan aiki',
-    toolsHubHint: 'Al\'umma, taswirar zafi, motoci & hanya: buɗe menu (☰) a sama.',
+    toolsHubHint: 'Al\'umma, taswirar zafi, ƙalubale & ƙari: buɗe menu (☰) a sama.',
   },
   
   safety: {
@@ -882,7 +882,7 @@ export const pcm = {
     statusGoOnlineHint: 'On the switch to start get offers',
     coreActions: 'Main things',
     toolsSection: 'Tools',
-    toolsHubHint: 'Community, heat map, fleet & traffic: open menu (☰) for up.',
+    toolsHubHint: 'Community, heat map, challenges & more: open menu (☰) for up.',
   },
   
   safety: {

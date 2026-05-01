@@ -56,14 +56,18 @@ const DRIVER_SECTIONS: HubSection[] = [
     ],
   },
   {
+    id: 'account',
+    title: 'Account & payments',
+    items: [
+      { label: 'Subscription', route: '/driver/subscription', icon: 'card-outline', hint: 'Plan & billing' },
+      { label: 'Support', route: '/support', icon: 'help-circle-outline', hint: 'Help & incidents' },
+    ],
+  },
+  {
     id: 'advanced',
     title: 'Advanced',
     items: [
       { label: 'Demand heatmap', route: '/driver/heatmap', icon: 'flame', hint: 'High-demand areas' },
-      { label: 'Fleet tracker', route: '/driver/fleet-tracker', icon: 'map', hint: 'Fleet view' },
-      { label: 'Fuel & vehicle', route: '/driver/fuel-tracker', icon: 'speedometer', hint: 'Maintenance' },
-      { label: 'Data insights', route: '/driver/data-insights', icon: 'analytics', hint: 'Performance' },
-      { label: 'AI suggestions', route: '/driver/ai-suggestions', icon: 'bulb', hint: 'Tips' },
       { label: 'Challenges & badges', route: '/driver/challenges', icon: 'ribbon', hint: 'Gamification' },
     ],
   },
@@ -137,7 +141,7 @@ export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerPro
             <View>
               <Text style={styles.sheetTitle}>NEXRYDE hub</Text>
               <Text style={styles.sheetSubtitle}>
-                {role === 'driver' ? 'Community, tools & advanced' : 'Wallet, convenience & records'}
+                {role === 'driver' ? 'Community, tools & more' : 'Wallet, convenience & records'}
               </Text>
             </View>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close menu">

@@ -11,10 +11,10 @@ import {
   Animated,
   Dimensions,
   Platform,
-  Linking,
   AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +28,11 @@ import {
   messageFromAxiosError,
 } from '@/src/services/api';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import axios from 'axios';
+
+/** AsyncStorage key for persisting the pending checkout reference across app restarts. */
+const PENDING_SUB_REF_KEY = '@nexryde_pending_sub_checkout_ref';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -126,6 +130,11 @@ export default function SubscriptionScreen() {
 
   const initializeData = async () => {
     try {
+      // Restore any persisted pending ref (survives app restarts)
+      const stored = await AsyncStorage.getItem(PENDING_SUB_REF_KEY);
+      if (stored) {
+        pendingSubCheckoutRef.current = stored;
+      }
       const eligible = await ensureDriverEligibleForActivation();
       if (!eligible) return;
       await Promise.all([fetchPricing(), fetchSubscriptionStatus()]);
@@ -266,6 +275,12 @@ export default function SubscriptionScreen() {
         stopStatusPolling();
       }
 
+      // Clear persisted ref once subscription is active
+      if (['active', 'trial', 'grace_period'].includes(normalizedStatus)) {
+        pendingSubCheckoutRef.current = null;
+        AsyncStorage.removeItem(PENDING_SUB_REF_KEY).catch(() => {});
+      }
+
       // If status flips from pending to an active state, move driver straight to dashboard.
       const previous = lastKnownStatusRef.current;
       if (
@@ -303,33 +318,35 @@ export default function SubscriptionScreen() {
     try {
       const response = await initiateSubscriptionCheckout(tier);
       const data = response.data || {};
+
       if (data.transaction_ref) {
-        pendingSubCheckoutRef.current = String(data.transaction_ref);
+        const ref = String(data.transaction_ref);
+        pendingSubCheckoutRef.current = ref;
+        // Persist ref so verification can resume after an app restart
+        await AsyncStorage.setItem(PENDING_SUB_REF_KEY, ref);
       }
+
       ensureStatusPolling();
+
       if (data.checkout_url && typeof data.checkout_url === 'string') {
-        const can = await Linking.canOpenURL(data.checkout_url);
-        if (can) {
-          await Linking.openURL(data.checkout_url);
-          Alert.alert(
-            'Complete payment',
-            'Finish payment in the browser. When you return, we activate your plan automatically (or tap “Verify payment” below if needed).',
-          );
-        } else {
-          Alert.alert('Open checkout', `Copy this reference in Squad: ${data.transaction_ref || ''}`);
-        }
+        // Open in-app browser (Custom Tabs on Android, SFSafariViewController on iOS).
+        // Awaits until the browser is dismissed — no fire-and-forget external browser.
+        await openSquadCheckoutUrl(data.checkout_url);
+
+        // Browser closed — immediately verify with Squad backend (silent: no extra alert on success)
+        await confirmPendingCheckoutRef.current({ silent: true });
       } else {
         Alert.alert(
           'Checkout started',
-          `Reference: ${data.transaction_ref || '—'}\nAmount (kobo): ${data.amount_kobo ?? '—'}\nUse Squad SDK with your public key if no link was returned.`,
+          `Reference: ${data.transaction_ref || '—'}\nAmount: ₦${data.amount_ngn?.toLocaleString() ?? '—'}\n\nTap "Verify Payment" below once you complete payment.`,
         );
       }
+
       await fetchSubscriptionStatus();
     } catch (error: unknown) {
-      const msg =
-        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-        'Could not start card / bank checkout. Try again or use transfer account details.';
-      Alert.alert('Checkout', String(msg));
+      const detail =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      Alert.alert('Payment Error', detail ? String(detail) : 'Payment not completed. Please try again.');
     }
     setSubmitting(false);
   };
@@ -344,18 +361,22 @@ export default function SubscriptionScreen() {
       const data = response.data as Record<string, unknown>;
       if (data.verified && (data.activated || data.duplicate || data.subscription_active)) {
         pendingSubCheckoutRef.current = null;
+        AsyncStorage.removeItem(PENDING_SUB_REF_KEY).catch(() => {});
         if (!silent) {
           Alert.alert('Success', 'Subscription active. Payment confirmed with Squad.');
         }
         await fetchSubscriptionStatus();
       } else {
         const vr = data.verify_result as Record<string, unknown> | undefined;
+        const squadStatus = (vr?.transaction_status as string | undefined) || '';
         const reason =
           data.detail === 'amount_mismatch'
             ? 'Amount mismatch. If Squad shows success, try again in a minute or contact support.'
-            : typeof vr?.reason === 'string'
-              ? vr.reason
-              : 'Payment not confirmed yet. Try again shortly.';
+            : squadStatus === 'pending' || squadStatus === 'processing'
+              ? 'Payment pending. Please complete authentication (OTP / bank approval) and try again.'
+              : typeof vr?.reason === 'string'
+                ? vr.reason
+                : 'Payment not confirmed yet. Try again shortly.';
         if (!silent) Alert.alert('Not yet confirmed', reason);
       }
     } catch (e: unknown) {
@@ -364,8 +385,8 @@ export default function SubscriptionScreen() {
           ? formatApiDetail(e.response?.data?.detail) || messageFromAxiosError(e, '')
           : '';
         Alert.alert(
-          'Verify',
-          msg || 'No pending checkout or Squad has not confirmed payment yet.',
+          'Verify Payment',
+          msg || 'Payment not completed. Please try again.',
         );
       }
     } finally {
