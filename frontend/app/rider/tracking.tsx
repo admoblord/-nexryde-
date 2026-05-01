@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -1119,6 +1120,21 @@ export default function TrackingScreen() {
                   <Text style={styles.actionBtnText}>Chat Driver</Text>
                 </TouchableOpacity>
 
+                {driverInfo?.phone && (
+                  <TouchableOpacity
+                    style={[styles.actionBtn, { backgroundColor: '#dcfce7' }]}
+                    onPress={() => {
+                      const phone = driverInfo.phone.replace(/\s+/g, '');
+                      Linking.openURL(`tel:${phone}`).catch(() =>
+                        Alert.alert('Cannot call', 'Unable to open the dialler on this device.')
+                      );
+                    }}
+                  >
+                    <Ionicons name="call" size={20} color="#16a34a" />
+                    <Text style={[styles.actionBtnText, { color: '#16a34a' }]}>Call Driver</Text>
+                  </TouchableOpacity>
+                )}
+
                 {(tripStatus === 'accepted' || tripStatus === 'arrived') && (
                   <TouchableOpacity
                     style={[styles.actionBtn, riderFaceVerifiedAtPickup ? styles.actionBtnSuccess : null]}
@@ -1223,13 +1239,13 @@ export default function TrackingScreen() {
                     </TouchableOpacity>
                   ) : null}
                   <TouchableOpacity
-                    style={styles.actionBtn}
+                    style={[styles.actionBtn, { backgroundColor: '#fef2f2' }]}
                     onPress={() => void handleSilentDangerMode()}
                     disabled={silentProtecting}
                   >
-                    <Ionicons name="refresh-circle-outline" size={20} color={COLORS.warning} />
-                    <Text style={styles.actionBtnText}>
-                      {silentProtecting ? 'Updating...' : 'Route Check'}
+                    <Ionicons name="alert-circle" size={20} color="#dc2626" />
+                    <Text style={[styles.actionBtnText, { color: '#dc2626', fontWeight: '700' }]}>
+                      {silentProtecting ? 'Alerting...' : 'Silent SOS'}
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity

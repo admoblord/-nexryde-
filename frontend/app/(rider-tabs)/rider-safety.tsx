@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,10 @@ import {
   Vibration,
   Animated,
   Easing,
+  Linking,
+  Modal,
+  TextInput,
+  FlatList,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -21,6 +25,23 @@ import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
+import policeContacts from '@/src/data/policeContacts';
+
+type PoliceContact = { state: string; aliases: string[]; phone: string };
+const POLICE: PoliceContact[] = policeContacts as PoliceContact[];
+
+function normaliseQ(v: string) {
+  return v.toLowerCase().replace(/\bstate\b/g, '').replace(/\s+/g, ' ').trim();
+}
+function matchPoliceState(query: string): PoliceContact | null {
+  const q = normaliseQ(query);
+  if (!q) return null;
+  return (
+    POLICE.find((c) => c.aliases.some((a) => a.includes(q) || q.includes(a))) ||
+    POLICE.find((c) => normaliseQ(c.state).includes(q)) ||
+    null
+  );
+}
 
 type Row = {
   label: string;
@@ -159,6 +180,46 @@ export default function RiderSafetyScreen() {
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
   const sosPulse = useRef(new Animated.Value(1)).current;
+
+  // Nigerian state police picker
+  const [showPolicePicker, setShowPolicePicker] = useState(false);
+  const [policeQuery, setPoliceQuery] = useState('');
+  const [detectedPolice, setDetectedPolice] = useState<PoliceContact | null>(null);
+  const [detectingPolice, setDetectingPolice] = useState(false);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setDetectingPolice(true);
+        const perm = await Location.requestForegroundPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const geo = await Location.reverseGeocodeAsync({ latitude: pos.coords.latitude, longitude: pos.coords.longitude });
+        const raw = String(geo?.[0]?.region || geo?.[0]?.subregion || '').trim();
+        if (raw) {
+          const found = matchPoliceState(raw);
+          if (found) { setDetectedPolice(found); setPoliceQuery(found.state); }
+        }
+      } catch { /* silent */ } finally { setDetectingPolice(false); }
+    })();
+  }, []);
+
+  const filteredPolice = useMemo(() => {
+    if (!policeQuery.trim()) return POLICE;
+    const q = normaliseQ(policeQuery);
+    return POLICE.filter((c) => normaliseQ(c.state).includes(q) || c.aliases.some((a) => a.includes(q)));
+  }, [policeQuery]);
+
+  const callPolice = useCallback((contact: PoliceContact) => {
+    Alert.alert(
+      `${contact.state} Police`,
+      `Call ${contact.state} State Police?\n${contact.phone}`,
+      [
+        { text: `Call ${contact.phone}`, onPress: () => Linking.openURL(`tel:${contact.phone}`) },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  }, []);
 
   const effectiveTripId = useMemo(() => currentTrip?.id || activeTripId || null, [currentTrip?.id, activeTripId]);
 
@@ -306,6 +367,40 @@ export default function RiderSafetyScreen() {
         </Animated.View>
         {loadingTrip ? <ActivityIndicator size="small" color={COLORS.accentGreen} style={{ marginBottom: SPACING.md }} /> : null}
 
+        {/* Nigerian Police Finder */}
+        <View style={styles.policeCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+            <Ionicons name="shield" size={20} color="#1d4ed8" />
+            <Text style={styles.policeCardTitle}>Nigerian Police Finder</Text>
+            {detectingPolice && <ActivityIndicator size="small" color="#1d4ed8" style={{ marginLeft: 8 }} />}
+          </View>
+          {detectedPolice ? (
+            <View style={styles.policeDetected}>
+              <Ionicons name="location" size={14} color="#16a34a" />
+              <Text style={styles.policeDetectedText}>Detected: {detectedPolice.state} Police</Text>
+            </View>
+          ) : null}
+          <TouchableOpacity
+            style={styles.policeCallBtn}
+            onPress={() => {
+              if (detectedPolice) {
+                callPolice(detectedPolice);
+              } else {
+                setPoliceQuery('');
+                setShowPolicePicker(true);
+              }
+            }}
+          >
+            <Ionicons name="call" size={18} color="#fff" />
+            <Text style={styles.policeCallBtnText}>
+              {detectedPolice ? `Call ${detectedPolice.state} Police` : 'Find & Call State Police'}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => { setPoliceQuery(''); setShowPolicePicker(true); }} style={{ marginTop: 6 }}>
+            <Text style={{ color: '#1d4ed8', fontSize: 12, textAlign: 'center' }}>Search a different state</Text>
+          </TouchableOpacity>
+        </View>
+
         {SECTIONS.map(section => (
           <View key={section.title} style={styles.section}>
             <Text style={styles.sectionTitle}>{section.title}</Text>
@@ -342,6 +437,46 @@ export default function RiderSafetyScreen() {
         onCancel={() => setSosModalVisible(false)}
         onConfirm={() => void handleConfirmSOS()}
       />
+
+      {/* Police State Picker Modal */}
+      <Modal visible={showPolicePicker} animationType="slide" transparent onRequestClose={() => setShowPolicePicker(false)}>
+        <View style={styles.policeModal}>
+          <View style={styles.policeModalSheet}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 17, fontWeight: '700', color: '#0f172a' }}>Select Your State</Text>
+              <TouchableOpacity onPress={() => setShowPolicePicker(false)}>
+                <Ionicons name="close-circle" size={26} color="#94a3b8" />
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.policeSearchInput}
+              placeholder="Search state (e.g. Lagos, Abuja...)"
+              placeholderTextColor="#94a3b8"
+              value={policeQuery}
+              onChangeText={setPoliceQuery}
+              autoFocus
+            />
+            <FlatList
+              data={filteredPolice}
+              keyExtractor={(item) => item.state}
+              style={{ maxHeight: 380 }}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  style={styles.policeListItem}
+                  onPress={() => { setShowPolicePicker(false); callPolice(item); }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '600', color: '#0f172a' }}>{item.state} Police</Text>
+                    <Text style={{ fontSize: 13, color: '#1d4ed8', marginTop: 2 }}>{item.phone}</Text>
+                  </View>
+                  <Ionicons name="call" size={20} color="#16a34a" />
+                </TouchableOpacity>
+              )}
+              ItemSeparatorComponent={() => <View style={{ height: 1, backgroundColor: '#f1f5f9' }} />}
+            />
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -448,6 +583,77 @@ const styles = StyleSheet.create({
   sosCta: {
     marginTop: SPACING.md,
     alignSelf: 'stretch',
+  },
+  policeCard: {
+    backgroundColor: '#eff6ff',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+  },
+  policeCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#1d4ed8',
+    marginLeft: 8,
+    flex: 1,
+  },
+  policeDetected: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 4,
+  },
+  policeDetectedText: {
+    fontSize: 12,
+    color: '#16a34a',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  policeCallBtn: {
+    backgroundColor: '#1d4ed8',
+    borderRadius: BORDER_RADIUS.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    gap: 8,
+  },
+  policeCallBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
+    marginLeft: 6,
+  },
+  policeModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  policeModalSheet: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: 20,
+    paddingBottom: 36,
+  },
+  policeSearchInput: {
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: BORDER_RADIUS.md,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: '#0f172a',
+    marginBottom: 12,
+  },
+  policeListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
   },
   section: {
     marginBottom: SPACING.lg,

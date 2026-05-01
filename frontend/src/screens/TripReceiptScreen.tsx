@@ -20,6 +20,8 @@ import {
   checkFavoriteDriver,
   confirmTripPayment,
   getTripBlackBox,
+  BACKEND_URL,
+  getAuthHeaders,
 } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 
@@ -60,6 +62,9 @@ export default function TripReceiptScreen() {
   const [confirmingPayment, setConfirmingPayment] = useState(false);
   const [blackBox, setBlackBox] = useState<any>(null);
   const [loadingBlackBox, setLoadingBlackBox] = useState(false);
+  const [myRating, setMyRating] = useState(0);
+  const [ratingSubmitted, setRatingSubmitted] = useState(false);
+  const [submittingRating, setSubmittingRating] = useState(false);
 
   useEffect(() => {
     const run = async () => {
@@ -132,6 +137,25 @@ export default function TripReceiptScreen() {
       accountName: trip.driver_account_name || '',
     };
   }, [trip]);
+
+  const handleSubmitRating = async (stars: number) => {
+    if (!trip?.id || !user?.id || ratingSubmitted || submittingRating) return;
+    setSubmittingRating(true);
+    setMyRating(stars);
+    try {
+      await fetch(`${BACKEND_URL}/api/trips/${trip.id}/rate?rater_id=${user.id}`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ comfort_ratings: {}, overall_rating: stars, comment: '' }),
+      });
+      setRatingSubmitted(true);
+      Alert.alert('Thank you!', `You rated this ride ${stars} ★`);
+    } catch {
+      Alert.alert('Could not save rating', 'Please try again.');
+    } finally {
+      setSubmittingRating(false);
+    }
+  };
 
   const handleSaveDriver = async () => {
     if (!user?.id || !trip?.driver_id || savingFavorite) return;
@@ -410,6 +434,40 @@ export default function TripReceiptScreen() {
           </TouchableOpacity>
         )}
 
+        {/* Driver rating submission */}
+        {trip?.driver_id && (
+          <View style={styles.ratingCard}>
+            {ratingSubmitted ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                <Ionicons name="checkmark-circle" size={22} color={COLORS.success} />
+                <Text style={styles.ratingDoneText}>Rating submitted — thank you!</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.ratingTitle}>Rate your ride</Text>
+                <Text style={styles.ratingSub}>How was your experience with {view?.driverName || 'your driver'}?</Text>
+                <View style={styles.starsRow}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <TouchableOpacity
+                      key={star}
+                      onPress={() => void handleSubmitRating(star)}
+                      disabled={submittingRating}
+                      style={{ padding: 6 }}
+                    >
+                      <Ionicons
+                        name={star <= myRating ? 'star' : 'star-outline'}
+                        size={34}
+                        color={star <= myRating ? '#f59e0b' : '#cbd5e1'}
+                      />
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                {submittingRating && <ActivityIndicator size="small" color={COLORS.primary} style={{ marginTop: 6 }} />}
+              </>
+            )}
+          </View>
+        )}
+
         <View style={styles.breakdownCard}>
           <Text style={styles.breakdownTitle}>Fare Breakdown</Text>
           <View style={styles.breakdownRow}><Text style={styles.breakdownLabel}>Base Fare</Text><Text style={styles.breakdownValue}>{CURRENCY}{view.baseFare}</Text></View>
@@ -565,4 +623,9 @@ const styles = StyleSheet.create({
   savedBannerText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.error },
   supportButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.sm, paddingVertical: SPACING.md },
   supportText: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600 },
+  ratingCard: { backgroundColor: '#fffbeb', borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.md, borderWidth: 1, borderColor: '#fde68a', alignItems: 'center' },
+  ratingTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: '#92400e', marginBottom: 4 },
+  ratingSub: { fontSize: FONT_SIZE.sm, color: '#78350f', marginBottom: SPACING.md, textAlign: 'center' },
+  starsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  ratingDoneText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.success },
 });

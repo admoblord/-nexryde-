@@ -150,6 +150,8 @@ function BookInDriveStyle() {
   const [showVehicleModal, setShowVehicleModal] = useState(false);
 
   const [searchingForDriver, setSearchingForDriver] = useState(false);
+  const [searchCountdown, setSearchCountdown] = useState(0);
+  const searchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [tripId, setTripId] = useState<string | null>(null);
   const [driverFound, setDriverFound] = useState<any>(null);
   const driverPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1075,6 +1077,18 @@ function BookInDriveStyle() {
         const tid = result.trip?.id || result.trip_id || null;
         setTripId(tid);
         setSearchingForDriver(true);
+        // Start cancellation countdown (90 s matches server offer expiry)
+        setSearchCountdown(90);
+        if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
+        searchCountdownRef.current = setInterval(() => {
+          setSearchCountdown((prev) => {
+            if (prev <= 1) {
+              if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
         pollForDriver(tid);
       } else {
         Alert.alert('Could not request ride', toStr(result?.detail || result?.message, 'Please try again in a moment.'));
@@ -1248,6 +1262,8 @@ function BookInDriveStyle() {
 
   const cancelSearch = async () => {
     clearDriverPoll();
+    if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
+    setSearchCountdown(0);
     await cancelPendingTrip(tripId);
     setSearchingForDriver(false);
     setDriverFound(null);
@@ -1994,6 +2010,16 @@ function BookInDriveStyle() {
                     ? `₦${currentFare.toLocaleString()} • Priority request sent`
                     : `₦${currentFare.toLocaleString()} sent to nearby drivers`}
                 </Text>
+                {searchCountdown > 0 && (
+                  <View style={{ marginTop: 8, marginBottom: 4, alignItems: 'center' }}>
+                    <Text style={{ fontSize: 13, color: '#64748b' }}>
+                      Offer expires in{' '}
+                      <Text style={{ fontWeight: '800', color: searchCountdown <= 15 ? COLORS.red : '#0f172a' }}>
+                        {searchCountdown}s
+                      </Text>
+                    </Text>
+                  </View>
+                )}
                 <TouchableOpacity style={s.searchCancel} onPress={cancelSearch} accessibilityLabel="Cancel search" accessibilityRole="button">
                   <Text style={{ color: COLORS.red, fontWeight: '800', fontSize: 16 }}>Cancel</Text>
                 </TouchableOpacity>

@@ -24,6 +24,7 @@ import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRi
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { COLORS } from '@/src/constants/theme';
 import { HOME_PALETTE } from '@/src/constants/designSystem';
+import notificationService from '@/src/services/notifications';
 
 const { width } = Dimensions.get('window');
 
@@ -88,6 +89,8 @@ export default function ModernRiderHome() {
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
+    // Request push notification permission so riders get driver alerts
+    void notificationService.requestPermissions().catch(() => {});
   }, []);
 
   useEffect(() => {
