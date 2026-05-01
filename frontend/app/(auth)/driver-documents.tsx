@@ -413,10 +413,10 @@ export default function DriverDocumentsScreen() {
         await AsyncStorage.removeItem(biometricCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          'Submitted for review',
-          'Your package is with the NEXRYDE team. You can enter the driver dashboard now, but online driving and the 48-hour trial unlock only after approval.',
+          'Documents Submitted',
+          'Your documents are with the NEXRYDE team for review. You will be notified once verified. After approval, you will get a free 20-trip trial to start earning.',
           [{
-            text: 'Go to driver home',
+            text: 'Go to Dashboard',
             onPress: () => router.replace('/(driver-tabs)/driver-home'),
           }],
         );

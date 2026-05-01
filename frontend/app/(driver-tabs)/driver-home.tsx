@@ -269,6 +269,8 @@ export default function ModernDriverHome() {
         hydrateOnlineState();
         void getQueueSize().then(setOfflineQueueCount);
         void syncQueuedRequests();
+        // Re-check verification status when app comes to foreground — reflects admin approval instantly
+        void checkOnboardingStatus();
       }
     });
     return () => {
@@ -914,38 +916,39 @@ export default function ModernDriverHome() {
         </Animated.View>
 
         <View style={styles.headerPills}>
-          <View style={styles.headerPill}>
-            <Ionicons
-              name={trialReady ? 'checkmark-circle' : driverApproved ? 'alert-circle' : 'lock-closed'}
-              size={16}
-              color={trialReady ? '#22E180' : '#FBBF24'}
-            />
-            <Text style={styles.headerPillText}>
-              {trialReady
-                ? 'Subscription ready'
-                : driverApproved ? 'Activation needed' : 'Trial locked until approval'}
-            </Text>
-          </View>
-          <View style={styles.headerPill}>
+          {/* Verification status pill */}
+          <View style={[styles.headerPill, driverApproved && { backgroundColor: 'rgba(34,225,128,0.15)' }]}>
             <Ionicons
               name={driverApproved ? 'shield-checkmark' : 'shield-half'}
               size={16}
               color={driverApproved ? '#22E180' : '#FBBF24'}
             />
-            <Text style={styles.headerPillText}>
-              {driverApproved ? 'Driver verified' : 'Verification under review'}
+            <Text style={[styles.headerPillText, driverApproved && { color: '#22E180' }]}>
+              {driverApproved ? 'Verified Driver' : 'Under review'}
             </Text>
           </View>
-          <View style={styles.headerPill}>
-            <Ionicons
-              name={driverOffersWsConnected ? 'radio' : 'cloud-offline-outline'}
-              size={16}
-              color={driverOffersWsConnected ? '#22E180' : '#FBBF24'}
-            />
-            <Text style={styles.headerPillText}>
-              {driverOffersWsConnected ? 'Live dispatch' : 'Fallback sync'}
-            </Text>
-          </View>
+
+          {/* Subscription / trial pill */}
+          {driverApproved && (
+            <View style={[styles.headerPill, trialReady && { backgroundColor: 'rgba(34,225,128,0.12)' }]}>
+              <Ionicons
+                name={trialReady ? 'checkmark-circle' : 'alert-circle'}
+                size={16}
+                color={trialReady ? '#22E180' : '#FBBF24'}
+              />
+              <Text style={[styles.headerPillText, trialReady && { color: '#22E180' }]}>
+                {trialReady ? 'Active' : 'Activate account'}
+              </Text>
+            </View>
+          )}
+
+          {/* Live dispatch — only show when actually connected, hide "Fallback sync" noise */}
+          {driverOffersWsConnected && (
+            <View style={[styles.headerPill, { backgroundColor: 'rgba(34,225,128,0.12)' }]}>
+              <Ionicons name="radio" size={16} color="#22E180" />
+              <Text style={[styles.headerPillText, { color: '#22E180' }]}>Live dispatch</Text>
+            </View>
+          )}
         </View>
       </LinearGradient>
 

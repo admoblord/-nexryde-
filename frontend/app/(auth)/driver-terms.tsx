@@ -172,7 +172,7 @@ export default function DriverTermsScreen() {
             <Text style={styles.paragraph}>
               • Launch pricing: ₦15,000/month (first 500 drivers){'\n'}
               • Standard pricing: ₦18,000/month (after launch){'\n'}
-              • 48-hour free trial (unlimited city rides) for new drivers{'\n'}
+              • Free 20-trip activity trial for newly verified drivers{'\n'}
               • Zero commission on rides — keep 100% of your earnings{'\n'}
               • Subscription must be active to accept ride requests{'\n'}
               • Payment proof must be submitted for verification

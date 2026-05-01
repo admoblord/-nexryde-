@@ -889,24 +889,16 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
             }
         if not profile.get("documents_verified") or verification_status != "approved":
             return {"step": "documents", "completed": False, "verification_status": verification_status or "not_submitted"}
+
+        # Admin / AI explicitly approved this driver — honour it regardless of profile_completed flag.
+        # Also auto-heal: patch profile_completed so future calls succeed without extra DB roundtrip.
         if not profile.get("profile_completed"):
-            return {"step": "profile", "completed": False}
+            await db.driver_profiles.update_one(
+                {"user_id": driver_id},
+                {"$set": {"profile_completed": True, "onboarding_step": "approved"}}
+            )
 
-        incomplete = []
-        if not profile.get("vehicle_model"):
-            incomplete.append("vehicle details")
-        if not profile.get("vehicle_type"):
-            incomplete.append("vehicle type")
-        if not profile.get("guarantor"):
-            incomplete.append("guarantor information")
-        if not profile.get("bank_name"):
-            incomplete.append("bank account")
-        if not profile.get("address"):
-            incomplete.append("home address")
-        if incomplete:
-            return {"step": "profile", "completed": False, "missing": incomplete}
-
-        return {"step": "approved", "completed": True, "verification_status": profile.get("verification_status", "approved"), "vehicle_registered": profile.get("vehicle_registered", False)}
+        return {"step": "approved", "completed": True, "verification_status": "approved", "vehicle_registered": profile.get("vehicle_registered", False)}
     except Exception as e:
         logger.error(f"Onboarding status error: {str(e)}")
         return {"step": "error", "completed": False}
@@ -1340,6 +1332,7 @@ async def _ai_approve(verification_id, user_id, vehicle_info, notes):
         {"$set": {
             "documents_verified": True,
             "verification_status": "approved",
+            "profile_completed": True,
             "documents_approved_at": datetime.now(timezone.utc).isoformat(),
             "nin_verified": True,
             "license_uploaded": True,
@@ -1349,11 +1342,12 @@ async def _ai_approve(verification_id, user_id, vehicle_info, notes):
             "vehicle_model": vehicle_info.get("vehicleModel"),
             "vehicle_plate": vehicle_info.get("plateNumber"),
             "vehicle_color": vehicle_info.get("vehicleColor"),
-            "onboarding_step": next_onboarding_step,
+            "onboarding_step": "approved",
             "approved_documents_snapshot_id": snapshot.get("id"),
         }},
         upsert=True
     )
+    await db.users.update_one({"id": user_id}, {"$set": {"profile_completed": True}})
     await _ensure_48h_trial_for_verified_driver(user_id)
     await send_driver_verification_notification(user_id, "approved")
 
@@ -1624,24 +1618,31 @@ async def admin_approve_verification(
             "approved_at": now_utc.isoformat(),
         }},
     )
+    vehicle_info = verification.get("vehicle_info", {}) or {}
     await db.driver_profiles.update_one(
         {"user_id": user_id},
         {"$set": {
             "documents_verified": True,
             "verification_status": "approved",
+            "profile_completed": True,        # ensure onboarding-status returns "approved"
             "documents_approved_at": now_utc.isoformat(),
             "nin_verified": True,
             "license_uploaded": True,
             "vehicle_docs_uploaded": True,
             "selfie_verified": True,
-            "vehicle_type": verification.get("vehicle_info", {}).get("vehicleMake"),
-            "vehicle_model": verification.get("vehicle_info", {}).get("vehicleModel"),
-            "vehicle_plate": verification.get("vehicle_info", {}).get("plateNumber"),
-            "vehicle_color": verification.get("vehicle_info", {}).get("vehicleColor"),
-            "onboarding_step": next_onboarding_step,
+            "vehicle_type": vehicle_info.get("vehicleMake"),
+            "vehicle_model": vehicle_info.get("vehicleModel"),
+            "vehicle_plate": vehicle_info.get("plateNumber"),
+            "vehicle_color": vehicle_info.get("vehicleColor"),
+            "onboarding_step": "approved",
             "approved_documents_snapshot_id": snapshot.get("id"),
         }},
         upsert=True,
+    )
+    # Also mark profile_completed on users record
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {"profile_completed": True}},
     )
     await _ensure_48h_trial_for_verified_driver(user_id)
     try:

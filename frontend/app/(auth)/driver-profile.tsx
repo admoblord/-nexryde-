@@ -195,11 +195,11 @@ export default function DriverProfileScreen() {
         setIsAuthenticated(true);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          'Welcome to NEXRYDE',
-          'Your driver profile is saved. Your 48-hour trial starts now (unlimited city rides where available). On the home screen, finish any remaining checks such as subscription or admin review before going online.',
+          'Profile Saved — Pending Review',
+          'Your documents have been submitted to the NEXRYDE team for verification. You will be notified once approved. Once approved, you get a free 20-trip activity trial to get started.',
           [
             {
-              text: 'Go to driver home',
+              text: 'Go to Dashboard',
               onPress: () => router.replace('/(driver-tabs)/driver-home'),
             },
           ],
