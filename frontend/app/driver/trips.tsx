@@ -448,11 +448,18 @@ export default function DriverTripsScreen() {
   };
 
   const handleStartTrip = async () => {
-    if (!currentTrip?.id || !user?.id) return;
-    router.push({
-      pathname: '/driver/verify-rider-code',
-      params: { trip_id: currentTrip.id, driver_id: user.id },
-    } as any);
+    if (!currentTrip?.id || !user?.id || busyActionKey) return;
+    setBusyActionKey('start');
+    setActionLoading('start');
+    try {
+      router.push({
+        pathname: '/driver/verify-rider-code',
+        params: { trip_id: currentTrip.id, driver_id: user.id },
+      } as any);
+    } finally {
+      // Clear loading after navigation starts (slight delay for UX)
+      setTimeout(() => { setActionLoading(null); setBusyActionKey(null); }, 800);
+    }
   };
 
   const handleArriveTrip = async () => {
@@ -749,14 +756,46 @@ export default function DriverTripsScreen() {
     );
   };
 
-  const renderTrip = ({ item }: { item: any }) => (
-    <Card style={styles.tripCard}>
+  const renderTrip = ({ item }: { item: any }) => {
+    const riderName: string = item.rider_display_name || item.rider_name || 'Rider';
+    const riderRating: number = Number(item.rider_rating ?? item.rider_reputation_avg ?? 0);
+    const isPreferred: boolean = Boolean(item.preferred);
+    const riskBand: string = item.rider_risk_band || 'green';
+    const riskColor = riskBand === 'red' ? '#dc2626' : riskBand === 'yellow' ? '#d97706' : '#16a34a';
+
+    return (
+    <Card style={[styles.tripCard, isPreferred && { borderColor: '#f59e0b', borderWidth: 2 }]}>
+      {isPreferred && (
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 4 }}>
+          <Ionicons name="star" size={13} color="#f59e0b" />
+          <Text style={{ fontSize: 11, fontWeight: '800', color: '#f59e0b', textTransform: 'uppercase' }}>Priority Request</Text>
+        </View>
+      )}
       <View style={styles.tripHeader}>
         <View style={styles.distanceBadge}>
           <Ionicons name="navigate" size={16} color={COLORS.primary} />
           <Text style={styles.distanceText}>{Number(item.distance_to_pickup ?? 0).toFixed(1)} km away</Text>
         </View>
-        <Text style={styles.tripFare}>{CURRENCY}{item.fare.toLocaleString()}</Text>
+        <Text style={styles.tripFare}>{CURRENCY}{Number(item.fare ?? 0).toLocaleString()}</Text>
+      </View>
+
+      {/* Rider info row */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10, gap: 8 }}>
+        <View style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#e0e7ff', alignItems: 'center', justifyContent: 'center' }}>
+          <Ionicons name="person" size={16} color="#4f46e5" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#0f172a' }}>{riderName}</Text>
+          {riderRating > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+              <Ionicons name="star" size={11} color="#f59e0b" />
+              <Text style={{ fontSize: 12, color: '#64748b' }}>{riderRating.toFixed(1)}</Text>
+            </View>
+          )}
+        </View>
+        <View style={{ backgroundColor: riskColor + '22', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10 }}>
+          <Text style={{ fontSize: 11, fontWeight: '700', color: riskColor, textTransform: 'capitalize' }}>{riskBand} risk</Text>
+        </View>
       </View>
       
       <View style={styles.tripRoute}>
@@ -765,19 +804,17 @@ export default function DriverTripsScreen() {
           <View style={styles.routeInfo}>
             <Text style={styles.routeLabel}>Pickup</Text>
             <Text style={styles.routeAddress} numberOfLines={1}>
-              {item.pickup_location.address}
+              {item.pickup_location?.address || 'Pickup'}
             </Text>
           </View>
         </View>
-        
         <View style={styles.routeLine} />
-        
         <View style={styles.routePoint}>
           <View style={[styles.routeDot, { backgroundColor: COLORS.error }]} />
           <View style={styles.routeInfo}>
             <Text style={styles.routeLabel}>Dropoff</Text>
             <Text style={styles.routeAddress} numberOfLines={1}>
-              {item.dropoff_location.address}
+              {item.dropoff_location?.address || 'Destination'}
             </Text>
           </View>
         </View>
@@ -794,7 +831,7 @@ export default function DriverTripsScreen() {
         </View>
         <View style={styles.metaItem}>
           <Ionicons name="card" size={14} color={COLORS.textSecondary} />
-          <Text style={styles.metaText}>{item.payment_method}</Text>
+          <Text style={styles.metaText}>{item.payment_method || 'cash'}</Text>
         </View>
       </View>
       
@@ -805,7 +842,8 @@ export default function DriverTripsScreen() {
         style={styles.acceptButton}
       />
     </Card>
-  );
+    );
+  };
 
   if (loading) {
     return (

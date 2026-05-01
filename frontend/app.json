@@ -2,7 +2,7 @@
   "expo": {
     "name": "NEXRYDE",
     "slug": "nexryde",
-    "version": "1.1.8",
+    "version": "1.1.9",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
@@ -26,7 +26,7 @@
       }
     },
     "android": {
-      "versionCode": 13,
+      "versionCode": 14,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0D1420"
@@ -74,7 +74,9 @@
         {
           "microphonePermission": "Allow NEXRYDE to use microphone for voice booking.",
           "speechRecognitionPermission": "Allow NEXRYDE to recognize speech for voice booking.",
-          "androidSpeechServicePackages": ["com.google.android.googlequicksearchbox"]
+          "androidSpeechServicePackages": [
+            "com.google.android.googlequicksearchbox"
+          ]
         }
       ],
       "@react-native-community/datetimepicker",

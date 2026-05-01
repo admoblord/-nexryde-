@@ -1,17 +1,54 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Tabs } from 'expo-router';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, FONT_SIZE, SHADOWS } from '@/src/constants/theme';
 import { BRAND } from '@/src/constants/designSystem';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
+import { useAppStore } from '@/src/store/appStore';
+import { BACKEND_URL, getAuthHeaders } from '@/src/api/client';
+
+function NotifIcon({ color, focused, count }: { color: string; focused: boolean; count: number }) {
+  return (
+    <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+      <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={24} color={color} />
+      {count > 0 && (
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>{count > 9 ? '9+' : String(count)}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
 
 export default function RiderTabLayout() {
   const { t } = useLanguage();
+  const { user, token } = useAppStore();
+  const [unreadCount, setUnreadCount] = useState(0);
   useActiveTripCoordinator();
   usePanicShakeGuard();
+
+  useEffect(() => {
+    if (!user?.id || !token) return;
+    let cancelled = false;
+    const fetchUnread = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/notifications/${user.id}?unread_only=true&limit=1`, {
+          headers: getAuthHeaders(),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const count = data?.unread_count ?? (Array.isArray(data?.notifications) ? data.notifications.length : 0);
+          if (!cancelled) setUnreadCount(Number(count));
+        }
+      } catch { /* silent */ }
+    };
+    fetchUnread();
+    const iv = setInterval(fetchUnread, 30000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [user?.id, token]);
 
   return (
     <Tabs
@@ -84,9 +121,7 @@ export default function RiderTabLayout() {
         options={{
           title: 'Updates',
           tabBarIcon: ({ color, focused }) => (
-            <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
-              <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={24} color={color} />
-            </View>
+            <NotifIcon color={color} focused={focused} count={unreadCount} />
           ),
         }}
       />
@@ -115,5 +150,24 @@ const styles = StyleSheet.create({
   },
   iconContainerActive: {
     backgroundColor: 'rgba(34, 197, 94, 0.12)',
+  },
+  badge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+    borderWidth: 1.5,
+    borderColor: '#fff',
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: '#fff',
   },
 });

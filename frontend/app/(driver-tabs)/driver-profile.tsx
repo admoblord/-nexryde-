@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import Constants from 'expo-constants';
 import {
   View,
   Text,
@@ -464,7 +465,7 @@ export default function DriverProfileScreen() {
           </TouchableOpacity>
         </View>
 
-        <Text style={styles.versionText}>NEXRYDE Driver v1.0.0</Text>
+        <Text style={styles.versionText}>NEXRYDE Driver v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
 
         <TouchableOpacity
           style={styles.logoutButtonScroll}

@@ -10,6 +10,7 @@ import {
   StatusBar,
   Modal,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -45,6 +46,8 @@ export default function ModernRiderHome() {
   const { language, setLanguage, t } = useLanguage();
   const [driverOfMonth, setDriverOfMonth] = useState<any>(null);
   const [votingDriverId, setVotingDriverId] = useState<string | null>(null);
+  const [recentTrips, setRecentTrips] = useState<any[]>([]);
+  const [recentTripsLoading, setRecentTripsLoading] = useState(false);
 
   const QUICK_FEATURES = [
     {
@@ -100,16 +103,46 @@ export default function ModernRiderHome() {
         const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/rider-verification-status`, {
           headers: getAuthHeaders(),
         });
-        const data = await res.json();
-        if (!res.ok || !data?.completed) {
+        // Only redirect on explicit 4xx — never on network failures or 5xx
+        if (res.status === 401 || res.status === 403) {
           router.replace('/(auth)/rider-verification');
+          return;
         }
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.completed === false) {
+            router.replace('/(auth)/rider-verification');
+          }
+        }
+        // else: network error / 5xx — stay on home, don't kick user out
       } catch {
-        router.replace('/(auth)/rider-verification');
+        // Network error — don't redirect, let the user stay on home
       }
     };
     enforceRiderVerification();
   }, [router, user?.id, user?.role]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadRecentTrips = async () => {
+      setRecentTripsLoading(true);
+      try {
+        const res = await fetch(
+          `${BACKEND_URL}/api/trips/rider/${user.id}?limit=3&status=completed`,
+          { headers: getAuthHeaders() }
+        );
+        if (res.ok) {
+          const data = await res.json();
+          setRecentTrips(Array.isArray(data?.trips) ? data.trips : []);
+        }
+      } catch {
+        // silent — empty state shown
+      } finally {
+        setRecentTripsLoading(false);
+      }
+    };
+    loadRecentTrips();
+  }, [user?.id]);
 
   useEffect(() => {
     const loadDriverOfMonth = async () => {
@@ -428,28 +461,65 @@ export default function ModernRiderHome() {
               <Text style={styles.seeAll}>{t.common.viewAll}</Text>
             </TouchableOpacity>
           </View>
-          
-          <View style={styles.tripsCard}>
-            <View style={styles.emptyState}>
-              <View style={[styles.emptyIcon, { backgroundColor: COLORS.accentGreen }]}>
-                <Ionicons name="car-sport" size={40} color="#FFF" />
-              </View>
-              <Text style={styles.emptyTitle}>No trips yet</Text>
-              <TouchableOpacity 
-                style={styles.emptyButton}
-                onPress={() => router.push('/rider/book' as any)}
-                accessibilityLabel="Book now"
-                accessibilityRole="button"
-              >
-                <LinearGradient
-                  colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
-                  style={styles.emptyButtonGradient}
-                >
-                  <Text style={styles.emptyButtonText}>Book Now</Text>
-                </LinearGradient>
-              </TouchableOpacity>
+
+          {recentTripsLoading ? (
+            <View style={[styles.tripsCard, { alignItems: 'center', paddingVertical: 24 }]}>
+              <ActivityIndicator size="small" color={COLORS.accentGreen} />
             </View>
-          </View>
+          ) : recentTrips.length > 0 ? (
+            <View style={styles.tripsCard}>
+              {recentTrips.map((trip: any) => {
+                const pickup = typeof trip.pickup_location === 'string'
+                  ? trip.pickup_location : trip.pickup_location?.address || 'Pickup';
+                const dropoff = typeof trip.dropoff_location === 'string'
+                  ? trip.dropoff_location : trip.dropoff_location?.address || 'Destination';
+                const fare = Number(trip.fare ?? 0);
+                const dt = trip.completed_at ? new Date(trip.completed_at) : null;
+                const dateStr = dt && !isNaN(dt.getTime())
+                  ? dt.toLocaleDateString([], { month: 'short', day: 'numeric' })
+                  : '';
+                return (
+                  <TouchableOpacity
+                    key={trip.id}
+                    style={{ paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                    onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } } as any)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center' }}>
+                      <Ionicons name="car-sport" size={18} color="#16a34a" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a' }} numberOfLines={1}>{pickup} → {dropoff}</Text>
+                      <Text style={{ fontSize: 12, color: '#64748b', marginTop: 2 }}>{dateStr}</Text>
+                    </View>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#16a34a' }}>₦{fare.toLocaleString()}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : (
+            <View style={styles.tripsCard}>
+              <View style={styles.emptyState}>
+                <View style={[styles.emptyIcon, { backgroundColor: COLORS.accentGreen }]}>
+                  <Ionicons name="car-sport" size={40} color="#FFF" />
+                </View>
+                <Text style={styles.emptyTitle}>No trips yet</Text>
+                <TouchableOpacity
+                  style={styles.emptyButton}
+                  onPress={() => router.push('/rider/book' as any)}
+                  accessibilityLabel="Book now"
+                  accessibilityRole="button"
+                >
+                  <LinearGradient
+                    colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
+                    style={styles.emptyButtonGradient}
+                  >
+                    <Text style={styles.emptyButtonText}>Book Now</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
         </Animated.View>
 
         {/* ALL FEATURES GRID - COMPLETE ACCESS */}

@@ -1684,25 +1684,25 @@ function BookInDriveStyle() {
                 </View>
               ) : null}
               {smartBaseUi != null && smartBaseUi > 0 && (
-                <View style={{ marginBottom: 10, gap: 4 }}>
-                  <Text style={{ color: COLORS.muted, fontSize: 12, fontWeight: '700' }}>
-                    Suggested price: ₦{smartBaseUi.toLocaleString()}
-                  </Text>
-                  {smartMinUi != null && smartMinUi > 0 && (
-                    <Text style={{ color: COLORS.yellow, fontSize: 12, fontWeight: '700' }}>
-                      Minimum allowed: ₦{smartMinUi.toLocaleString()}
-                    </Text>
-                  )}
-                  {smartMaxUi != null && smartMaxUi > 0 && (
-                    <Text style={{ color: COLORS.dim, fontSize: 11, fontWeight: '600' }}>
-                      Drivers may counter up to ₦{smartMaxUi.toLocaleString()}
-                    </Text>
-                  )}
-                  {priorityMatch && (
-                    <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>
-                      Priority matching — your offer is in the fast lane
-                    </Text>
-                  )}
+                <View style={{ marginBottom: 10, gap: 6 }}>
+                  {/* Compact fare range pill */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                    <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="cash-outline" size={13} color="#22d3ee" />
+                      <Text style={{ color: '#e2e8f0', fontSize: 12, fontWeight: '700' }}>
+                        ₦{(smartMinUi ?? smartBaseUi).toLocaleString()} – ₦{(smartMaxUi ?? Math.round(smartBaseUi * 1.3)).toLocaleString()}
+                      </Text>
+                    </View>
+                    <View style={{ backgroundColor: '#0f2d18', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Ionicons name="star" size={12} color="#fbbf24" />
+                      <Text style={{ color: '#86efac', fontSize: 12, fontWeight: '700' }}>Suggested ₦{smartBaseUi.toLocaleString()}</Text>
+                    </View>
+                    {priorityMatch && (
+                      <View style={{ backgroundColor: '#1e3a1e', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
+                        <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>⚡ Priority match</Text>
+                      </View>
+                    )}
+                  </View>
                 </View>
               )}
               <Animated.View style={[s.fareRow, { opacity: fareReveal }]}>
@@ -1814,9 +1814,19 @@ function BookInDriveStyle() {
                   </TouchableOpacity>
                 </View>
               </View>
-              <TouchableOpacity style={s.findBtn} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
-                <LinearGradient colors={[COLORS.lime, '#9CD900']} style={s.btnGrad}>
-                  {isLoading ? <ActivityIndicator color={COLORS.bg} /> : <Text style={s.findBtnText}>Find offers</Text>}
+              <TouchableOpacity style={[s.findBtn, isLoading && { opacity: 0.7 }]} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
+                <LinearGradient colors={isLoading ? ['#64748b', '#475569'] : [COLORS.lime, '#9CD900']} style={s.btnGrad}>
+                  {isLoading ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <ActivityIndicator color="#fff" size="small" />
+                      <Text style={[s.findBtnText, { color: '#fff' }]}>Finding drivers...</Text>
+                    </View>
+                  ) : (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Ionicons name="car" size={18} color={COLORS.bg} />
+                      <Text style={s.findBtnText}>Find Driver</Text>
+                    </View>
+                  )}
                 </LinearGradient>
               </TouchableOpacity>
             </View>

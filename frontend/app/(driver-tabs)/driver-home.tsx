@@ -134,7 +134,8 @@ export default function ModernDriverHome() {
   useEffect(() => {
     if (!user?.id) return;
     let mounted = true;
-    const fetchEarnings = async () => {
+    const fetchEarnings = async (isInitial = false) => {
+      if (isInitial) { setEarningsLoading(true); setEarningsError(false); }
       try {
         const [todayRes, weekRes] = await Promise.all([
           fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=today`, {
@@ -144,7 +145,8 @@ export default function ModernDriverHome() {
             headers: getAuthHeaders(),
           }),
         ]);
-        if (!todayRes.ok) return;
+        if (!mounted) return;
+        if (!todayRes.ok) { if (isInitial) setEarningsError(true); return; }
         const todayData = await todayRes.json();
         const weekData = weekRes.ok ? await weekRes.json() : null;
         const todaySummary = todayData?.summary || {};
@@ -160,13 +162,16 @@ export default function ModernDriverHome() {
             trips: Number(user?.total_trips ?? todaySummary.total_trips ?? 0),
           });
           setEarningsGuarantee(todayData.guarantee || null);
+          setEarningsError(false);
         }
       } catch {
-        /* keep defaults */
+        if (mounted && isInitial) setEarningsError(true);
+      } finally {
+        if (mounted && isInitial) setEarningsLoading(false);
       }
     };
-    fetchEarnings();
-    const interval = setInterval(fetchEarnings, 60000);
+    fetchEarnings(true);
+    const interval = setInterval(() => fetchEarnings(false), 60000);
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -198,6 +203,9 @@ export default function ModernDriverHome() {
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const [simSignalSent, setSimSignalSent] = useState(false);
   const onlineToggleInFlightRef = useRef(false);
+  const [toggleSyncing, setToggleSyncing] = useState(false);
+  const [earningsLoading, setEarningsLoading] = useState(true);
+  const [earningsError, setEarningsError] = useState(false);
   const navigationInFlightRef = useRef(false);
   const guardedPush = useCallback(
     (route: string) => {
@@ -712,6 +720,7 @@ export default function ModernDriverHome() {
       return;
     }
     onlineToggleInFlightRef.current = true;
+    setToggleSyncing(true);
     try {
       const res = await fetch(
         `${BACKEND_URL}/api/drivers/${user.id}/online?is_online=${nextStatus}`,
@@ -732,6 +741,7 @@ export default function ModernDriverHome() {
       Alert.alert('Network Error', 'Could not update online status.');
     } finally {
       onlineToggleInFlightRef.current = false;
+      setToggleSyncing(false);
     }
   };
   
@@ -890,11 +900,16 @@ export default function ModernDriverHome() {
             </View>
           </View>
           <TouchableOpacity 
-            style={[styles.toggleButton, isOnline && styles.toggleButtonActive, !driverCanReceiveOffers && styles.toggleButtonDisabled]}
+            style={[styles.toggleButton, isOnline && styles.toggleButtonActive, (!driverCanReceiveOffers || toggleSyncing) && styles.toggleButtonDisabled]}
             onPress={handleToggleOnline}
             activeOpacity={0.8}
+            disabled={toggleSyncing}
           >
-            <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
+            {toggleSyncing ? (
+              <ActivityIndicator size="small" color="#FFF" style={{ margin: 6 }} />
+            ) : (
+              <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
+            )}
           </TouchableOpacity>
         </Animated.View>
 
@@ -1058,13 +1073,25 @@ export default function ModernDriverHome() {
             accessibilityRole="button"
             accessibilityLabel="Open driver earnings"
           >
-            <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
+              {earningsLoading && <ActivityIndicator size="small" color={COLORS.accentGreen} />}
+              {earningsError && !earningsLoading && (
+                <Text style={{ fontSize: 11, color: '#f87171' }}>Could not load</Text>
+              )}
+            </View>
             <LinearGradient
             colors={['#022c22', '#064e3b', '#0f766e']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.earningsGradientWrap}
           >
+            {earningsLoading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 28 }}>
+                <ActivityIndicator size="large" color="#22E180" />
+                <Text style={{ color: '#86efac', fontSize: 13, marginTop: 8 }}>Loading earnings...</Text>
+              </View>
+            ) : (
             <View style={styles.earningsGrid}>
               <View style={[styles.earningCard, styles.earningCardOnGreen]}>
                 <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
@@ -1090,6 +1117,7 @@ export default function ModernDriverHome() {
                 <Text style={styles.earningValueLight}>{earnings.trips}</Text>
               </View>
             </View>
+            )}
           </LinearGradient>
           </TouchableOpacity>
         </Animated.View>

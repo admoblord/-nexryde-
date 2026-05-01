@@ -36,7 +36,7 @@ export default function RiderTripsScreen() {
       const res = await getUserTrips(user.id, 'rider');
       setTrips(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
-      console.log('Failed to load rider trips:', e);
+      if (__DEV__) console.warn('Failed to load rider trips:', e);
       setTrips([]);
     } finally {
       setLoading(false);
