@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   Linking,
+  Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -66,6 +67,11 @@ export default function TrackingScreen() {
   const [confirmingSafeArrival, setConfirmingSafeArrival] = useState(false);
   const [respondingSafety, setRespondingSafety] = useState<'safe' | 'need_help' | null>(null);
   const [driverStopReason, setDriverStopReason] = useState<{ reason?: string; submitted_at?: string } | null>(null);
+  const [isFavoriteDriver, setIsFavoriteDriver] = useState(false);
+  const [checkingFavorite, setCheckingFavorite] = useState(false);
+  const [showFavoritePrompt, setShowFavoritePrompt] = useState(false);
+  const [addingFavorite, setAddingFavorite] = useState(false);
+  const favoritePromptShownRef = useRef<string | null>(null);
   const pickupAlertSentRef = useRef(false);
   const geoFenceAlertShownRef = useRef<string | null>(null);
   const speedSpikeAlertShownRef = useRef<string | null>(null);
@@ -94,6 +100,61 @@ export default function TrackingScreen() {
 
   const effectiveTripId = params.tripId || currentTrip?.id || '';
   const { recordingStatus, currentRecording, reportSafetyIncident } = useTripSafetyRecording(currentTrip);
+
+  // Helpers for active-call-permitted states
+  const ACTIVE_CALL_STATES = ['accepted', 'arrived', 'ongoing', 'pending_payment'];
+  const isActiveRide = ACTIVE_CALL_STATES.includes(tripStatus);
+  const callAllowed = isActiveRide || isFavoriteDriver;
+
+  // Mask a phone number for display: 08012345678 → 0801***5678
+  const maskPhone = (phone: string | null | undefined): string => {
+    if (!phone) return '';
+    const d = phone.replace(/\s+/g, '').replace(/-/g, '');
+    if (d.length >= 8) return d.slice(0, 4) + '***' + d.slice(-4);
+    return phone;
+  };
+
+  // Check if this driver is favorited
+  const checkIsFavorite = useCallback(async (driverId: string) => {
+    if (!user?.id || !driverId) return;
+    setCheckingFavorite(true);
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/users/${user.id}/favorite-drivers/${driverId}/check`,
+        { headers: getAuthHeaders() }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setIsFavoriteDriver(Boolean(data?.is_favorite));
+      }
+    } catch { /* silent */ }
+    finally { setCheckingFavorite(false); }
+  }, [user?.id]);
+
+  // Add driver to favorites
+  const handleAddFavorite = useCallback(async (driverId: string) => {
+    if (!user?.id || !driverId) return;
+    setAddingFavorite(true);
+    try {
+      const res = await fetch(
+        `${BACKEND_URL}/api/users/${user.id}/favorite-drivers`,
+        {
+          method: 'POST',
+          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ driver_id: driverId }),
+        }
+      );
+      if (res.ok) {
+        setIsFavoriteDriver(true);
+        Alert.alert('Added to Favorites', 'You can call this driver after future rides too.');
+      }
+    } catch {
+      Alert.alert('Error', 'Could not add driver to favorites.');
+    } finally {
+      setAddingFavorite(false);
+      setShowFavoritePrompt(false);
+    }
+  }, [user?.id]);
   const pickupCoords = getCoords(currentTrip?.pickup_location);
   const dropoffCoords = getCoords(currentTrip?.dropoff_location);
   const liveDriverCoords = getCoords(driverLocation);
@@ -363,6 +424,27 @@ export default function TrackingScreen() {
       clearInterval(interval);
     };
   }, [effectiveTripId, user?.id, fetchStatus, riderWsConnected]);
+
+  // Check favorite status whenever driverInfo.driver_id becomes known
+  useEffect(() => {
+    const driverId = driverInfo?.driver_id;
+    if (!driverId) return;
+    void checkIsFavorite(driverId);
+  }, [driverInfo?.driver_id, checkIsFavorite]);
+
+  // Show "Add to Favorites" prompt once when ride reaches completed/pending_payment
+  useEffect(() => {
+    const driverId = driverInfo?.driver_id;
+    if (!driverId) return;
+    if (isFavoriteDriver) return; // already favorited
+    const shouldPrompt = ['completed', 'pending_payment'].includes(tripStatus);
+    if (shouldPrompt && favoritePromptShownRef.current !== effectiveTripId) {
+      favoritePromptShownRef.current = effectiveTripId;
+      // Small delay so receipt navigation has time to happen first
+      const t = setTimeout(() => setShowFavoritePrompt(true), 1200);
+      return () => clearTimeout(t);
+    }
+  }, [tripStatus, driverInfo?.driver_id, isFavoriteDriver, effectiveTripId]);
 
   const handleCancelRide = async () => {
     if (!effectiveTripId || !user?.id) return;
@@ -1120,20 +1202,35 @@ export default function TrackingScreen() {
                   <Text style={styles.actionBtnText}>Chat Driver</Text>
                 </TouchableOpacity>
 
-                {driverInfo?.phone && (
+                {/* Call Driver — shown when active ride OR driver is favorited */}
+                {callAllowed && driverInfo?.phone ? (
                   <TouchableOpacity
                     style={[styles.actionBtn, { backgroundColor: '#dcfce7' }]}
                     onPress={() => {
-                      const phone = driverInfo.phone.replace(/\s+/g, '');
+                      const phone = (driverInfo.phone as string).replace(/\s+/g, '');
                       Linking.openURL(`tel:${phone}`).catch(() =>
                         Alert.alert('Cannot call', 'Unable to open the dialler on this device.')
                       );
                     }}
                   >
                     <Ionicons name="call" size={20} color="#16a34a" />
-                    <Text style={[styles.actionBtnText, { color: '#16a34a' }]}>Call Driver</Text>
+                    <View>
+                      <Text style={[styles.actionBtnText, { color: '#16a34a' }]}>Call Driver</Text>
+                      {driverInfo?.phone_masked && (
+                        <Text style={{ fontSize: 10, color: '#16a34a', opacity: 0.7 }}>{maskPhone(driverInfo.phone)}</Text>
+                      )}
+                    </View>
                   </TouchableOpacity>
-                )}
+                ) : !isActiveRide && !isFavoriteDriver && driverInfo ? (
+                  /* Disabled call state — ride not active, not favorited */
+                  <View style={[styles.actionBtn, { backgroundColor: '#f1f5f9', opacity: 0.6 }]}>
+                    <Ionicons name="call-outline" size={20} color="#94a3b8" />
+                    <View>
+                      <Text style={[styles.actionBtnText, { color: '#94a3b8' }]}>Call Unavailable</Text>
+                      <Text style={{ fontSize: 10, color: '#94a3b8' }}>Favorite driver to re-enable</Text>
+                    </View>
+                  </View>
+                ) : null}
 
                 {(tripStatus === 'accepted' || tripStatus === 'arrived') && (
                   <TouchableOpacity
@@ -1280,9 +1377,89 @@ export default function TrackingScreen() {
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+
+      {/* ── Favorite Driver Prompt Modal ── */}
+      <Modal
+        visible={showFavoritePrompt}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowFavoritePrompt(false)}
+      >
+        <View style={favStyles.overlay}>
+          <View style={favStyles.card}>
+            <View style={favStyles.iconWrap}>
+              <Ionicons name="star" size={36} color="#f59e0b" />
+            </View>
+            <Text style={favStyles.title}>Add driver to favorites?</Text>
+            <Text style={favStyles.body}>
+              {driverInfo?.name ? `${driverInfo.name} drove you safely.` : 'Your driver drove you safely.'}{'\n'}
+              Favorite them to keep calling after future rides.
+            </Text>
+            <View style={favStyles.row}>
+              <TouchableOpacity
+                style={[favStyles.btn, favStyles.btnOutline]}
+                onPress={() => setShowFavoritePrompt(false)}
+              >
+                <Text style={favStyles.btnOutlineText}>Not now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[favStyles.btn, favStyles.btnPrimary, addingFavorite && { opacity: 0.7 }]}
+                onPress={() => void handleAddFavorite(driverInfo?.driver_id || '')}
+                disabled={addingFavorite}
+              >
+                {addingFavorite ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={favStyles.btnPrimaryText}>Yes, add favorite</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
+
+const favStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 28,
+    alignItems: 'center',
+    width: '100%',
+    maxWidth: 340,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  iconWrap: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#fef3c7',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  title: { fontSize: 18, fontWeight: '800', color: '#0f172a', marginBottom: 8, textAlign: 'center' },
+  body: { fontSize: 14, color: '#475569', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
+  row: { flexDirection: 'row', gap: 12, width: '100%' },
+  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  btnOutline: { borderWidth: 2, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+  btnOutlineText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
+  btnPrimary: { backgroundColor: '#f59e0b' },
+  btnPrimaryText: { fontSize: 14, fontWeight: '800', color: '#fff' },
+});
 
 const styles = StyleSheet.create({
   container: {

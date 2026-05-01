@@ -2963,6 +2963,26 @@ async def get_trip_status(trip_id: str, request: Request):
                 )
                 driver_moving = moved_km >= 0.03  # ~30 meters+
 
+        # Phone visibility gate: only expose during active ride OR if rider has favorited this driver
+        ACTIVE_CALL_STATUSES = {"accepted", "arrived", "ongoing", "pending_payment"}
+        trip_status_raw = trip.get("status", "")
+        rider_id_for_check = trip.get("rider_id")
+        phone_visible = trip_status_raw in ACTIVE_CALL_STATUSES
+        if not phone_visible and rider_id_for_check:
+            rider_doc = await db.users.find_one({"id": rider_id_for_check}, {"_id": 0, "favorite_drivers": 1})
+            if rider_doc and driver_id in (rider_doc.get("favorite_drivers") or []):
+                phone_visible = True
+
+        driver_phone_raw = user.get("phone") if phone_visible else None
+        # Masked display for UI (e.g. 08012345678 → 0801***5678)
+        def _mask_phone(p: str | None) -> str | None:
+            if not p:
+                return None
+            digits = str(p).replace(" ", "").replace("-", "")
+            if len(digits) >= 8:
+                return digits[:4] + "***" + digits[-4:]
+            return p
+
         driver_info = {
             "driver_id": driver_id,
             "name": user.get("name", "Driver"),
@@ -2975,6 +2995,10 @@ async def get_trip_status(trip_id: str, request: Request):
             "bank_name": profile.get("bank_name"),
             "account_number": profile.get("account_number"),
             "account_name": profile.get("account_name"),
+            # Controlled phone fields
+            "phone": driver_phone_raw,
+            "phone_masked": _mask_phone(driver_phone_raw),
+            "phone_visible": phone_visible,
         }
 
     return {
