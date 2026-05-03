@@ -1,80 +1,294 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>NEXRYDE - Privacy Policy</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 720px; margin: 0 auto; padding: 24px 16px; color: #1a1a2e; line-height: 1.7; }
-  h1 { color: #0D1420; border-bottom: 3px solid #22E180; padding-bottom: 12px; }
-  h2 { color: #0D1420; margin-top: 32px; }
-  .updated { color: #64748b; font-size: 14px; }
-  ul { padding-left: 20px; }
-  a { color: #22E180; }
-</style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXRYDE — Privacy Policy</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, sans-serif;
+      max-width: 860px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+      color: #0f172a;
+      line-height: 1.75;
+      font-size: 15px;
+      background: #fff;
+    }
+    .brand-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #22e180, #3b82f6);
+      color: #fff;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      margin-bottom: 28px;
+    }
+    h1 { font-size: 28px; font-weight: 900; color: #0f172a; border-bottom: 3px solid #22e180; padding-bottom: 12px; margin-bottom: 6px; }
+    h2 { font-size: 17px; font-weight: 800; color: #0f172a; margin-top: 36px; margin-bottom: 8px; }
+    p, li { color: #334155; }
+    ul { padding-left: 22px; margin: 8px 0; }
+    li { margin-bottom: 5px; }
+    .meta { color: #64748b; font-size: 13px; margin-bottom: 28px; }
+    .highlight-box {
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-left: 4px solid #22e180;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin: 20px 0;
+    }
+    .highlight-box p { margin: 0; font-size: 14px; }
+    .rights-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0;
+    }
+    .rights-item {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 14px 16px;
+    }
+    .rights-item strong { display: block; font-size: 13px; color: #0f172a; margin-bottom: 4px; }
+    .rights-item span { font-size: 13px; color: #64748b; }
+    .contact-box {
+      background: #f0fdf4;
+      border: 1.5px solid #86efac;
+      border-radius: 10px;
+      padding: 16px 18px;
+      margin-top: 40px;
+    }
+    .contact-box p { margin: 3px 0; }
+    a { color: #16a34a; }
+    table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+    th { background: #f1f5f9; text-align: left; padding: 10px 14px; font-weight: 700; color: #0f172a; border: 1px solid #e2e8f0; }
+    td { padding: 9px 14px; border: 1px solid #e2e8f0; color: #334155; vertical-align: top; }
+    tr:nth-child(even) td { background: #f8fafc; }
+    footer { margin-top: 56px; color: #94a3b8; font-size: 12px; text-align: center; }
+    @media (max-width: 500px) { .rights-grid { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
-<h1>NEXRYDE Privacy Policy</h1>
-<p class="updated">Last updated: March 14, 2026</p>
 
-<p>NEXRYDE ("we", "us", or "our") operates the NEXRYDE mobile application. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our ride-sharing platform.</p>
+  <div class="brand-badge">NEXRYDE</div>
 
-<h2>1. Information We Collect</h2>
-<ul>
-  <li><strong>Personal Information:</strong> Name, phone number, email address, National Identification Number (NIN), profile photo.</li>
-  <li><strong>Location Data:</strong> Real-time GPS location during trip booking, in-progress rides, and when drivers are online.</li>
-  <li><strong>Trip Data:</strong> Pickup and dropoff locations, route, fare, distance, duration, and ratings.</li>
-  <li><strong>Payment Information:</strong> Payment method preferences and transaction records. We do not store card numbers.</li>
-  <li><strong>Device Information:</strong> Device type, operating system, and app version for support and analytics.</li>
-  <li><strong>Camera &amp; Microphone:</strong> Used only for document verification, face verification, and voice booking when explicitly activated by you.</li>
-</ul>
+  <h1>Privacy Policy</h1>
+  <p class="meta">Effective Date: May 3, 2026 &nbsp;|&nbsp; Version 2.0 &nbsp;|&nbsp; Complies with the Nigeria Data Protection Act 2023 (NDPA)</p>
 
-<h2>2. How We Use Your Information</h2>
-<ul>
-  <li>Match riders with nearby drivers and calculate fares.</li>
-  <li>Process payments and provide trip receipts.</li>
-  <li>Verify driver identity, vehicle documents, and NIN.</li>
-  <li>Enable safety features: SOS alerts, trip sharing, security codes, and route monitoring.</li>
-  <li>Improve our services through anonymized analytics.</li>
-  <li>Communicate important updates about your account or trips.</li>
-</ul>
+  <p>
+    NEXRYDE (a product of <strong>AdmoblordGroup</strong>) ("we", "us", or "NEXRYDE") operates the NEXRYDE mobile
+    application and related services. We are committed to protecting your personal data. This Privacy Policy explains,
+    in plain language, what data we collect, why we collect it, how we use and share it, how long we keep it, and
+    what rights you have under Nigerian law.
+  </p>
 
-<h2>3. Information Sharing</h2>
-<p>We do not sell your personal data. We share information only in these cases:</p>
-<ul>
-  <li><strong>Between Riders and Drivers:</strong> Name, rating, vehicle details, and real-time location during a trip.</li>
-  <li><strong>Emergency Contacts:</strong> Location and trip data shared when you use the SOS feature or trip sharing.</li>
-  <li><strong>Legal Requirements:</strong> When required by Nigerian law or to protect the safety of users.</li>
-  <li><strong>Service Providers:</strong> Google Maps for routing, SMS providers for OTP verification — bound by their own privacy policies.</li>
-</ul>
+  <div class="highlight-box">
+    <p><strong>Quick summary:</strong> We collect only what is necessary to run a safe, reliable ride-sharing service.
+    We do not sell your personal data. We never share your data with advertisers. You can request your data or ask us
+    to delete your account at any time from within the app.</p>
+  </div>
 
-<h2>4. Data Security</h2>
-<p>We use encryption (HTTPS/TLS) for all data in transit, JWT-based authentication for API access, and secure storage for sensitive data. Access to user data is restricted to authorized personnel only.</p>
+  <!-- ── 1 ── -->
+  <h2>1. Data We Collect and Why</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th>What we collect</th>
+        <th>Why</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Identity</strong></td>
+        <td>Full name, phone number, email address, National ID (NIN), profile photo, face image</td>
+        <td>Account creation, verification, fraud prevention</td>
+      </tr>
+      <tr>
+        <td><strong>Location</strong></td>
+        <td>GPS coordinates (foreground during booking, background when driver is online)</td>
+        <td>Match riders with nearby drivers, route calculation, live tracking</td>
+      </tr>
+      <tr>
+        <td><strong>Trip Records</strong></td>
+        <td>Pickup/dropoff addresses, route, fare, distance, duration, timestamp, ratings</td>
+        <td>Trip completion, receipts, dispute resolution, analytics</td>
+      </tr>
+      <tr>
+        <td><strong>Payment</strong></td>
+        <td>Payment method choice, transaction reference, top-up history</td>
+        <td>Payment processing and receipts. We do NOT store card numbers.</td>
+      </tr>
+      <tr>
+        <td><strong>Documents (drivers)</strong></td>
+        <td>Driver's licence, vehicle registration, proof of insurance, vehicle licence</td>
+        <td>Regulatory compliance, vehicle and driver verification</td>
+      </tr>
+      <tr>
+        <td><strong>Device</strong></td>
+        <td>Device model, OS version, app version, push notification token</td>
+        <td>App compatibility, support, security alerts</td>
+      </tr>
+      <tr>
+        <td><strong>Camera / Microphone</strong></td>
+        <td>Photos (document upload, face check), audio (trip safety recording when activated)</td>
+        <td>Identity checks, safety recording — only when you explicitly enable them</td>
+      </tr>
+      <tr>
+        <td><strong>Usage Data</strong></td>
+        <td>Feature interactions, error logs (anonymised)</td>
+        <td>App improvement and crash diagnosis</td>
+      </tr>
+    </tbody>
+  </table>
 
-<h2>5. Data Retention</h2>
-<p>We retain trip data for 2 years for dispute resolution and regulatory compliance. Account data is kept while your account is active and deleted within 90 days of account closure upon request.</p>
+  <!-- ── 2 ── -->
+  <h2>2. Legal Basis for Processing</h2>
+  <p>Under the Nigeria Data Protection Act 2023, we process your personal data on the following legal grounds:</p>
+  <ul>
+    <li><strong>Contract performance:</strong> To provide the ride-sharing service you have requested.</li>
+    <li><strong>Legal obligation:</strong> To comply with Nigerian laws including tax, anti-fraud, and safety regulations.</li>
+    <li><strong>Legitimate interests:</strong> To improve our services, prevent fraud, and maintain platform security.</li>
+    <li><strong>Consent:</strong> For optional features such as trip safety recordings and face unlock login — you can withdraw consent at any time from app Settings.</li>
+  </ul>
 
-<h2>6. Your Rights</h2>
-<p>Under the Nigeria Data Protection Regulation (NDPR), you have the right to:</p>
-<ul>
-  <li>Access and download your personal data.</li>
-  <li>Correct inaccurate information.</li>
-  <li>Request deletion of your account and data.</li>
-  <li>Withdraw consent for optional data processing.</li>
-</ul>
+  <!-- ── 3 ── -->
+  <h2>3. How We Share Your Data</h2>
+  <p>We do not sell, rent, or trade your personal data. We share it only in these specific cases:</p>
+  <ul>
+    <li><strong>Between riders and drivers during a trip:</strong> First name, rating, vehicle details (make, model, plate), and real-time GPS. This sharing ends when the trip is complete.</li>
+    <li><strong>Emergency contacts:</strong> Location and trip details shared only when you activate the SOS or Trip Sharing feature.</li>
+    <li><strong>Service providers:</strong> Google Maps (routing), Termii (SMS OTP), Squad (payment processing). Each is bound by its own data protection agreements and our data processing contracts.</li>
+    <li><strong>Legal requirement:</strong> Where required by valid Nigerian court order, law enforcement request, or regulatory obligation.</li>
+    <li><strong>Business transfer:</strong> In the event of a merger, acquisition, or sale of NEXRYDE, your data may be transferred to the successor entity subject to the same privacy protections.</li>
+  </ul>
 
-<h2>7. Location Permissions</h2>
-<p>Location access is essential for our ride-sharing service. You can disable background location access in your device settings, but the app requires foreground location to book and track rides.</p>
+  <!-- ── 4 ── -->
+  <h2>4. Data Security</h2>
+  <ul>
+    <li>All data in transit is encrypted using HTTPS/TLS 1.2+.</li>
+    <li>API access is protected by JWT-based authentication with short-lived tokens.</li>
+    <li>Sensitive data (tokens, device IDs) is stored using platform-level secure storage (iOS Keychain / Android Keystore).</li>
+    <li>Access to production databases is restricted to authorised NEXRYDE personnel with audit logging.</li>
+    <li>Face images used for verification are not stored on-device; they are processed securely on our servers and retained only as a hash fingerprint.</li>
+  </ul>
+  <p>
+    No method of electronic transmission or storage is 100% secure. While we implement industry-standard safeguards,
+    we cannot guarantee absolute security. In the event of a data breach that is likely to result in significant harm
+    to you, we will notify you and the Nigeria Data Protection Commission (NDPC) within 72 hours as required by the NDPA 2023.
+  </p>
 
-<h2>8. Children's Privacy</h2>
-<p>NEXRYDE is not intended for users under 18. We do not knowingly collect data from minors.</p>
+  <!-- ── 5 ── -->
+  <h2>5. Data Retention</h2>
+  <table>
+    <thead>
+      <tr><th>Data Type</th><th>Retention Period</th><th>Reason</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Trip records</td><td>5 years</td><td>Dispute resolution, tax compliance</td></tr>
+      <tr><td>Identity documents (drivers)</td><td>3 years after account closure</td><td>Regulatory compliance</td></tr>
+      <tr><td>Transaction records</td><td>7 years</td><td>Financial regulations (FIRS)</td></tr>
+      <tr><td>Account data (active)</td><td>Duration of account</td><td>Service provision</td></tr>
+      <tr><td>Account data (deleted)</td><td>90 days post-deletion request</td><td>Dispute resolution window</td></tr>
+      <tr><td>Safety recordings (audio)</td><td>30 days unless flagged</td><td>Incident investigation</td></tr>
+    </tbody>
+  </table>
 
-<h2>9. Changes to This Policy</h2>
-<p>We may update this policy from time to time. We will notify you of material changes through the app or via email.</p>
+  <!-- ── 6 ── -->
+  <h2>6. Your Rights Under the Nigeria Data Protection Act 2023</h2>
+  <div class="rights-grid">
+    <div class="rights-item">
+      <strong>Access</strong>
+      <span>Request a copy of all personal data we hold about you.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Correction</strong>
+      <span>Ask us to correct any inaccurate or incomplete data.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Deletion</strong>
+      <span>Request deletion of your account and personal data (subject to legal retention obligations).</span>
+    </div>
+    <div class="rights-item">
+      <strong>Portability</strong>
+      <span>Receive your data in a machine-readable format.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Objection</strong>
+      <span>Object to processing based on legitimate interests.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Restrict Processing</strong>
+      <span>Ask us to pause processing while a dispute is resolved.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Withdraw Consent</strong>
+      <span>Turn off consent-based features (face unlock, safety recording) from in-app Settings.</span>
+    </div>
+    <div class="rights-item">
+      <strong>Complain</strong>
+      <span>Lodge a complaint with the Nigeria Data Protection Commission (NDPC) at <a href="https://ndpc.gov.ng">ndpc.gov.ng</a>.</span>
+    </div>
+  </div>
+  <p>To exercise any of the above rights, email <a href="mailto:privacy@nexryde.com">privacy@nexryde.com</a>. We will respond within 30 days.</p>
 
-<h2>10. Contact Us</h2>
-<p>For privacy questions or data requests:<br>
-Email: <a href="mailto:privacy@nexryde.com">privacy@nexryde.com</a><br>
-Support: <a href="mailto:support@nexryde.com">support@nexryde.com</a></p>
+  <!-- ── 7 ── -->
+  <h2>7. Location Data</h2>
+  <p>
+    Location access is essential to the ride-sharing service. The app requests foreground location during booking and
+    in-progress rides. Background location is requested only when a driver is online and waiting for trip offers.
+    You can adjust location permissions in your device settings, but disabling location will prevent you from booking
+    or receiving rides.
+  </p>
+
+  <!-- ── 8 ── -->
+  <h2>8. Cookies and Analytics</h2>
+  <p>
+    The NEXRYDE mobile app does not use browser cookies. We use anonymised, aggregated in-app analytics to understand
+    feature usage and improve the product. No personally identifiable information is included in analytics data.
+  </p>
+
+  <!-- ── 9 ── -->
+  <h2>9. International Data Transfers</h2>
+  <p>
+    Your data may be processed on servers hosted by Google Cloud (us-central1 region) and MongoDB Atlas. These providers
+    are bound by contractual data protection obligations and comply with international data protection standards.
+    Where data is transferred outside Nigeria, we ensure appropriate safeguards are in place.
+  </p>
+
+  <!-- ── 10 ── -->
+  <h2>10. Children's Privacy</h2>
+  <p>
+    NEXRYDE is not intended for persons under 18 years of age. We do not knowingly collect personal data from minors.
+    If we discover that a minor has created an account, we will delete the account and all associated data immediately.
+    If you believe a minor is using NEXRYDE, please notify us at <a href="mailto:support@nexryde.com">support@nexryde.com</a>.
+  </p>
+
+  <!-- ── 11 ── -->
+  <h2>11. Changes to This Policy</h2>
+  <p>
+    We may update this Privacy Policy from time to time. For material changes, we will notify you via in-app notification
+    or email at least 14 days before the new policy takes effect, with the version number and effective date clearly
+    displayed. Continued use after the effective date constitutes acceptance.
+  </p>
+
+  <!-- ── CONTACT ── -->
+  <div class="contact-box">
+    <h2 style="margin-top: 0;">Contact and Data Requests</h2>
+    <p><strong>Privacy / Data Requests:</strong> <a href="mailto:privacy@nexryde.com">privacy@nexryde.com</a></p>
+    <p><strong>Customer Support:</strong> <a href="mailto:support@nexryde.com">support@nexryde.com</a></p>
+    <p><strong>Legal &amp; Compliance:</strong> <a href="mailto:legal@nexryde.com">legal@nexryde.com</a></p>
+    <p style="margin-top: 10px; color: #64748b; font-size: 13px;">
+      NEXRYDE is a product of AdmoblordGroup, Nigeria. Registered Data Controller under the Nigeria Data Protection Act 2023.
+    </p>
+  </div>
+
+  <footer>© 2026 NEXRYDE — AdmoblordGroup. All rights reserved.</footer>
+
 </body>
 </html>
