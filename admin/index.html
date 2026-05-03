@@ -376,6 +376,10 @@
             background: rgba(255,255,255,0.08);
             border-color: rgba(99,102,241,0.3);
         }
+    @keyframes toastIn {
+        from { opacity:0; transform:translateY(12px); }
+        to   { opacity:1; transform:translateY(0);    }
+    }
     </style>
 </head>
 <body>
@@ -855,33 +859,63 @@
             </div>
             <!-- Shield Cases Page -->
             <div class="page-section" id="page-shield">
-                <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px;">
-                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                        <button class="action-btn approve" onclick="loadShieldCases('all')" id="shieldFilterAll">All</button>
-                        <button class="action-btn" onclick="loadShieldCases('awaiting_response')" id="shieldFilterAwaiting" style="background:rgba(234,179,8,0.15);color:#EAB308;border:1px solid rgba(234,179,8,0.3);">Awaiting Response</button>
-                        <button class="action-btn" onclick="loadShieldCases('under_review')" id="shieldFilterReview" style="background:rgba(14,165,233,0.15);color:#0EA5E9;border:1px solid rgba(14,165,233,0.3);">Under Review</button>
-                        <button class="action-btn" onclick="loadShieldCases('resolved')" id="shieldFilterResolved" style="background:rgba(0,208,132,0.15);color:#00D084;border:1px solid rgba(0,208,132,0.3);">Resolved</button>
+                <!-- Stats row -->
+                <div class="stats-grid" id="shieldStatsRow" style="margin-bottom:20px;">
+                    <div class="stat-card" style="background:rgba(234,179,8,0.08);border-color:rgba(234,179,8,0.25);">
+                        <div class="icon" style="background:rgba(234,179,8,0.15);"><i class="ri-time-line" style="color:#EAB308;"></i></div>
+                        <div class="value" id="shieldStatAwaiting" style="color:#EAB308;">0</div>
+                        <div class="label">Awaiting Response</div>
                     </div>
-                    <span id="shieldCaseCount" style="color:#94A3B8;font-size:13px;margin-left:auto;"></span>
+                    <div class="stat-card" style="background:rgba(14,165,233,0.08);border-color:rgba(14,165,233,0.25);">
+                        <div class="icon" style="background:rgba(14,165,233,0.15);"><i class="ri-search-line" style="color:#0EA5E9;"></i></div>
+                        <div class="value" id="shieldStatReview" style="color:#0EA5E9;">0</div>
+                        <div class="label">Under Review</div>
+                    </div>
+                    <div class="stat-card" style="background:rgba(0,208,132,0.08);border-color:rgba(0,208,132,0.25);">
+                        <div class="icon" style="background:rgba(0,208,132,0.15);"><i class="ri-checkbox-circle-line" style="color:#00D084;"></i></div>
+                        <div class="value" id="shieldStatResolved" style="color:#00D084;">0</div>
+                        <div class="label">Resolved</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="icon green"><i class="ri-shield-check-line"></i></div>
+                        <div class="value" id="shieldStatTotal">0</div>
+                        <div class="label">Total Cases</div>
+                    </div>
                 </div>
+
+                <!-- Filter + count -->
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;">
+                    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                        <button onclick="loadShieldCases('all')" id="shieldBtnAll" class="action-btn approve" style="border-radius:20px;padding:7px 16px;font-size:13px;">All</button>
+                        <button onclick="loadShieldCases('awaiting_response')" id="shieldBtnAwaiting" class="action-btn" style="border-radius:20px;padding:7px 16px;font-size:13px;background:rgba(234,179,8,0.12);color:#EAB308;border:1px solid rgba(234,179,8,0.3);">Awaiting Response</button>
+                        <button onclick="loadShieldCases('under_review')" id="shieldBtnReview" class="action-btn" style="border-radius:20px;padding:7px 16px;font-size:13px;background:rgba(14,165,233,0.12);color:#0EA5E9;border:1px solid rgba(14,165,233,0.3);">Under Review</button>
+                        <button onclick="loadShieldCases('resolved')" id="shieldBtnResolved" class="action-btn" style="border-radius:20px;padding:7px 16px;font-size:13px;background:rgba(0,208,132,0.12);color:#00D084;border:1px solid rgba(0,208,132,0.3);">Resolved</button>
+                    </div>
+                    <span id="shieldCaseCount" style="color:#94A3B8;font-size:13px;margin-left:auto;font-weight:600;"></span>
+                </div>
+
+                <!-- Table -->
                 <div class="card">
-                    <div class="card-header">
-                        <h3>Shield Cases</h3>
+                    <div class="card-header" style="padding:16px 20px;">
+                        <h3 style="display:flex;align-items:center;gap:8px;">
+                            <i class="ri-shield-check-line" style="color:#00E676;"></i> Shield Cases
+                        </h3>
                     </div>
                     <div id="shieldCasesTableWrap" style="overflow-x:auto;">
                         <table style="width:100%;border-collapse:collapse;">
                             <thead>
-                                <tr style="border-bottom:1px solid rgba(255,255,255,0.08);">
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Case ID</th>
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Issue</th>
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Status</th>
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Filed</th>
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Decision</th>
-                                    <th style="padding:12px 16px;text-align:left;font-size:12px;color:#64748B;font-weight:700;text-transform:uppercase;">Actions</th>
+                                <tr style="border-bottom:1px solid rgba(255,255,255,0.07);">
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Case ID</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Issue Type</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Parties</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Status</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Filed</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;">Decision</th>
+                                    <th style="padding:10px 16px;text-align:left;font-size:11px;color:#64748B;font-weight:800;text-transform:uppercase;letter-spacing:0.6px;"></th>
                                 </tr>
                             </thead>
                             <tbody id="shieldCasesTable">
-                                <tr><td colspan="6" style="padding:32px;text-align:center;color:#64748B;">Loading…</td></tr>
+                                <tr><td colspan="7" style="padding:40px;text-align:center;color:#64748B;">Loading…</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -892,61 +926,73 @@
 
     <!-- Shield Case Detail Modal -->
     <div class="modal-overlay" id="shieldModal" style="display:none;z-index:9999;">
-        <div class="modal-content" style="max-width:680px;max-height:90vh;overflow-y:auto;">
-            <div class="modal-header">
-                <h3><i class="ri-shield-check-line" style="color:#00E676;"></i> Shield Case <span id="shieldModalCaseId"></span></h3>
-                <button class="modal-close" onclick="closeShieldModal()">&times;</button>
+        <div class="modal-content" style="max-width:700px;max-height:92vh;overflow-y:auto;padding:0;">
+            <!-- Sticky modal header -->
+            <div style="background:rgba(15,23,42,0.97);padding:20px 24px;border-bottom:1px solid rgba(255,255,255,0.07);position:sticky;top:0;z-index:1;display:flex;align-items:center;justify-content:space-between;backdrop-filter:blur(12px);">
+                <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="width:36px;height:36px;border-radius:10px;background:rgba(0,230,118,0.15);display:flex;align-items:center;justify-content:center;">
+                        <i class="ri-shield-check-line" style="color:#00E676;font-size:18px;"></i>
+                    </div>
+                    <div>
+                        <div style="font-size:16px;font-weight:900;color:#FFF;">Nexryde Shield</div>
+                        <div style="font-size:12px;color:#64748B;font-weight:600;">Case <span id="shieldModalCaseId" style="color:#00E676;"></span></div>
+                    </div>
+                </div>
+                <button class="modal-close" onclick="closeShieldModal()" style="width:32px;height:32px;border-radius:50%;background:rgba(255,255,255,0.07);border:none;color:#94A3B8;font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;">&times;</button>
             </div>
 
-            <!-- Status + Issue -->
-            <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;" id="shieldModalBadges"></div>
+            <div style="padding:24px;">
+                <!-- Status + Issue badges -->
+                <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:20px;" id="shieldModalBadges"></div>
 
-            <!-- Timeline -->
-            <div style="background:rgba(0,0,0,0.2);border-radius:14px;padding:16px;margin-bottom:20px;">
+                <!-- Timeline (vertical) -->
                 <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:12px;">CASE PROGRESS</div>
-                <div id="shieldTimeline" style="display:flex;align-items:center;gap:0;"></div>
-            </div>
+                <div style="background:rgba(0,0,0,0.25);border:1px solid rgba(255,255,255,0.07);border-radius:16px;padding:16px 20px;margin-bottom:24px;">
+                    <div id="shieldTimeline"></div>
+                </div>
 
-            <!-- Trip Evidence -->
-            <div style="margin-bottom:20px;">
+                <!-- Evidence -->
                 <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px;">TRIP EVIDENCE</div>
-                <div id="shieldEvidenceGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;background:rgba(0,0,0,0.2);border-radius:14px;padding:14px;"></div>
-            </div>
+                <div id="shieldEvidenceGrid" style="background:rgba(0,0,0,0.2);border:1px solid rgba(255,255,255,0.07);border-radius:16px;overflow:hidden;margin-bottom:24px;"></div>
 
-            <!-- Statements -->
-            <div style="margin-bottom:20px;">
+                <!-- Statements -->
                 <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px;">STATEMENTS</div>
-                <div id="shieldRiderStatement" style="background:rgba(14,165,233,0.08);border:1px solid rgba(14,165,233,0.25);border-radius:12px;padding:14px;margin-bottom:8px;"></div>
-                <div id="shieldDriverStatement" style="background:rgba(0,208,132,0.08);border:1px solid rgba(0,208,132,0.25);border-radius:12px;padding:14px;"></div>
-            </div>
+                <div id="shieldRiderStatement" style="background:rgba(14,165,233,0.07);border:1px solid rgba(14,165,233,0.2);border-radius:14px;padding:16px;margin-bottom:10px;"></div>
+                <div id="shieldDriverStatement" style="background:rgba(0,208,132,0.07);border:1px solid rgba(0,208,132,0.2);border-radius:14px;padding:16px;margin-bottom:24px;"></div>
 
-            <!-- Decision -->
-            <div id="shieldResolvedSection" style="display:none;margin-bottom:20px;">
-                <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px;">DECISION</div>
-                <div id="shieldDecisionDisplay" style="background:rgba(0,0,0,0.2);border-radius:12px;padding:14px;"></div>
-            </div>
+                <!-- Existing decision (if resolved) -->
+                <div id="shieldResolvedSection" style="display:none;margin-bottom:24px;">
+                    <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:10px;">FINAL DECISION</div>
+                    <div id="shieldDecisionDisplay" style="border-radius:14px;padding:16px;border:1px solid rgba(255,255,255,0.1);"></div>
+                </div>
 
-            <!-- Admin Decision Form -->
-            <div id="shieldDecisionForm" style="border-top:1px solid rgba(255,255,255,0.08);padding-top:20px;">
-                <div style="font-size:11px;color:#64748B;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;margin-bottom:14px;">ADMIN DECISION</div>
-                <input type="hidden" id="shieldDecisionCaseId" />
-                <div class="form-group">
-                    <label>Decision</label>
-                    <select id="shieldDecisionSelect" style="width:100%;padding:12px 14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:#FFF;font-size:14px;">
-                        <option value="">— Select a decision —</option>
-                        <option value="no_action">No Action</option>
-                        <option value="warning">Warning</option>
-                        <option value="refund_partial">Partial Refund</option>
-                        <option value="refund_full">Full Refund</option>
-                        <option value="account_restriction">Account Restriction</option>
-                        <option value="account_suspension">Account Suspension</option>
-                    </select>
+                <!-- Admin decision form -->
+                <div id="shieldDecisionForm" style="background:rgba(0,230,118,0.05);border:1px solid rgba(0,230,118,0.2);border-radius:16px;padding:20px;">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+                        <i class="ri-gavel-line" style="color:#00E676;font-size:18px;"></i>
+                        <span style="font-size:13px;color:#FFF;font-weight:800;">ADMIN DECISION</span>
+                    </div>
+                    <input type="hidden" id="shieldDecisionCaseId" />
+                    <div class="form-group" style="margin-bottom:14px;">
+                        <label style="font-size:12px;color:#94A3B8;font-weight:700;margin-bottom:6px;display:block;">Select Decision</label>
+                        <select id="shieldDecisionSelect" style="width:100%;padding:11px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:12px;color:#FFF;font-size:14px;cursor:pointer;">
+                            <option value="">— Choose a decision —</option>
+                            <option value="no_action">No Action Taken</option>
+                            <option value="warning">Issue Warning</option>
+                            <option value="refund_partial">Partial Refund</option>
+                            <option value="refund_full">Full Refund</option>
+                            <option value="account_restriction">Restrict Account</option>
+                            <option value="account_suspension">Suspend Account</option>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:16px;">
+                        <label style="font-size:12px;color:#94A3B8;font-weight:700;margin-bottom:6px;display:block;">Reason / Explanation <span style="color:#EF4444;">*</span></label>
+                        <textarea id="shieldDecisionReason" rows="4" placeholder="Explain the decision in clear, professional language. Both parties will be notified." style="width:100%;padding:12px 14px;background:rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.12);border-radius:12px;color:#FFF;font-size:13px;resize:vertical;line-height:1.5;box-sizing:border-box;"></textarea>
+                    </div>
+                    <button onclick="submitShieldDecision()" style="width:100%;padding:14px;background:linear-gradient(135deg,#00E676,#00C853);color:#0D1420;font-size:15px;font-weight:900;border:none;border-radius:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
+                        <i class="ri-shield-check-line"></i> Submit Decision
+                    </button>
                 </div>
-                <div class="form-group">
-                    <label>Decision Reason (required)</label>
-                    <textarea id="shieldDecisionReason" rows="4" placeholder="Explain the decision in detail…" style="width:100%;padding:12px 14px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:#FFF;font-size:14px;resize:vertical;"></textarea>
-                </div>
-                <button class="login-btn" onclick="submitShieldDecision()" style="background:linear-gradient(135deg,#00E676,#00C853);">Submit Decision</button>
             </div>
         </div>
     </div>
@@ -1680,6 +1726,28 @@
             account_restriction: { label: 'Account Restricted',  color: '#EF4444' },
             account_suspension:  { label: 'Account Suspended',   color: '#DC2626' },
         };
+        // ─── Toast notifications ──────────────────────────────────────────────────
+        function showNotification(msg, type = 'success') {
+            const existing = document.getElementById('adminToast');
+            if (existing) existing.remove();
+            const colors = { success: '#00E676', error: '#EF4444', warning: '#F59E0B', info: '#0EA5E9' };
+            const icons  = { success: 'ri-checkbox-circle-line', error: 'ri-close-circle-line', warning: 'ri-alert-line', info: 'ri-information-line' };
+            const t = document.createElement('div');
+            t.id = 'adminToast';
+            t.innerHTML = `<i class="${icons[type]||icons.info}" style="font-size:18px;color:${colors[type]||colors.info};flex-shrink:0;"></i><span style="flex:1;">${msg}</span>`;
+            Object.assign(t.style, {
+                position:'fixed', bottom:'28px', right:'28px', zIndex:'99999',
+                display:'flex', alignItems:'center', gap:'10px',
+                background:'#1E293B', border:`1px solid ${colors[type]||colors.info}40`,
+                borderRadius:'14px', padding:'14px 18px', boxShadow:'0 8px 32px rgba(0,0,0,0.4)',
+                fontSize:'14px', color:'#FFF', fontWeight:'600',
+                animation:'toastIn .25s ease', maxWidth:'360px',
+            });
+            document.body.appendChild(t);
+            setTimeout(() => { t.style.opacity='0'; t.style.transition='opacity .3s'; setTimeout(()=>t.remove(),350); }, 3500);
+        }
+
+        // ─── Nexryde Shield ──────────────────────────────────────────────────────
         const SHIELD_ISSUE_LABELS = {
             driver_behavior: 'Driver Behavior',
             wrong_fare:      'Wrong Fare',
@@ -1687,51 +1755,97 @@
             safety_concern:  'Safety Concern',
             other:           'Other',
         };
-
         let currentShieldFilter = 'all';
 
-        async function loadShieldCases(filter) {
+        // Vertical timeline step
+        function shieldTimelineStep(label, sub, state, isLast) {
+            const color = state === 'done' ? '#00E676' : state === 'active' ? '#0EA5E9' : '#334155';
+            const icon  = state === 'done' ? 'ri-checkbox-circle-fill' : state === 'active' ? 'ri-radio-button-line' : 'ri-circle-line';
+            return `
+              <div style="display:flex;gap:12px;${isLast ? '' : 'margin-bottom:4px;'}">
+                <div style="display:flex;flex-direction:column;align-items:center;width:28px;flex-shrink:0;">
+                  <div style="width:28px;height:28px;border-radius:50%;background:${color}20;border:1.5px solid ${color};display:flex;align-items:center;justify-content:center;">
+                    <i class="${icon}" style="color:${color};font-size:13px;"></i>
+                  </div>
+                  ${!isLast ? `<div style="width:2px;flex:1;min-height:16px;background:${color === '#334155' ? '#1E293B' : color + '40'};margin:3px 0;"></div>` : ''}
+                </div>
+                <div style="padding-bottom:${isLast ? '0' : '12px'};padding-top:4px;">
+                  <div style="font-size:13px;font-weight:700;color:${state === 'pending' ? '#64748B' : '#FFF'};">${label}</div>
+                  ${sub ? `<div style="font-size:11px;color:#64748B;margin-top:2px;">${sub}</div>` : ''}
+                </div>
+              </div>`;
+        }
+
+        async function loadShieldCases(filter = 'all') {
             currentShieldFilter = filter;
+
+            // Highlight active filter button
+            ['All','Awaiting','Review','Resolved'].forEach(k => {
+                const btn = document.getElementById(`shieldBtn${k}`);
+                if (btn) btn.style.opacity = '0.5';
+            });
+            const activeMap = { all:'All', awaiting_response:'Awaiting', under_review:'Review', resolved:'Resolved' };
+            const activeBtn = document.getElementById(`shieldBtn${activeMap[filter]}`);
+            if (activeBtn) activeBtn.style.opacity = '1';
+
             document.getElementById('shieldCasesTable').innerHTML =
-                '<tr><td colspan="6" style="padding:32px;text-align:center;color:#64748B;">Loading…</td></tr>';
+                '<tr><td colspan="7" style="padding:40px;text-align:center;color:#64748B;">Loading…</td></tr>';
+
             try {
-                const qs = filter && filter !== 'all' ? `?status=${filter}` : '';
-                const res = await fetch(`${API_URL}/shield/admin/disputes${qs}`, {
-                    headers: { 'x-admin-token': adminToken }
-                });
-                const data = await res.json();
-                const cases = data.disputes || [];
-                document.getElementById('shieldCaseCount').textContent = `${data.total ?? cases.length} cases`;
+                // Load all cases to compute stats, then filter for display
+                const allRes = await fetch(`${API_URL}/shield/admin/disputes`, { headers: { 'x-admin-token': adminToken } });
+                const allData = await allRes.json();
+                const allCases = allData.disputes || [];
+
+                const statCounts = { awaiting_response: 0, under_review: 0, resolved: 0 };
+                allCases.forEach(c => { if (statCounts[c.status] !== undefined) statCounts[c.status]++; });
+                document.getElementById('shieldStatAwaiting').textContent = statCounts.awaiting_response;
+                document.getElementById('shieldStatReview').textContent   = statCounts.under_review;
+                document.getElementById('shieldStatResolved').textContent = statCounts.resolved;
+                document.getElementById('shieldStatTotal').textContent    = allCases.length;
+
+                const cases = filter === 'all' ? allCases : allCases.filter(c => c.status === filter);
+                document.getElementById('shieldCaseCount').textContent =
+                    `${cases.length} case${cases.length !== 1 ? 's' : ''}`;
 
                 if (cases.length === 0) {
                     document.getElementById('shieldCasesTable').innerHTML =
-                        '<tr><td colspan="6" style="padding:32px;text-align:center;color:#64748B;">No cases found</td></tr>';
+                        `<tr><td colspan="7" style="padding:40px;text-align:center;color:#64748B;">No ${filter === 'all' ? '' : filter.replace('_',' ')} cases found</td></tr>`;
                     return;
                 }
 
+                const fmtDate = s => s ? new Date(s).toLocaleDateString('en-NG', { day:'numeric', month:'short', year:'numeric' }) : '—';
+
                 document.getElementById('shieldCasesTable').innerHTML = cases.map(c => {
-                    const sc = SHIELD_STATUS_CFG[c.status] || { label: c.status, color: '#94A3B8' };
-                    const issueLabel = SHIELD_ISSUE_LABELS[c.issue_type] || c.issue_type || 'General';
-                    const dc = c.decision ? (SHIELD_DECISION_CFG[c.decision] || { label: c.decision, color: '#94A3B8' }) : null;
-                    const date = c.created_at ? new Date(c.created_at).toLocaleDateString('en-NG', { day:'numeric', month:'short', year:'numeric' }) : '—';
-                    return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);">
-                        <td style="padding:12px 16px;font-size:13px;color:#94A3B8;font-family:monospace;">#${(c.id||'').slice(-6).toUpperCase()}</td>
-                        <td style="padding:12px 16px;font-size:13px;color:#FFF;font-weight:600;">${issueLabel}</td>
+                    const sc  = SHIELD_STATUS_CFG[c.status]  || { label: c.status,    color: '#94A3B8' };
+                    const dc  = c.decision ? (SHIELD_DECISION_CFG[c.decision] || { label: c.decision, color: '#94A3B8' }) : null;
+                    const iss = SHIELD_ISSUE_LABELS[c.issue_type] || c.issue_type || 'General';
+                    const parties = [
+                        c.rider_name  ? `<span style="font-size:11px;color:#0EA5E9;">${c.rider_name}</span>` : '',
+                        c.driver_name ? `<span style="font-size:11px;color:#00D084;">${c.driver_name}</span>` : '',
+                    ].filter(Boolean).join('<br>') || '—';
+                    return `<tr style="border-bottom:1px solid rgba(255,255,255,0.05);transition:background .15s;" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background=''">
+                        <td style="padding:12px 16px;font-size:12px;color:#64748B;font-family:monospace;font-weight:700;">#${(c.id||'').slice(-6).toUpperCase()}</td>
+                        <td style="padding:12px 16px;font-size:13px;color:#FFF;font-weight:600;">${iss}</td>
+                        <td style="padding:12px 16px;">${parties}</td>
                         <td style="padding:12px 16px;">
-                            <span style="background:${sc.color}22;color:${sc.color};border:1px solid ${sc.color}44;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;">${sc.label}</span>
+                          <span style="background:${sc.color}1A;color:${sc.color};border:1px solid ${sc.color}40;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;">${sc.label}</span>
                         </td>
-                        <td style="padding:12px 16px;font-size:12px;color:#94A3B8;">${date}</td>
+                        <td style="padding:12px 16px;font-size:12px;color:#94A3B8;">${fmtDate(c.created_at)}</td>
                         <td style="padding:12px 16px;">
-                            ${dc ? `<span style="background:${dc.color}22;color:${dc.color};border:1px solid ${dc.color}44;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;">${dc.label}</span>` : '<span style="color:#64748B;font-size:12px;">Pending</span>'}
+                          ${dc ? `<span style="background:${dc.color}1A;color:${dc.color};border:1px solid ${dc.color}40;padding:4px 10px;border-radius:20px;font-size:11px;font-weight:800;">${dc.label}</span>`
+                               : '<span style="color:#475569;font-size:12px;">—</span>'}
                         </td>
                         <td style="padding:12px 16px;">
-                            <button class="action-btn approve" onclick="openShieldCase('${c.id}')">Review</button>
+                          <button class="action-btn approve" style="padding:6px 14px;font-size:12px;border-radius:8px;" onclick="openShieldCase('${c.id}')">
+                            <i class="ri-eye-line"></i> Review
+                          </button>
                         </td>
                     </tr>`;
                 }).join('');
             } catch (err) {
                 document.getElementById('shieldCasesTable').innerHTML =
-                    `<tr><td colspan="6" style="padding:32px;text-align:center;color:#EF4444;">Error loading cases: ${err.message}</td></tr>`;
+                    `<tr><td colspan="7" style="padding:40px;text-align:center;color:#EF4444;">Error: ${err.message}</td></tr>`;
             }
         }
 
@@ -1741,6 +1855,9 @@
             document.getElementById('shieldDecisionCaseId').value = caseId;
             document.getElementById('shieldDecisionSelect').value = '';
             document.getElementById('shieldDecisionReason').value = '';
+            document.getElementById('shieldModalBadges').innerHTML = '<span style="color:#64748B;font-size:13px;">Loading…</span>';
+            document.getElementById('shieldTimeline').innerHTML = '';
+            document.getElementById('shieldEvidenceGrid').innerHTML = '';
 
             try {
                 const res = await fetch(`${API_URL}/shield/admin/disputes/${caseId}`, {
@@ -1748,80 +1865,103 @@
                 });
                 const data = await res.json();
                 const c = data.dispute;
-                if (!c) return;
+                if (!c) { alert('Case not found'); return; }
 
-                // Badges
-                const sc = SHIELD_STATUS_CFG[c.status] || { label: c.status, color: '#94A3B8' };
-                const issueLabel = SHIELD_ISSUE_LABELS[c.issue_type] || c.issue_type || 'General';
-                document.getElementById('shieldModalBadges').innerHTML = `
-                    <span style="background:${sc.color}22;color:${sc.color};border:1px solid ${sc.color}44;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:800;">${sc.label}</span>
-                    <span style="background:rgba(148,163,184,0.15);color:#94A3B8;border:1px solid rgba(148,163,184,0.25);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;">${issueLabel}</span>
-                    ${c.rider_name ? `<span style="background:rgba(14,165,233,0.12);color:#0EA5E9;border:1px solid rgba(14,165,233,0.25);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;">Rider: ${c.rider_name}</span>` : ''}
-                    ${c.driver_name ? `<span style="background:rgba(0,208,132,0.12);color:#00D084;border:1px solid rgba(0,208,132,0.25);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;">Driver: ${c.driver_name}</span>` : ''}
-                `;
+                const fmtDate = s => s ? new Date(s).toLocaleDateString('en-NG', { day:'numeric', month:'short', year:'numeric' }) : null;
 
-                // Timeline
+                // ── Badges ──
+                const sc  = SHIELD_STATUS_CFG[c.status]  || { label: c.status,    color: '#94A3B8' };
+                const iss = SHIELD_ISSUE_LABELS[c.issue_type] || c.issue_type || 'General';
+                document.getElementById('shieldModalBadges').innerHTML = [
+                    `<span style="background:${sc.color}1A;color:${sc.color};border:1px solid ${sc.color}40;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:800;">${sc.label}</span>`,
+                    `<span style="background:rgba(148,163,184,0.12);color:#94A3B8;border:1px solid rgba(148,163,184,0.22);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;">${iss}</span>`,
+                    c.rider_name  ? `<span style="background:rgba(14,165,233,0.1);color:#0EA5E9;border:1px solid rgba(14,165,233,0.25);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;"><i class="ri-user-line"></i> ${c.rider_name}</span>` : '',
+                    c.driver_name ? `<span style="background:rgba(0,208,132,0.1);color:#00D084;border:1px solid rgba(0,208,132,0.25);padding:5px 12px;border-radius:20px;font-size:12px;font-weight:700;"><i class="ri-car-line"></i> ${c.driver_name}</span>` : '',
+                    `<span style="color:#64748B;font-size:12px;margin-left:auto;">Filed ${fmtDate(c.created_at) || '—'}</span>`,
+                ].filter(Boolean).join('');
+
+                // ── Vertical Timeline ──
                 const stages = { awaiting_response: 1, under_review: 2, resolved: 3, dismissed: 3 };
-                const current = stages[c.status] || 0;
-                const steps = ['Report Submitted', 'Awaiting Response', 'Under Review', 'Resolved'];
-                document.getElementById('shieldTimeline').innerHTML = steps.map((step, i) => {
-                    const done = i + 1 <= current;
-                    const active = i + 1 === current;
-                    const color = done ? '#00E676' : active ? '#0EA5E9' : '#334155';
-                    return `
-                        <div style="display:flex;flex-direction:column;align-items:center;flex:1;">
-                            <div style="width:28px;height:28px;border-radius:50%;background:${color}22;border:2px solid ${color};display:flex;align-items:center;justify-content:center;margin-bottom:6px;">
-                                <i class="ri-${done || active ? 'check' : 'time'}-line" style="color:${color};font-size:12px;"></i>
-                            </div>
-                            <div style="font-size:10px;font-weight:700;color:${done || active ? '#FFF' : '#64748B'};text-align:center;max-width:70px;line-height:1.3;">${step}</div>
-                        </div>
-                        ${i < steps.length - 1 ? `<div style="flex:1;height:2px;background:${i + 2 <= current ? '#00E676' : '#1E293B'};margin-bottom:14px;max-width:40px;"></div>` : ''}
-                    `;
+                const cur = stages[c.status] || 0;
+                const tlSteps = [
+                    { label: 'Report Submitted',  sub: fmtDate(c.created_at) },
+                    { label: 'Awaiting Response', sub: 'Other party notified to respond' },
+                    { label: 'Under Review',      sub: 'Nexryde team reviewing statements' },
+                    { label: 'Case Resolved',     sub: c.resolved_at ? fmtDate(c.resolved_at) : null },
+                ];
+                document.getElementById('shieldTimeline').innerHTML = tlSteps.map((st, i) => {
+                    const n     = i + 1;
+                    const state = n < cur ? 'done' : n === cur ? (cur === 3 && c.status === 'resolved' ? 'done' : 'active') : 'pending';
+                    return shieldTimelineStep(st.label, st.sub, state, i === tlSteps.length - 1);
                 }).join('');
 
-                // Trip evidence
+                // ── Trip Evidence ──
                 const ev = c.trip_evidence || {};
                 const evRows = [
-                    ['Fare', ev.fare ? `₦${Number(ev.fare).toLocaleString()}` : null],
-                    ['Distance', ev.distance_km ? `${Number(ev.distance_km).toFixed(1)} km` : null],
-                    ['Duration', ev.duration_mins ? `~${ev.duration_mins} min` : null],
-                    ['Payment', ev.payment_method],
-                    ['Pickup', ev.pickup_address],
-                    ['Drop-off', ev.dropoff_address],
-                    ['Trip Started', ev.trip_start_time ? new Date(ev.trip_start_time).toLocaleString() : null],
-                    ['Trip Ended', ev.trip_end_time ? new Date(ev.trip_end_time).toLocaleString() : null],
+                    ['Fare',        ev.fare        ? `₦${Number(ev.fare).toLocaleString()}` : null],
+                    ['Distance',    ev.distance_km ? `${Number(ev.distance_km).toFixed(1)} km` : null],
+                    ['Duration',    ev.duration_mins ? `~${ev.duration_mins} min` : null],
+                    ['Payment',     ev.payment_method],
+                    ['Pickup',      ev.pickup_address],
+                    ['Drop-off',    ev.dropoff_address],
+                    ['Trip started',ev.trip_start_time ? new Date(ev.trip_start_time).toLocaleString('en-NG') : null],
+                    ['Trip ended',  ev.trip_end_time   ? new Date(ev.trip_end_time).toLocaleString('en-NG')   : null],
                 ].filter(([, v]) => v);
-                document.getElementById('shieldEvidenceGrid').innerHTML = evRows.map(([k, v]) => `
-                    <div style="background:rgba(0,0,0,0.15);border-radius:8px;padding:10px;">
-                        <div style="font-size:10px;color:#64748B;font-weight:700;text-transform:uppercase;margin-bottom:4px;">${k}</div>
-                        <div style="font-size:13px;color:#FFF;font-weight:600;word-break:break-word;">${v}</div>
-                    </div>
-                `).join('') || '<div style="color:#64748B;font-size:13px;">No evidence available</div>';
 
-                // Statements
-                document.getElementById('shieldRiderStatement').innerHTML = c.rider_statement
-                    ? `<div style="font-size:11px;color:#0EA5E9;font-weight:800;margin-bottom:6px;">RIDER STATEMENT</div><div style="font-size:13px;color:#FFF;line-height:1.6;">${c.rider_statement}</div>`
-                    : `<div style="font-size:12px;color:#EAB308;font-weight:700;"><i class="ri-time-line"></i> Rider response pending</div>`;
-                document.getElementById('shieldDriverStatement').innerHTML = c.driver_statement
-                    ? `<div style="font-size:11px;color:#00D084;font-weight:800;margin-bottom:6px;">DRIVER STATEMENT</div><div style="font-size:13px;color:#FFF;line-height:1.6;">${c.driver_statement}</div>`
-                    : `<div style="font-size:12px;color:#EAB308;font-weight:700;"><i class="ri-time-line"></i> Driver response pending</div>`;
+                if (evRows.length) {
+                    document.getElementById('shieldEvidenceGrid').innerHTML = evRows.map(([k, v], i) => `
+                      <div style="display:flex;justify-content:space-between;align-items:flex-start;padding:10px 14px;${i < evRows.length-1 ? 'border-bottom:1px solid rgba(255,255,255,0.06);' : ''}">
+                        <span style="font-size:12px;color:#64748B;font-weight:700;">${k}</span>
+                        <span style="font-size:12px;color:#FFF;font-weight:700;text-align:right;max-width:55%;word-break:break-word;">${v}</span>
+                      </div>`).join('');
+                } else {
+                    document.getElementById('shieldEvidenceGrid').innerHTML = '<div style="padding:14px;color:#64748B;font-size:13px;text-align:center;">No trip evidence attached</div>';
+                }
 
-                // Decision
+                // ── Statements ──
+                const riderEl  = document.getElementById('shieldRiderStatement');
+                const driverEl = document.getElementById('shieldDriverStatement');
+                riderEl.innerHTML = c.rider_statement
+                    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                         <i class="ri-user-line" style="color:#0EA5E9;"></i>
+                         <span style="font-size:11px;color:#0EA5E9;font-weight:800;">RIDER STATEMENT</span>
+                       </div>
+                       <div style="font-size:13px;color:#FFF;line-height:1.65;">${c.rider_statement}</div>`
+                    : `<div style="display:flex;align-items:center;gap:6px;">
+                         <i class="ri-time-line" style="color:#F59E0B;"></i>
+                         <span style="font-size:12px;color:#F59E0B;font-weight:700;">Rider response pending</span>
+                       </div>`;
+                driverEl.innerHTML = c.driver_statement
+                    ? `<div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;">
+                         <i class="ri-car-line" style="color:#00D084;"></i>
+                         <span style="font-size:11px;color:#00D084;font-weight:800;">DRIVER STATEMENT</span>
+                       </div>
+                       <div style="font-size:13px;color:#FFF;line-height:1.65;">${c.driver_statement}</div>`
+                    : `<div style="display:flex;align-items:center;gap:6px;">
+                         <i class="ri-time-line" style="color:#F59E0B;"></i>
+                         <span style="font-size:12px;color:#F59E0B;font-weight:700;">Driver response pending</span>
+                       </div>`;
+
+                // ── Decision / Form ──
                 if (c.status === 'resolved' && c.decision) {
                     const dc = SHIELD_DECISION_CFG[c.decision] || { label: c.decision, color: '#94A3B8' };
                     document.getElementById('shieldResolvedSection').style.display = 'block';
+                    document.getElementById('shieldDecisionDisplay').style.background = `${dc.color}12`;
+                    document.getElementById('shieldDecisionDisplay').style.border     = `1px solid ${dc.color}40`;
                     document.getElementById('shieldDecisionDisplay').innerHTML = `
-                        <span style="background:${dc.color}22;color:${dc.color};border:1px solid ${dc.color}44;padding:6px 14px;border-radius:20px;font-size:13px;font-weight:800;display:inline-block;margin-bottom:10px;">${dc.label}</span>
-                        ${c.decision_reason ? `<div style="font-size:13px;color:#94A3B8;line-height:1.6;">${c.decision_reason}</div>` : ''}
-                    `;
+                      <div style="display:flex;align-items:center;gap:10px;margin-bottom:${c.decision_reason ? '12px' : '0'};">
+                        <i class="ri-shield-check-line" style="color:${dc.color};font-size:20px;"></i>
+                        <span style="font-size:16px;font-weight:900;color:${dc.color};">${dc.label}</span>
+                      </div>
+                      ${c.decision_reason ? `<div style="font-size:13px;color:#94A3B8;line-height:1.6;">${c.decision_reason}</div>` : ''}`;
                     document.getElementById('shieldDecisionForm').style.display = 'none';
                 } else {
                     document.getElementById('shieldResolvedSection').style.display = 'none';
                     document.getElementById('shieldDecisionForm').style.display = 'block';
                 }
-
             } catch (err) {
-                alert('Could not load case details: ' + err.message);
+                alert('Could not load case: ' + err.message);
+                closeShieldModal();
             }
         }
 
@@ -1830,14 +1970,19 @@
         }
 
         async function submitShieldDecision() {
-            const caseId = document.getElementById('shieldDecisionCaseId').value;
+            const caseId   = document.getElementById('shieldDecisionCaseId').value;
             const decision = document.getElementById('shieldDecisionSelect').value;
-            const reason = document.getElementById('shieldDecisionReason').value.trim();
+            const reason   = document.getElementById('shieldDecisionReason').value.trim();
 
-            if (!decision) { alert('Please select a decision.'); return; }
-            if (reason.length < 10) { alert('Please provide a decision reason (min 10 characters).'); return; }
+            if (!decision) { alert('Please choose a decision before submitting.'); return; }
+            if (reason.length < 10) { alert('Decision reason must be at least 10 characters.'); return; }
 
-            if (!confirm(`Confirm decision: "${decision.replace(/_/g,' ').toUpperCase()}"?\n\nThis will notify both the rider and driver.`)) return;
+            const decisionLabel = document.getElementById('shieldDecisionSelect').selectedOptions[0]?.text || decision;
+            if (!confirm(`Submit decision: "${decisionLabel}"?\n\nBoth the rider and driver will be notified immediately.`)) return;
+
+            const btn = event.target;
+            btn.disabled = true;
+            btn.textContent = 'Submitting…';
 
             try {
                 const res = await fetch(`${API_URL}/shield/admin/disputes/${caseId}/decision`, {
@@ -1847,7 +1992,7 @@
                 });
                 const data = await res.json();
                 if (data.success) {
-                    alert('✓ Decision submitted. Both parties have been notified.');
+                    showNotification('Decision submitted. Both parties have been notified.', 'success');
                     closeShieldModal();
                     loadShieldCases(currentShieldFilter);
                 } else {
@@ -1855,6 +2000,9 @@
                 }
             } catch (err) {
                 alert('Network error: ' + err.message);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="ri-shield-check-line"></i> Submit Decision';
             }
         }
         // ─────────────────────────────────────────────────────────────────────
