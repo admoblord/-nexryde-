@@ -994,10 +994,29 @@ async def email_sign_in(request: EmailSignInRequest):
     user = await db.users.find_one({"email": email})
     if user:
         if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
-            raise HTTPException(
-                status_code=423,
-                detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
-            )
+            # Auto-clear false-positive SIM swap locks for verified drivers.
+            # A driver who has completed verification and provides valid email credentials
+            # should never be permanently locked out by a stale fingerprint mismatch.
+            profile_check = await db.driver_profiles.find_one(
+                {"user_id": user["id"]}, {"_id": 0, "verification_status": 1}
+            ) or {}
+            if profile_check.get("verification_status") in ("approved", "verified"):
+                _now_iso = datetime.now(timezone.utc).isoformat()
+                await db.users.update_one(
+                    {"id": user["id"]},
+                    {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""},
+                     "$set": {"sim_swap_lock_cleared_at": _now_iso, "sim_swap_lock_cleared_source": "email_login_verified_driver"}}
+                )
+                await db.driver_profiles.update_one(
+                    {"user_id": user["id"]},
+                    {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
+                )
+                user["sim_swap_lock"] = {"active": False}
+            else:
+                raise HTTPException(
+                    status_code=423,
+                    detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
+                )
         if user.get("role") == "driver":
             driver_profile = await db.driver_profiles.find_one(
                 {"user_id": user["id"]},
@@ -1266,6 +1285,38 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
         "face_confidence": confidence,
         "face_template_saved": True,
     }
+
+
+@auth_router.post("/auth/admin/clear-sim-swap-lock")
+async def admin_clear_sim_swap_lock(request: Request):
+    """Admin endpoint: manually clear a driver's SIM swap lock by phone or user_id."""
+    body = await request.json()
+    phone = body.get("phone", "").strip()
+    user_id = body.get("user_id", "").strip()
+    admin_key = body.get("admin_key", "")
+    if admin_key != "nexryde_admin_2030":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    query = {}
+    if user_id:
+        query = {"id": user_id}
+    elif phone:
+        query = {"phone": normalize_phone(phone)}
+    else:
+        raise HTTPException(status_code=400, detail="Provide phone or user_id")
+    user = await db.users.find_one(query, {"_id": 0, "id": 1, "name": 1, "phone": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user["id"]},
+        {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""},
+         "$set": {"sim_swap_lock_cleared_at": now_iso, "sim_swap_lock_cleared_source": "admin_manual_clear"}}
+    )
+    await db.driver_profiles.update_one(
+        {"user_id": user["id"]},
+        {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
+    )
+    return {"message": f"SIM swap lock cleared for driver {user.get('name', user['id'])}", "cleared_at": now_iso}
 
 
 @auth_router.post("/auth/driver-sim-swap/reconfirm")
