@@ -21,6 +21,46 @@ import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 
+function formatEarnings(amount: number): string {
+  if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
+  if (amount >= 1_000) return `${(amount / 1_000).toFixed(1)}k`;
+  return amount.toLocaleString();
+}
+
+function TripCardSkeleton() {
+  const anim = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 900, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.4, duration: 900, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [anim]);
+  return (
+    <Animated.View style={[skStyles.skCard, { opacity: anim }]}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+        <View style={[skStyles.skBox, { width: 80, height: 22, borderRadius: 999 }]} />
+        <View style={[skStyles.skBox, { width: 64, height: 22 }]} />
+      </View>
+      <View style={[skStyles.skBox, { width: '60%', height: 14, marginBottom: 6 }]} />
+      <View style={[skStyles.skBox, { width: '45%', height: 14, marginBottom: 10 }]} />
+      <View style={[skStyles.skBox, { width: '100%', height: 40, borderRadius: 8 }]} />
+    </Animated.View>
+  );
+}
+const skStyles = StyleSheet.create({
+  skCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  skBox: { backgroundColor: '#E2E8F0', borderRadius: 6, height: 16 },
+});
+
 type TripStatus = 'completed' | 'cancelled' | 'ongoing' | 'accepted' | 'arrived' | 'pending' | 'pending_payment';
 type FilterKey = 'all' | 'active' | 'completed' | 'cancelled';
 
@@ -233,6 +273,12 @@ export default function DriverTripsTab() {
               <Text style={styles.metaChipText}>{distKm.toFixed(1)} km</Text>
             </View>
           )}
+          {item.duration_mins ? (
+            <View style={styles.metaChip}>
+              <Ionicons name="time-outline" size={12} color="#6B7280" />
+              <Text style={styles.metaChipText}>{Math.round(Number(item.duration_mins))} min</Text>
+            </View>
+          ) : null}
           {item.category && (
             <View style={styles.metaChip}>
               <Ionicons name="car-sport" size={12} color="#6B7280" />
@@ -241,8 +287,14 @@ export default function DriverTripsTab() {
           )}
           {item.payment_method && (
             <View style={styles.metaChip}>
-              <Ionicons name="card" size={12} color="#6B7280" />
+              <Ionicons name={item.payment_method?.toLowerCase()?.includes('cash') ? 'cash-outline' : 'card'} size={12} color="#6B7280" />
               <Text style={styles.metaChipText}>{item.payment_method}</Text>
+            </View>
+          )}
+          {item.rider_rating != null && Number(item.rider_rating) > 0 && (
+            <View style={[styles.metaChip, { backgroundColor: '#FEF9C3' }]}>
+              <Ionicons name="star" size={12} color="#CA8A04" />
+              <Text style={[styles.metaChipText, { color: '#854D0E' }]}>{Number(item.rider_rating).toFixed(1)}</Text>
             </View>
           )}
         </View>
@@ -302,7 +354,7 @@ export default function DriverTripsTab() {
         </View>
         <View style={styles.statDivider} />
         <View style={styles.statItem}>
-          <Text style={styles.statValue}>{CURRENCY}{(stats.earnings / 1000).toFixed(1)}k</Text>
+          <Text style={styles.statValue}>{CURRENCY}{formatEarnings(stats.earnings)}</Text>
           <Text style={styles.statLabel}>Earned</Text>
         </View>
         <View style={styles.statDivider} />
@@ -403,9 +455,8 @@ export default function DriverTripsTab() {
       )}
 
       {loading && !refreshing ? (
-        <View style={styles.loadingCenter}>
-          <ActivityIndicator size="large" color="#2563EB" />
-          <Text style={styles.loadingText}>Loading trips…</Text>
+        <View style={{ paddingHorizontal: SPACING.lg, paddingTop: SPACING.lg }}>
+          {[0, 1, 2, 3].map(i => <TripCardSkeleton key={i} />)}
         </View>
       ) : (
         <FlatList

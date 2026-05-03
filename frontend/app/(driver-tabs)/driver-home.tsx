@@ -973,7 +973,7 @@ export default function ModernDriverHome() {
           </View>
         </View>
 
-        {/* ONLINE STATUS TOGGLE - PROMINENT */}
+        {/* ONLINE STATUS TOGGLE */}
         <Animated.View
           style={[
             styles.statusCard,
@@ -981,39 +981,76 @@ export default function ModernDriverHome() {
             isOnline && styles.statusCardOnlineGlow,
           ]}
         >
+          {/* Status dot indicator */}
+          <View style={[styles.statusDot, isOnline && styles.statusDotOnline, !driverCanReceiveOffers && styles.statusDotLocked]}>
+            {isOnline ? (
+              <Ionicons name="radio-button-on" size={20} color="#22E180" />
+            ) : !driverApproved ? (
+              <Ionicons name="shield-half" size={20} color="#FBBF24" />
+            ) : !trialReady ? (
+              <Ionicons name="alert-circle" size={20} color="#FBBF24" />
+            ) : (
+              <Ionicons name="power" size={20} color="rgba(255,255,255,0.5)" />
+            )}
+          </View>
+
           <View style={styles.statusLeft}>
-            <Ionicons 
-              name={isOnline ? "radio-button-on" : driverCanReceiveOffers ? "radio-button-off" : "shield-half"}
-              size={24} 
-              color={isOnline ? COLORS.success : driverCanReceiveOffers ? COLORS.error : COLORS.warning}
-            />
             <View style={styles.statusText}>
               <Text style={styles.statusTitle}>
-                {!driverApproved ? 'Dashboard access only' : !trialReady ? 'Activation needed' : isOnline ? t.driver.youAreOnline : t.driver.youAreOffline}
+                {isOnline
+                  ? t.driver.youAreOnline
+                  : !driverApproved
+                    ? 'Pending Verification'
+                    : !trialReady
+                      ? 'Activate Your Account'
+                      : t.driver.youAreOffline}
               </Text>
-              <Text style={styles.statusSubtitle}>
-                {!driverApproved
-                  ? 'Documents saved. Ride access unlocks after approval (free 20-trip trial).'
-                  : !trialReady
-                    ? 'Your account is approved. Activate your driver access before going online.'
-                  : subscriptionStatus === 'trial'
-                    ? `Free trial: ${trialTripsCompleted}/${trialTripsTarget} trips completed${trialExtended ? ' (extended)' : ''}`
-                  : isOnline ? t.driver.statusReceivingOffers : t.driver.statusGoOnlineHint}
+              <Text style={styles.statusSubtitle} numberOfLines={2}>
+                {isOnline
+                  ? (subscriptionStatus === 'trial'
+                      ? `Trial • ${trialTripsCompleted}/${trialTripsTarget} trips${trialExtended ? ' (extended)' : ''}`
+                      : t.driver.statusReceivingOffers)
+                  : !driverApproved
+                    ? 'Documents under review. Access unlocks after admin approval.'
+                    : !trialReady
+                      ? 'Tap "Activate" to start your free 20-trip trial.'
+                      : t.driver.statusGoOnlineHint}
               </Text>
             </View>
           </View>
-          <TouchableOpacity 
-            style={[styles.toggleButton, isOnline && styles.toggleButtonActive, (!driverCanReceiveOffers || toggleSyncing) && styles.toggleButtonDisabled]}
-            onPress={handleToggleOnline}
-            activeOpacity={0.8}
-            disabled={toggleSyncing}
-          >
-            {toggleSyncing ? (
-              <ActivityIndicator size="small" color="#FFF" style={{ margin: 6 }} />
-            ) : (
-              <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
-            )}
-          </TouchableOpacity>
+
+          {/* Action: either toggle or CTA button */}
+          {!driverApproved ? (
+            <View style={styles.pendingBadge}>
+              <Ionicons name="time-outline" size={14} color="#FBBF24" />
+              <Text style={styles.pendingBadgeText}>Review</Text>
+            </View>
+          ) : !trialReady ? (
+            <TouchableOpacity
+              style={styles.activateBtn}
+              onPress={() => guardedPush('/driver/subscription')}
+              activeOpacity={0.88}
+            >
+              <Text style={styles.activateBtnText}>Activate</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[
+                styles.toggleButton,
+                isOnline && styles.toggleButtonActive,
+                toggleSyncing && styles.toggleButtonDisabled,
+              ]}
+              onPress={handleToggleOnline}
+              activeOpacity={0.8}
+              disabled={toggleSyncing}
+            >
+              {toggleSyncing ? (
+                <ActivityIndicator size="small" color="#FFF" style={{ margin: 6 }} />
+              ) : (
+                <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
+              )}
+            </TouchableOpacity>
+          )}
         </Animated.View>
 
         <View style={styles.headerPills}>
@@ -1417,10 +1454,11 @@ const styles = StyleSheet.create({
   statusCard: {
     backgroundColor: COLORS.white,
     borderRadius: 20,
-    padding: 20,
+    padding: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.15,
@@ -1435,15 +1473,50 @@ const styles = StyleSheet.create({
     shadowRadius: 18,
     borderColor: 'rgba(0, 212, 106, 0.45)',
   },
-  statusLeft: {
-    flexDirection: 'row',
+  statusDot: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(30,58,95,0.08)',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusDotOnline: {
+    backgroundColor: 'rgba(0,212,106,0.12)',
+  },
+  statusDotLocked: {
+    backgroundColor: 'rgba(251,191,36,0.12)',
+  },
+  statusLeft: {
     flex: 1,
   },
   statusText: {
-    marginLeft: 14,
     flex: 1,
   },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(251,191,36,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  pendingBadgeText: { fontSize: 12, fontWeight: '800', color: '#D97706' },
+  activateBtn: {
+    backgroundColor: '#2563EB',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  activateBtnText: { fontSize: 13, fontWeight: '800', color: '#FFF' },
   statusTitle: {
     fontSize: 18,
     fontWeight: '900',

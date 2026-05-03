@@ -62,6 +62,32 @@ function statusLabel(s: string) {
   return 'Unverified';
 }
 
+const COLOR_SWATCHES: Record<string, string> = {
+  white: '#FFFFFF', black: '#1C1C1C', silver: '#C0C0C0', gray: '#808080', grey: '#808080',
+  red: '#EF4444', blue: '#3B82F6', green: '#22C55E', yellow: '#EAB308', orange: '#F97316',
+  gold: '#EAB308', brown: '#92400E', maroon: '#7F1D1D', navy: '#1E3A5F', beige: '#E7D9B8',
+  'dark gray': '#4B5563', 'dark grey': '#4B5563', 'pearl white': '#F5F5F0',
+  'wine red': '#7F1D1D', champagne: '#F7E7CE', pink: '#EC4899',
+};
+
+function colorSwatch(colorLabel: string): string | null {
+  const key = colorLabel?.toLowerCase().trim();
+  return COLOR_SWATCHES[key] ?? null;
+}
+
+function ColorDot({ color, size = 14 }: { color: string; size?: number }) {
+  const hex = colorSwatch(color);
+  if (!hex) return null;
+  return (
+    <View style={{
+      width: size, height: size, borderRadius: size / 2,
+      backgroundColor: hex,
+      borderWidth: 1,
+      borderColor: hex === '#FFFFFF' || hex === '#F5F5F0' ? '#CBD5E1' : 'transparent',
+    }} />
+  );
+}
+
 export default function VehicleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -73,6 +99,14 @@ export default function VehicleScreen() {
   const [loadError, setLoadError] = useState(false);
   const [switchingId, setSwitchingId] = useState<string | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = setTimeout(() => setSuccessMessage(null), 3500);
+  };
 
   // Add vehicle modal
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -142,6 +176,7 @@ export default function VehicleScreen() {
       const data = await res.json();
       setVehicles(data.vehicles || []);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showSuccess('Active vehicle switched successfully.');
     } catch {
       Alert.alert('Error', 'Could not switch vehicle. Try again.');
     } finally {
@@ -180,6 +215,7 @@ export default function VehicleScreen() {
       setVehicles(data.vehicles || []);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditModalVisible(false);
+      showSuccess('Vehicle details updated.');
     } catch {
       Alert.alert('Error', 'Could not save changes. Try again.');
     } finally {
@@ -255,7 +291,7 @@ export default function VehicleScreen() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAddModalVisible(false);
       setAddForm({ type: 'Economy', make: '', model: '', year: '', color: '', plate: '' });
-      Alert.alert('Vehicle Added', 'Your new vehicle needs to be verified before it can accept rides. Contact NEXRYDE support with the vehicle documents.');
+      showSuccess('Vehicle added! It will be verified before accepting rides.');
     } catch {
       Alert.alert('Error', 'Could not add vehicle. Check your connection.');
     } finally {
@@ -282,6 +318,14 @@ export default function VehicleScreen() {
           <Ionicons name="add" size={22} color={COLORS.primary} />
         </TouchableOpacity>
       </View>
+
+      {/* Success toast */}
+      {successMessage && (
+        <View style={styles.successToast}>
+          <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
+          <Text style={styles.successToastText}>{successMessage}</Text>
+        </View>
+      )}
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 24) + 80 }]}
@@ -340,9 +384,12 @@ export default function VehicleScreen() {
                     <Text style={styles.activeVehicleName}>
                       {[activeVehicle.make, activeVehicle.model].filter(Boolean).join(' ') || 'My Vehicle'}
                     </Text>
-                    <Text style={styles.activeVehicleDetail}>
-                      {[activeVehicle.color, activeVehicle.year, activeVehicle.plate].filter(Boolean).join(' • ')}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                      <ColorDot color={activeVehicle.color} size={12} />
+                      <Text style={styles.activeVehicleDetail}>
+                        {[activeVehicle.color, activeVehicle.year, activeVehicle.plate].filter(Boolean).join(' • ')}
+                      </Text>
+                    </View>
                   </View>
                   <View style={styles.activeBadge}>
                     <Ionicons name="radio-button-on" size={12} color="#4ADE80" />
@@ -409,9 +456,12 @@ export default function VehicleScreen() {
                     <Text style={styles.vehicleName}>
                       {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle'}
                     </Text>
-                    <Text style={styles.vehicleDetail}>
-                      {[vehicle.color, vehicle.year, vehicle.plate].filter(Boolean).join(' • ')}
-                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                      <ColorDot color={vehicle.color} size={11} />
+                      <Text style={styles.vehicleDetail}>
+                        {[vehicle.color, vehicle.year, vehicle.plate].filter(Boolean).join(' • ')}
+                      </Text>
+                    </View>
                     <View style={[styles.verificationChip, { backgroundColor: statusBg(vehicle.verification_status) }]}>
                       <View style={[styles.verificationDot, { backgroundColor: statusColor(vehicle.verification_status) }]} />
                       <Text style={[styles.verificationChipText, { color: statusColor(vehicle.verification_status) }]}>
@@ -608,6 +658,18 @@ export default function VehicleScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  successToast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#F0FDF4',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#BBF7D0',
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.sm,
+  },
+  successToastText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#15803D' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

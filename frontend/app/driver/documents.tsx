@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   ScrollView,
   TouchableOpacity,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -15,6 +16,56 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/consta
 import { BACKEND_URL, getAuthHeaders, getDriverProfile } from '@/src/services/api';
 import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
 import { useAppStore } from '@/src/store/appStore';
+
+const DOC_DESCRIPTIONS: Record<string, string> = {
+  nin: 'National Identification Number — proves your Nigerian citizenship',
+  drivers_license: 'Valid driving licence issued by FRSC Nigeria',
+  passport_photo: 'Clear recent photo showing your face, no filters',
+  vehicle_registration: 'Official document showing you own or are authorised to use the vehicle',
+  vehicle_license: 'Vehicle licence document issued by the licensing authority',
+  road_worthiness: 'Certificate confirming the vehicle is safe to operate on roads',
+  insurance: 'Third-party or comprehensive motor insurance certificate',
+  vehicle_front: 'Photo of the front of your vehicle in clear daylight',
+  vehicle_interior: 'Photo showing a clean, passenger-ready interior',
+  vehicle_ac: 'Photo of the air conditioning unit/vents inside the vehicle',
+};
+
+function DocSkeleton() {
+  const anim = useRef(new Animated.Value(0.45)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, { toValue: 1, duration: 850, useNativeDriver: true }),
+        Animated.timing(anim, { toValue: 0.45, duration: 850, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [anim]);
+  return (
+    <Animated.View style={[skDoc.row, { opacity: anim }]}>
+      <View style={[skDoc.icon]} />
+      <View style={{ flex: 1, gap: 6 }}>
+        <View style={[skDoc.bar, { width: '60%' }]} />
+        <View style={[skDoc.bar, { width: '80%', height: 10 }]} />
+      </View>
+      <View style={[skDoc.bar, { width: 64, height: 24, borderRadius: 999 }]} />
+    </Animated.View>
+  );
+}
+const skDoc = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  icon: { width: 44, height: 44, borderRadius: 10, backgroundColor: '#E2E8F0' },
+  bar: { height: 14, borderRadius: 6, backgroundColor: '#E2E8F0' },
+});
 
 interface DocStatus {
   id: string;
@@ -198,16 +249,16 @@ export default function DocumentsScreen() {
         {/* Document list */}
         <Text style={styles.sectionTitle}>Document Status</Text>
         {loading ? (
-          <View style={styles.loadingRow}>
-            <Ionicons name="hourglass-outline" size={24} color={COLORS.gray400} />
-            <Text style={styles.loadingText}>Loading documents…</Text>
-          </View>
+          <>
+            {Array.from({ length: 6 }).map((_, i) => <DocSkeleton key={i} />)}
+          </>
         ) : (
           documents.map((doc, idx) => (
             <View
               key={doc.id}
               style={[
                 styles.documentCard,
+                doc.status === 'verified' && styles.documentCardVerified,
                 idx === documents.length - 1 && { marginBottom: 0 },
               ]}
             >
@@ -216,14 +267,14 @@ export default function DocumentsScreen() {
               </View>
               <View style={styles.docInfo}>
                 <Text style={styles.docName}>{doc.name}</Text>
-                {doc.detail ? (
-                  <Text style={[styles.docDetail, { color: getStatusColor(doc.status) }]}>
-                    {doc.detail}
-                  </Text>
-                ) : null}
+                <Text style={styles.docDesc} numberOfLines={2}>
+                  {doc.detail
+                    ? doc.detail
+                    : DOC_DESCRIPTIONS[doc.id] ?? ''}
+                </Text>
               </View>
               <View style={[styles.statusBadge, { backgroundColor: getStatusBg(doc.status) }]}>
-                <Ionicons name={getStatusIcon(doc.status)} size={14} color={getStatusColor(doc.status)} />
+                <Ionicons name={getStatusIcon(doc.status)} size={13} color={getStatusColor(doc.status)} />
                 <Text style={[styles.statusBadgeText, { color: getStatusColor(doc.status) }]}>
                   {getStatusText(doc.status)}
                 </Text>
@@ -344,6 +395,12 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.sm,
     ...SHADOWS.sm,
     gap: SPACING.sm,
+    borderWidth: 1,
+    borderColor: 'transparent',
+  },
+  documentCardVerified: {
+    borderColor: '#BBF7D0',
+    backgroundColor: '#F9FFFE',
   },
   docIconWrap: {
     width: 44,
@@ -355,6 +412,7 @@ const styles = StyleSheet.create({
   docInfo: { flex: 1 },
   docName: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray800 },
   docDetail: { fontSize: FONT_SIZE.xs, fontWeight: '600', marginTop: 2 },
+  docDesc: { fontSize: 11, color: COLORS.gray400, marginTop: 2, lineHeight: 15 },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
