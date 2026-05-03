@@ -24,6 +24,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppStore, type User } from '@/src/store/appStore';
 import { saveUserSession, getUserSession } from '@/utils/authStorage';
+import { autoApplyPendingReferral } from '@/src/services/referralService';
 import {
   driverTermsRouteParams,
   driverDocumentsRouteParams,
@@ -284,6 +285,9 @@ export default function LoginScreen() {
         setToken(resolvedToken);
         setIsAuthenticated(true);
         await saveUserSession({ ...data.user, token: resolvedToken });
+        // Auto-apply any deep-link referral code for riders (silently)
+        if (data.user.role !== 'driver' && resolvedToken)
+          void autoApplyPendingReferral(data.user.id, resolvedToken);
         await routeVerifiedUser(data.user, resolvedToken);
         return;
       }

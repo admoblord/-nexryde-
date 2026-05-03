@@ -18,6 +18,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
+import { getPendingReferralCode, clearPendingReferralCode } from '@/src/services/referralService';
 
 export default function RiderNINScreen() {
   const router = useRouter();
@@ -53,6 +54,9 @@ export default function RiderNINScreen() {
 
     setLoading(true);
     try {
+      // Read any deep-link referral code before registering
+      const pendingReferral = await getPendingReferralCode();
+
       const response = await fetch(`${BACKEND_URL}/api/auth/register`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -64,6 +68,7 @@ export default function RiderNINScreen() {
           google_id: googleId || null,
           profile_image: profileImage || null,
           nin: nin,
+          referral_code: pendingReferral || null,
         }),
       });
 
@@ -75,6 +80,8 @@ export default function RiderNINScreen() {
         setToken(resolvedToken);
         setIsAuthenticated(true);
         await saveUserSession({ ...data.user, token: resolvedToken });
+        // Referral was embedded in registration; clear the pending code
+        if (pendingReferral) await clearPendingReferralCode();
         router.replace('/(rider-tabs)/rider-home');
       } else {
         Alert.alert('Error', data.detail || 'Registration failed');

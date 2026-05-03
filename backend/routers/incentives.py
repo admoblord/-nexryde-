@@ -255,16 +255,68 @@ async def get_my_credits(request: Request):
     }
 
 
+NEXRYDE_INVITE_BASE_URL = "https://nexryde.app/invite"
+
+
 @incentives_router.get("/incentives/referral-code")
 async def get_referral_code(request: Request):
-    """Get or create the caller's personal referral code."""
+    """Get or create the caller's personal referral code + invite link."""
     user_id = require_authenticated(request)
     code = await _generate_referral_code(user_id)
+    invite_url = f"{NEXRYDE_INVITE_BASE_URL}?code={code}"
     return {
         "referral_code": code,
+        "invite_url": invite_url,
         "inviter_reward": REFERRAL_REWARD_INVITER_NGN,
         "invitee_reward": REFERRAL_REWARD_INVITEE_NGN,
-        "message": f"Share your code. When your friend completes their first ride you both get ₦{REFERRAL_REWARD_INVITER_NGN:,.0f}!",
+        "message": f"Join Nexryde with my link and get ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride: {invite_url}",
+        "share_message": f"🚗 Join Nexryde — Nigeria's smartest ride app!\n\nUse my invite link and we BOTH earn ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride:\n{invite_url}",
+    }
+
+
+@incentives_router.get("/incentives/referral-stats")
+async def get_referral_stats(request: Request):
+    """Referral performance stats: invited count, rewarded count, total earnings."""
+    user_id = require_authenticated(request)
+    code = await _generate_referral_code(user_id)
+
+    # Count users who applied this referral code
+    invited_count = await db.users.count_documents({"referred_by": code})
+
+    # Count those who completed at least one ride (i.e. reward was triggered)
+    rewarded_credits = await db.promo_credits.count_documents({
+        "referral_code": code,
+        "reason": "referral_inviter",
+    })
+
+    # Total earnings from this referral code
+    pipeline = [
+        {"$match": {"referral_code": code, "reason": "referral_inviter"}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ]
+    res = await db.promo_credits.aggregate(pipeline).to_list(1)
+    total_earned = float(res[0]["total"]) if res else 0.0
+
+    # Recent referral events
+    recent_cursor = db.promo_credits.find(
+        {"referral_code": code, "reason": "referral_inviter"},
+        {"_id": 0, "amount": 1, "created_at": 1, "trip_id": 1},
+    ).sort("created_at", -1).limit(10)
+    recent = await recent_cursor.to_list(10)
+
+    invite_url = f"{NEXRYDE_INVITE_BASE_URL}?code={code}"
+    return {
+        "referral_code": code,
+        "invite_url": invite_url,
+        "invited_count": invited_count,
+        "rewarded_count": rewarded_credits,
+        "pending_count": max(0, invited_count - rewarded_credits),
+        "total_earned_ngn": total_earned,
+        "reward_per_referral": REFERRAL_REWARD_INVITER_NGN,
+        "recent_rewards": [
+            {"amount": r.get("amount", 0), "date": r["created_at"].isoformat() if isinstance(r.get("created_at"), datetime) else str(r.get("created_at", ""))}
+            for r in recent
+        ],
     }
 
 

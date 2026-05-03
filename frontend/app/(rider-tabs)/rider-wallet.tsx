@@ -87,6 +87,9 @@ export default function RiderWalletScreen() {
   const [amountStr, setAmountStr] = useState('2000');
   const [promoCode, setPromoCode] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const [inviteUrl, setInviteUrl] = useState('');
+  const [referralStats, setReferralStats] = useState<{ invited: number; rewarded: number; earned: number } | null>(null);
+  const [showManualCode, setShowManualCode] = useState(false);
   const [busy, setBusy] = useState<'checkout' | 'verify' | null>(null);
   const [topupState, setTopupState] = useState<TopupState>({ phase: 'idle' });
   const [txs, setTxs] = useState<Record<string, unknown>[]>([]);
@@ -158,19 +161,23 @@ export default function RiderWalletScreen() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (!uid) { setReferralCode(''); return; }
+    if (!uid) { setReferralCode(''); setInviteUrl(''); setReferralStats(null); return; }
     let cancelled = false;
     const loadIncentives = async () => {
       try {
         const hdr = await getAuthHeaders();
-        const [refRes, creditRes, firstRideRes] = await Promise.allSettled([
+        const [refRes, creditRes, firstRideRes, statsRes] = await Promise.allSettled([
           fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: hdr }),
           fetch(`${BACKEND_URL}/api/incentives/my-credits`, { headers: hdr }),
           fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, { headers: hdr }),
+          fetch(`${BACKEND_URL}/api/incentives/referral-stats`, { headers: hdr }),
         ]);
         if (refRes.status === 'fulfilled' && refRes.value.ok) {
           const data = await refRes.value.json();
-          if (!cancelled) setReferralCode(data.referral_code ?? '');
+          if (!cancelled) {
+            setReferralCode(data.referral_code ?? '');
+            setInviteUrl(data.invite_url ?? '');
+          }
         }
         if (creditRes.status === 'fulfilled' && creditRes.value.ok) {
           const data = await creditRes.value.json();
@@ -179,6 +186,14 @@ export default function RiderWalletScreen() {
         if (firstRideRes.status === 'fulfilled' && firstRideRes.value.ok) {
           const data = await firstRideRes.value.json();
           if (!cancelled) setFirstRideRewardGranted(data.reward_granted ?? false);
+        }
+        if (statsRes.status === 'fulfilled' && statsRes.value.ok) {
+          const data = await statsRes.value.json();
+          if (!cancelled) setReferralStats({
+            invited: data.invited_count ?? 0,
+            rewarded: data.rewarded_count ?? 0,
+            earned: data.total_earned_ngn ?? 0,
+          });
         }
       } catch { if (!cancelled) setReferralCode(''); }
     };
@@ -628,50 +643,121 @@ export default function RiderWalletScreen() {
             </View>
           )}
 
-          {/* Referral */}
-          <View style={[s.rewardCard, { borderLeftColor: '#7C3AED' }]}>
-            <View style={[s.rewardIcon, { backgroundColor: '#EDE9FE' }]}>
-              <Ionicons name="people" size={22} color="#7C3AED" />
+          {/* ── Referral Card ─────────────────────────────────────────── */}
+          <LinearGradient
+            colors={['#2E1065', '#4C1D95', '#2E1065']}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            style={s.referralCard}
+          >
+            {/* Glow */}
+            <View style={s.referralGlow} />
+
+            {/* Header */}
+            <View style={s.referralHeader}>
+              <View style={s.referralIconBig}>
+                <Ionicons name="people" size={24} color="#A78BFA" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.referralCardTitle}>Invite Friends</Text>
+                <Text style={s.referralCardSub}>You & your friend each earn ₦500 after their first ride</Text>
+              </View>
+              <View style={s.referralBadgePill}>
+                <Text style={s.referralBadgeText}>₦500</Text>
+              </View>
             </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.rewardTitle}>Invite Friends — Earn ₦500 Each</Text>
-              <Text style={s.rewardText}>When your friend completes their first ride, you both earn ₦500.</Text>
-              {referralCode ? (
-                <View style={s.referralRow}>
-                  <View style={s.referralCode}>
-                    <Text style={s.referralCodeText}>{referralCode}</Text>
-                  </View>
-                  <TouchableOpacity
-                    style={s.shareBtn}
-                    onPress={() => {
-                      const { Share } = require('react-native');
-                      Share.share({ message: `Join Nexryde with my code ${referralCode} and we both earn ₦500 after your first ride! Download: https://nexryde.app` });
-                    }}
-                  >
-                    <Ionicons name="share-social" size={14} color="#FFF" />
-                    <Text style={s.shareBtnText}>Share</Text>
-                  </TouchableOpacity>
+
+            {/* Stats row */}
+            {referralStats !== null && (
+              <View style={s.referralStats}>
+                <View style={s.referralStatItem}>
+                  <Text style={s.referralStatNum}>{referralStats.invited}</Text>
+                  <Text style={s.referralStatLabel}>Invited</Text>
                 </View>
-              ) : (
-                <Text style={[s.rewardText, { color: C.gray400, marginTop: 4 }]}>Loading your code…</Text>
-              )}
-              {/* Apply code input */}
-              <View style={s.codeInputRow}>
+                <View style={s.referralStatDivider} />
+                <View style={s.referralStatItem}>
+                  <Text style={s.referralStatNum}>{referralStats.rewarded}</Text>
+                  <Text style={s.referralStatLabel}>Rode & Earned</Text>
+                </View>
+                <View style={s.referralStatDivider} />
+                <View style={s.referralStatItem}>
+                  <Text style={[s.referralStatNum, { color: '#4ADE80' }]}>
+                    {referralStats.earned > 0 ? `₦${referralStats.earned.toLocaleString()}` : '₦0'}
+                  </Text>
+                  <Text style={s.referralStatLabel}>You Earned</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Invite Link */}
+            {referralCode ? (
+              <View style={s.referralLinkBox}>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.referralLinkLabel}>YOUR INVITE LINK</Text>
+                  <Text style={s.referralLinkText} numberOfLines={1}>
+                    nexryde.app/invite?code={referralCode}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={s.referralShareBtn}
+                  onPress={() => {
+                    const url = inviteUrl || `https://nexryde.app/invite?code=${referralCode}`;
+                    const msg = `🚗 Join Nexryde — Nigeria's smartest ride app!\n\nUse my invite link and we BOTH earn ₦500 after your first ride:\n${url}`;
+                    const { Share } = require('react-native');
+                    Share.share({ message: msg, url }, { dialogTitle: 'Invite to Nexryde' }).catch(() => {});
+                  }}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="share-social" size={16} color="#FFF" />
+                  <Text style={s.referralShareBtnText}>Share</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={s.referralLinkBox}>
+                <Text style={[s.referralLinkLabel, { color: 'rgba(167,139,250,0.5)' }]}>Loading your invite link…</Text>
+              </View>
+            )}
+
+            {/* Code only row */}
+            {referralCode ? (
+              <View style={s.referralCodeOnly}>
+                <Text style={s.referralCodeOnlyLabel}>CODE</Text>
+                <Text style={s.referralCodeOnlyText}>{referralCode}</Text>
+              </View>
+            ) : null}
+
+            {/* Manual code entry — optional fallback */}
+            <TouchableOpacity
+              style={s.referralToggleManual}
+              onPress={() => setShowManualCode((v) => !v)}
+              activeOpacity={0.7}
+            >
+              <Text style={s.referralToggleManualText}>
+                {showManualCode ? 'Hide' : 'Have a friend\'s code? Enter manually'}
+              </Text>
+              <Ionicons
+                name={showManualCode ? 'chevron-up' : 'chevron-down'}
+                size={14}
+                color="rgba(167,139,250,0.7)"
+              />
+            </TouchableOpacity>
+
+            {showManualCode && (
+              <View style={s.referralManualRow}>
                 <TextInput
-                  style={s.codeInput}
-                  placeholder="Have a code? Enter here"
-                  placeholderTextColor={C.gray400}
+                  style={s.referralManualInput}
+                  placeholder="e.g. NX1A2B3C"
+                  placeholderTextColor="rgba(167,139,250,0.4)"
                   value={promoCode}
                   onChangeText={setPromoCode}
                   autoCapitalize="characters"
                   autoCorrect={false}
                 />
-                <TouchableOpacity style={s.codeApplyBtn} onPress={applyPromoCode}>
-                  <Text style={s.codeApplyText}>Apply</Text>
+                <TouchableOpacity style={s.referralManualBtn} onPress={applyPromoCode}>
+                  <Text style={s.referralManualBtnText}>Apply</Text>
                 </TouchableOpacity>
               </View>
-            </View>
-          </View>
+            )}
+          </LinearGradient>
         </View>
 
         {/* ── TRANSACTION HISTORY ────────────────────────────────────────── */}
@@ -853,6 +939,35 @@ const s = StyleSheet.create({
   rewardText: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2, lineHeight: 18 },
   rewardBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   rewardBadgeText: { fontSize: 13, fontWeight: '900', color: '#92400E' },
+  // Referral card (replaces old referralRow/shareBtn/codeInput)
+  referralCard: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, padding: 20, overflow: 'hidden', position: 'relative' },
+  referralGlow: { position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: '#7C3AED', opacity: 0.18 },
+  referralHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  referralIconBig: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(167,139,250,0.2)', alignItems: 'center', justifyContent: 'center' },
+  referralCardTitle: { color: '#E9D5FF', fontSize: 17, fontWeight: '900' },
+  referralCardSub: { color: 'rgba(233,213,255,0.6)', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  referralBadgePill: { backgroundColor: 'rgba(74,222,128,0.2)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.4)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  referralBadgeText: { color: '#4ADE80', fontSize: 14, fontWeight: '900' },
+  referralStats: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.25)', borderRadius: 14, padding: 16, marginBottom: 16 },
+  referralStatItem: { flex: 1, alignItems: 'center' },
+  referralStatNum: { color: '#E9D5FF', fontSize: 22, fontWeight: '900' },
+  referralStatLabel: { color: 'rgba(233,213,255,0.5)', fontSize: 10, fontWeight: '700', marginTop: 2, letterSpacing: 0.5 },
+  referralStatDivider: { width: 1, height: 36, backgroundColor: 'rgba(167,139,250,0.25)' },
+  referralLinkBox: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(0,0,0,0.3)', borderRadius: 14, padding: 14, marginBottom: 10 },
+  referralLinkLabel: { color: 'rgba(167,139,250,0.7)', fontSize: 9, fontWeight: '800', letterSpacing: 1.5, marginBottom: 3 },
+  referralLinkText: { color: '#C4B5FD', fontSize: 13, fontWeight: '700' },
+  referralShareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#7C3AED', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, shadowColor: '#7C3AED', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 8, elevation: 6 },
+  referralShareBtnText: { color: C.white, fontSize: 13, fontWeight: '900' },
+  referralCodeOnly: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,0,0,0.2)', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 14 },
+  referralCodeOnlyLabel: { color: 'rgba(167,139,250,0.5)', fontSize: 9, fontWeight: '800', letterSpacing: 2 },
+  referralCodeOnlyText: { color: '#DDD6FE', fontSize: 16, fontWeight: '900', letterSpacing: 3 },
+  referralToggleManual: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', paddingVertical: 8 },
+  referralToggleManualText: { color: 'rgba(167,139,250,0.7)', fontSize: 12, fontWeight: '700' },
+  referralManualRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  referralManualInput: { flex: 1, borderWidth: 1, borderColor: 'rgba(167,139,250,0.3)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: Platform.OS === 'ios' ? 12 : 9, fontSize: 14, fontWeight: '700', color: '#E9D5FF', backgroundColor: 'rgba(0,0,0,0.25)' },
+  referralManualBtn: { backgroundColor: '#7C3AED', borderRadius: 12, paddingHorizontal: 18, alignItems: 'center', justifyContent: 'center' },
+  referralManualBtnText: { color: C.white, fontSize: 13, fontWeight: '900' },
+  // Legacy (unused, kept for safety)
   referralRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
   referralCode: { backgroundColor: C.white, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: C.border },
   referralCodeText: { fontWeight: '900', fontSize: 16, color: C.gray900, letterSpacing: 2 },

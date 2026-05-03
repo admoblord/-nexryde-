@@ -1453,6 +1453,14 @@ async def register(request: RegisterRequest, http_request: Request):
     if request.role == "rider" and not request.nin:
         raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
     
+    # Validate referral code if provided (don't block registration if invalid — just ignore)
+    referred_by_code: Optional[str] = None
+    raw_referral = (request.referral_code or "").strip().upper()
+    if raw_referral:
+        referrer = await db.users.find_one({"referral_code": raw_referral}, {"_id": 0, "id": 1})
+        if referrer:
+            referred_by_code = raw_referral
+
     user = create_user_dict(
         phone=normalized_phone or "",
         name=request.name, 
@@ -1464,6 +1472,7 @@ async def register(request: RegisterRequest, http_request: Request):
         nin=request.nin,
         terms_accepted=request.terms_accepted,
         terms_accepted_at=request.terms_accepted_at,
+        referred_by=referred_by_code,
     )
     await db.users.insert_one(user)
     user.pop("_id", None)

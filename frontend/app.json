@@ -18,6 +18,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.nexryde.app",
+      "associatedDomains": ["applinks:nexryde.app"],
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "NexRyde uses your location to detect your pickup point and match you with nearby drivers.",
         "NSCameraUsageDescription": "NEXRYDE needs camera access for document verification",
@@ -39,6 +40,30 @@
         "CAMERA",
         "RECORD_AUDIO",
         "POST_NOTIFICATIONS"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "nexryde.app",
+              "pathPrefix": "/invite"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        },
+        {
+          "action": "VIEW",
+          "data": [
+            {
+              "scheme": "nexryde",
+              "host": "invite"
+            }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
       ]
     },
     "web": {
