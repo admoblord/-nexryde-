@@ -6,6 +6,7 @@ Core rule (enforced everywhere):
 Credits are ONLY granted after a verified completed trip.
 No signup bonuses. No credit on cancelled trips.
 """
+import re
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
@@ -101,6 +102,72 @@ async def _generate_referral_code(user_id: str) -> str:
     code = f"NX{user_id[:6].upper()}"
     await db.users.update_one({"id": user_id}, {"$set": {"referral_code": code}})
     return code
+
+
+async def generate_unique_username(name: str, user_id: str) -> str:
+    """Derive a unique, slug-safe username from a user's full name.
+
+    Rules:
+    - Lowercase only, letters+digits, no spaces or special chars
+    - "Funny Bony" → "funnybony"
+    - If taken: funnybony1, funnybony2, …
+    - Fallback (empty name): "user" + first 6 chars of user_id
+    """
+    base = re.sub(r"[^a-z0-9]", "", (name or "").lower())
+    if not base:
+        base = f"user{user_id[:6].lower()}"
+
+    # Check base
+    if not await db.users.find_one({"username": base, "id": {"$ne": user_id}}):
+        return base
+
+    # Try numeric suffixes
+    for i in range(1, 10_000):
+        candidate = f"{base}{i}"
+        if not await db.users.find_one({"username": candidate, "id": {"$ne": user_id}}):
+            return candidate
+
+    # Ultimate fallback
+    return f"{base}{user_id[:4].lower()}"
+
+
+async def _ensure_username(user_id: str) -> Optional[str]:
+    """Return the user's username, generating one if absent."""
+    user = await db.users.find_one({"id": user_id}, {"username": 1, "name": 1})
+    if not user:
+        return None
+    if user.get("username"):
+        return user["username"]
+    username = await generate_unique_username(user.get("name") or "", user_id)
+    await db.users.update_one({"id": user_id}, {"$set": {"username": username}})
+    return username
+
+
+async def _resolve_referral_identifier(raw: str, caller_user_id: str) -> Optional[dict]:
+    """Resolve a raw identifier (username OR referral code) to a referrer user doc.
+
+    Returns the referrer's user doc (id, referral_code, username, name) or None.
+    Does NOT allow self-referral.
+    """
+    if not raw:
+        return None
+
+    # Try as username first (lowercase slug)
+    referrer = await db.users.find_one(
+        {"username": raw.lower()},
+        {"_id": 0, "id": 1, "referral_code": 1, "username": 1, "name": 1},
+    )
+    if not referrer:
+        # Try as referral code (uppercase)
+        referrer = await db.users.find_one(
+            {"referral_code": raw.upper()},
+            {"_id": 0, "id": 1, "referral_code": 1, "username": 1, "name": 1},
+        )
+    if not referrer:
+        return None
+    if referrer["id"] == caller_user_id:
+        return None  # self-referral silently dropped
+    return referrer
 
 
 # ── Post-trip hook (called from trips.complete_trip) ─────────────────────────
@@ -258,19 +325,33 @@ async def get_my_credits(request: Request):
 NEXRYDE_INVITE_BASE_URL = "https://nexryde.app/invite"
 
 
+def _build_invite_url(username: Optional[str], code: str) -> str:
+    """Return the canonical invite URL — username path preferred, code query fallback."""
+    if username:
+        return f"{NEXRYDE_INVITE_BASE_URL}/{username}"
+    return f"{NEXRYDE_INVITE_BASE_URL}?code={code}"
+
+
 @incentives_router.get("/incentives/referral-code")
 async def get_referral_code(request: Request):
-    """Get or create the caller's personal referral code + invite link."""
+    """Get or create the caller's personal referral code, username, and invite link."""
     user_id = require_authenticated(request)
     code = await _generate_referral_code(user_id)
-    invite_url = f"{NEXRYDE_INVITE_BASE_URL}?code={code}"
+    username = await _ensure_username(user_id)
+    invite_url = _build_invite_url(username, code)
+    share_message = (
+        f"🚗 Join Nexryde — Nigeria's smartest ride app!\n\n"
+        f"Use {username + \"'s\" if username else 'my'} invite link and we BOTH earn "
+        f"₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride:\n{invite_url}"
+    )
     return {
         "referral_code": code,
+        "username": username,
         "invite_url": invite_url,
         "inviter_reward": REFERRAL_REWARD_INVITER_NGN,
         "invitee_reward": REFERRAL_REWARD_INVITEE_NGN,
-        "message": f"Join Nexryde with my link and get ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride: {invite_url}",
-        "share_message": f"🚗 Join Nexryde — Nigeria's smartest ride app!\n\nUse my invite link and we BOTH earn ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride:\n{invite_url}",
+        "message": f"Join Nexryde via {invite_url} and get ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride.",
+        "share_message": share_message,
     }
 
 
@@ -279,17 +360,14 @@ async def get_referral_stats(request: Request):
     """Referral performance stats: invited count, rewarded count, total earnings."""
     user_id = require_authenticated(request)
     code = await _generate_referral_code(user_id)
+    username = await _ensure_username(user_id)
+    invite_url = _build_invite_url(username, code)
 
-    # Count users who applied this referral code
     invited_count = await db.users.count_documents({"referred_by": code})
-
-    # Count those who completed at least one ride (i.e. reward was triggered)
     rewarded_credits = await db.promo_credits.count_documents({
         "referral_code": code,
         "reason": "referral_inviter",
     })
-
-    # Total earnings from this referral code
     pipeline = [
         {"$match": {"referral_code": code, "reason": "referral_inviter"}},
         {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
@@ -297,16 +375,15 @@ async def get_referral_stats(request: Request):
     res = await db.promo_credits.aggregate(pipeline).to_list(1)
     total_earned = float(res[0]["total"]) if res else 0.0
 
-    # Recent referral events
     recent_cursor = db.promo_credits.find(
         {"referral_code": code, "reason": "referral_inviter"},
         {"_id": 0, "amount": 1, "created_at": 1, "trip_id": 1},
     ).sort("created_at", -1).limit(10)
     recent = await recent_cursor.to_list(10)
 
-    invite_url = f"{NEXRYDE_INVITE_BASE_URL}?code={code}"
     return {
         "referral_code": code,
+        "username": username,
         "invite_url": invite_url,
         "invited_count": invited_count,
         "rewarded_count": rewarded_credits,
@@ -320,13 +397,38 @@ async def get_referral_stats(request: Request):
     }
 
 
+@incentives_router.get("/incentives/resolve-identifier/{identifier}")
+async def resolve_referral_identifier(identifier: str, request: Request):
+    """Resolve a username or referral code to the referrer's public profile.
+
+    Used by the signup screen to display "You were invited by funnybony".
+    Does NOT require authentication (called before the user has an account).
+    """
+    raw = (identifier or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="identifier is required")
+
+    referrer = await db.users.find_one(
+        {"$or": [{"username": raw.lower()}, {"referral_code": raw.upper()}]},
+        {"_id": 0, "id": 1, "referral_code": 1, "username": 1, "name": 1},
+    )
+    if not referrer:
+        raise HTTPException(status_code=404, detail="Referral not found")
+
+    return {
+        "referral_code": referrer.get("referral_code", ""),
+        "username": referrer.get("username") or "",
+        "display_name": referrer.get("name", "").split()[0] if referrer.get("name") else referrer.get("username", ""),
+    }
+
+
 @incentives_router.post("/incentives/apply-referral-code")
 async def apply_referral_code(request: Request):
-    """A new user registers their referral code before their first ride."""
+    """Apply a referral by username OR referral code before first trip."""
     user_id = require_authenticated(request)
     body = await request.json()
-    code = (body.get("referral_code") or "").strip().upper()
-    if not code:
+    raw = (body.get("referral_code") or "").strip()
+    if not raw:
         raise HTTPException(status_code=400, detail="referral_code is required")
 
     user = await db.users.find_one({"id": user_id})
@@ -335,22 +437,28 @@ async def apply_referral_code(request: Request):
     if user.get("referred_by"):
         raise HTTPException(status_code=400, detail="You have already applied a referral code")
 
-    # Check the code belongs to someone else and they exist.
-    referrer = await db.users.find_one({"referral_code": code})
+    # Resolve identifier — accepts username or code
+    referrer = await _resolve_referral_identifier(raw, user_id)
     if not referrer:
-        raise HTTPException(status_code=404, detail="Invalid referral code")
-    if referrer["id"] == user_id:
-        raise HTTPException(status_code=400, detail="You cannot use your own referral code")
+        raise HTTPException(status_code=404, detail="Invalid referral username or code")
+
+    # Ensure referrer has a code (should always be true at this point)
+    referrer_code = referrer.get("referral_code")
+    if not referrer_code:
+        referrer_code = await _generate_referral_code(referrer["id"])
 
     # Check the user hasn't completed any trips yet.
     prior = await db.trips.count_documents({"rider_id": user_id, "status": "completed"})
     if prior > 0:
-        raise HTTPException(status_code=400, detail="Referral code can only be applied before your first trip")
+        raise HTTPException(status_code=400, detail="Referral can only be applied before your first trip")
 
-    await db.users.update_one({"id": user_id}, {"$set": {"referred_by": code}})
+    await db.users.update_one({"id": user_id}, {"$set": {"referred_by": referrer_code}})
+    display = referrer.get("username") or referrer.get("name", "").split()[0] or "your friend"
     return {
         "success": True,
-        "message": f"Referral code applied! Complete your first trip to earn ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f}.",
+        "referrer_username": referrer.get("username") or "",
+        "referrer_display": display,
+        "message": f"You're now linked to {display}! Complete your first trip to both earn ₦{REFERRAL_REWARD_INVITEE_NGN:,.0f}.",
     }
 
 

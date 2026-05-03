@@ -18,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
+import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
 import { useAppStore } from '@/src/store/appStore';
 import {
   BACKEND_URL,
@@ -87,6 +88,7 @@ export default function RiderWalletScreen() {
   const [amountStr, setAmountStr] = useState('2000');
   const [promoCode, setPromoCode] = useState('');
   const [referralCode, setReferralCode] = useState('');
+  const [referralUsername, setReferralUsername] = useState('');
   const [inviteUrl, setInviteUrl] = useState('');
   const [referralStats, setReferralStats] = useState<{ invited: number; rewarded: number; earned: number } | null>(null);
   const [showManualCode, setShowManualCode] = useState(false);
@@ -161,7 +163,7 @@ export default function RiderWalletScreen() {
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (!uid) { setReferralCode(''); setInviteUrl(''); setReferralStats(null); return; }
+    if (!uid) { setReferralCode(''); setReferralUsername(''); setInviteUrl(''); setReferralStats(null); return; }
     let cancelled = false;
     const loadIncentives = async () => {
       try {
@@ -176,6 +178,7 @@ export default function RiderWalletScreen() {
           const data = await refRes.value.json();
           if (!cancelled) {
             setReferralCode(data.referral_code ?? '');
+            setReferralUsername(data.username ?? '');
             setInviteUrl(data.invite_url ?? '');
           }
         }
@@ -694,14 +697,16 @@ export default function RiderWalletScreen() {
                 <View style={{ flex: 1 }}>
                   <Text style={s.referralLinkLabel}>YOUR INVITE LINK</Text>
                   <Text style={s.referralLinkText} numberOfLines={1}>
-                    nexryde.app/invite?code={referralCode}
+                    {referralUsername
+                      ? `nexryde.app/invite/${referralUsername}`
+                      : `nexryde.app/invite?code=${referralCode}`}
                   </Text>
                 </View>
                 <TouchableOpacity
                   style={s.referralShareBtn}
                   onPress={() => {
-                    const url = inviteUrl || `https://nexryde.app/invite?code=${referralCode}`;
-                    const msg = `🚗 Join Nexryde — Nigeria's smartest ride app!\n\nUse my invite link and we BOTH earn ₦500 after your first ride:\n${url}`;
+                    const url = inviteUrl || buildInviteUrl(referralUsername, referralCode);
+                    const msg = buildShareMessage(referralUsername, referralCode, user?.name);
                     const { Share } = require('react-native');
                     Share.share({ message: msg, url }, { dialogTitle: 'Invite to Nexryde' }).catch(() => {});
                   }}
@@ -717,11 +722,20 @@ export default function RiderWalletScreen() {
               </View>
             )}
 
-            {/* Code only row */}
+            {/* Username + code row */}
             {referralCode ? (
               <View style={s.referralCodeOnly}>
-                <Text style={s.referralCodeOnlyLabel}>CODE</Text>
-                <Text style={s.referralCodeOnlyText}>{referralCode}</Text>
+                {referralUsername ? (
+                  <>
+                    <Text style={s.referralCodeOnlyLabel}>USERNAME</Text>
+                    <Text style={s.referralCodeOnlyText}>{referralUsername}</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={s.referralCodeOnlyLabel}>CODE</Text>
+                    <Text style={s.referralCodeOnlyText}>{referralCode}</Text>
+                  </>
+                )}
               </View>
             ) : null}
 
@@ -731,13 +745,14 @@ export default function RiderWalletScreen() {
               onPress={() => setShowManualCode((v) => !v)}
               activeOpacity={0.7}
             >
+              <Ionicons name="pencil-outline" size={13} color="rgba(167,139,250,0.6)" />
               <Text style={s.referralToggleManualText}>
-                {showManualCode ? 'Hide' : 'Have a friend\'s code? Enter manually'}
+                {showManualCode ? 'Hide manual entry' : "Have a friend's username or code?"}
               </Text>
               <Ionicons
                 name={showManualCode ? 'chevron-up' : 'chevron-down'}
-                size={14}
-                color="rgba(167,139,250,0.7)"
+                size={13}
+                color="rgba(167,139,250,0.5)"
               />
             </TouchableOpacity>
 
@@ -745,11 +760,11 @@ export default function RiderWalletScreen() {
               <View style={s.referralManualRow}>
                 <TextInput
                   style={s.referralManualInput}
-                  placeholder="e.g. NX1A2B3C"
+                  placeholder="username or code (e.g. funnybony)"
                   placeholderTextColor="rgba(167,139,250,0.4)"
                   value={promoCode}
                   onChangeText={setPromoCode}
-                  autoCapitalize="characters"
+                  autoCapitalize="none"
                   autoCorrect={false}
                 />
                 <TouchableOpacity style={s.referralManualBtn} onPress={applyPromoCode}>

@@ -20,21 +20,33 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export const REFERRAL_CODE_STORAGE_KEY = '@nexryde_pending_referral';
 
 /**
- * Extract referral code from any Nexryde invite URL:
- *   nexryde://invite?code=NEXJOS157
- *   https://nexryde.app/invite?code=NEXJOS157
- *   https://nexryde.app/invite/NEXJOS157
+ * Extract a referral identifier from any Nexryde invite URL.
+ *
+ * Returns:
+ *   - username  (lowercase slug, e.g. "funnybony")  for path-based links
+ *   - code      (uppercase, e.g. "NXABC12")         for ?code= query links
+ *
+ * Supported formats:
+ *   nexryde://invite/funnybony
+ *   https://nexryde.app/invite/funnybony
+ *   nexryde://invite?code=NXABC12
+ *   https://nexryde.app/invite?code=NXABC12
  */
-function extractReferralCode(url: string): string | null {
+function extractReferralIdentifier(url: string): string | null {
   try {
     const parsed = Linking.parse(url);
-    // Query param ?code=...
-    const code = (parsed.queryParams?.code as string | undefined) || '';
-    if (code.trim()) return code.trim().toUpperCase();
-    // Path segment  /invite/NEXJOS157
+
+    // ?code= param → treat as an internal referral code (keep uppercase)
+    const codeParam = (parsed.queryParams?.code as string | undefined) || '';
+    if (codeParam.trim()) return codeParam.trim().toUpperCase();
+
+    // /invite/{slug} → username (lowercase, human-readable)
     const pathParts = (parsed.path || '').split('/').filter(Boolean);
     const idx = pathParts.indexOf('invite');
-    if (idx !== -1 && pathParts[idx + 1]) return pathParts[idx + 1].toUpperCase();
+    if (idx !== -1 && pathParts[idx + 1]) {
+      return pathParts[idx + 1].toLowerCase();
+    }
+
     return null;
   } catch {
     return null;
@@ -42,13 +54,13 @@ function extractReferralCode(url: string): string | null {
 }
 
 async function handleInviteUrl(url: string) {
-  const code = extractReferralCode(url);
-  if (!code) return;
+  const identifier = extractReferralIdentifier(url);
+  if (!identifier) return;
   try {
-    // Only store if no code already pending (first wins)
+    // First invite wins — don't overwrite once stored
     const existing = await AsyncStorage.getItem(REFERRAL_CODE_STORAGE_KEY);
     if (!existing) {
-      await AsyncStorage.setItem(REFERRAL_CODE_STORAGE_KEY, code);
+      await AsyncStorage.setItem(REFERRAL_CODE_STORAGE_KEY, identifier);
     }
   } catch { /* storage unavailable */ }
 }

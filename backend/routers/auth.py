@@ -1461,6 +1461,11 @@ async def register(request: RegisterRequest, http_request: Request):
         if referrer:
             referred_by_code = raw_referral
 
+    # Generate unique username from name
+    from routers.incentives import generate_unique_username
+    tmp_id = str(uuid4())  # temp id for uniqueness check, replaced below
+    generated_username = await generate_unique_username(request.name, tmp_id)
+
     user = create_user_dict(
         phone=normalized_phone or "",
         name=request.name, 
@@ -1473,6 +1478,7 @@ async def register(request: RegisterRequest, http_request: Request):
         terms_accepted=request.terms_accepted,
         terms_accepted_at=request.terms_accepted_at,
         referred_by=referred_by_code,
+        username=generated_username,
     )
     await db.users.insert_one(user)
     user.pop("_id", None)

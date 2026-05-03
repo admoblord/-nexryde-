@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -18,7 +18,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
-import { getPendingReferralCode, clearPendingReferralCode } from '@/src/services/referralService';
+import { getPendingReferralCode, clearPendingReferralCode, resolvePendingReferrer, type ReferrerInfo } from '@/src/services/referralService';
 
 export default function RiderNINScreen() {
   const router = useRouter();
@@ -27,7 +27,13 @@ export default function RiderNINScreen() {
   
   const [nin, setNin] = useState('');
   const [loading, setLoading] = useState(false);
-  
+  const [referrerInfo, setReferrerInfo] = useState<ReferrerInfo | null>(null);
+
+  // Resolve any pending referral so we can show the "invited by" banner
+  useEffect(() => {
+    resolvePendingReferrer().then((info) => { if (info) setReferrerInfo(info); }).catch(() => {});
+  }, []);
+
   // Get registration data from params
   const phone = params.phone as string;
   const name = params.name as string;
@@ -135,6 +141,35 @@ export default function RiderNINScreen() {
             <Text style={styles.subtitle}>
               For your safety and security, we require your National Identification Number (NIN)
             </Text>
+
+            {/* ── Invited-by banner ─────────────────────────────────────────── */}
+            {referrerInfo ? (
+              <View style={styles.invitedByBanner}>
+                <LinearGradient
+                  colors={['#2E1065', '#4C1D95']}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                  style={styles.invitedByGrad}
+                >
+                  <View style={styles.invitedByIcon}>
+                    <Ionicons name="people" size={18} color="#A78BFA" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.invitedByTitle}>
+                      You were invited by{' '}
+                      <Text style={{ color: '#A78BFA', fontWeight: '900' }}>
+                        {referrerInfo.username || referrerInfo.displayName}
+                      </Text>
+                    </Text>
+                    <Text style={styles.invitedBySub}>
+                      Complete your first ride and you both earn ₦500!
+                    </Text>
+                  </View>
+                  <View style={styles.invitedByBadge}>
+                    <Text style={styles.invitedByBadgeText}>₦500</Text>
+                  </View>
+                </LinearGradient>
+              </View>
+            ) : null}
 
             {/* Info Cards */}
             <View style={styles.infoCard}>
@@ -396,4 +431,12 @@ const styles = StyleSheet.create({
     color: COLORS.lightTextSecondary,
     textAlign: 'center',
   },
+  // Invited-by banner
+  invitedByBanner: { marginTop: SPACING.lg, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden' },
+  invitedByGrad: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
+  invitedByIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(167,139,250,0.2)', alignItems: 'center', justifyContent: 'center' },
+  invitedByTitle: { color: '#E9D5FF', fontSize: 13, fontWeight: '700', lineHeight: 18 },
+  invitedBySub: { color: 'rgba(233,213,255,0.6)', fontSize: 11, fontWeight: '600', marginTop: 2 },
+  invitedByBadge: { backgroundColor: 'rgba(74,222,128,0.2)', borderWidth: 1, borderColor: 'rgba(74,222,128,0.35)', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  invitedByBadgeText: { color: '#4ADE80', fontSize: 13, fontWeight: '900' },
 });
