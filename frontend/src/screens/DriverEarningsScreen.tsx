@@ -62,7 +62,7 @@ export default function DriverEarningsScreen() {
   const summary = dashboard?.summary || {};
   const averages = dashboard?.averages || {};
   const projections = dashboard?.projections || {};
-  const guarantee = dashboard?.guarantee || null;
+  const surge = dashboard?.surge || null;
   const salaryMode = dashboard?.salary_mode || null;
   const chartData = useMemo(() => {
     const breakdown = dashboard?.daily_breakdown || {};
@@ -155,34 +155,39 @@ export default function DriverEarningsScreen() {
           </View>
         </View>
 
-        {guarantee && (
-          <View style={[styles.guaranteeCard, guarantee.active ? styles.guaranteeCardActive : styles.guaranteeCardStandby]}>
-            <View style={styles.guaranteeHeader}>
-              <Ionicons
-                name={guarantee.active ? 'rainy-outline' : 'shield-checkmark-outline'}
-                size={22}
-                color={guarantee.active ? COLORS.warning : COLORS.info}
-              />
+        {/* ── Live Surge Status ─────────────────────────────────────────── */}
+        {surge && (
+          <View style={[
+            styles.surgeCard,
+            surge.is_surge ? styles.surgeCardActive : styles.surgeCardNormal,
+          ]}>
+            <View style={styles.surgeCardHeader}>
+              <View style={[styles.surgeIconWrap, { backgroundColor: (surge.tier_color || '#16A34A') + '22' }]}>
+                <Ionicons
+                  name={surge.is_surge ? 'flash' : 'checkmark-circle-outline'}
+                  size={22}
+                  color={surge.tier_color || '#16A34A'}
+                />
+              </View>
               <View style={styles.guaranteeHeaderText}>
-                <Text style={styles.guaranteeTitle}>{guarantee.title}</Text>
-                <Text style={styles.guaranteeSubtitle}>{guarantee.reason}</Text>
+                <Text style={[styles.guaranteeTitle, { color: surge.tier_color || '#16A34A' }]}>
+                  {surge.is_surge ? `⚡ ${surge.tier_label || 'Surge Active'} — ${surge.multiplier}x` : 'Normal Pricing'}
+                </Text>
+                <Text style={styles.guaranteeSubtitle}>
+                  {surge.reasons?.join(' · ') || 'Standard fares right now'}
+                </Text>
               </View>
+              {surge.is_surge && (
+                <View style={[styles.surgePctBadge, { backgroundColor: surge.tier_color || '#F59E0B' }]}>
+                  <Text style={styles.surgePctText}>+{surge.pct_extra || 0}%</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.guaranteeRow}>
-              <View style={styles.guaranteeItem}>
-                <Text style={styles.guaranteeLabel}>Hourly floor</Text>
-                <Text style={styles.guaranteeValue}>{CURRENCY}{Number(guarantee.minimum_hourly_earnings || 0).toLocaleString()}</Text>
-              </View>
-              <View style={styles.guaranteeItem}>
-                <Text style={styles.guaranteeLabel}>This hour</Text>
-                <Text style={styles.guaranteeValue}>{CURRENCY}{Number(guarantee.current_hour_earnings || 0).toLocaleString()}</Text>
-              </View>
-              <View style={styles.guaranteeItem}>
-                <Text style={styles.guaranteeLabel}>Gap cover</Text>
-                <Text style={styles.guaranteeValue}>{CURRENCY}{Number(guarantee.top_up_gap || 0).toLocaleString()}</Text>
-              </View>
-            </View>
-            <Text style={styles.guaranteeFootnote}>{guarantee.message}</Text>
+            <Text style={styles.guaranteeFootnote}>
+              {surge.driver_message || (surge.is_surge
+                ? `You earn ${surge.pct_extra}% more per trip during this period.`
+                : 'Stay online — surge pricing activates during peak demand and wet season.')}
+            </Text>
           </View>
         )}
 
@@ -334,9 +339,13 @@ const styles = StyleSheet.create({
   commissionContent: { flex: 1 },
   commissionTitle: { fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.success },
   commissionText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.success, opacity: 0.9 },
-  guaranteeCard: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg, ...SHADOWS.sm },
-  guaranteeCardActive: { backgroundColor: COLORS.warningSoft },
-  guaranteeCardStandby: { backgroundColor: COLORS.infoSoft },
+  surgeCard: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg, ...SHADOWS.sm },
+  surgeCardActive: { backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FCD34D' },
+  surgeCardNormal: { backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#86EFAC' },
+  surgeCardHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, marginBottom: SPACING.sm },
+  surgeIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  surgePctBadge: { borderRadius: BORDER_RADIUS.full, paddingHorizontal: 10, paddingVertical: 5, alignItems: 'center', justifyContent: 'center' },
+  surgePctText: { color: '#FFF', fontSize: FONT_SIZE.sm, fontWeight: '900' },
   salaryModeCard: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg, ...SHADOWS.sm },
   salaryModeCardBehind: { backgroundColor: COLORS.accentPurpleSoft },
   salaryModeCardOnTrack: { backgroundColor: COLORS.successSoft },

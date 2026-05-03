@@ -63,7 +63,15 @@ export default function RiderTripsScreen() {
     if (!raw) return 'Recent';
     const d = new Date(raw);
     if (Number.isNaN(d.getTime())) return 'Recent';
-    return d.toLocaleString();
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    if (diffMins < 60) return diffMins <= 1 ? 'Just now' : `${diffMins}m ago`;
+    const diffHrs = Math.floor(diffMins / 60);
+    if (diffHrs < 24) return `${diffHrs}h ago`;
+    const diffDays = Math.floor(diffHrs / 24);
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return d.toLocaleDateString([], { day: 'numeric', month: 'short', year: diffDays > 365 ? 'numeric' : undefined });
   };
 
   const getAddress = (point: any) => {
@@ -78,6 +86,8 @@ export default function RiderTripsScreen() {
     const fare = Number(trip.fare || 0);
     const driverLabel = trip.driver_name || trip.driver_id || 'Driver pending';
     const rating = trip.driver_rating || trip.rider_rating || 0;
+    const distKm = Number(trip.distance_km || 0);
+    const durationMins = Number(trip.duration_mins || trip.duration_min || 0);
 
     return (
       <View key={trip.id} style={styles.tripCard}>
@@ -98,18 +108,53 @@ export default function RiderTripsScreen() {
           </View>
         </View>
 
-        <View style={styles.tripFooter}>
+        {/* Trip meta row: driver + distance/time */}
+        <View style={styles.tripMeta}>
           <Text style={styles.driverName}>{driverLabel}</Text>
-          {activeTab === 'completed' ? (
-            <View style={styles.ratingBadge}>
-              <Ionicons name="star" size={14} color={COLORS.accent} />
-              <Text style={styles.ratingText}>{rating ? Number(rating).toFixed(1) : 'N/A'}</Text>
-            </View>
-          ) : null}
+          <View style={styles.tripMetaRight}>
+            {distKm > 0 && (
+              <View style={styles.metaPill}>
+                <Ionicons name="navigate-outline" size={11} color={COLORS.gray500} />
+                <Text style={styles.metaPillText}>{distKm.toFixed(1)} km</Text>
+              </View>
+            )}
+            {durationMins > 0 && (
+              <View style={styles.metaPill}>
+                <Ionicons name="time-outline" size={11} color={COLORS.gray500} />
+                <Text style={styles.metaPillText}>{durationMins} min</Text>
+              </View>
+            )}
+            {activeTab === 'completed' && rating > 0 && (
+              <View style={styles.ratingBadge}>
+                <Ionicons name="star" size={13} color={COLORS.accent} />
+                <Text style={styles.ratingText}>{Number(rating).toFixed(1)}</Text>
+              </View>
+            )}
+          </View>
         </View>
 
         {activeTab === 'completed' ? (
           <View style={styles.tripActions}>
+            {/* Book Again — top priority action */}
+            <TouchableOpacity
+              style={styles.bookAgainButton}
+              onPress={() =>
+                router.push({
+                  pathname: '/rider/book',
+                  params: {
+                    pickup: typeof trip.pickup_location === 'string'
+                      ? trip.pickup_location
+                      : trip.pickup_location?.address || '',
+                    dropoff: typeof trip.dropoff_location === 'string'
+                      ? trip.dropoff_location
+                      : trip.dropoff_location?.address || '',
+                  },
+                } as any)
+              }
+            >
+              <Ionicons name="refresh-circle" size={16} color="#FFF" />
+              <Text style={styles.bookAgainText}>Book Again</Text>
+            </TouchableOpacity>
             <TouchableOpacity
               style={styles.receiptButton}
               onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } })}
@@ -122,7 +167,7 @@ export default function RiderTripsScreen() {
               onPress={() => router.push({ pathname: '/shield-disputes', params: { tripId: trip.id, mode: 'report' } } as any)}
             >
               <Ionicons name="shield-outline" size={16} color={COLORS.error} />
-              <Text style={styles.reportButtonText}>Report Issue</Text>
+              <Text style={styles.reportButtonText}>Issue</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -239,7 +284,7 @@ const styles = StyleSheet.create({
   dot: { width: 10, height: 10, borderRadius: 5, marginRight: SPACING.sm },
   routeText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray700 },
   routeLine: { width: 2, height: 20, backgroundColor: COLORS.gray200, marginLeft: 4, marginVertical: 2 },
-  tripFooter: {
+  tripMeta: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -247,22 +292,47 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.sm,
     borderTopWidth: 1,
     borderTopColor: COLORS.gray100,
+    gap: SPACING.xs,
   },
-  driverName: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600 },
-  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  ratingText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray700 },
+  tripMetaRight: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
+  metaPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: COLORS.gray50,
+    borderRadius: BORDER_RADIUS.full,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: COLORS.gray100,
+  },
+  metaPillText: { fontSize: 10, fontWeight: '700', color: COLORS.gray500 },
+  driverName: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600 },
+  ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#FEF9C3', borderRadius: BORDER_RADIUS.full, paddingHorizontal: 7, paddingVertical: 3 },
+  ratingText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: '#92400E' },
   shieldBtn: { padding: SPACING.xs },
   tripActions: {
     flexDirection: 'row',
     gap: SPACING.xs,
     marginTop: SPACING.sm,
   },
+  bookAgainButton: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.sm,
+    backgroundColor: COLORS.success,
+  },
+  bookAgainText: { color: '#FFF', fontWeight: '800', fontSize: FONT_SIZE.sm },
   receiptButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: SPACING.xs,
+    gap: 3,
     borderRadius: BORDER_RADIUS.lg,
     paddingVertical: SPACING.sm,
     backgroundColor: COLORS.accentBlueSoft,
@@ -273,7 +343,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: SPACING.xs,
+    gap: 3,
     borderRadius: BORDER_RADIUS.lg,
     paddingVertical: SPACING.sm,
     backgroundColor: 'rgba(239,68,68,0.08)',

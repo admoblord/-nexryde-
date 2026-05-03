@@ -50,6 +50,8 @@ export default function ModernRiderHome() {
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
   const [recentTripsLoading, setRecentTripsLoading] = useState(false);
   const tabPad = useTabBottomPad(16);
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [completedTripCount, setCompletedTripCount] = useState<number>(-1);
 
   const QUICK_FEATURES = [
     {
@@ -157,6 +159,30 @@ export default function ModernRiderHome() {
     };
     loadDriverOfMonth();
   }, []);
+
+  // Wallet balance + completed trip count for first-ride nudge
+  useEffect(() => {
+    if (!user?.id) return;
+    const loadWalletAndStats = async () => {
+      try {
+        const headers = getAuthHeaders();
+          const [walletRes, tripsRes] = await Promise.allSettled([
+          fetch(`${BACKEND_URL}/api/wallet/${user.id}`, { headers }),
+          fetch(`${BACKEND_URL}/api/trips/rider/${user.id}?limit=1&status=completed`, { headers }),
+        ]);
+        if (walletRes.status === 'fulfilled' && walletRes.value.ok) {
+          const data = await walletRes.value.json();
+          setWalletBalance(Number(data?.balance ?? data?.wallet_balance ?? 0));
+        }
+        if (tripsRes.status === 'fulfilled' && tripsRes.value.ok) {
+          const data = await tripsRes.value.json();
+          const count = Number(data?.total_count ?? data?.count ?? (Array.isArray(data?.trips) ? data.trips.length : -1));
+          setCompletedTripCount(count);
+        }
+      } catch { /* non-critical */ }
+    };
+    void loadWalletAndStats();
+  }, [user?.id]);
 
   const normalizedCurrentTripStatus = normalizeTripStatus(currentTrip?.status, (currentTrip as any)?.payment_status);
   const showResumeChip = Boolean(currentTrip?.id && isActiveTripStatus(normalizedCurrentTripStatus));
@@ -299,6 +325,48 @@ export default function ModernRiderHome() {
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* ── Wallet balance strip ─────────────────────────────────── */}
+      {walletBalance !== null && (
+        <TouchableOpacity
+          style={styles.walletStrip}
+          onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)}
+          activeOpacity={0.85}
+        >
+          <View style={styles.walletStripLeft}>
+            <Ionicons name="wallet-outline" size={16} color={COLORS.accentGreen} />
+            <Text style={styles.walletStripLabel}>Wallet</Text>
+          </View>
+          <Text style={styles.walletStripBalance}>₦{walletBalance.toLocaleString()}</Text>
+          <Ionicons name="chevron-forward" size={15} color={COLORS.gray400} />
+        </TouchableOpacity>
+      )}
+
+      {/* ── First-ride discount nudge (only before first completed trip) ── */}
+      {completedTripCount === 0 && (
+        <TouchableOpacity
+          style={styles.firstRideBanner}
+          onPress={() => router.push('/rider/book' as any)}
+          activeOpacity={0.88}
+        >
+          <LinearGradient
+            colors={['#16A34A', '#15803D']}
+            style={styles.firstRideBannerGrad}
+            start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+          >
+            <View style={styles.firstRideBannerIcon}>
+              <Ionicons name="gift" size={22} color="#FFF" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.firstRideBannerTitle}>🎉 20% off your first ride!</Text>
+              <Text style={styles.firstRideBannerSub}>
+                Your first-ride discount is ready — book now to use it.
+              </Text>
+            </View>
+            <Ionicons name="arrow-forward-circle" size={26} color="rgba(255,255,255,0.9)" />
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
         {/* PRIORITY ACTIONS — full-bleed green hero, then two equal cards */}
@@ -617,6 +685,49 @@ const styles = StyleSheet.create({
     color: '#065F46',
     textTransform: 'capitalize',
   },
+  walletStrip: {
+    marginHorizontal: 20,
+    marginBottom: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.04,
+    shadowOffset: { width: 0, height: 1 },
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  walletStripLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
+  walletStripLabel: { fontSize: 13, fontWeight: '700', color: '#475569' },
+  walletStripBalance: { fontSize: 15, fontWeight: '900', color: '#0F172A' },
+  firstRideBanner: {
+    marginHorizontal: 20,
+    marginBottom: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  firstRideBannerGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+  },
+  firstRideBannerIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  firstRideBannerTitle: { color: '#FFF', fontSize: 14, fontWeight: '900' },
+  firstRideBannerSub: { color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 },
   heroSection: {
     marginTop: 8,
   },
