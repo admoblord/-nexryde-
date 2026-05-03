@@ -31,7 +31,7 @@ const COLORS = {
 };
 
 const DRIVER_CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
-const STARTUP_STATUS_TIMEOUT_MS = 8000;
+const STARTUP_STATUS_TIMEOUT_MS = 2500;
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -133,19 +133,22 @@ export default function SplashScreen() {
           setToken(userData.token || null);
           setIsAuthenticated(true);
           
-          // Enforce full verification on restore (no shortcut access).
+          // Navigate to home immediately for instant feel, then verify in background.
           const authHeaders: Record<string, string> = userData.token
             ? { Authorization: `Bearer ${userData.token}` }
             : {};
-          setTimeout(async () => {
+
+          if (userData.role === 'driver') {
+            router.replace('/(driver-tabs)/driver-home');
+          } else {
+            router.replace('/(rider-tabs)/rider-home');
+          }
+
+          // Background verification — home screens will handle redirects if needed.
+          (async () => {
             try {
               if (userData.role === 'driver') {
-                const u = {
-                  id: userData.id,
-                  phone: userData.phone,
-                  name: userData.name,
-                  email: userData.email,
-                };
+                const u = { id: userData.id, phone: userData.phone, name: userData.name, email: userData.email };
                 const { response: st, data } = await fetchJsonWithTimeout(
                   `${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`,
                   { headers: authHeaders },
@@ -156,39 +159,25 @@ export default function SplashScreen() {
                     router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
                   } else if (step === 'profile') {
                     router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
-                  } else if (step === 'documents_review' || step === 'documents_rejected') {
+                  } else if (step === 'documents_rejected') {
                     router.replace({ pathname: '/(auth)/driver-verification-status', params: driverDocumentsRouteParams(u) });
-                  } else if (step === 'dashboard_limited') {
-                    router.replace('/(driver-tabs)/driver-home');
-                  } else {
+                  } else if (step === 'documents') {
                     router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
                   }
-                  return;
                 }
-                router.replace('/(driver-tabs)/driver-home');
                 return;
               }
-
               const { response: riderStatusRes, data: riderStatus } = await fetchJsonWithTimeout(
                 `${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`,
                 { headers: authHeaders },
               );
               if (!riderStatusRes.ok || !riderStatus?.completed) {
                 router.replace('/(auth)/rider-verification');
-                return;
               }
-              router.replace('/(rider-tabs)/rider-home');
             } catch {
-              // Network/server error on startup — fall back to role-based home rather than
-              // forcing re-onboarding (the driver may already be fully onboarded; sending
-              // them to documents/profile on a transient error creates a bad loop).
-              if (userData.role === 'driver') {
-                router.replace('/(driver-tabs)/driver-home');
-                return;
-              }
-              router.replace('/(rider-tabs)/rider-home');
+              // Network error — user is already on home, let them continue.
             }
-          }, 700); // Small delay for smooth transition
+          })();
 
           return;
         }
@@ -249,7 +238,7 @@ export default function SplashScreen() {
     ).start();
   }, []);
 
-  // Show loading screen while checking for saved login
+  // Branded loading screen while restoring session
   if (checking) {
     return (
       <View style={styles.container}>
@@ -260,8 +249,20 @@ export default function SplashScreen() {
           end={{ x: 0.5, y: 1 }}
         />
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.green} />
-          <Text style={styles.loadingText}>Checking login...</Text>
+          <View style={styles.loadingLogoContainer}>
+            <LinearGradient colors={[COLORS.greenBright, COLORS.green]} style={styles.loadingLogoLeft} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+            <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.loadingLogoRight} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
+            <View style={styles.roadLine}>
+              <View style={styles.roadDash} />
+              <View style={styles.roadDash} />
+              <View style={styles.roadDash} />
+            </View>
+          </View>
+          <View style={styles.loadingBrandRow}>
+            <Text style={styles.loadingBrandNex}>NEX</Text>
+            <Text style={styles.loadingBrandRyde}>RYDE</Text>
+          </View>
+          <ActivityIndicator size="small" color={COLORS.green} style={{ marginTop: 32 }} />
         </View>
       </View>
     );
@@ -638,12 +639,47 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 16,
   },
-  loadingText: {
+  loadingLogoContainer: {
+    width: 72,
+    height: 72,
+    position: 'relative',
+    marginBottom: 16,
+  },
+  loadingLogoLeft: {
+    position: 'absolute',
+    left: 6,
+    top: 0,
+    width: 28,
+    height: 72,
+    borderTopLeftRadius: 8,
+    borderBottomLeftRadius: 8,
+    transform: [{ skewX: '-8deg' }],
+  },
+  loadingLogoRight: {
+    position: 'absolute',
+    right: 6,
+    top: 0,
+    width: 28,
+    height: 72,
+    borderTopRightRadius: 8,
+    borderBottomRightRadius: 8,
+    transform: [{ skewX: '8deg' }],
+  },
+  loadingBrandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  loadingBrandNex: {
+    fontSize: 32,
+    fontWeight: '900',
     color: COLORS.white,
-    fontSize: 16,
-    fontWeight: '600',
-    marginTop: 12,
+    letterSpacing: 3,
+  },
+  loadingBrandRyde: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: COLORS.green,
+    letterSpacing: 3,
   },
 });

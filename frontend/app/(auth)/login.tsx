@@ -878,7 +878,7 @@ const styles = StyleSheet.create({
   },
   welcomeText: {
     fontSize: 15,
-    color: '#64748B',
+    color: '#94A3B8',
     marginBottom: 4,
     fontWeight: '700',
     textTransform: 'uppercase',
@@ -902,7 +902,7 @@ const styles = StyleSheet.create({
   },
   subtitleText: {
     fontSize: 13,
-    color: '#475569',
+    color: '#94A3B8',
     marginTop: 4,
     fontWeight: '700',
   },
@@ -912,7 +912,7 @@ const styles = StyleSheet.create({
   formTitle: {
     fontSize: 17,
     fontWeight: '900',
-    color: '#0F172A',
+    color: '#F0F4F8',
     marginBottom: 16,
     letterSpacing: -0.5,
   },
@@ -1085,7 +1085,7 @@ const styles = StyleSheet.create({
   termsText: {
     textAlign: 'center',
     fontSize: 13,
-    color: '#475569',
+    color: '#94A3B8',
     lineHeight: 20,
     fontWeight: '700',
   },
@@ -1119,13 +1119,13 @@ const styles = StyleSheet.create({
   featureTitle: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#0F172A',
+    color: '#E2E8F0',
     marginBottom: 2,
     letterSpacing: -0.5,
   },
   featureSubtitle: {
     fontSize: 13,
-    color: '#475569',
+    color: '#94A3B8',
     fontWeight: '700',
   },
   fortressPanel: {

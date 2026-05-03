@@ -83,6 +83,9 @@ export interface Trip {
   safe_arrival_check?: Record<string, unknown> | null;
   rider_face_verified_at_pickup?: boolean;
   face_verified_at_start?: boolean;
+  pickup_code?: string;
+  pickup_code_verified?: boolean;
+  security_code_verified?: boolean;
 }
 
 export interface Location {

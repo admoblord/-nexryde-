@@ -3,7 +3,7 @@ import 'react-native-get-random-values';
 
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { COLORS } from '@/src/constants/theme';
@@ -29,7 +29,7 @@ export default function RootLayout() {
                   screenOptions={{
                     headerShown: false,
                     contentStyle: { backgroundColor: COLORS.background },
-                    animation: 'slide_from_right',
+                    animation: Platform.OS === 'ios' ? 'default' : 'fade_from_bottom',
                   }}
                 >
                     <Stack.Screen name="index" />

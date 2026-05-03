@@ -998,6 +998,25 @@ export default function ModernDriverHome() {
           <View>
             <Text style={styles.greeting}>{(() => { const h = new Date().getHours(); return h < 12 ? t.home.goodMorning : h < 17 ? t.home.goodAfternoon : t.home.goodEvening; })()}</Text>
             <Text style={styles.driverName}>{user?.name || 'Driver'}</Text>
+            {/* Quick earnings snapshot — visible without scrolling */}
+            {!earningsLoading && (earnings.today > 0 || earnings.trips > 0) && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Ionicons name="wallet-outline" size={12} color="rgba(255,255,255,0.8)" />
+                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' }}>
+                    ₦{earnings.today >= 1000 ? `${(earnings.today / 1000).toFixed(1)}k` : earnings.today.toLocaleString()} today
+                  </Text>
+                </View>
+                {earnings.trips > 0 && (
+                  <>
+                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>•</Text>
+                    <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '600' }}>
+                      {earnings.trips} trip{earnings.trips !== 1 ? 's' : ''}
+                    </Text>
+                  </>
+                )}
+              </View>
+            )}
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <TouchableOpacity

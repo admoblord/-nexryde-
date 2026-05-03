@@ -1899,17 +1899,26 @@ function BookInDriveStyle() {
                   </TouchableOpacity>
                 </View>
               </View>
+              {/* Nearby driver count hint */}
+              {nearbyDrivers.length > 0 && !isLoading && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 8 }}>
+                  <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.green }} />
+                  <Text style={{ color: '#86EFAC', fontSize: 12, fontWeight: '700' }}>
+                    {nearbyDrivers.length} driver{nearbyDrivers.length !== 1 ? 's' : ''} nearby — quick pickup likely
+                  </Text>
+                </View>
+              )}
               <TouchableOpacity style={[s.findBtn, isLoading && { opacity: 0.7 }]} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
-                <LinearGradient colors={isLoading ? ['#64748b', '#475569'] : [COLORS.lime, '#9CD900']} style={s.btnGrad}>
+                <LinearGradient colors={isLoading ? ['#64748b', '#475569'] : [COLORS.green, '#00B455']} style={[s.btnGrad, { paddingVertical: 18 }]}>
                   {isLoading ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <ActivityIndicator color="#fff" size="small" />
-                      <Text style={[s.findBtnText, { color: '#fff' }]}>Finding drivers...</Text>
+                      <Text style={[s.findBtnText, { color: '#fff', fontSize: 16 }]}>Finding drivers...</Text>
                     </View>
                   ) : (
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Ionicons name="car" size={18} color={COLORS.bg} />
-                      <Text style={s.findBtnText}>Find Driver</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <Ionicons name="car-sport" size={22} color="#FFF" />
+                      <Text style={[s.findBtnText, { color: '#FFF', fontSize: 17, fontWeight: '900' }]}>Request Ride — ₦{currentFare.toLocaleString()}</Text>
                     </View>
                   )}
                 </LinearGradient>
@@ -1924,12 +1933,24 @@ function BookInDriveStyle() {
               accessibilityRole="button"
             >
               <LinearGradient
-                colors={pickup && destination && selectedVehicle ? [COLORS.green, '#00B455'] : ['#334155', '#475569']}
+                colors={pickup && destination && selectedVehicle ? [COLORS.green, '#009E3F'] : ['#334155', '#475569']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
-                style={s.calcBtnGrad}
+                style={[s.calcBtnGrad, { paddingVertical: 18 }]}
               >
-                {isLoading ? <ActivityIndicator color={COLORS.white} /> : <Text style={s.calcBtnText}>{selectedVehicle ? 'Calculate Fare' : 'Select Vehicle & Calculate'}</Text>}
+                {isLoading ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <ActivityIndicator color={COLORS.white} />
+                    <Text style={[s.calcBtnText, { color: '#FFF' }]}>Calculating...</Text>
+                  </View>
+                ) : (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons name={selectedVehicle ? 'calculator' : 'car-outline'} size={20} color="#FFF" />
+                    <Text style={[s.calcBtnText, { color: '#FFF', fontSize: 16 }]}>
+                      {selectedVehicle ? 'Get Fare Estimate' : 'Select Vehicle First'}
+                    </Text>
+                  </View>
+                )}
               </LinearGradient>
             </TouchableOpacity>
           )}

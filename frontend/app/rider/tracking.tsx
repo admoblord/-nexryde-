@@ -13,6 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
@@ -907,6 +908,32 @@ export default function TrackingScreen() {
             </View>
           )}
 
+          {/* Driver Arrived — prominent pickup code CTA */}
+          {tripStatus === 'arrived' && (
+            <TouchableOpacity
+              style={styles.arrivedCodeBanner}
+              onPress={() => router.push({ pathname: '/rider/security-code', params: { trip_id: effectiveTripId } } as any)}
+              activeOpacity={0.88}
+            >
+              <LinearGradient
+                colors={['#00D46A', '#009E3F']}
+                style={styles.arrivedCodeBannerGrad}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              >
+                <View style={{ width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="keypad" size={26} color="#FFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '900' }}>Driver has arrived!</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.88)', fontSize: 13, marginTop: 2 }}>
+                    Tap to show your 4-digit pick-up code
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="rgba(255,255,255,0.9)" />
+              </LinearGradient>
+            </TouchableOpacity>
+          )}
+
           {/* Status Card */}
           <View style={styles.statusCard}>
             <View style={styles.loadingContainer}>
@@ -1501,6 +1528,24 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: SPACING.lg,
+  },
+  arrivedCodeBanner: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginBottom: 12,
+    shadowColor: '#00D46A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  arrivedCodeBannerGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRadius: 16,
   },
   liveTripHero: {
     backgroundColor: COLORS.white,

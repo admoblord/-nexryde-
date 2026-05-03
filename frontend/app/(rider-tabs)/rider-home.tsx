@@ -69,11 +69,11 @@ export default function ModernRiderHome() {
       bg: ICON_SUPPORT,
     },
     {
-      id: 'witness',
-      label: 'Witness',
-      icon: 'eye' as const,
-      route: '/rider/share-trip',
-      bg: COLORS.accentGreen,
+      id: 'wallet',
+      label: 'My Wallet',
+      icon: 'wallet' as const,
+      route: '/(rider-tabs)/rider-wallet',
+      bg: '#7C3AED',
     },
     {
       id: 'settings',
