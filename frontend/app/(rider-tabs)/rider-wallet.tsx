@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,11 +10,13 @@ import {
   ActivityIndicator,
   RefreshControl,
   AppState,
-  Modal,
+  Animated,
+  Easing,
+  Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import {
@@ -38,7 +40,30 @@ import {
 } from '@/src/services/walletCheckoutSession';
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 
-const PRESETS = [500, 1000, 2000, 5000, 10000, 20000];
+// ── Palette ──────────────────────────────────────────────────────────────────
+const C = {
+  bg: '#F0F4F8',
+  card: '#0F172A',
+  cardAlt: '#1E293B',
+  green: '#22C55E',
+  greenLight: '#4ADE80',
+  greenDark: '#15803D',
+  amber: '#F59E0B',
+  amberLight: '#FDE68A',
+  blue: '#3B82F6',
+  red: '#EF4444',
+  white: '#FFFFFF',
+  gray50: '#F8FAFC',
+  gray100: '#F1F5F9',
+  gray200: '#E2E8F0',
+  gray400: '#94A3B8',
+  gray600: '#475569',
+  gray900: '#0F172A',
+  border: '#E2E8F0',
+  shadow: 'rgba(15,23,42,0.12)',
+};
+
+const PRESETS = [500, 1_000, 2_000, 5_000, 10_000, 20_000];
 
 type TopupState =
   | { phase: 'idle' }
@@ -49,12 +74,13 @@ type TopupState =
   | { phase: 'failed'; reference?: string; reason: string }
   | { phase: 'cancelled'; reference?: string };
 
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
   const insets = useSafeAreaInsets();
+
   const [balance, setBalance] = useState(0);
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);
-  const [firstRideCompleted, setFirstRideCompleted] = useState(false);
   const [firstRideRewardGranted, setFirstRideRewardGranted] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -64,30 +90,60 @@ export default function RiderWalletScreen() {
   const [busy, setBusy] = useState<'checkout' | 'verify' | null>(null);
   const [topupState, setTopupState] = useState<TopupState>({ phase: 'idle' });
   const [txs, setTxs] = useState<Record<string, unknown>[]>([]);
-  /** In-progress Squad checkout (server + local; survives app background). */
-  const [pendingMeta, setPendingMeta] = useState<{
-    ref: string;
-    url: string;
-    amount: number;
-  } | null>(null);
+  const [pendingMeta, setPendingMeta] = useState<{ ref: string; url: string; amount: number } | null>(null);
   const [checkoutFailed, setCheckoutFailed] = useState(false);
+
+  // Animations
+  const balanceFade = useRef(new Animated.Value(0)).current;
+  const balanceScale = useRef(new Animated.Value(0.92)).current;
+  const successPulse = useRef(new Animated.Value(1)).current;
+  const verifyShake = useRef(new Animated.Value(0)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
 
   const uid = user?.id;
 
-  const load = useCallback(async (): Promise<number | null> => {
-    if (!uid) {
-      setLoading(false);
-      return null;
+  // ── Spin animation for verify loading ───────────────────────────────────────
+  useEffect(() => {
+    if (busy === 'verify') {
+      Animated.loop(
+        Animated.timing(spinAnim, { toValue: 1, duration: 1000, useNativeDriver: true, easing: Easing.linear })
+      ).start();
+    } else {
+      spinAnim.setValue(0);
     }
+  }, [busy]);
+
+  const spin = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
+
+  // ── Balance entry animation ──────────────────────────────────────────────────
+  const animateBalanceIn = () => {
+    Animated.parallel([
+      Animated.timing(balanceFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+      Animated.spring(balanceScale, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Success pulse ────────────────────────────────────────────────────────────
+  const pulseSuccess = () => {
+    Animated.sequence([
+      Animated.timing(successPulse, { toValue: 1.06, duration: 200, useNativeDriver: true }),
+      Animated.timing(successPulse, { toValue: 1, duration: 200, useNativeDriver: true }),
+      Animated.timing(successPulse, { toValue: 1.06, duration: 200, useNativeDriver: true }),
+      Animated.timing(successPulse, { toValue: 1, duration: 200, useNativeDriver: true }),
+    ]).start();
+  };
+
+  // ── Data load ────────────────────────────────────────────────────────────────
+  const load = useCallback(async (): Promise<number | null> => {
+    if (!uid) { setLoading(false); return null; }
     try {
       const w = await getWalletMe(15);
       const bal = Number(w.data?.balance ?? 0);
       setBalance(bal);
-      setTxs(
-        Array.isArray(w.data?.transactions)
-          ? (w.data.transactions as Record<string, unknown>[])
-          : []
-      );
+      setTxs(Array.isArray(w.data?.transactions) ? (w.data.transactions as Record<string, unknown>[]) : []);
+      balanceFade.setValue(0);
+      balanceScale.setValue(0.92);
+      animateBalanceIn();
       return bal;
     } catch {
       setBalance(0);
@@ -99,19 +155,13 @@ export default function RiderWalletScreen() {
     }
   }, [uid]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (!uid) {
-      setReferralCode('');
-      return;
-    }
+    if (!uid) { setReferralCode(''); return; }
     let cancelled = false;
     const loadIncentives = async () => {
       try {
-        // Load referral code
         const hdr = await getAuthHeaders();
         const [refRes, creditRes, firstRideRes] = await Promise.allSettled([
           fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: hdr }),
@@ -128,24 +178,16 @@ export default function RiderWalletScreen() {
         }
         if (firstRideRes.status === 'fulfilled' && firstRideRes.value.ok) {
           const data = await firstRideRes.value.json();
-          if (!cancelled) {
-            setFirstRideCompleted(data.first_ride_completed ?? false);
-            setFirstRideRewardGranted(data.reward_granted ?? false);
-          }
+          if (!cancelled) setFirstRideRewardGranted(data.reward_granted ?? false);
         }
-      } catch {
-        if (!cancelled) setReferralCode('');
-      }
+      } catch { if (!cancelled) setReferralCode(''); }
     };
     void loadIncentives();
     return () => { cancelled = true; };
   }, [uid]);
 
   const syncPendingCheckout = useCallback(async () => {
-    if (!uid) {
-      setPendingMeta(null);
-      return;
-    }
+    if (!uid) { setPendingMeta(null); return; }
     try {
       const res = await getPendingWalletCheckout();
       const d = res.data;
@@ -154,97 +196,36 @@ export default function RiderWalletScreen() {
         setPendingMeta(null);
         return;
       }
-      const meta = {
-        ref: String(d.transaction_ref),
-        url: String(d.checkout_url),
-        amount: Number(d.amount_ngn ?? 0),
-      };
-      await saveWalletCheckoutSession({
-        userId: uid,
-        transaction_ref: meta.ref,
-        checkout_url: meta.url,
-        amount_ngn: meta.amount,
-        savedAt: new Date().toISOString(),
-      });
+      const meta = { ref: String(d.transaction_ref), url: String(d.checkout_url), amount: Number(d.amount_ngn ?? 0) };
+      await saveWalletCheckoutSession({ userId: uid, transaction_ref: meta.ref, checkout_url: meta.url, amount_ngn: meta.amount, savedAt: new Date().toISOString() });
       setPendingMeta(meta);
     } catch {
       const local = await loadWalletCheckoutSession(uid);
-      if (local) {
-        setPendingMeta({
-          ref: local.transaction_ref,
-          url: local.checkout_url,
-          amount: local.amount_ngn,
-        });
-      }
+      if (local) setPendingMeta({ ref: local.transaction_ref, url: local.checkout_url, amount: local.amount_ngn });
     }
   }, [uid]);
 
+  useEffect(() => { if (uid) void syncPendingCheckout(); }, [uid, syncPendingCheckout]);
   useEffect(() => {
-    if (uid) void syncPendingCheckout();
-  }, [uid, syncPendingCheckout]);
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') { void syncPendingCheckout(); void load(); }
+    });
+    return () => sub.remove();
+  }, [syncPendingCheckout, load]);
 
-  const onRefresh = () => {
-    setRefreshing(true);
-    load();
-  };
+  const onRefresh = () => { setRefreshing(true); load(); };
+  const parsedAmount = (): number => { const n = parseFloat(String(amountStr).replace(/,/g, '')); return Number.isFinite(n) ? n : 0; };
 
-  const parsedAmount = (): number => {
-    const n = parseFloat(String(amountStr).replace(/,/g, ''));
-    return Number.isFinite(n) ? n : 0;
-  };
-
-  const applyPromoCode = async () => {
-    const code = promoCode.trim().toUpperCase();
-    if (!code) {
-      Alert.alert('Referral code', 'Enter a referral code to continue.');
-      return;
-    }
-    try {
-      const hdr = await getAuthHeaders();
-      const res = await fetch(`${BACKEND_URL}/api/incentives/apply-referral-code`, {
-        method: 'POST',
-        headers: { ...hdr, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ referral_code: code }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        Alert.alert('Code applied! 🎉', data.message || 'Complete your first ride to earn ₦500.');
-        setPromoCode('');
-      } else {
-        Alert.alert('Could not apply code', data.detail || 'Invalid or already-used code.');
-      }
-    } catch {
-      Alert.alert('Error', 'Could not apply code. Please try again.');
-    }
-  };
-
-  const persistAndOpenCheckout = async (data: {
-    checkout_url?: string;
-    transaction_ref?: string;
-    transactionRef?: string;
-    amount_ngn?: number;
-  }) => {
+  // ── Checkout helpers ─────────────────────────────────────────────────────────
+  const persistAndOpenCheckout = async (data: { checkout_url?: string; transaction_ref?: string; transactionRef?: string; amount_ngn?: number }) => {
     const url = data.checkout_url;
     const ref = data.transaction_ref ?? data.transactionRef;
     if (!uid || !url || typeof url !== 'string' || !ref) return false;
     const amountNgn = Number(data.amount_ngn ?? parsedAmount());
-    await saveWalletCheckoutSession({
-      userId: uid,
-      transaction_ref: String(ref),
-      checkout_url: url,
-      amount_ngn: amountNgn,
-      savedAt: new Date().toISOString(),
-    });
+    await saveWalletCheckoutSession({ userId: uid, transaction_ref: String(ref), checkout_url: url, amount_ngn: amountNgn, savedAt: new Date().toISOString() });
     setPendingMeta({ ref: String(ref), url, amount: amountNgn });
     const ok = await openSquadCheckoutUrl(url);
-    if (!ok) {
-      Alert.alert('Checkout', 'Could not open the payment page. Try again.');
-      return false;
-    }
-    Alert.alert('Squad checkout', 'Complete payment in the window that opened, then tap Verify Payment.', [
-      { text: 'Verify Payment', onPress: () => void verifyPending() },
-      { text: 'OK', style: 'cancel' },
-    ]);
+    if (!ok) { Alert.alert('Checkout', 'Could not open the payment page. Try again.'); return false; }
     return true;
   };
 
@@ -254,36 +235,24 @@ export default function RiderWalletScreen() {
     try {
       const res = await initiateRiderWalletCheckout(amount, true);
       const data = res.data || {};
-      if (isWalletCheckoutInitOk(data)) {
-        setCheckoutFailed(false);
-        await persistAndOpenCheckout(data);
-      } else {
-        setCheckoutFailed(true);
-        Alert.alert('Payment', WALLET_CHECKOUT_USER_ERROR);
-      }
+      if (isWalletCheckoutInitOk(data)) { setCheckoutFailed(false); await persistAndOpenCheckout(data); }
+      else { setCheckoutFailed(true); Alert.alert('Payment', WALLET_CHECKOUT_USER_ERROR); }
     } catch (e: unknown) {
       setCheckoutFailed(true);
       Alert.alert('Payment', messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR));
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   };
 
   const startCardCheckout = async () => {
     const amount = parsedAmount();
-    if (amount < 100) {
-      Alert.alert('Amount', 'Minimum top-up is ₦100');
-      return;
-    }
+    if (amount < 100) { Alert.alert('Amount', 'Minimum top-up is ₦100'); return; }
     setBusy('checkout');
     setCheckoutFailed(false);
     try {
       const res = await initiateRiderWalletCheckout(amount, false);
       const data = res.data || {};
-      if (isWalletCheckoutInitOk(data)) {
-        setCheckoutFailed(false);
-        await persistAndOpenCheckout(data);
-      } else {
+      if (isWalletCheckoutInitOk(data)) { setCheckoutFailed(false); await persistAndOpenCheckout(data); }
+      else {
         setCheckoutFailed(true);
         Alert.alert('Payment', WALLET_CHECKOUT_USER_ERROR);
       }
@@ -294,24 +263,12 @@ export default function RiderWalletScreen() {
           const amt = Number(conflict.pending_amount_ngn ?? 0);
           Alert.alert(
             'Pending top-up',
-            `You already started a ₦${amt.toLocaleString()} payment. Resume the same checkout, or cancel it to use ₦${amount.toLocaleString()} instead.`,
+            `You have a pending ₦${amt.toLocaleString()} payment. Resume it or cancel to use ₦${amount.toLocaleString()}.`,
             [
-              {
-                text: 'Resume checkout',
-                onPress: () =>
-                  void persistAndOpenCheckout({
-                    checkout_url: conflict.checkout_url,
-                    transaction_ref: conflict.transaction_ref,
-                    amount_ngn: amt,
-                  }),
-              },
-              {
-                text: 'Cancel old & pay new amount',
-                style: 'destructive',
-                onPress: () => void startCardCheckoutReplace(amount),
-              },
-              { text: 'Not now', style: 'cancel' },
-            ]
+              { text: 'Resume', onPress: () => void persistAndOpenCheckout({ checkout_url: conflict.checkout_url, transaction_ref: conflict.transaction_ref, amount_ngn: amt }) },
+              { text: 'Use new amount', style: 'destructive', onPress: () => void startCardCheckoutReplace(amount) },
+              { text: 'Cancel', style: 'cancel' },
+            ],
           );
         } else {
           setCheckoutFailed(true);
@@ -321,932 +278,618 @@ export default function RiderWalletScreen() {
         setCheckoutFailed(true);
         Alert.alert('Payment', messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR));
       }
-    } finally {
-      setBusy(null);
-    }
+    } finally { setBusy(null); }
   };
 
   const handleCancelPendingSession = () => {
-    Alert.alert(
-      'Cancel pending top-up?',
-      'You can start a new amount afterward. This does not undo money already sent from your bank.',
-      [
-        { text: 'Keep session', style: 'cancel' },
-        {
-          text: 'Cancel session',
-          style: 'destructive',
-          onPress: () =>
-            void (async () => {
-              try {
-                await cancelPendingWalletCheckout();
-                if (uid) await clearWalletCheckoutSession(uid);
-                setPendingMeta(null);
-              } catch {
-                Alert.alert('Cancel', 'Could not cancel. Try again.');
-              }
-            })(),
-        },
-      ]
-    );
+    Alert.alert('Cancel pending top-up?', 'This does not undo money already sent from your bank.', [
+      { text: 'Keep session', style: 'cancel' },
+      {
+        text: 'Cancel session',
+        style: 'destructive',
+        onPress: () => void (async () => {
+          try {
+            await cancelPendingWalletCheckout();
+            if (uid) await clearWalletCheckoutSession(uid);
+            setPendingMeta(null);
+          } catch { Alert.alert('Cancel', 'Could not cancel. Try again.'); }
+        })(),
+      },
+    ]);
   };
 
-  const verifyPending = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      const silent = Boolean(opts?.silent);
-      if (!silent) setBusy('verify');
-      try {
-        const ref =
-          pendingMeta?.ref ||
-          (uid ? (await loadWalletCheckoutSession(uid))?.transaction_ref : undefined);
-        if (!ref) {
-          if (!silent)
-            Alert.alert('No payment found', 'Start a new top-up or pull down to refresh your balance.');
-          return;
-        }
-        if (!silent) setTopupState({ phase: 'verifying', reference: ref, startedAt: Date.now() });
+  // ── Verify payment ───────────────────────────────────────────────────────────
+  const verifyPending = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent);
+    if (!silent) setBusy('verify');
+    try {
+      const ref = pendingMeta?.ref || (uid ? (await loadWalletCheckoutSession(uid))?.transaction_ref : undefined);
+      if (!ref) {
+        if (!silent) Alert.alert('No payment found', 'Start a new top-up or pull down to refresh.');
+        return;
+      }
+      if (!silent) setTopupState({ phase: 'verifying', reference: ref, startedAt: Date.now() });
 
-        // Poll up to 24× (72 seconds) — Squad sometimes takes up to 60s to settle a card payment.
-        let terminal: Record<string, unknown> | null = null;
-        for (let i = 0; i < 24; i += 1) {
-          try {
-            const res = await verifyPendingRiderWallet(ref);
-            const data = res.data as Record<string, unknown>;
+      let terminal: Record<string, unknown> | null = null;
+      for (let i = 0; i < 24; i += 1) {
+        try {
+          const res = await verifyPendingRiderWallet(ref);
+          const data = res.data as Record<string, unknown>;
+          if (data.verified && (data.credited || data.duplicate)) { terminal = data; break; }
+          if (data.terminal || data.detail === 'amount_mismatch' || String(data.status || '').toLowerCase() === 'cancelled') { terminal = data; break; }
+        } catch { /* keep polling */ }
+        await new Promise((r) => setTimeout(r, 3000));
+      }
 
-            // Wallet successfully credited (or duplicate — already credited before)
-            if (data.verified && (data.credited || data.duplicate)) {
-              terminal = data;
-              break;
-            }
-            // Terminal failure — no point retrying
-            if (
-              data.terminal ||
-              data.detail === 'amount_mismatch' ||
-              String(data.status || '').toLowerCase() === 'cancelled'
-            ) {
-              terminal = data;
-              break;
-            }
-            // "squad_not_confirmed_yet" — keep polling silently
-          } catch {
-            // Network hiccup — keep polling
-          }
-          await new Promise((resolve) => setTimeout(resolve, 3000));
-        }
-
-        const data = terminal;
-        if (data?.verified && (data.credited || data.duplicate)) {
-          const amountForDisplay = pendingMeta?.amount ?? parsedAmount();
-          if (uid) await clearWalletCheckoutSession(uid);
-          setPendingMeta(null);
-          const balAfter = await load();
-          setTopupState({
-            phase: 'success',
-            reference: ref,
-            amountNgn: amountForDisplay,
-            balanceNgn: typeof balAfter === 'number' ? balAfter : 0,
-          });
-          if (!silent) {
-            Alert.alert(
-              '✅ Wallet Funded!',
-              `₦${(amountForDisplay).toLocaleString()} has been added to your wallet.`,
-            );
-          }
-        } else {
-          const isCancelled = String(data?.status || '').toLowerCase() === 'cancelled';
-          const isMismatch = data?.detail === 'amount_mismatch';
-          const reason = isMismatch
-            ? 'Amount mismatch. If money left your bank, contact support with your receipt.'
-            : isCancelled
-              ? 'Payment was cancelled.'
-              : 'Payment not confirmed yet. Tap "Verify Payment" again in a few seconds, or pull down to refresh your balance.';
-
-          if (isCancelled) {
-            setTopupState({ phase: 'cancelled', reference: ref });
-          } else {
-            // Keep phase as idle (not failed) so the UI stays usable and user can tap Verify again
-            setTopupState({ phase: 'idle' });
-          }
-          if (!silent) {
-            Alert.alert(
-              isCancelled ? 'Payment Cancelled' : isMismatch ? 'Amount Mismatch' : 'Not Confirmed Yet',
-              reason,
-              [
-                { text: 'OK' },
-                ...(!isCancelled && !isMismatch
-                  ? [{ text: 'Try Again', onPress: () => void verifyPending() }]
-                  : []),
-              ],
-            );
-          }
-        }
-      } catch (e: unknown) {
+      const data = terminal;
+      if (data?.verified && (data.credited || data.duplicate)) {
+        const amountForDisplay = pendingMeta?.amount ?? parsedAmount();
+        if (uid) await clearWalletCheckoutSession(uid);
+        setPendingMeta(null);
+        const balAfter = await load();
+        setTopupState({ phase: 'success', reference: ref, amountNgn: amountForDisplay, balanceNgn: typeof balAfter === 'number' ? balAfter : 0 });
+        pulseSuccess();
+        if (!silent) Alert.alert('✅ Wallet Funded!', `₦${amountForDisplay.toLocaleString()} has been added to your wallet.`);
+      } else {
+        const isCancelled = String(data?.status || '').toLowerCase() === 'cancelled';
+        const isMismatch = data?.detail === 'amount_mismatch';
+        const reason = isMismatch
+          ? 'Amount mismatch. If money left your bank, contact support with your receipt.'
+          : isCancelled ? 'Payment was cancelled.'
+          : 'Payment not confirmed yet. Tap Verify again in a few seconds.';
+        if (isCancelled) setTopupState({ phase: 'cancelled', reference: ref });
+        else setTopupState({ phase: 'idle' });
         if (!silent) {
-          const msg = axios.isAxiosError(e)
-            ? formatApiDetail(e.response?.data?.detail) || messageFromAxiosError(e, '')
-            : '';
-          // 404 most likely means Squad hasn't forwarded the event yet
-          const isNotFound = axios.isAxiosError(e) && e.response?.status === 404;
           Alert.alert(
-            isNotFound ? 'Payment Pending' : 'Verify',
-            isNotFound
-              ? 'Squad is still processing your payment. Tap "Verify Payment" again in a few seconds.'
-              : msg || 'Could not reach the server. Check your connection and try again.',
-            [
-              { text: 'OK' },
-              { text: 'Try Again', onPress: () => void verifyPending() },
-            ],
+            isCancelled ? 'Payment Cancelled' : isMismatch ? 'Amount Mismatch' : 'Not Confirmed Yet',
+            reason,
+            [{ text: 'OK' }, ...(!isCancelled && !isMismatch ? [{ text: 'Try Again', onPress: () => void verifyPending() }] : [])],
           );
         }
-      } finally {
-        if (!silent) setBusy(null);
       }
-    },
-    [uid, pendingMeta, load],
-  );
-
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        void syncPendingCheckout();
-        void load();
+    } catch (e: unknown) {
+      if (!silent) {
+        const msg = axios.isAxiosError(e) ? formatApiDetail(e.response?.data?.detail) || messageFromAxiosError(e, '') : '';
+        const isNotFound = axios.isAxiosError(e) && e.response?.status === 404;
+        Alert.alert(
+          isNotFound ? 'Payment Pending' : 'Verify',
+          isNotFound ? 'Squad is still processing. Tap Verify again in a few seconds.' : msg || 'Connection error. Try again.',
+          [{ text: 'OK' }, { text: 'Try Again', onPress: () => void verifyPending() }],
+        );
       }
-    });
-    return () => {
-      sub.remove();
-    };
-  }, [syncPendingCheckout, load]);
+    } finally { if (!silent) setBusy(null); }
+  }, [uid, pendingMeta, load]);
 
+  const applyPromoCode = async () => {
+    const code = promoCode.trim().toUpperCase();
+    if (!code) { Alert.alert('Referral code', 'Enter a referral code first.'); return; }
+    try {
+      const hdr = await getAuthHeaders();
+      const res = await fetch(`${BACKEND_URL}/api/incentives/apply-referral-code`, {
+        method: 'POST', headers: { ...hdr, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_code: code }),
+      });
+      const data = await res.json();
+      if (res.ok) { Alert.alert('Code applied! 🎉', data.message || 'Complete your first ride to earn ₦500.'); setPromoCode(''); }
+      else Alert.alert('Could not apply code', data.detail || 'Invalid or already-used code.');
+    } catch { Alert.alert('Error', 'Could not apply code. Try again.'); }
+  };
+
+  // ── Derived ──────────────────────────────────────────────────────────────────
+  const isSuccess = topupState.phase === 'success';
+  const hasPromo = promoCreditBalance > 0;
+  const formattedBalance = loading ? '—' : `₦${balance.toLocaleString()}`;
+
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Wallet</Text>
-        <Text style={styles.headerSub}>Top up with card or bank (Squad)</Text>
-      </View>
+    <SafeAreaView style={s.root} edges={['top']}>
       <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingBottom: SPACING.xxl + Math.max(insets.bottom, 12) + 56 },
-        ]}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={[s.scroll, { paddingBottom: Math.max(insets.bottom, 16) + 80 }]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.green} />}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Available balance</Text>
-          {loading ? (
-            <ActivityIndicator color="#FBBF24" style={{ marginVertical: 12 }} />
-          ) : (
-            <Text style={styles.balanceAmount}>₦{balance.toLocaleString()}</Text>
+
+        {/* ── HERO BALANCE CARD ──────────────────────────────────────────── */}
+        <LinearGradient colors={['#0F172A', '#1E3A5F', '#0F172A']} style={s.heroCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          {/* Glow orb */}
+          <View style={s.heroGlow} />
+
+          <View style={s.heroTop}>
+            <View>
+              <Text style={s.heroLabel}>NEXRYDE WALLET</Text>
+              <Text style={s.heroName}>{user?.name?.split(' ')[0] || 'Rider'}</Text>
+            </View>
+            <View style={s.heroBadge}>
+              <Ionicons name="wallet" size={18} color={C.green} />
+              <Text style={s.heroBadgeText}>Active</Text>
+            </View>
+          </View>
+
+          <Animated.View style={{ opacity: balanceFade, transform: [{ scale: balanceScale }] }}>
+            <Text style={s.heroBalanceLabel}>Available Balance</Text>
+            <Text style={s.heroBalance}>{formattedBalance}</Text>
+          </Animated.View>
+
+          {hasPromo && (
+            <View style={s.promoStrip}>
+              <Ionicons name="gift" size={14} color={C.amber} />
+              <Text style={s.promoStripText}>+₦{promoCreditBalance.toLocaleString()} promo credit available</Text>
+            </View>
           )}
-          <Text style={styles.balanceSubtext}>
-            Use wallet for in-app ride payments where enabled. Cash remains available for rides.
-          </Text>
-        </View>
 
-        <Text style={styles.sectionTitle}>Top up</Text>
-        <Text style={styles.sectionHint}>
-          Choose an amount, then pay with card or bank in Squad. Your session is saved until you pay or cancel.
-        </Text>
-
-        {pendingMeta ? (
-          <View style={styles.pendingBanner}>
-            <Ionicons name="time-outline" size={22} color="#B45309" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.pendingBannerTitle}>Payment pending</Text>
-              <Text style={styles.pendingBannerText}>
-                ₦{pendingMeta.amount.toLocaleString()} — same Squad session. Tap Resume if the browser closed.
-              </Text>
+          <View style={s.heroFooter}>
+            <View style={s.heroFooterItem}>
+              <Ionicons name="shield-checkmark-outline" size={14} color="rgba(255,255,255,0.5)" />
+              <Text style={s.heroFooterText}>Secured by Squad</Text>
+            </View>
+            <View style={s.heroFooterItem}>
+              <Ionicons name="refresh-circle-outline" size={14} color="rgba(255,255,255,0.5)" />
+              <Text style={s.heroFooterText}>Pull to refresh</Text>
             </View>
           </View>
-        ) : null}
+        </LinearGradient>
 
-        {pendingMeta ? (
-          <View style={styles.pendingActions}>
-            <TouchableOpacity
-              style={styles.resumeBtn}
-              onPress={() => void openSquadCheckoutUrl(pendingMeta.url)}
-              disabled={busy !== null}
-            >
-              <Ionicons name="open-outline" size={20} color="#FFF" />
-              <Text style={styles.resumeBtnText}>Resume checkout</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.cancelSessionBtn}
-              onPress={handleCancelPendingSession}
-              disabled={busy !== null}
-            >
-              <Text style={styles.cancelSessionBtnText}>Cancel session</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-
-        <View style={styles.presetRow}>
-          {PRESETS.map((p) => (
-            <TouchableOpacity
-              key={p}
-              style={[styles.presetChip, amountStr === String(p) && styles.presetChipOn]}
-              onPress={() => setAmountStr(String(p))}
-            >
-              <Text style={[styles.presetChipText, amountStr === String(p) && styles.presetChipTextOn]}>
-                ₦{(p / 1000).toLocaleString()}k
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-        <TextInput
-          style={styles.amountInput}
-          keyboardType="decimal-pad"
-          placeholder="Amount (NGN)"
-          placeholderTextColor={COLORS.gray400}
-          value={amountStr}
-          onChangeText={setAmountStr}
-        />
-
-        <TouchableOpacity
-          style={[styles.primaryBtn, busy === 'checkout' && { opacity: 0.7 }]}
-          onPress={startCardCheckout}
-          disabled={busy !== null || (topupState.phase !== 'idle' && topupState.phase !== 'failed' && topupState.phase !== 'cancelled' && topupState.phase !== 'success')}
-        >
-          {busy === 'checkout' ? (
-            <ActivityIndicator color="#FFF" />
-          ) : (
-            <>
-              <Ionicons name="card" size={22} color="#FFF" />
-              <Text style={styles.primaryBtnText}>Pay with card / bank (Squad)</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {checkoutFailed ? (
-          <TouchableOpacity
-            style={styles.retryCheckoutBtn}
-            onPress={() => {
-              setCheckoutFailed(false);
-              void startCardCheckout();
-            }}
-            disabled={busy !== null}
-          >
-            <Ionicons name="refresh" size={20} color={COLORS.primary} />
-            <Text style={styles.retryCheckoutBtnText}>Try again</Text>
-          </TouchableOpacity>
-        ) : null}
-
-        {topupState.phase === 'success' && (
-          <View style={styles.successBanner}>
-            <Ionicons name="checkmark-circle" size={22} color="#16A34A" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.successBannerTitle}>Wallet Funded Successfully</Text>
-              <Text style={styles.successBannerText}>
-                ₦{(topupState.amountNgn ?? 0).toLocaleString()} added · New balance: ₦{(topupState.balanceNgn ?? 0).toLocaleString()}
-              </Text>
-            </View>
-          </View>
-        )}
-
-        <TouchableOpacity
-          style={[styles.verifyBtn, busy === 'verify' && { opacity: 0.7 }]}
-          onPress={() => void verifyPending()}
-          disabled={busy !== null}
-        >
-          {busy === 'verify' ? (
-            <ActivityIndicator color="#FFF" size="small" />
-          ) : (
-            <>
-              <Ionicons name="checkmark-done-outline" size={18} color="#FFF" />
-              <Text style={styles.verifyBtnText}>Verify Payment</Text>
-            </>
-          )}
-        </TouchableOpacity>
-        <Text style={styles.verifyHint}>
-          Tap after completing payment in Squad. We'll check with Squad and credit your wallet instantly.
-        </Text>
-
-        <Text style={styles.sectionTitle}>Rewards & Bonuses</Text>
-        <Text style={styles.sectionHint}>
-          Earn rewards through real trips only — no fake credits, no abuse.
-        </Text>
-
-        {/* First-ride reward card */}
-        <View style={[styles.rewardsCard, { borderLeftWidth: 4, borderLeftColor: firstRideRewardGranted ? '#22C55E' : '#F59E0B' }]}>
-          <View style={styles.rewardsRow}>
-            <View style={[styles.rewardsIcon, { backgroundColor: firstRideRewardGranted ? '#DCFCE7' : '#FEF3C7' }]}>
-              <Ionicons name={firstRideRewardGranted ? 'checkmark-circle' : 'flash'} size={22} color={firstRideRewardGranted ? '#16A34A' : '#D97706'} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.rewardsTitle}>
-                {firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}
-              </Text>
-              <Text style={styles.rewardsText}>
-                {firstRideRewardGranted
-                  ? '₦500 promo credit has been added to your wallet.'
-                  : 'Complete your first ride and get ₦500 bonus credit instantly.'}
-              </Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Promo credit balance */}
-        {promoCreditBalance > 0 && (
-          <View style={[styles.rewardsCard, { backgroundColor: '#F0FDF4' }]}>
-            <View style={styles.rewardsRow}>
-              <View style={[styles.rewardsIcon, { backgroundColor: '#DCFCE7' }]}>
-                <Ionicons name="wallet" size={22} color="#16A34A" />
+        {/* ── SUCCESS BANNER ─────────────────────────────────────────────── */}
+        {isSuccess && (
+          <Animated.View style={[s.successBanner, { transform: [{ scale: successPulse }] }]}>
+            <LinearGradient colors={['#DCFCE7', '#F0FDF4']} style={s.successBannerGrad}>
+              <View style={s.successIconWrap}>
+                <Ionicons name="checkmark-circle" size={28} color={C.greenDark} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={styles.rewardsTitle}>Promo Credit Balance</Text>
-                <Text style={[styles.rewardsText, { color: '#16A34A', fontWeight: '700', fontSize: 18 }]}>
-                  ₦{promoCreditBalance.toLocaleString()}
-                </Text>
-                <Text style={[styles.rewardsText, { fontSize: 11, color: '#6B7280' }]}>
-                  Applied automatically (max ₦500 / 40% of fare per ride · expires in 7 days)
+                <Text style={s.successTitle}>Wallet Funded!</Text>
+                <Text style={s.successSub}>
+                  +₦{(topupState as any).amountNgn?.toLocaleString()} · Balance: ₦{(topupState as any).balanceNgn?.toLocaleString()}
                 </Text>
               </View>
-            </View>
+              <TouchableOpacity onPress={() => setTopupState({ phase: 'idle' })}>
+                <Ionicons name="close-circle" size={22} color={C.greenDark} />
+              </TouchableOpacity>
+            </LinearGradient>
+          </Animated.View>
+        )}
+
+        {/* ── PENDING PAYMENT BANNER ─────────────────────────────────────── */}
+        {pendingMeta && (
+          <View style={s.pendingCard}>
+            <LinearGradient colors={['#451A03', '#78350F']} style={s.pendingGrad}>
+              <View style={s.pendingHeader}>
+                <View style={s.pendingIconWrap}>
+                  <Ionicons name="time" size={20} color={C.amber} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.pendingTitle}>Payment In Progress</Text>
+                  <Text style={s.pendingSub}>₦{pendingMeta.amount.toLocaleString()} — Squad session active</Text>
+                </View>
+                <TouchableOpacity onPress={handleCancelPendingSession}>
+                  <Ionicons name="close" size={20} color="rgba(255,255,255,0.5)" />
+                </TouchableOpacity>
+              </View>
+              <View style={s.pendingActions}>
+                <TouchableOpacity
+                  style={s.pendingResume}
+                  onPress={() => void openSquadCheckoutUrl(pendingMeta.url)}
+                  disabled={busy !== null}
+                >
+                  <Ionicons name="open-outline" size={16} color={C.amber} />
+                  <Text style={s.pendingResumeText}>Resume Payment</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.pendingVerify}
+                  onPress={() => void verifyPending()}
+                  disabled={busy !== null}
+                >
+                  {busy === 'verify' ? (
+                    <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                      <Ionicons name="refresh" size={16} color={C.white} />
+                    </Animated.View>
+                  ) : (
+                    <Ionicons name="checkmark-done" size={16} color={C.white} />
+                  )}
+                  <Text style={s.pendingVerifyText}>{busy === 'verify' ? 'Checking…' : 'Verify Now'}</Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
           </View>
         )}
 
-        {/* Referral card */}
-        <View style={styles.rewardsCard}>
-          <View style={styles.rewardsRow}>
-            <View style={[styles.rewardsIcon, { backgroundColor: '#EDE9FE' }]}>
-              <Ionicons name="people" size={20} color="#7C3AED" />
+        {/* ── TOP UP SECTION ─────────────────────────────────────────────── */}
+        <View style={s.section}>
+          <View style={s.sectionHeader}>
+            <View style={s.sectionIconWrap}>
+              <Ionicons name="add-circle" size={20} color={C.green} />
+            </View>
+            <Text style={s.sectionTitle}>Top Up Wallet</Text>
+          </View>
+
+          {/* Amount presets */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.presetsRow}>
+            {PRESETS.map((p) => {
+              const selected = amountStr === String(p);
+              return (
+                <TouchableOpacity key={p} style={[s.preset, selected && s.presetOn]} onPress={() => setAmountStr(String(p))}>
+                  <Text style={[s.presetText, selected && s.presetTextOn]}>
+                    {p >= 1000 ? `₦${p / 1000}k` : `₦${p}`}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Custom amount */}
+          <View style={s.amountWrap}>
+            <Text style={s.amountPrefix}>₦</Text>
+            <TextInput
+              style={s.amountInput}
+              keyboardType="decimal-pad"
+              placeholder="Enter amount"
+              placeholderTextColor={C.gray400}
+              value={amountStr}
+              onChangeText={setAmountStr}
+              returnKeyType="done"
+            />
+          </View>
+
+          {/* Pay button */}
+          <TouchableOpacity
+            style={[s.payBtn, busy === 'checkout' && { opacity: 0.75 }]}
+            onPress={startCardCheckout}
+            disabled={busy !== null}
+            activeOpacity={0.88}
+          >
+            <LinearGradient colors={busy === 'checkout' ? ['#475569', '#334155'] : [C.green, '#16A34A']} style={s.payBtnGrad}>
+              {busy === 'checkout' ? (
+                <View style={s.payBtnInner}>
+                  <ActivityIndicator color="#FFF" size="small" />
+                  <Text style={s.payBtnText}>Opening Squad…</Text>
+                </View>
+              ) : (
+                <View style={s.payBtnInner}>
+                  <Ionicons name="card" size={22} color="#FFF" />
+                  <Text style={s.payBtnText}>
+                    Pay ₦{parsedAmount() > 0 ? parsedAmount().toLocaleString() : '—'} via Squad
+                  </Text>
+                </View>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+          {checkoutFailed && (
+            <TouchableOpacity style={s.retryBtn} onPress={() => { setCheckoutFailed(false); void startCardCheckout(); }} disabled={busy !== null}>
+              <Ionicons name="refresh" size={16} color={C.blue} />
+              <Text style={s.retryBtnText}>Try Again</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Divider */}
+          <View style={s.divider}>
+            <View style={s.dividerLine} />
+            <Text style={s.dividerText}>already paid?</Text>
+            <View style={s.dividerLine} />
+          </View>
+
+          {/* Verify button */}
+          <TouchableOpacity
+            style={[s.verifyBtn, busy === 'verify' && { opacity: 0.75 }]}
+            onPress={() => void verifyPending()}
+            disabled={busy !== null}
+            activeOpacity={0.88}
+          >
+            {busy === 'verify' ? (
+              <View style={s.verifyBtnInner}>
+                <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                  <Ionicons name="refresh" size={18} color={C.white} />
+                </Animated.View>
+                <Text style={s.verifyBtnText}>Checking with Squad…</Text>
+              </View>
+            ) : (
+              <View style={s.verifyBtnInner}>
+                <Ionicons name="checkmark-done-outline" size={18} color={C.white} />
+                <Text style={s.verifyBtnText}>Verify Payment</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <Text style={s.verifyHint}>Tap after completing payment in Squad to instantly credit your wallet.</Text>
+        </View>
+
+        {/* ── REWARDS ────────────────────────────────────────────────────── */}
+        <View style={s.section}>
+          <View style={s.sectionHeader}>
+            <View style={[s.sectionIconWrap, { backgroundColor: '#FEF3C7' }]}>
+              <Ionicons name="gift" size={20} color={C.amber} />
+            </View>
+            <Text style={s.sectionTitle}>Rewards & Bonuses</Text>
+          </View>
+
+          {/* First ride bonus */}
+          <View style={[s.rewardCard, { borderLeftColor: firstRideRewardGranted ? C.green : C.amber }]}>
+            <View style={[s.rewardIcon, { backgroundColor: firstRideRewardGranted ? '#DCFCE7' : '#FEF3C7' }]}>
+              <Ionicons name={firstRideRewardGranted ? 'checkmark-circle' : 'flash'} size={22} color={firstRideRewardGranted ? C.greenDark : '#D97706'} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.rewardsTitle}>Invite Friends — Earn ₦500 Each</Text>
-              <Text style={styles.rewardsText}>
-                When your friend completes their first ride you both earn ₦500 credit.
+              <Text style={s.rewardTitle}>{firstRideRewardGranted ? '🎉 First Ride Bonus Earned!' : 'First Ride Bonus'}</Text>
+              <Text style={s.rewardText}>
+                {firstRideRewardGranted ? '₦500 bonus has been added to your wallet.' : 'Complete your first ride and get ₦500 instantly.'}
               </Text>
+            </View>
+            {!firstRideRewardGranted && <View style={s.rewardBadge}><Text style={s.rewardBadgeText}>₦500</Text></View>}
+          </View>
+
+          {/* Promo balance */}
+          {hasPromo && (
+            <View style={[s.rewardCard, { borderLeftColor: C.green }]}>
+              <View style={[s.rewardIcon, { backgroundColor: '#DCFCE7' }]}>
+                <Ionicons name="wallet" size={22} color={C.greenDark} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.rewardTitle}>Promo Credit</Text>
+                <Text style={[s.rewardText, { color: C.greenDark, fontWeight: '800', fontSize: 18 }]}>₦{promoCreditBalance.toLocaleString()}</Text>
+                <Text style={[s.rewardText, { fontSize: 11, marginTop: 2 }]}>Applied automatically — max ₦500 / 40% per fare</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Referral */}
+          <View style={[s.rewardCard, { borderLeftColor: '#7C3AED' }]}>
+            <View style={[s.rewardIcon, { backgroundColor: '#EDE9FE' }]}>
+              <Ionicons name="people" size={22} color="#7C3AED" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.rewardTitle}>Invite Friends — Earn ₦500 Each</Text>
+              <Text style={s.rewardText}>When your friend completes their first ride, you both earn ₦500.</Text>
               {referralCode ? (
-                <View style={{ marginTop: 8, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                  <View style={{ backgroundColor: '#F3F4F6', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}>
-                    <Text style={{ fontWeight: '800', fontSize: 16, color: '#111827', letterSpacing: 2 }}>{referralCode}</Text>
+                <View style={s.referralRow}>
+                  <View style={s.referralCode}>
+                    <Text style={s.referralCodeText}>{referralCode}</Text>
                   </View>
                   <TouchableOpacity
-                    style={{ backgroundColor: '#7C3AED', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 }}
+                    style={s.shareBtn}
                     onPress={() => {
                       const { Share } = require('react-native');
                       Share.share({ message: `Join Nexryde with my code ${referralCode} and we both earn ₦500 after your first ride! Download: https://nexryde.app` });
                     }}
                   >
-                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>Share</Text>
+                    <Ionicons name="share-social" size={14} color="#FFF" />
+                    <Text style={s.shareBtnText}>Share</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
-                <Text style={[styles.rewardsText, { color: '#9CA3AF', marginTop: 4 }]}>Loading your code…</Text>
+                <Text style={[s.rewardText, { color: C.gray400, marginTop: 4 }]}>Loading your code…</Text>
               )}
-            </View>
-          </View>
-          {/* Apply a referral code */}
-          <View style={styles.promoBox}>
-            <Text style={styles.promoLabel}>Have a referral code?</Text>
-            <TextInput
-              style={styles.promoInput}
-              placeholder="Enter code e.g. NX1A2B3C"
-              placeholderTextColor={COLORS.gray400}
-              value={promoCode}
-              onChangeText={setPromoCode}
-              autoCapitalize="characters"
-              autoCorrect={false}
-            />
-            <TouchableOpacity style={styles.promoBtn} onPress={applyPromoCode}>
-              <Text style={styles.promoBtnText}>Apply</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <Text style={styles.sectionTitle}>Nexryde Wallet as a Bank</Text>
-        <Text style={styles.sectionHint}>
-          Your rider wallet will evolve into a mini banking experience inside Nexryde.
-        </Text>
-        <View style={styles.comingSoonCard}>
-          <View style={styles.comingSoonHeader}>
-            <View style={styles.comingSoonIcon}>
-              <Ionicons name="business-outline" size={22} color={COLORS.primary} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.comingSoonTitle}>Banking features</Text>
-              <Text style={styles.comingSoonText}>
-                Earn interest on balance, send money, pay bills, and buy airtime without leaving Nexryde.
-              </Text>
-            </View>
-            <View style={styles.comingSoonBadge}>
-              <Text style={styles.comingSoonBadgeText}>Coming Soon</Text>
-            </View>
-          </View>
-          <View style={styles.comingSoonGrid}>
-            <View style={styles.comingSoonChip}>
-              <Ionicons name="trending-up-outline" size={16} color="#0F766E" />
-              <Text style={styles.comingSoonChipText}>Interest earnings</Text>
-            </View>
-            <View style={styles.comingSoonChip}>
-              <Ionicons name="swap-horizontal-outline" size={16} color="#0F766E" />
-              <Text style={styles.comingSoonChipText}>Send money</Text>
-            </View>
-            <View style={styles.comingSoonChip}>
-              <Ionicons name="flash-outline" size={16} color="#0F766E" />
-              <Text style={styles.comingSoonChipText}>Buy airtime</Text>
-            </View>
-            <View style={styles.comingSoonChip}>
-              <Ionicons name="receipt-outline" size={16} color="#0F766E" />
-              <Text style={styles.comingSoonChipText}>Pay bills</Text>
+              {/* Apply code input */}
+              <View style={s.codeInputRow}>
+                <TextInput
+                  style={s.codeInput}
+                  placeholder="Have a code? Enter here"
+                  placeholderTextColor={C.gray400}
+                  value={promoCode}
+                  onChangeText={setPromoCode}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity style={s.codeApplyBtn} onPress={applyPromoCode}>
+                  <Text style={s.codeApplyText}>Apply</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Recent wallet activity</Text>
-        {txs.length === 0 ? (
-          <Text style={styles.emptyTx}>No transactions yet. Top up to get started.</Text>
-        ) : (
-          txs.map((row, i) => {
-            const t = row as Record<string, unknown>;
-            const amt = Number(t.amount || 0);
-            const typ = String(t.type || '');
-            const src = String(t.source || '');
-            const isCreditTopUp =
-              typ === 'topup' || (typ === 'credit' && (src === 'squad' || !src));
-            const isRideDebit = typ === 'debit' || typ === 'ride_payment';
-            const ts = t.timestamp ? String(t.timestamp) : '';
-            const txLabel = isCreditTopUp
-              ? 'Top up'
-              : isRideDebit
-                ? 'Ride payment'
-                : typ === 'credit'
-                  ? 'Credit'
-                  : typ || 'Transaction';
-            const iconBg = isCreditTopUp ? '#D1FAE5' : '#FEE2E2';
-            const iconColor = isCreditTopUp ? '#059669' : '#DC2626';
-            return (
-              <View key={String(t.id || i)} style={styles.txRow}>
-                <View style={[styles.txIcon, { backgroundColor: iconBg }]}>
-                  <Ionicons
-                    name={isCreditTopUp ? 'arrow-down-circle' : 'car'}
-                    size={20}
-                    color={iconColor}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.txType}>{txLabel}</Text>
-                  <Text style={styles.txMeta} numberOfLines={1}>
-                    {ts}
-                    {t.reference ? ` · ${String(t.reference).slice(-8)}` : ''}
+        {/* ── TRANSACTION HISTORY ────────────────────────────────────────── */}
+        <View style={s.section}>
+          <View style={s.sectionHeader}>
+            <View style={[s.sectionIconWrap, { backgroundColor: '#EFF6FF' }]}>
+              <Ionicons name="receipt" size={20} color={C.blue} />
+            </View>
+            <Text style={s.sectionTitle}>Recent Activity</Text>
+          </View>
+
+          {txs.length === 0 ? (
+            <View style={s.emptyTx}>
+              <Ionicons name="receipt-outline" size={36} color={C.gray400} />
+              <Text style={s.emptyTxText}>No transactions yet</Text>
+              <Text style={s.emptyTxSub}>Top up to get started</Text>
+            </View>
+          ) : (
+            txs.map((row, i) => {
+              const t = row as Record<string, unknown>;
+              const amt = Number(t.amount || 0);
+              const typ = String(t.type || '');
+              const src = String(t.source || '');
+              const isCreditTopUp = typ === 'topup' || (typ === 'credit' && (src === 'squad' || !src));
+              const isRideDebit = typ === 'debit' || typ === 'ride_payment';
+              const ts = t.timestamp ? String(t.timestamp) : '';
+              const label = isCreditTopUp ? 'Top up' : isRideDebit ? 'Ride payment' : typ === 'credit' ? 'Credit' : typ || 'Transaction';
+              const iconBg = isCreditTopUp ? '#DCFCE7' : '#FEE2E2';
+              const iconColor = isCreditTopUp ? C.greenDark : C.red;
+              return (
+                <View key={String(t.id || i)} style={s.txRow}>
+                  <View style={[s.txIcon, { backgroundColor: iconBg }]}>
+                    <Ionicons name={isCreditTopUp ? 'arrow-down-circle' : 'car'} size={20} color={iconColor} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.txLabel}>{label}</Text>
+                    <Text style={s.txMeta} numberOfLines={1}>
+                      {ts ? new Date(ts).toLocaleDateString('en-NG', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'}
+                      {t.reference ? ` · #${String(t.reference).slice(-6)}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={[s.txAmt, { color: isCreditTopUp ? C.greenDark : C.red }]}>
+                    {isCreditTopUp ? '+' : '-'}₦{Math.abs(amt).toLocaleString()}
                   </Text>
                 </View>
-                <Text
-                  style={[
-                    styles.txAmt,
-                    { color: amt >= 0 ? '#059669' : '#DC2626' },
-                  ]}
-                >
-                  {amt >= 0 ? '+' : ''}₦{Math.abs(amt).toLocaleString()}
-                </Text>
+              );
+            })
+          )}
+        </View>
+
+        {/* ── COMING SOON ────────────────────────────────────────────────── */}
+        <LinearGradient colors={['#ECFEFF', '#F0FEFF']} style={s.futureCard}>
+          <View style={s.futureHeader}>
+            <View style={[s.sectionIconWrap, { backgroundColor: '#CFFAFE' }]}>
+              <Ionicons name="business-outline" size={20} color="#0891B2" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={s.futureTitle}>Nexryde Banking</Text>
+              <Text style={s.futureSub}>Earn interest, send money, pay bills — coming soon</Text>
+            </View>
+            <View style={s.futureBadge}><Text style={s.futureBadgeText}>SOON</Text></View>
+          </View>
+          <View style={s.futureChips}>
+            {['Interest earnings', 'Send money', 'Buy airtime', 'Pay bills'].map((f) => (
+              <View key={f} style={s.futureChip}>
+                <Text style={s.futureChipText}>{f}</Text>
               </View>
-            );
-          })
-        )}
+            ))}
+          </View>
+        </LinearGradient>
+
       </ScrollView>
-      <Modal visible={topupState.phase === 'verifying'} transparent animationType="fade">
-        <View style={styles.verifyModalOverlay}>
-          <View style={styles.verifyModalCard}>
-            <ActivityIndicator color={COLORS.accentGreen} />
-            <Text style={styles.verifyModalTitle}>Confirming payment with Squad…</Text>
-            <Text style={styles.verifyModalText}>Do not close the app. We only credit after Squad confirms income.</Text>
+
+      {/* ── VERIFYING OVERLAY ──────────────────────────────────────────────── */}
+      {topupState.phase === 'verifying' && (
+        <View style={s.overlay}>
+          <View style={s.overlayCard}>
+            <LinearGradient colors={[C.green, '#16A34A']} style={s.overlayIconWrap}>
+              <Animated.View style={{ transform: [{ rotate: spin }] }}>
+                <Ionicons name="refresh" size={28} color="#FFF" />
+              </Animated.View>
+            </LinearGradient>
+            <Text style={s.overlayTitle}>Confirming with Squad</Text>
+            <Text style={s.overlaySub}>Please wait — do not close the app.</Text>
+            <View style={s.overlayDots}>
+              {[0, 1, 2].map((i) => <View key={i} style={s.overlayDot} />)}
+            </View>
           </View>
         </View>
-      </Modal>
+      )}
     </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-  },
-  header: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    borderBottomLeftRadius: BORDER_RADIUS.xxl,
-    borderBottomRightRadius: BORDER_RADIUS.xxl,
-  },
-  headerTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  headerSub: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginTop: 4,
-  },
-  content: {
-    padding: SPACING.lg,
-    paddingBottom: SPACING.xxl,
-  },
-  balanceCard: {
-    backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.xxl,
-    padding: SPACING.xl,
-    marginBottom: SPACING.lg,
-    ...SHADOWS.lg,
-  },
-  balanceLabel: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#F59E0B',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  balanceAmount: {
-    fontSize: FONT_SIZE.display,
-    fontWeight: '900',
-    color: '#FBBF24',
-    marginVertical: SPACING.sm,
-  },
-  balanceSubtext: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#FDE68A',
-    lineHeight: 20,
-  },
-  sectionTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: '#0F172A',
-    marginBottom: SPACING.sm,
-    marginTop: SPACING.md,
-  },
-  sectionHint: {
-    fontSize: FONT_SIZE.sm,
-    color: '#64748B',
-    marginBottom: SPACING.md,
-    lineHeight: 20,
-  },
-  pendingBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.sm,
-    backgroundColor: '#FEF3C7',
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: '#FCD34D',
-  },
-  pendingBannerTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#92400E',
-    marginBottom: 4,
-  },
-  pendingBannerText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: '#78350F',
-    lineHeight: 18,
-  },
-  pendingActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-    marginBottom: SPACING.md,
-  },
-  resumeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#EA580C',
-    paddingVertical: 12,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  resumeBtnText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#FFF',
-  },
-  cancelSessionBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: SPACING.md,
-    justifyContent: 'center',
-  },
-  cancelSessionBtnText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '700',
-    color: '#64748B',
-    textDecorationLine: 'underline',
-  },
-  presetRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: SPACING.md,
-  },
-  presetChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.white,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-  },
-  presetChipOn: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: '#ECFDF5',
-  },
-  presetChipText: {
-    fontWeight: '800',
-    color: '#64748B',
-    fontSize: FONT_SIZE.sm,
-  },
-  presetChipTextOn: {
-    color: '#059669',
-  },
-  amountInput: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 2,
-    borderColor: '#E2E8F0',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 14,
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    marginBottom: SPACING.md,
-    color: '#0F172A',
-  },
-  primaryBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    backgroundColor: COLORS.accentGreen,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.lg,
-  },
-  primaryBtnText: {
-    color: '#FFF',
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-  },
-  retryCheckoutBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    marginTop: -8,
-    marginBottom: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 2,
-    borderColor: COLORS.primary,
-    backgroundColor: COLORS.white,
-  },
-  retryCheckoutBtnText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  verifyBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#0F766E',
-    paddingVertical: 16,
-    borderRadius: BORDER_RADIUS.xl,
-    marginBottom: 8,
-  },
-  verifyBtnText: {
-    color: '#FFF',
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-  },
-  verifyHint: {
-    color: '#64748B',
-    fontSize: FONT_SIZE.xs,
-    textAlign: 'center',
-    lineHeight: 18,
-    marginBottom: SPACING.lg,
-    paddingHorizontal: SPACING.sm,
-  },
-  successBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    backgroundColor: '#F0FDF4',
-    borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md,
-    marginBottom: SPACING.sm,
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  successBannerTitle: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: '#166534',
-    marginBottom: 2,
-  },
-  successBannerText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '600',
-    color: '#15803D',
-  },
-  rewardsCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    marginBottom: SPACING.md,
-    ...SHADOWS.sm,
-  },
-  comingSoonCard: {
-    backgroundColor: '#ECFEFF',
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
-    borderWidth: 1,
-    borderColor: '#A5F3FC',
-    marginBottom: SPACING.md,
-    ...SHADOWS.sm,
-  },
-  comingSoonHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: SPACING.md,
-  },
-  comingSoonIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: '#CFFAFE',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  comingSoonTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.gray900,
-  },
-  comingSoonText: {
-    marginTop: 4,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.gray600,
-    lineHeight: 20,
-  },
-  comingSoonBadge: {
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: 6,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  comingSoonBadgeText: {
-    color: COLORS.white,
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  comingSoonGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-    marginTop: SPACING.md,
-  },
-  comingSoonChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.8)',
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  comingSoonChipText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.gray700,
-  },
-  rewardsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  rewardsIcon: {
-    width: 42,
-    height: 42,
-    borderRadius: BORDER_RADIUS.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  rewardsTitle: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-  },
-  rewardsText: {
-    marginTop: 2,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextSecondary,
-  },
-  promoBox: {
-    marginTop: SPACING.md,
-    paddingTop: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.lightBorder,
-  },
-  promoLabel: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    color: COLORS.lightTextMuted,
-    marginBottom: SPACING.xs,
-  },
-  promoInput: {
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingHorizontal: SPACING.md,
-    paddingVertical: 12,
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
-    backgroundColor: COLORS.gray50,
-  },
-  promoBtn: {
-    marginTop: SPACING.sm,
-    backgroundColor: COLORS.primary,
-    borderRadius: BORDER_RADIUS.lg,
-    paddingVertical: SPACING.md,
-    alignItems: 'center',
-  },
-  promoBtnText: {
-    color: COLORS.white,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-  },
-  emptyTx: {
-    color: '#64748B',
-    fontSize: FONT_SIZE.sm,
-    fontStyle: 'italic',
-  },
-  txRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.white,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    marginBottom: SPACING.sm,
-    ...SHADOWS.sm,
-  },
-  txIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.sm,
-  },
-  txType: {
-    fontWeight: '800',
-    color: '#0F172A',
-    fontSize: FONT_SIZE.sm,
-  },
-  txMeta: {
-    fontSize: FONT_SIZE.xs,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  txAmt: {
-    fontWeight: '900',
-    fontSize: FONT_SIZE.md,
-  },
-  verifyModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: SPACING.lg,
-  },
-  verifyModalCard: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    alignItems: 'center',
-    gap: SPACING.sm,
-  },
-  verifyModalTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.gray900,
-    textAlign: 'center',
-  },
-  verifyModalText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.gray600,
-    textAlign: 'center',
-  },
+// ── Styles ────────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.bg },
+  scroll: { gap: 0 },
+
+  // Hero
+  heroCard: { marginHorizontal: 0, paddingHorizontal: 24, paddingTop: 24, paddingBottom: 28, position: 'relative', overflow: 'hidden' },
+  heroGlow: { position: 'absolute', top: -60, right: -60, width: 200, height: 200, borderRadius: 100, backgroundColor: C.green, opacity: 0.07 },
+  heroTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 },
+  heroLabel: { color: 'rgba(255,255,255,0.45)', fontSize: 10, fontWeight: '800', letterSpacing: 2, marginBottom: 4 },
+  heroName: { color: C.white, fontSize: 18, fontWeight: '900' },
+  heroBadge: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(34,197,94,0.15)', borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6 },
+  heroBadgeText: { color: C.green, fontSize: 12, fontWeight: '800' },
+  heroBalanceLabel: { color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: '700', marginBottom: 6 },
+  heroBalance: { color: C.white, fontSize: 44, fontWeight: '900', letterSpacing: -1 },
+  promoStrip: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(245,158,11,0.15)', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8, marginTop: 16, alignSelf: 'flex-start' },
+  promoStripText: { color: C.amberLight, fontSize: 12, fontWeight: '700' },
+  heroFooter: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20, paddingTop: 16, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.08)' },
+  heroFooterItem: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  heroFooterText: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600' },
+
+  // Success
+  successBanner: { marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
+  successBannerGrad: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  successIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(21,128,61,0.1)', alignItems: 'center', justifyContent: 'center' },
+  successTitle: { fontSize: 16, fontWeight: '900', color: '#14532D' },
+  successSub: { fontSize: 13, fontWeight: '600', color: C.greenDark, marginTop: 2 },
+
+  // Pending
+  pendingCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
+  pendingGrad: { padding: 16 },
+  pendingHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  pendingIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' },
+  pendingTitle: { color: C.white, fontSize: 15, fontWeight: '900' },
+  pendingSub: { color: 'rgba(255,255,255,0.7)', fontSize: 12, fontWeight: '600', marginTop: 2 },
+  pendingActions: { flexDirection: 'row', gap: 10 },
+  pendingResume: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(245,158,11,0.2)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.4)', borderRadius: 12, paddingVertical: 12 },
+  pendingResumeText: { color: C.amber, fontSize: 13, fontWeight: '800' },
+  pendingVerify: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: C.green, borderRadius: 12, paddingVertical: 12 },
+  pendingVerifyText: { color: C.white, fontSize: 13, fontWeight: '800' },
+
+  // Section
+  section: { backgroundColor: C.white, marginHorizontal: 16, marginTop: 16, borderRadius: 20, padding: 20, shadowColor: C.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 3 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  sectionIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' },
+  sectionTitle: { fontSize: 17, fontWeight: '900', color: C.gray900 },
+
+  // Presets
+  presetsRow: { gap: 8, paddingBottom: 4, marginBottom: 12 },
+  preset: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: C.gray100, borderWidth: 2, borderColor: C.border },
+  presetOn: { backgroundColor: '#DCFCE7', borderColor: C.green },
+  presetText: { fontSize: 14, fontWeight: '800', color: C.gray600 },
+  presetTextOn: { color: C.greenDark },
+
+  // Amount input
+  amountWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.gray50, borderWidth: 2, borderColor: C.border, borderRadius: 14, paddingHorizontal: 16, marginBottom: 16 },
+  amountPrefix: { fontSize: 22, fontWeight: '900', color: C.gray900, marginRight: 4 },
+  amountInput: { flex: 1, fontSize: 22, fontWeight: '900', color: C.gray900, paddingVertical: Platform.OS === 'ios' ? 14 : 10 },
+
+  // Pay button
+  payBtn: { borderRadius: 16, overflow: 'hidden', marginBottom: 12, shadowColor: C.green, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 12, elevation: 8 },
+  payBtnGrad: { paddingVertical: 18, paddingHorizontal: 24 },
+  payBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  payBtnText: { color: C.white, fontSize: 17, fontWeight: '900' },
+
+  // Retry
+  retryBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: C.blue, marginBottom: 12 },
+  retryBtnText: { color: C.blue, fontSize: 14, fontWeight: '800' },
+
+  // Divider
+  divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 16 },
+  dividerLine: { flex: 1, height: 1, backgroundColor: C.border },
+  dividerText: { color: C.gray400, fontSize: 12, fontWeight: '700' },
+
+  // Verify button
+  verifyBtn: { backgroundColor: '#0F766E', borderRadius: 14, marginBottom: 8, overflow: 'hidden' },
+  verifyBtnInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 15 },
+  verifyBtnText: { color: C.white, fontSize: 15, fontWeight: '800' },
+  verifyHint: { color: C.gray400, fontSize: 12, textAlign: 'center', lineHeight: 18 },
+
+  // Rewards
+  rewardCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.gray50, borderRadius: 14, padding: 14, borderLeftWidth: 4, marginBottom: 12 },
+  rewardIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  rewardTitle: { fontSize: 14, fontWeight: '800', color: C.gray900 },
+  rewardText: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2, lineHeight: 18 },
+  rewardBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  rewardBadgeText: { fontSize: 13, fontWeight: '900', color: '#92400E' },
+  referralRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 10 },
+  referralCode: { backgroundColor: C.white, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: C.border },
+  referralCodeText: { fontWeight: '900', fontSize: 16, color: C.gray900, letterSpacing: 2 },
+  shareBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#7C3AED', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  shareBtnText: { color: C.white, fontSize: 12, fontWeight: '800' },
+  codeInputRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  codeInput: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 12, paddingVertical: Platform.OS === 'ios' ? 10 : 8, fontSize: 14, fontWeight: '700', color: C.gray900, backgroundColor: C.white },
+  codeApplyBtn: { backgroundColor: C.gray900, borderRadius: 10, paddingHorizontal: 16, alignItems: 'center', justifyContent: 'center' },
+  codeApplyText: { color: C.white, fontSize: 13, fontWeight: '800' },
+
+  // Transactions
+  emptyTx: { alignItems: 'center', paddingVertical: 28, gap: 8 },
+  emptyTxText: { fontSize: 15, fontWeight: '800', color: C.gray600 },
+  emptyTxSub: { fontSize: 13, color: C.gray400 },
+  txRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: C.gray100 },
+  txIcon: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  txLabel: { fontSize: 14, fontWeight: '800', color: C.gray900 },
+  txMeta: { fontSize: 11, color: C.gray400, marginTop: 2 },
+  txAmt: { fontSize: 15, fontWeight: '900', flexShrink: 0 },
+
+  // Coming soon
+  futureCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#A5F3FC' },
+  futureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
+  futureTitle: { fontSize: 15, fontWeight: '900', color: C.gray900 },
+  futureSub: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2 },
+  futureBadge: { backgroundColor: C.gray900, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8 },
+  futureBadgeText: { color: C.white, fontSize: 10, fontWeight: '900', letterSpacing: 1.5 },
+  futureChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  futureChip: { backgroundColor: 'rgba(255,255,255,0.8)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999 },
+  futureChipText: { fontSize: 12, fontWeight: '700', color: '#0F766E' },
+
+  // Overlay
+  overlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15,23,42,0.65)', alignItems: 'center', justifyContent: 'center', zIndex: 99 },
+  overlayCard: { backgroundColor: C.white, borderRadius: 24, padding: 32, alignItems: 'center', width: '80%', gap: 12 },
+  overlayIconWrap: { width: 64, height: 64, borderRadius: 32, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  overlayTitle: { fontSize: 18, fontWeight: '900', color: C.gray900, textAlign: 'center' },
+  overlaySub: { fontSize: 13, color: C.gray600, textAlign: 'center' },
+  overlayDots: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  overlayDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
 });

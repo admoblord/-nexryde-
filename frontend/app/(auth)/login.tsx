@@ -74,6 +74,7 @@ export default function LoginScreen() {
   const [fortressFaceImage, setFortressFaceImage] = useState<string>('');
   const [fortressLoading, setFortressLoading] = useState(false);
   const [pinSetupRequired, setPinSetupRequired] = useState(false);
+  const [loginError, setLoginError] = useState<{ type: 'sim_swap' | 'generic' | null; message: string }>({ type: null, message: '' });
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
 
   useEffect(() => {
@@ -215,9 +216,17 @@ export default function LoginScreen() {
       try { data = JSON.parse(text); } catch {}
 
       if (!res.ok) {
-        Alert.alert("Email sign-in failed", data?.detail || data?.message || text || "Please try again.");
+        const detail = data?.detail || data?.message || text || "Please try again.";
+        const isSIMSwap = res.status === 423 || String(detail).toLowerCase().includes('sim swap');
+        setLoginError({
+          type: isSIMSwap ? 'sim_swap' : 'generic',
+          message: isSIMSwap
+            ? 'A SIM change was detected on your device. Your account has been temporarily secured for your protection.'
+            : String(detail),
+        });
         return;
       }
+      setLoginError({ type: null, message: '' });
 
       if (data?.fortress_required) {
         setFortressChallengeId(String(data.challenge_id || ''));
@@ -508,6 +517,38 @@ export default function LoginScreen() {
                   ? `Continue as ${requestedRole === 'driver' ? 'Driver' : 'Rider'}`
                   : 'Sign in to continue'}
               </Text>
+
+              {/* ── Login Error Banner ────────────────────────────────── */}
+              {loginError.type === 'sim_swap' && (
+                <View style={styles.simSwapBanner}>
+                  <View style={styles.simSwapIconWrap}>
+                    <Ionicons name="shield-half" size={26} color="#EF4444" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.simSwapTitle}>Account Temporarily Secured</Text>
+                    <Text style={styles.simSwapText}>{loginError.message}</Text>
+                    <TouchableOpacity
+                      style={styles.simSwapCta}
+                      onPress={() => Linking.openURL('https://nexryde.app/support')}
+                    >
+                      <Ionicons name="headset" size={14} color="#FFF" />
+                      <Text style={styles.simSwapCtaText}>Contact Support</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity onPress={() => setLoginError({ type: null, message: '' })} style={{ alignSelf: 'flex-start' }}>
+                    <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
+                  </TouchableOpacity>
+                </View>
+              )}
+              {loginError.type === 'generic' && loginError.message && (
+                <View style={styles.errorBanner}>
+                  <Ionicons name="alert-circle" size={18} color="#EF4444" />
+                  <Text style={styles.errorBannerText} numberOfLines={3}>{loginError.message}</Text>
+                  <TouchableOpacity onPress={() => setLoginError({ type: null, message: '' })}>
+                    <Ionicons name="close" size={16} color="#94A3B8" />
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Email Sign-In */}
               <View style={styles.emailContainer}>
@@ -1019,6 +1060,73 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.surfaceLight,
     marginBottom: 16,
+  },
+  // SIM swap / error banners
+  simSwapBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    backgroundColor: 'rgba(239,68,68,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+  },
+  simSwapIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+  },
+  simSwapTitle: {
+    color: '#FCA5A5',
+    fontSize: 14,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  simSwapText: {
+    color: 'rgba(252,165,165,0.85)',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
+    marginBottom: 10,
+  },
+  simSwapCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#EF4444',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    alignSelf: 'flex-start',
+  },
+  simSwapCtaText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: '#FCA5A5',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   },
   emailContainer: {
     gap: 10,
