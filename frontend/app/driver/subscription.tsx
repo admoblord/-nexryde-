@@ -709,26 +709,34 @@ export default function SubscriptionScreen() {
 
           {/* Tier Selection Cards */}
           <View style={styles.tiersContainer}>
-            {/* CITY RIDER CARD */}
+
+            {/* ── CITY RIDER CARD ──────────────────────────────────────────── */}
             <Animated.View style={[styles.tierCard, { opacity: fadeAnim }]}>
               <LinearGradient
-                colors={['rgba(0, 208, 132, 0.1)', 'rgba(0, 208, 132, 0.05)']}
+                colors={['#0F2A1E', '#0F172A']}
                 style={styles.tierCardGradient}
               >
+                {/* Header */}
                 <View style={styles.tierHeader}>
-                  <View style={[styles.tierIconBg, { backgroundColor: '#00D08420' }]}>
-                    <Ionicons name="car-sport" size={28} color="#00D084" />
-                  </View>
+                  <LinearGradient colors={['#00D084', '#00C853']} style={styles.tierIconBg}>
+                    <Ionicons name="car-sport" size={26} color="#FFFFFF" />
+                  </LinearGradient>
                   <View style={styles.tierHeaderText}>
                     <Text style={styles.tierTitle}>CITY RIDER</Text>
                     <Text style={styles.tierSubtitle}>Perfect for intra-city trips</Text>
                   </View>
                 </View>
 
-                <View style={styles.tierPricing}>
-                  <Text style={styles.tierPriceLabel}>
-                    {pricing && pricing.city_rider && getPhaseLabel(pricing.city_rider.current_phase)}
-                  </Text>
+                {/* Divider */}
+                <View style={styles.tierDivider} />
+
+                {/* Pricing block */}
+                <View style={styles.tierPricingBlock}>
+                  <View style={styles.tierPhasePill}>
+                    <Text style={styles.tierPhasePillText}>
+                      {pricing && pricing.city_rider ? getPhaseLabel(pricing.city_rider.current_phase) : '⭐ EARLY ADOPTER'}
+                    </Text>
+                  </View>
                   <View style={styles.tierPriceRow}>
                     <Text style={styles.tierCurrency}>₦</Text>
                     <Text style={styles.tierPrice}>
@@ -737,90 +745,105 @@ export default function SubscriptionScreen() {
                     <Text style={styles.tierPeriod}>/month</Text>
                   </View>
                   {pricing && pricing.city_rider.launch_slots_remaining > 0 && (
-                    <Text style={styles.slotsRemaining}>
-                      🔥 Only {pricing.city_rider.launch_slots_remaining} slots left at this price!
-                    </Text>
+                    <View style={styles.slotsPill}>
+                      <Ionicons name="flame" size={12} color="#F59E0B" />
+                      <Text style={styles.slotsText}>
+                        {pricing.city_rider.launch_slots_remaining} slots left at this price
+                      </Text>
+                    </View>
                   )}
                 </View>
 
-                <View style={styles.tierFeatures}>
-                  <Text style={styles.featuresTitle}>WHAT YOU GET:</Text>
-                  {[
-                    { icon: 'location', text: 'Unlimited intra-city trips (max 50km)', color: '#00D084' },
-                    { icon: 'cash', text: 'Keep 100% of your earnings', color: '#FFD700' },
-                    { icon: 'shield-checkmark', text: 'Basic insurance coverage', color: '#00B0FF' },
-                    { icon: 'headset', text: 'Standard customer support', color: '#FF6B6B' },
-                    { icon: 'flash', text: 'Real-time ride matching', color: '#8B5CF6' },
-                  ].map((feature, index) => (
-                    <View key={index} style={styles.featureRow}>
-                      <View style={[styles.featureIcon, { backgroundColor: `${feature.color}20` }]}>
-                        <Ionicons name={feature.icon as any} size={16} color={feature.color} />
-                      </View>
-                      <Text style={styles.featureText}>{feature.text}</Text>
+                {/* Features */}
+                <Text style={styles.featuresTitle}>WHAT YOU GET</Text>
+                {[
+                  { icon: 'location', text: 'Unlimited intra-city trips (max 50 km)', color: '#00D084' },
+                  { icon: 'cash', text: 'Keep 100% of your earnings', color: '#FFD700' },
+                  { icon: 'shield-checkmark', text: 'Basic insurance coverage', color: '#38BDF8' },
+                  { icon: 'headset', text: 'Standard customer support', color: '#F87171' },
+                  { icon: 'flash', text: 'Real-time ride matching', color: '#A78BFA' },
+                ].map((feature, index) => (
+                  <View key={index} style={styles.featureRow}>
+                    <View style={[styles.featureIcon, { backgroundColor: feature.color + '1A' }]}>
+                      <Ionicons name={feature.icon as any} size={15} color={feature.color} />
                     </View>
-                  ))}
-                </View>
+                    <Text style={styles.featureText}>{feature.text}</Text>
+                  </View>
+                ))}
 
-                {subscriptionIsActive && subscription?.tier === 'city_rider' ? (
-                  <View style={styles.currentTierButton}>
-                    <Ionicons name="checkmark-circle" size={20} color="#00D084" />
-                    <Text style={styles.currentTierButtonText}>Active — Current Tier</Text>
-                  </View>
-                ) : subscriptionIsPending && subscription?.tier === 'city_rider' ? (
-                  <View style={styles.pendingTierButton}>
-                    <Ionicons name="time" size={18} color="#FBBF24" />
-                    <Text style={styles.pendingTierButtonText}>Payment processing — not yet active</Text>
-                  </View>
-                ) : (subscription?.tier === 'none' || !subscription) ? (
-                  <TouchableOpacity
-                    style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
-                    onPress={() => payWithSquadCheckout('city_rider')}
-                    disabled={submitting}
-                    activeOpacity={0.85}
-                  >
-                    <LinearGradient
-                      colors={['#00D084', '#00C853']}
-                      style={styles.selectButtonGradient}
+                {/* CTA */}
+                <View style={styles.tierCtaWrap}>
+                  {subscriptionIsActive && subscription?.tier === 'city_rider' ? (
+                    <View style={[styles.activeBadgeBtn, { borderColor: '#00D084' }]}>
+                      <Ionicons name="checkmark-circle" size={18} color="#00D084" />
+                      <Text style={[styles.activeBadgeBtnText, { color: '#00D084' }]}>Active — Your Current Tier</Text>
+                    </View>
+                  ) : subscriptionIsPending && subscription?.tier === 'city_rider' ? (
+                    <View style={styles.pendingTierButton}>
+                      <Ionicons name="time" size={16} color="#FBBF24" />
+                      <Text style={styles.pendingTierButtonText}>Processing payment…</Text>
+                    </View>
+                  ) : (subscription?.tier === 'none' || !subscription) ? (
+                    <TouchableOpacity
+                      style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
+                      onPress={() => payWithSquadCheckout('city_rider')}
+                      disabled={submitting}
+                      activeOpacity={0.85}
                     >
-                      {payingTier === 'city_rider' ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <>
-                          <Ionicons name="card" size={20} color={submitting ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
-                          <Text style={[styles.selectButtonText, submitting ? { opacity: 0.5 } : null]}>
-                            Pay Now — City Rider
-                          </Text>
-                        </>
-                      )}
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ) : null}
+                      <LinearGradient colors={['#00D084', '#00C853']} style={styles.selectButtonGradient}>
+                        {payingTier === 'city_rider' ? (
+                          <ActivityIndicator color="#FFF" />
+                        ) : (
+                          <>
+                            <Ionicons name="card" size={18} color="#FFF" />
+                            <Text style={styles.selectButtonText}>Subscribe — City Rider</Text>
+                          </>
+                        )}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               </LinearGradient>
             </Animated.View>
 
-            {/* ROAD WARRIOR CARD */}
+            {/* ── ROAD WARRIOR CARD ────────────────────────────────────────── */}
             <Animated.View style={[styles.tierCard, styles.featuredTier, { opacity: fadeAnim }]}>
-              <View style={styles.recommendedBadge}>
-                <Text style={styles.recommendedText}>⭐ RECOMMENDED</Text>
-              </View>
+              {/* ★ RECOMMENDED banner — sits ABOVE the content, never overlaps */}
               <LinearGradient
-                colors={['rgba(255, 215, 0, 0.15)', 'rgba(255, 165, 0, 0.05)']}
+                colors={['#FFD700', '#F59E0B']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={styles.recommendedBanner}
+              >
+                <Ionicons name="star" size={13} color="#000" />
+                <Text style={styles.recommendedBannerText}>RECOMMENDED</Text>
+                <Ionicons name="star" size={13} color="#000" />
+              </LinearGradient>
+
+              <LinearGradient
+                colors={['#1A1500', '#0F172A']}
                 style={styles.tierCardGradient}
               >
+                {/* Header */}
                 <View style={styles.tierHeader}>
-                  <View style={[styles.tierIconBg, { backgroundColor: '#FFD70030' }]}>
-                    <Ionicons name="navigate" size={28} color="#FFD700" />
-                  </View>
+                  <LinearGradient colors={['#FFD700', '#F59E0B']} style={styles.tierIconBg}>
+                    <Ionicons name="navigate" size={26} color="#000" />
+                  </LinearGradient>
                   <View style={styles.tierHeaderText}>
                     <Text style={[styles.tierTitle, { color: '#FFD700' }]}>ROAD WARRIOR</Text>
                     <Text style={styles.tierSubtitle}>Unlimited nationwide trips</Text>
                   </View>
                 </View>
 
-                <View style={styles.tierPricing}>
-                  <Text style={[styles.tierPriceLabel, { color: '#FFD700' }]}>
-                    {pricing && pricing.road_warrior && getPhaseLabel(pricing.road_warrior.current_phase)}
-                  </Text>
+                {/* Divider */}
+                <View style={[styles.tierDivider, { backgroundColor: 'rgba(255,215,0,0.15)' }]} />
+
+                {/* Pricing block */}
+                <View style={[styles.tierPricingBlock, { backgroundColor: 'rgba(255,215,0,0.07)', borderColor: 'rgba(255,215,0,0.18)' }]}>
+                  <View style={[styles.tierPhasePill, { backgroundColor: 'rgba(255,215,0,0.15)', borderColor: 'rgba(255,215,0,0.3)' }]}>
+                    <Text style={[styles.tierPhasePillText, { color: '#FFD700' }]}>
+                      {pricing && pricing.road_warrior ? getPhaseLabel(pricing.road_warrior.current_phase) : '⭐ EARLY ADOPTER'}
+                    </Text>
+                  </View>
                   <View style={styles.tierPriceRow}>
                     <Text style={[styles.tierCurrency, { color: '#FFD700' }]}>₦</Text>
                     <Text style={styles.tierPrice}>
@@ -829,85 +852,82 @@ export default function SubscriptionScreen() {
                     <Text style={styles.tierPeriod}>/month</Text>
                   </View>
                   {pricing && pricing.road_warrior.launch_slots_remaining > 0 && (
-                    <Text style={styles.slotsRemaining}>
-                      🔥 Only {pricing.road_warrior.launch_slots_remaining} slots left!
-                    </Text>
+                    <View style={styles.slotsPill}>
+                      <Ionicons name="flame" size={12} color="#F59E0B" />
+                      <Text style={styles.slotsText}>
+                        {pricing.road_warrior.launch_slots_remaining} slots left at this price
+                      </Text>
+                    </View>
                   )}
                 </View>
 
-                <View style={styles.tierFeatures}>
-                  <Text style={styles.featuresTitle}>EVERYTHING IN CITY RIDER, PLUS:</Text>
-                  {[
-                    { icon: 'navigate-circle', text: 'Unlimited inter-city/interstate trips', color: '#FFD700' },
-                    { icon: 'map', text: 'Smart Route Planner (AI-powered)', color: '#00D084' },
-                    { icon: 'repeat', text: 'Auto return trip matching', color: '#FF6B6B' },
-                    { icon: 'cash-outline', text: 'Route discovery bonuses (₦5K)', color: '#00B0FF' },
-                    { icon: 'flash', text: '3x API call limits', color: '#8B5CF6' },
-                    { icon: 'shield', text: 'Premium insurance coverage', color: '#00C853' },
-                    { icon: 'headset', text: 'Priority 24/7 support', color: '#FF9800' },
-                  ].map((feature, index) => (
-                    <View key={index} style={styles.featureRow}>
-                      <View style={[styles.featureIcon, { backgroundColor: `${feature.color}20` }]}>
-                        <Ionicons name={feature.icon as any} size={16} color={feature.color} />
-                      </View>
-                      <Text style={styles.featureText}>{feature.text}</Text>
+                {/* Features */}
+                <Text style={[styles.featuresTitle, { color: 'rgba(255,215,0,0.7)' }]}>EVERYTHING IN CITY RIDER, PLUS</Text>
+                {[
+                  { icon: 'navigate-circle', text: 'Unlimited inter-city / interstate trips', color: '#FFD700' },
+                  { icon: 'map', text: 'Smart Route Planner (AI-powered)', color: '#00D084' },
+                  { icon: 'repeat', text: 'Auto return trip matching', color: '#F87171' },
+                  { icon: 'cash-outline', text: 'Route discovery bonuses (₦5,000)', color: '#38BDF8' },
+                  { icon: 'flash', text: '3× API call limits', color: '#A78BFA' },
+                  { icon: 'shield', text: 'Premium insurance coverage', color: '#34D399' },
+                  { icon: 'headset', text: 'Priority 24/7 driver support', color: '#FB923C' },
+                ].map((feature, index) => (
+                  <View key={index} style={styles.featureRow}>
+                    <View style={[styles.featureIcon, { backgroundColor: feature.color + '1A' }]}>
+                      <Ionicons name={feature.icon as any} size={15} color={feature.color} />
                     </View>
-                  ))}
-                </View>
+                    <Text style={styles.featureText}>{feature.text}</Text>
+                  </View>
+                ))}
 
-                {subscriptionIsActive && subscription?.tier === 'road_warrior' ? (
-                  <View style={[styles.currentTierButton, { backgroundColor: '#FFD70020', borderColor: '#FFD700' }]}>
-                    <Ionicons name="checkmark-circle" size={20} color="#FFD700" />
-                    <Text style={[styles.currentTierButtonText, { color: '#FFD700' }]}>Active — Current Tier</Text>
-                  </View>
-                ) : subscriptionIsPending && subscription?.tier === 'road_warrior' ? (
-                  <View style={styles.pendingTierButton}>
-                    <Ionicons name="time" size={18} color="#FBBF24" />
-                    <Text style={styles.pendingTierButtonText}>Payment processing — not yet active</Text>
-                  </View>
-                ) : subscriptionIsActive && subscription?.tier === 'city_rider' && subscription?.can_upgrade ? (
-                  <TouchableOpacity
-                    style={styles.selectButton}
-                    onPress={() => setShowUpgradeModal(true)}
-                    activeOpacity={0.85}
-                  >
-                    <LinearGradient
-                      colors={['#FFD700', '#FFA500']}
-                      style={styles.selectButtonGradient}
+                {/* CTA */}
+                <View style={styles.tierCtaWrap}>
+                  {subscriptionIsActive && subscription?.tier === 'road_warrior' ? (
+                    <View style={[styles.activeBadgeBtn, { borderColor: '#FFD700' }]}>
+                      <Ionicons name="checkmark-circle" size={18} color="#FFD700" />
+                      <Text style={[styles.activeBadgeBtnText, { color: '#FFD700' }]}>Active — Your Current Tier</Text>
+                    </View>
+                  ) : subscriptionIsPending && subscription?.tier === 'road_warrior' ? (
+                    <View style={styles.pendingTierButton}>
+                      <Ionicons name="time" size={16} color="#FBBF24" />
+                      <Text style={styles.pendingTierButtonText}>Processing payment…</Text>
+                    </View>
+                  ) : subscriptionIsActive && subscription?.tier === 'city_rider' && subscription?.can_upgrade ? (
+                    <TouchableOpacity
+                      style={styles.selectButton}
+                      onPress={() => setShowUpgradeModal(true)}
+                      activeOpacity={0.85}
                     >
-                      <Ionicons name="arrow-up-circle" size={20} color="#FFFFFF" />
-                      <Text style={styles.selectButtonText}>Upgrade to Road Warrior</Text>
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ) : subscriptionIsActive && subscription?.tier === 'city_rider' && !subscription?.can_upgrade ? (
-                  <View style={styles.lockedButton}>
-                    <Ionicons name="lock-closed" size={18} color="#94A3B8" />
-                    <Text style={styles.lockedButtonText}>Unlocks after 4.5★ rating + 50 trips</Text>
-                  </View>
-                ) : (subscription?.tier === 'none' || !subscription) ? (
-                  <TouchableOpacity
-                    style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
-                    onPress={() => payWithSquadCheckout('road_warrior')}
-                    disabled={submitting}
-                    activeOpacity={0.85}
-                  >
-                    <LinearGradient
-                      colors={['#FFD700', '#FFA500']}
-                      style={styles.selectButtonGradient}
+                      <LinearGradient colors={['#FFD700', '#F59E0B']} style={styles.selectButtonGradient}>
+                        <Ionicons name="arrow-up-circle" size={18} color="#000" />
+                        <Text style={[styles.selectButtonText, { color: '#000' }]}>Upgrade to Road Warrior</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ) : subscriptionIsActive && subscription?.tier === 'city_rider' && !subscription?.can_upgrade ? (
+                    <View style={styles.lockedButton}>
+                      <Ionicons name="lock-closed" size={16} color="#64748B" />
+                      <Text style={styles.lockedButtonText}>Unlocks after 4.5★ rating + 50 trips</Text>
+                    </View>
+                  ) : (subscription?.tier === 'none' || !subscription) ? (
+                    <TouchableOpacity
+                      style={[styles.selectButton, submitting ? styles.selectButtonDisabled : null]}
+                      onPress={() => payWithSquadCheckout('road_warrior')}
+                      disabled={submitting}
+                      activeOpacity={0.85}
                     >
-                      {payingTier === 'road_warrior' ? (
-                        <ActivityIndicator color="#FFFFFF" />
-                      ) : (
-                        <>
-                          <Ionicons name="card" size={20} color={submitting ? 'rgba(255,255,255,0.5)' : '#FFFFFF'} />
-                          <Text style={[styles.selectButtonText, submitting ? { opacity: 0.5 } : null]}>
-                            Pay Now — Road Warrior
-                          </Text>
-                        </>
-                      )}
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ) : null}
+                      <LinearGradient colors={['#FFD700', '#F59E0B']} style={styles.selectButtonGradient}>
+                        {payingTier === 'road_warrior' ? (
+                          <ActivityIndicator color="#000" />
+                        ) : (
+                          <>
+                            <Ionicons name="card" size={18} color="#000" />
+                            <Text style={[styles.selectButtonText, { color: '#000' }]}>Subscribe — Road Warrior</Text>
+                          </>
+                        )}
+                      </LinearGradient>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
               </LinearGradient>
             </Animated.View>
           </View>
@@ -1224,30 +1244,28 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   tierCard: {
-    borderRadius: 20,
+    borderRadius: 22,
     overflow: 'hidden',
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0, 208, 132, 0.22)',
   },
   featuredTier: {
     borderColor: '#FFD700',
-    borderWidth: 2,
+    borderWidth: 1.5,
   },
-  recommendedBadge: {
-    position: 'absolute',
-    top: 16,
-    right: 16,
-    backgroundColor: '#FFD700',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 20,
-    zIndex: 10,
+  // RECOMMENDED banner — full-width strip above card content
+  recommendedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 8,
   },
-  recommendedText: {
-    fontSize: 11,
+  recommendedBannerText: {
+    fontSize: 12,
     fontWeight: '900',
     color: '#000000',
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
   tierCardGradient: {
     padding: 20,
@@ -1256,42 +1274,58 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
+    gap: 14,
   },
   tierIconBg: {
-    width: 56,
-    height: 56,
-    borderRadius: 16,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    flexShrink: 0,
   },
   tierHeaderText: {
     flex: 1,
   },
   tierTitle: {
-    fontSize: 22,
+    fontSize: 21,
     fontWeight: '900',
     color: '#00D084',
-    letterSpacing: -0.5,
-    marginBottom: 2,
+    letterSpacing: 0.3,
+    marginBottom: 3,
   },
   tierSubtitle: {
     fontSize: 13,
-    fontWeight: '700',
-    color: '#94A3B8',
+    fontWeight: '600',
+    color: '#64748B',
   },
-  tierPricing: {
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 16,
-    padding: 16,
+  tierDivider: {
+    height: 1,
+    backgroundColor: 'rgba(0,208,132,0.12)',
     marginBottom: 16,
+  },
+  tierPricingBlock: {
+    backgroundColor: 'rgba(0,208,132,0.07)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(0,208,132,0.15)',
+    padding: 16,
+    marginBottom: 20,
     alignItems: 'center',
   },
-  tierPriceLabel: {
-    fontSize: 12,
+  tierPhasePill: {
+    backgroundColor: 'rgba(0,208,132,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,208,132,0.3)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  tierPhasePillText: {
+    fontSize: 11,
     fontWeight: '900',
     color: '#00D084',
-    marginBottom: 8,
     letterSpacing: 1,
   },
   tierPriceRow: {
@@ -1299,56 +1333,86 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   tierCurrency: {
-    fontSize: 24,
+    fontSize: 22,
     fontWeight: '900',
     color: '#00D084',
-    marginTop: 4,
+    marginTop: 6,
+    marginRight: 2,
   },
   tierPrice: {
-    fontSize: 44,
+    fontSize: 48,
     fontWeight: '900',
     color: '#FFFFFF',
+    letterSpacing: -2,
   },
   tierPeriod: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
-    color: '#94A3B8',
-    marginTop: 20,
+    color: '#64748B',
+    marginTop: 24,
+    marginLeft: 4,
   },
-  slotsRemaining: {
-    fontSize: 12,
-    fontWeight: '700',
+  slotsPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 10,
+    backgroundColor: 'rgba(245,158,11,0.12)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  slotsText: {
+    fontSize: 11,
+    fontWeight: '800',
     color: '#F59E0B',
-    marginTop: 8,
-  },
-  tierFeatures: {
-    marginBottom: 16,
   },
   featuresTitle: {
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '900',
-    color: '#CBD5E1',
+    color: 'rgba(0,208,132,0.55)',
     marginBottom: 12,
-    letterSpacing: 1,
+    letterSpacing: 1.5,
   },
   featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 10,
+    marginBottom: 11,
     gap: 10,
   },
   featureIcon: {
-    width: 32,
-    height: 32,
+    width: 30,
+    height: 30,
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   featureText: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '700',
-    color: '#E2E8F0',
+    color: '#CBD5E1',
     flex: 1,
+    lineHeight: 19,
+  },
+  tierCtaWrap: {
+    marginTop: 18,
+  },
+  activeBadgeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,208,132,0.1)',
+    paddingVertical: 14,
+    borderRadius: 14,
+    gap: 8,
+    borderWidth: 1.5,
+    borderColor: '#00D084',
+  },
+  activeBadgeBtnText: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#00D084',
   },
   currentTierButton: {
     flexDirection: 'row',
@@ -1371,10 +1435,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: 'rgba(251, 191, 36, 0.12)',
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderRadius: 14,
     gap: 8,
-    borderWidth: 2,
+    borderWidth: 1.5,
     borderColor: 'rgba(251, 191, 36, 0.45)',
   },
   pendingTierButtonText: {
@@ -1390,11 +1454,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: 15,
     gap: 10,
   },
   selectButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '900',
     color: '#FFFFFF',
   },
@@ -1402,17 +1466,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(148, 163, 184, 0.1)',
-    paddingVertical: 14,
+    backgroundColor: 'rgba(100,116,139,0.1)',
+    paddingVertical: 13,
     borderRadius: 14,
     gap: 8,
-    borderWidth: 2,
-    borderColor: 'rgba(148, 163, 184, 0.3)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(100,116,139,0.25)',
   },
   lockedButtonText: {
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
-    color: '#94A3B8',
+    color: '#64748B',
   },
 
   // Bank Card
