@@ -52,7 +52,7 @@ const SECTIONS: { title: string; rows: SafeRow[] }[] = [
     title: 'Verification',
     rows: [
       { label: 'Driver verification', desc: 'License, vehicle & identity checks', route: '/driver/verification', icon: 'checkmark-done', tone: 'safe' },
-      { label: 'Rider security code', desc: 'Confirm rider before starting trip', route: '/driver/verify-rider-code', icon: 'key', tone: 'safe' },
+      { label: 'Pick-up Code', desc: 'Auto-triggered at pickup — enter rider code to start trip', route: '/driver/verify-rider-code', icon: 'keypad', tone: 'safe' },
       { label: 'Documents', desc: 'Upload or refresh verification files', route: '/driver/documents', icon: 'document-text', tone: 'info' },
     ],
   },

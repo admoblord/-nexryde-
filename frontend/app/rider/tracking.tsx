@@ -203,7 +203,7 @@ export default function TrackingScreen() {
     tripStatus === 'accepted'
       ? 'Your driver has accepted. Get ready for pickup.'
       : tripStatus === 'arrived'
-        ? 'Show your security code before entering the vehicle'
+        ? 'Driver arrived — tap "Show Pick-up Code" and hand your phone to the driver'
         : tripStatus === 'ongoing'
           ? 'Your trip is currently in progress'
           : tripStatus === 'pending_payment'
@@ -270,16 +270,17 @@ export default function TrackingScreen() {
         setSecurityPromptShown(true);
         Alert.alert(
           'Driver Arrived',
-          'Your driver is at the pickup point. Please show your security code before the ride starts.',
+          'Your driver is at the pickup point. Open your pick-up code and show it to the driver.',
           [
             {
               text: 'Show Code',
               onPress: () =>
                 router.push({
                   pathname: '/rider/security-code',
-                  params: { tripId: effectiveTripId, driverId: data.driver_info?.driver_id || '' },
+                  params: { trip_id: effectiveTripId },
                 } as any),
             },
+            { text: 'OK', style: 'cancel' },
           ]
         );
       }
@@ -367,16 +368,17 @@ export default function TrackingScreen() {
         setSecurityPromptShown(true);
         Alert.alert(
           'Driver Arrived',
-          'Your driver is at the pickup point. Please show your security code before the ride starts.',
+          'Your driver is at the pickup point. Open your pick-up code and show it to the driver.',
           [
             {
-              text: 'Show Code',
+              text: 'Show Pick-up Code',
               onPress: () =>
                 router.push({
                   pathname: '/rider/security-code',
-                  params: { tripId: effectiveTripId, driverId: t.driver_id || '' },
+                  params: { trip_id: effectiveTripId },
                 } as any),
             },
+            { text: 'OK', style: 'cancel' },
           ]
         );
       }
@@ -1251,11 +1253,13 @@ export default function TrackingScreen() {
 
                 {(tripStatus === 'accepted' || tripStatus === 'arrived') && (
                   <TouchableOpacity
-                    style={styles.actionBtn}
-                    onPress={() => router.push({ pathname: '/rider/security-code', params: { tripId: effectiveTripId, driverId: driverInfo?.driver_id || '' } } as any)}
+                    style={[styles.actionBtn, tripStatus === 'arrived' && { borderColor: '#00D46A', backgroundColor: 'rgba(0,212,106,0.08)' }]}
+                    onPress={() => router.push({ pathname: '/rider/security-code', params: { trip_id: effectiveTripId } } as any)}
                   >
-                    <Ionicons name="shield-checkmark-outline" size={20} color={COLORS.primary} />
-                    <Text style={styles.actionBtnText}>Show Code</Text>
+                    <Ionicons name="keypad-outline" size={20} color={tripStatus === 'arrived' ? '#00D46A' : COLORS.primary} />
+                    <Text style={[styles.actionBtnText, tripStatus === 'arrived' && { color: '#00D46A', fontWeight: '800' }]}>
+                      {tripStatus === 'arrived' ? 'Show Pick-up Code' : 'Pick-up Code'}
+                    </Text>
                   </TouchableOpacity>
                 )}
 

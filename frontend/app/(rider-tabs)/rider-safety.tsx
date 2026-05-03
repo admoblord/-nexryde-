@@ -64,10 +64,10 @@ const SECTIONS: { title: string; rows: Row[] }[] = [
     title: 'Verification',
     rows: [
       {
-        label: 'Trip security code',
-        desc: 'PIN-style verification with your driver',
+        label: 'Pick-up Code',
+        desc: 'Your 4-digit code — shown to driver at pickup to confirm identity',
         route: '/rider/security-code',
-        icon: 'key',
+        icon: 'keypad',
         tone: 'safe',
       },
       {

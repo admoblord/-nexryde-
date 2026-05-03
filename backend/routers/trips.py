@@ -840,6 +840,8 @@ def _analyze_one_star_rating_consistency(trip: dict, has_rider_complaint: bool, 
         "no_fake_driver_alert": not bool(trip.get("fake_driver_alert_triggered")),
         "driver_face_verified": bool(trip.get("face_verified_at_start")),
         "rider_face_verified": bool(trip.get("rider_face_verified_at_pickup")),
+        "pickup_code": trip.get("pickup_code") or trip.get("security_code", ""),
+        "pickup_code_verified": bool(trip.get("pickup_code_verified") or trip.get("security_code_verified")),
         "security_code_verified": bool(trip.get("security_code_verified")),
         "safe_arrival_confirmed": bool((trip.get("safe_arrival_check") or {}).get("confirmed_at")),
         "rider_complaint_filed": bool(has_rider_complaint),
@@ -1529,6 +1531,9 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         "recording_enabled": request.enable_recording,
         "fare_locked_until": (datetime.now(timezone.utc) + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
         "insurance_id": f"INS_{uuid4().hex[:8].upper()}",
+        "pickup_code": str(random.randint(1000, 9999)),
+        "pickup_code_verified": False,
+        "pickup_code_attempts": 0,
         "security_code": str(random.randint(1000, 9999)),
         "security_code_verified": False,
         "security_code_attempts": 0,
@@ -2020,98 +2025,66 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     return trip
 
 
-@trips_router.post("/trips/{trip_id}/verify-security-code")
-async def verify_security_code(trip_id: str, request: dict, http_request: Request):
-    """Driver verifies the security code shown to rider"""
+@trips_router.post("/trips/{trip_id}/verify-pickup-code")
+async def verify_pickup_code(trip_id: str, request: dict, http_request: Request):
+    """Driver enters the 4-digit pickup code shown to rider. No biometric required."""
     driver_id = require_authenticated(http_request)
-    security_code = request.get("security_code", "")
-    
-    if not security_code:
-        raise HTTPException(status_code=400, detail="security_code is required")
-    
+    entered_code = str(request.get("pickup_code", "") or request.get("code", "")).strip()
+
+    if not entered_code or len(entered_code) != 4 or not entered_code.isdigit():
+        raise HTTPException(status_code=400, detail="Enter the 4-digit code shown on the rider's screen.")
+
     trip = await db.trips.find_one({"id": trip_id})
     if not trip:
-        raise HTTPException(status_code=404, detail="Trip not found")
-    
+        raise HTTPException(status_code=404, detail="Trip not found.")
+    if trip.get("driver_id") != driver_id:
+        raise HTTPException(status_code=403, detail="You are not the driver for this trip.")
     if trip["status"] not in ["accepted", "arrived"]:
-        raise HTTPException(status_code=400, detail="Trip must be accepted first")
-    
-    if trip["driver_id"] != driver_id:
-        raise HTTPException(status_code=403, detail="You are not the driver for this trip")
+        raise HTTPException(status_code=400, detail="Trip must be in accepted or arrived state.")
 
-    if not trip.get("rider_face_verified_at_pickup"):
-        raise HTTPException(
-            status_code=403,
-            detail="Rider must complete face verification at pickup before security code verification.",
-        )
-    
-    # Check if already verified
-    if trip.get("security_code_verified", False):
-        trip["_id"] = str(trip["_id"])
-        return {
-            "verified": True,
-            "message": "Security code already verified",
-            "trip": trip
-        }
-    
-    # Check attempts
-    attempts = trip.get("security_code_attempts", 0)
-    if attempts >= 3:
-        # Too many failed attempts - cancel trip for safety
+    # Already verified
+    if trip.get("pickup_code_verified") or trip.get("security_code_verified"):
+        return {"verified": True, "message": "Pick-up code already confirmed.", "trip_id": trip_id}
+
+    # Attempt guard (max 5)
+    attempts = trip.get("pickup_code_attempts", 0)
+    if attempts >= 5:
         await db.trips.update_one(
             {"id": trip_id},
-            {"$set": {"status": "cancelled", "cancel_reason": "Too many wrong security code attempts"}}
+            {"$set": {"status": "cancelled", "cancel_reason": "Too many wrong pick-up code attempts"}}
         )
-        raise HTTPException(
-            status_code=403,
-            detail="Too many wrong attempts. Trip cancelled for safety."
-        )
-    
-    # Verify code
-    if trip.get("security_code") == security_code:
-        # Code matches - mark as verified
+        raise HTTPException(status_code=403, detail="Too many wrong attempts. Trip cancelled for safety.")
+
+    # Get the stored code — prefer new pickup_code field, fall back to legacy security_code
+    stored_code = trip.get("pickup_code") or trip.get("security_code", "")
+    if entered_code == stored_code:
         await db.trips.update_one(
             {"id": trip_id},
             {"$set": {
-                "security_code_verified": True,
-                "security_code_verified_at": datetime.utcnow()
+                "pickup_code_verified": True,
+                "pickup_code_verified_at": datetime.utcnow().isoformat(),
+                "security_code_verified": True,  # keep legacy field in sync
+                "security_code_verified_at": datetime.utcnow().isoformat(),
             }}
         )
-        
-        updated_trip = await db.trips.find_one({"id": trip_id})
-        if updated_trip:
-            updated_trip["_id"] = str(updated_trip["_id"])
-        await _log_trip_event(trip_id, "security_code_verified", driver_id, {})
-        return {
-            "verified": True,
-            "message": "Security code verified successfully! Rider identity confirmed.",
-            "trip": updated_trip
-        }
+        await _log_trip_event(trip_id, "pickup_code_verified", driver_id, {})
+        return {"verified": True, "message": "Rider confirmed. You can now start the trip.", "trip_id": trip_id}
     else:
-        # Code doesn't match - increment attempts
         new_attempts = attempts + 1
-        await db.trips.update_one(
-            {"id": trip_id},
-            {"$set": {"security_code_attempts": new_attempts}}
-        )
-        
-        remaining = 3 - new_attempts
-        if remaining == 0:
-            await db.trips.update_one(
-                {"id": trip_id},
-                {"$set": {"status": "cancelled", "cancel_reason": "Too many wrong security code attempts"}}
-            )
-            await _log_trip_event(trip_id, "security_code_failed_lockout", driver_id, {"attempts": new_attempts})
-            raise HTTPException(
-                status_code=403,
-                detail="Wrong code. Trip cancelled for safety."
-            )
-        await _log_trip_event(trip_id, "security_code_failed", driver_id, {"attempts": new_attempts})
-        
+        await db.trips.update_one({"id": trip_id}, {"$set": {"pickup_code_attempts": new_attempts}})
+        remaining = 5 - new_attempts
+        await _log_trip_event(trip_id, "pickup_code_failed", driver_id, {"attempts": new_attempts})
         raise HTTPException(
             status_code=400,
-            detail=f"Wrong security code. {remaining} attempt{'s' if remaining > 1 else ''} remaining."
+            detail=f"Invalid code. {remaining} attempt{'s' if remaining != 1 else ''} remaining."
         )
+
+
+@trips_router.post("/trips/{trip_id}/verify-security-code")
+async def verify_security_code(trip_id: str, request: dict, http_request: Request):
+    """Legacy endpoint — delegates to the new pickup-code flow."""
+    new_req = {"pickup_code": request.get("security_code", ""), "code": request.get("security_code", "")}
+    return await verify_pickup_code(trip_id, new_req, http_request)
 
 
 @trips_router.put("/trips/{trip_id}/biometric-lock")
@@ -2420,12 +2393,10 @@ async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequ
     if trip["status"] not in ["accepted", "arrived"]:
         raise HTTPException(status_code=400, detail="Trip must be accepted or driver must be at pickup first")
 
-    if not trip.get("security_code_verified"):
-        raise HTTPException(status_code=403, detail="Security code must be verified before biometric trip lock start")
-    if not trip.get("rider_face_verified_at_pickup"):
-        raise HTTPException(status_code=403, detail="Rider pickup face verification is required before trip start")
-    if not _trip_biometric_ready(trip):
-        raise HTTPException(status_code=403, detail="Both rider and driver must complete biometric trip lock before starting")
+    # Require pickup code verification (new system) or legacy security_code_verified
+    pickup_verified = trip.get("pickup_code_verified") or trip.get("security_code_verified")
+    if not pickup_verified:
+        raise HTTPException(status_code=403, detail="Verify the rider's pick-up code before starting the trip.")
     
     if not request.face_image or len(request.face_image) < 100:
         raise HTTPException(status_code=400, detail="Live face photo is required before starting any ride")

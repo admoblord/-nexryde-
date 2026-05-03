@@ -23,6 +23,16 @@ import { Card, Badge, Button } from '@/src/components/UI';
 import { useAppStore, Trip } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, getDriverTripOffers, acceptTrip, arriveTrip, startTrip, completeTrip, cancelTrip, getTrip, explainGeoFenceDeviation, triggerOneTouchPoliceConnect, submitDriverWitnessReport, submitDriverStopReason } from '@/src/services/api';
 import notificationService from '@/src/services/notifications';
+import * as Location from 'expo-location';
+import policeContactsRaw from '@/src/data/policeContacts';
+
+interface _PoliceContact { state: string; aliases: string[]; phone: string; }
+const _POLICE = policeContactsRaw as _PoliceContact[];
+function _matchPolice(region: string): string {
+  const q = region.toLowerCase().trim();
+  const found = _POLICE.find((c) => c.state.toLowerCase() === q || c.aliases.some((a) => a === q || q.includes(a)));
+  return found ? `tel:${found.phone}` : 'tel:+2349055390070'; // Lagos fallback
+}
 
 /* ─── Dark map style ─── */
 const DARK_MAP_STYLE = [
@@ -456,13 +466,35 @@ export default function DriverTripsScreen() {
     try {
       router.push({
         pathname: '/driver/verify-rider-code',
-        params: { trip_id: currentTrip.id, driver_id: user.id },
+        params: { trip_id: currentTrip.id, driver_id: user.id, auto: '0' },
       } as any);
     } finally {
-      // Clear loading after navigation starts (slight delay for UX)
       setTimeout(() => { setActionLoading(null); setBusyActionKey(null); }, 800);
     }
   };
+
+  // Auto-trigger verify screen when driver is within 100m of pickup
+  const autoVerifyTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (
+      currentTrip?.status === 'arrived' &&
+      !currentTrip?.pickup_code_verified &&
+      !currentTrip?.security_code_verified &&
+      !autoVerifyTriggeredRef.current &&
+      user?.id
+    ) {
+      autoVerifyTriggeredRef.current = true;
+      setTimeout(() => {
+        router.push({
+          pathname: '/driver/verify-rider-code',
+          params: { trip_id: currentTrip.id, driver_id: user.id, auto: '1' },
+        } as any);
+      }, 600);
+    }
+    if (!currentTrip || currentTrip.status !== 'arrived') {
+      autoVerifyTriggeredRef.current = false;
+    }
+  }, [currentTrip?.status, currentTrip?.pickup_code_verified, currentTrip?.security_code_verified]);
 
   const handleArriveTrip = async () => {
     if (busyActionKey) return;
@@ -472,7 +504,7 @@ export default function DriverTripsScreen() {
     try {
       const response = await arriveTrip(currentTrip.id, user.id);
       setCurrentTrip(response.data);
-      Alert.alert('Arrived', 'Rider has been notified. Ask them to show their security code.');
+      Alert.alert('Arrived at Pickup', 'Rider notified. Ask them to open NEXRYDE and show their pick-up code.');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to mark arrival');
     } finally {
@@ -599,7 +631,15 @@ export default function DriverTripsScreen() {
       });
       const data = res.data || {};
       const mapUrl = String(data.nearest_police_station_map_url || '');
-      const dialUri = String(data.dial_uri || 'tel:+234199');
+      // Use backend dial_uri if present; otherwise reverse-geocode to get state police number
+      let dialUri = String(data.dial_uri || '');
+      if (!dialUri) {
+        try {
+          const geo = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+          const region = String(geo?.[0]?.region || geo?.[0]?.subregion || '').trim();
+          dialUri = region ? _matchPolice(region) : 'tel:+2349055390070';
+        } catch { dialUri = 'tel:+2349055390070'; }
+      }
       Alert.alert(
         'Police Connect Active',
         'Structured alert sent with your driver and vehicle details. Calling nearest emergency line now.',
@@ -1041,10 +1081,14 @@ export default function DriverTripsScreen() {
             )}
             {currentTrip.status === 'arrived' && (
               <Button
-                title={actionLoading === 'start' ? 'Opening...' : 'Verify Rider Code'}
+                title={
+                  currentTrip.pickup_code_verified || currentTrip.security_code_verified
+                    ? (actionLoading === 'start' ? 'Starting...' : 'Start Trip ✓')
+                    : (actionLoading === 'start' ? 'Opening...' : 'Enter Pick-up Code')
+                }
                 onPress={handleStartTrip}
                 loading={actionLoading === 'start'}
-                icon="key"
+                icon={currentTrip.pickup_code_verified || currentTrip.security_code_verified ? 'play-circle' : 'keypad'}
                 style={styles.actionButton}
               />
             )}
@@ -1084,13 +1128,23 @@ export default function DriverTripsScreen() {
               />
             )}
             {['accepted', 'arrived', 'ongoing'].includes(currentTrip.status) && (
-              <Button
-                title="Cancel"
-                onPress={handleCancelTrip}
-                variant="outline"
-                loading={actionLoading === 'cancel'}
-                style={styles.cancelButton}
-              />
+              <>
+                {/* Trip recording button — available during active trips */}
+                <TouchableOpacity
+                  style={styles.recordingBtn}
+                  onPress={() => router.push({ pathname: '/driver/ride-recording', params: { tripId: currentTrip.id } } as any)}
+                >
+                  <Ionicons name="videocam-outline" size={16} color="#9333EA" />
+                  <Text style={styles.recordingBtnText}>Record This Trip</Text>
+                </TouchableOpacity>
+                <Button
+                  title="Cancel"
+                  onPress={handleCancelTrip}
+                  variant="outline"
+                  loading={actionLoading === 'cancel'}
+                  style={styles.cancelButton}
+                />
+              </>
             )}
             {['completed', 'cancelled'].includes(currentTrip.status) && (
               <TouchableOpacity
@@ -1305,6 +1359,23 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 0.4,
+  },
+  recordingBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(147,51,234,0.12)',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(147,51,234,0.3)',
+  },
+  recordingBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#9333EA',
   },
   reportIssueBtn: {
     flexDirection: 'row',
