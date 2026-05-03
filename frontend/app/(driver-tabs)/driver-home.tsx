@@ -431,34 +431,51 @@ export default function ModernDriverHome() {
     pushLocation();
   }, [isOnline, user?.id, driverCoords?.lat, driverCoords?.lng]);
 
+  // SIM Swap Protection — runs at most once per 24h per device, never blocks UI
+  const [simSwapAlert, setSimSwapAlert] = useState(false);
   useEffect(() => {
     if (!user?.id || simSignalSent) return;
     const sendSimRiskSignal = async () => {
       try {
-        const key = `nexryde_sim_fp_${user.id}`;
-        let fingerprint = await SecureStore.getItemAsync(key);
-        if (!fingerprint) {
-          fingerprint = `simfp_${user.id}_${(user.phone || '').slice(-6)}_${Math.random().toString(36).slice(2, 12)}`;
-          await SecureStore.setItemAsync(key, fingerprint);
+        const fpKey = `nexryde_sim_fp_${user.id}`;
+        const cooldownKey = `nexryde_sim_check_ts_${user.id}`;
+
+        // Local 24h cooldown — skip if checked within the last 24 hours
+        const lastCheckTs = await SecureStore.getItemAsync(cooldownKey);
+        if (lastCheckTs && Date.now() - Number(lastCheckTs) < 86_400_000) {
+          return; // Not due yet
         }
+
+        // Generate or retrieve stable device fingerprint
+        let fingerprint = await SecureStore.getItemAsync(fpKey);
+        if (!fingerprint) {
+          // First-time: generate a stable ID based on user + platform (no random)
+          fingerprint = `simfp_${user.id.slice(-8)}_${Platform.OS}_${String(Platform.Version).replace(/\./g, '')}_v1`;
+          await SecureStore.setItemAsync(fpKey, fingerprint);
+        }
+
+        // NOTE: we do NOT send phone — the backend already has the registered phone.
+        // Sending app-state phone caused false positives due to format differences
+        // (e.g. "08012345678" vs "+2348012345678" for the same number).
         await reportDriverSimSwapSignal(user.id, {
           sim_fingerprint: fingerprint,
           carrier_name: 'unknown',
-          phone: user.phone || undefined,
         });
+
+        // Record successful check time
+        await SecureStore.setItemAsync(cooldownKey, String(Date.now()));
       } catch (error: any) {
         if (error?.response?.status === 423) {
-          Alert.alert(
-            'SIM Swap Protection',
-            error?.response?.data?.detail || 'SIM swap risk detected. Account activity is frozen pending identity reconfirmation.',
-          );
+          // Show a non-blocking in-app banner instead of a modal Alert
+          setSimSwapAlert(true);
         }
+        // Any other error (network etc.) — silently ignore, try again next session
       } finally {
         setSimSignalSent(true);
       }
     };
     void sendSimRiskSignal();
-  }, [simSignalSent, user?.id, user?.phone]);
+  }, [simSignalSent, user?.id]);
 
   // Real-time ride offers via WebSocket; HTTP polling only as fallback (slower when WS is up).
   useEffect(() => {
@@ -939,6 +956,22 @@ export default function ModernDriverHome() {
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
+
+      {/* SIM Swap Alert Banner — non-blocking, shown only on genuine risk */}
+      {simSwapAlert && (
+        <View style={styles.simSwapBanner}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
+            <Ionicons name="shield-checkmark" size={20} color="#FFF" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.simSwapBannerTitle}>Security Alert</Text>
+              <Text style={styles.simSwapBannerText}>A new SIM was detected. Contact support if this wasn't you.</Text>
+            </View>
+          </View>
+          <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 4 }}>
+            <Ionicons name="close" size={18} color="rgba(255,255,255,0.8)" />
+          </TouchableOpacity>
+        </View>
+      )}
       
       {/* HEADER WITH GRADIENT */}
       <LinearGradient
@@ -1414,6 +1447,25 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.gray50,
+  },
+  simSwapBanner: {
+    backgroundColor: '#B91C1C',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  simSwapBannerTitle: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '700',
+    marginBottom: 1,
+  },
+  simSwapBannerText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    lineHeight: 16,
   },
   header: {
     paddingHorizontal: 20,

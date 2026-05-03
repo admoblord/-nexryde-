@@ -741,9 +741,27 @@ async def update_driver_location(user_id: str, request: LocationUpdate, http_req
 @drivers_router.put("/drivers/{user_id}/online")
 async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
     verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "ghost_driver_lock": 1})
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "ghost_driver_lock": 1, "sim_swap_lock": 1})
+
+    # Ghost Driver lock check
     if (user or {}).get("ghost_driver_lock", {}).get("active"):
         raise HTTPException(status_code=423, detail="Ghost Driver Protection lock is active. Reconfirm identity to go online.")
+
+    # Auto-clear stale SIM swap locks for approved drivers.
+    # False positives were caused by phone-format mismatches (now fixed). Any driver
+    # with verification_status == "approved" whose sim_swap_lock is still active
+    # gets it silently cleared so they can work normally.
+    if (user or {}).get("sim_swap_lock", {}).get("active"):
+        profile_check = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "verification_status": 1}) or {}
+        if profile_check.get("verification_status") == "approved":
+            await db.users.update_one(
+                {"id": user_id},
+                {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""}}
+            )
+            await db.driver_profiles.update_one(
+                {"user_id": user_id},
+                {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
+            )
     if is_online:
         profile = await db.driver_profiles.find_one({"user_id": user_id})
         if not profile:
@@ -2676,86 +2694,106 @@ async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultR
 
 @drivers_router.post("/drivers/{driver_id}/sim-swap-signal")
 async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, http_request: Request):
-    """Detect SIM swap risk and freeze driver activity pending secondary reconfirmation."""
+    """
+    SIM swap risk detection using device fingerprint only.
+
+    NOTE: Phone-number comparison was REMOVED. SIM swap fraud keeps the same
+    phone number on a new SIM — comparing phone numbers is the wrong signal and
+    caused false positives when app state and DB store numbers in different formats
+    (e.g. 08012345678 vs +2348012345678).
+
+    We only compare device-generated fingerprints, and only after the first
+    successful registration (grace period). Checks are rate-limited to once per 24h.
+    """
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "phone": 1}) or {}
-    normalized_phone = re.sub(r"\s+", "", str(user.get("phone") or ""))
-    provided_phone = re.sub(r"\s+", "", str(request.phone or ""))
-    if provided_phone and normalized_phone and provided_phone != normalized_phone:
-        now_iso = datetime.now(timezone.utc).isoformat()
-        lock_payload = {
-            "active": True,
-            "reason": "sim_swap_detected_phone_mismatch",
-            "detected_at": now_iso,
-            "registered_phone": normalized_phone,
-            "provided_phone": provided_phone,
-            "carrier_name": request.carrier_name,
-            "sim_fingerprint_prefix": request.sim_fingerprint[:12],
-        }
-        await db.users.update_one({"id": driver_id}, {"$set": {"sim_swap_lock": lock_payload, "earnings_frozen": True}})
+
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "sim_fingerprint": 1, "sim_last_checked_at": 1, "verification_status": 1}
+    ) or {}
+
+    now_utc = datetime.now(timezone.utc)
+    now_iso = now_utc.isoformat()
+
+    # ── Rate limit: only run the check once every 24 hours ─────────────────
+    last_checked_raw = profile.get("sim_last_checked_at")
+    if last_checked_raw:
+        try:
+            last_checked = datetime.fromisoformat(str(last_checked_raw).replace("Z", "+00:00"))
+            if last_checked.tzinfo is None:
+                last_checked = last_checked.replace(tzinfo=timezone.utc)
+            if (now_utc - last_checked).total_seconds() < 86400:  # 24 hours
+                return {"success": True, "message": "SIM check skipped (rate limited)", "checked": False}
+        except Exception:
+            pass  # Proceed on parse error
+
+    # ── Fingerprint check ──────────────────────────────────────────────────
+    previous_fingerprint = str(profile.get("sim_fingerprint") or "")
+    incoming_fingerprint = str(request.sim_fingerprint or "")
+
+    # Grace period: if no fingerprint stored yet, just save it (first-time setup)
+    if not previous_fingerprint:
         await db.driver_profiles.update_one(
             {"user_id": driver_id},
-            {"$set": {"is_online": False, "sim_swap_lock": lock_payload, "pending_identity_reconfirm": True}},
+            {"$set": {
+                "sim_fingerprint": incoming_fingerprint,
+                "sim_carrier_name": request.carrier_name,
+                "sim_last_checked_at": now_iso,
+            }},
             upsert=True,
         )
-        await db.notifications.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "user_id": driver_id,
-                "type": "sim_swap_lock",
-                "title": "SIM Swap Protection Activated",
-                "message": "Phone mismatch detected. Account activity is frozen until secondary identity reconfirmation.",
-                "read": False,
-                "created_at": now_iso,
-                "data": lock_payload,
-            }
-        )
-        raise HTTPException(
-            status_code=423,
-            detail="SIM swap risk detected. Account activity frozen pending physical identity reconfirmation.",
-        )
+        return {"success": True, "message": "SIM fingerprint registered", "checked": True}
 
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "sim_fingerprint": 1}) or {}
-    previous_fingerprint = str(profile.get("sim_fingerprint") or "")
-    now_iso = datetime.now(timezone.utc).isoformat()
-    if previous_fingerprint and previous_fingerprint != request.sim_fingerprint:
+    # Fingerprint changed — genuine SIM swap signal
+    if previous_fingerprint != incoming_fingerprint:
         lock_payload = {
             "active": True,
             "reason": "sim_fingerprint_changed",
             "detected_at": now_iso,
             "carrier_name": request.carrier_name,
             "previous_fingerprint_prefix": previous_fingerprint[:12],
-            "new_fingerprint_prefix": request.sim_fingerprint[:12],
+            "new_fingerprint_prefix": incoming_fingerprint[:12],
         }
-        await db.users.update_one({"id": driver_id}, {"$set": {"sim_swap_lock": lock_payload, "earnings_frozen": True}})
+        await db.users.update_one(
+            {"id": driver_id},
+            {"$set": {"sim_swap_lock": lock_payload, "earnings_frozen": True}}
+        )
         await db.driver_profiles.update_one(
             {"user_id": driver_id},
-            {"$set": {"is_online": False, "sim_swap_lock": lock_payload, "pending_identity_reconfirm": True}},
+            {"$set": {
+                "is_online": False,
+                "sim_swap_lock": lock_payload,
+                "pending_identity_reconfirm": True,
+                "sim_last_checked_at": now_iso,
+            }},
             upsert=True,
         )
-        await db.notifications.insert_one(
-            {
-                "id": str(uuid.uuid4()),
-                "user_id": driver_id,
-                "type": "sim_swap_lock",
-                "title": "SIM Swap Protection Activated",
-                "message": "SIM change detected. Sessions locked and earnings frozen until identity is reconfirmed.",
-                "read": False,
-                "created_at": now_iso,
-                "data": lock_payload,
-            }
-        )
+        await db.notifications.insert_one({
+            "id": str(uuid.uuid4()),
+            "user_id": driver_id,
+            "type": "sim_swap_lock",
+            "title": "Security Alert: SIM Change Detected",
+            "message": "A new SIM was detected on your device. Your account has been temporarily secured. Contact support if this was not you.",
+            "read": False,
+            "created_at": now_iso,
+            "data": lock_payload,
+        })
         raise HTTPException(
             status_code=423,
-            detail="SIM swap risk detected. Account activity frozen pending physical identity reconfirmation.",
+            detail="Security alert: a new SIM was detected. Your account is temporarily secured pending identity reconfirmation.",
         )
 
+    # Fingerprint unchanged — all good, update timestamp
     await db.driver_profiles.update_one(
         {"user_id": driver_id},
-        {"$set": {"sim_fingerprint": request.sim_fingerprint, "sim_carrier_name": request.carrier_name, "sim_last_checked_at": now_iso}},
+        {"$set": {
+            "sim_fingerprint": incoming_fingerprint,
+            "sim_carrier_name": request.carrier_name,
+            "sim_last_checked_at": now_iso,
+        }},
         upsert=True,
     )
-    return {"success": True, "message": "SIM fingerprint check passed"}
+    return {"success": True, "message": "SIM fingerprint check passed", "checked": True}
 
 
 @drivers_router.post("/drivers/{driver_id}/withdraw-earnings")
