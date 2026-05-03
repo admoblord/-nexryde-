@@ -13,6 +13,7 @@ import {
   Alert,
   Linking,
   Image,
+  StatusBar,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import axios from 'axios';
@@ -470,6 +471,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={COLORS.background} />
       <LinearGradient
         colors={[COLORS.background, COLORS.primary, COLORS.background]}
         style={StyleSheet.absoluteFillObject}

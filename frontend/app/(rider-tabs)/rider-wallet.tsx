@@ -13,8 +13,9 @@ import {
   Animated,
   Easing,
   Platform,
+  StatusBar,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
@@ -79,7 +80,6 @@ type TopupState =
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
-  const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(8);
 
   const [balance, setBalance] = useState(0);
@@ -349,7 +349,7 @@ export default function RiderWalletScreen() {
         const balAfter = await load();
         setTopupState({ phase: 'success', reference: ref, amountNgn: amountForDisplay, balanceNgn: typeof balAfter === 'number' ? balAfter : 0 });
         pulseSuccess();
-        if (!silent) Alert.alert('✅ Wallet Funded!', `₦${amountForDisplay.toLocaleString()} has been added to your wallet.`);
+        if (!silent) Alert.alert('Wallet Funded', `₦${amountForDisplay.toLocaleString()} has been added to your Nexryde wallet.`);
       } else {
         const isCancelled = String(data?.status || '').toLowerCase() === 'cancelled';
         const isMismatch = data?.detail === 'amount_mismatch';
@@ -403,6 +403,7 @@ export default function RiderWalletScreen() {
   // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <SafeAreaView style={s.root} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <ScrollView
         contentContainerStyle={[s.scroll, { paddingBottom: tabPad }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.green} />}

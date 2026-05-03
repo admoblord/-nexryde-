@@ -173,6 +173,9 @@ export default function ModernRiderHome() {
         if (walletRes.status === 'fulfilled' && walletRes.value.ok) {
           const data = await walletRes.value.json();
           setWalletBalance(Number(data?.balance ?? data?.wallet_balance ?? 0));
+        } else {
+          // Show strip with ₦0 on failure so the tap-to-open-wallet CTA is always visible
+          setWalletBalance(0);
         }
         if (tripsRes.status === 'fulfilled' && tripsRes.value.ok) {
           const data = await tripsRes.value.json();
@@ -414,7 +417,7 @@ export default function ModernRiderHome() {
               <View style={styles.heroSmallInner}>
                 <Ionicons name="time" size={30} color="#FFF" />
                 <Text style={styles.heroSmallTitle}>{t.home.myTrips}</Text>
-                <Text style={styles.heroSmallSubtitle}>{t.ride.distance}</Text>
+                <Text style={styles.heroSmallSubtitle}>History &amp; receipts</Text>
               </View>
             </TouchableOpacity>
             <TouchableOpacity

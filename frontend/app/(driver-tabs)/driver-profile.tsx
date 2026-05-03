@@ -12,6 +12,7 @@ import {
   Animated,
   Dimensions,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -307,6 +308,7 @@ export default function DriverProfileScreen() {
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor="#060C14" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll, { paddingBottom: tabPad + 24 }]}>
 
         {/* ── HERO ── */}
@@ -667,19 +669,19 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(0,212,106,0.08)', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4,
     borderWidth: 1, borderColor: 'rgba(0,212,106,0.2)',
   },
-  roleBadgeText: { fontSize: 10, fontWeight: '800', color: '#00D46A' },
+  roleBadgeText: { fontSize: 11, fontWeight: '800', color: '#00D46A' },
   statusBadge: { borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4, borderWidth: 1 },
-  statusBadgeText: { fontSize: 10, fontWeight: '800' },
+  statusBadgeText: { fontSize: 11, fontWeight: '800' },
   subBadge: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(251,191,36,0.1)', borderRadius: 20, paddingHorizontal: 9, paddingVertical: 4,
     borderWidth: 1, borderColor: 'rgba(251,191,36,0.2)',
   },
-  subBadgeText: { fontSize: 10, fontWeight: '800', color: '#FBBF24' },
+  subBadgeText: { fontSize: 11, fontWeight: '800', color: '#FBBF24' },
   statsRow: { flexDirection: 'row', alignItems: 'center' },
   statChip: { alignItems: 'center', paddingHorizontal: 20 },
   statValue: { fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
-  statLabel: { fontSize: 10, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statLabel: { fontSize: 11, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   statsDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.06)' },
 
   /* Vehicle card */
@@ -702,7 +704,7 @@ const s = StyleSheet.create({
   vehicleEmpty: { fontSize: 12, color: '#475569', fontStyle: 'italic' },
   vehicleRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   vehicleCountBadge: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#0EA5E9', alignItems: 'center', justifyContent: 'center' },
-  vehicleCountText: { fontSize: 10, fontWeight: '900', color: '#FFF' },
+  vehicleCountText: { fontSize: 11, fontWeight: '900', color: '#FFF' },
 
   /* Subscription card */
   subCard: { borderRadius: 18, overflow: 'hidden', marginTop: 12, borderWidth: 1, borderColor: 'rgba(251,191,36,0.12)' },
@@ -714,7 +716,7 @@ const s = StyleSheet.create({
 
   /* Grid */
   gridSection: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4 },
-  gridTitle: { fontSize: 10, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
+  gridTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionTile: {
     backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: 16,
@@ -729,7 +731,7 @@ const s = StyleSheet.create({
 
   /* Section */
   section: { paddingHorizontal: 20, paddingTop: 24 },
-  sectionTitle: { fontSize: 10, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
+  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
   sectionCard: {
     backgroundColor: 'rgba(255,255,255,0.025)', borderRadius: 18,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)', overflow: 'hidden',
@@ -753,12 +755,12 @@ const s = StyleSheet.create({
     borderRadius: 20, borderWidth: 1, borderColor: '#00D46A44',
     paddingHorizontal: 11, paddingVertical: 5, backgroundColor: 'rgba(0,212,106,0.06)',
   },
-  scoreTierText: { fontSize: 10, fontWeight: '800', color: '#00D46A' },
+  scoreTierText: { fontSize: 11, fontWeight: '800', color: '#00D46A' },
   scoreChip: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(251,191,36,0.1)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3,
   },
-  scoreChipText: { fontSize: 10, fontWeight: '700', color: '#FBBF24' },
+  scoreChipText: { fontSize: 11, fontWeight: '700', color: '#FBBF24' },
   scoreBreak: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   scoreBarWrap: { gap: 5 },
   scoreBarRow: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -768,7 +770,7 @@ const s = StyleSheet.create({
   scoreBarFill: { height: '100%', borderRadius: 3 },
   verifRow: { flexDirection: 'row', gap: 8, padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   verifChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  verifChipText: { fontSize: 10, fontWeight: '700' },
+  verifChipText: { fontSize: 11, fontWeight: '700' },
   perksWrap: { padding: 14, gap: 8 },
   perksHeader: { fontSize: 11, fontWeight: '800', color: '#475569', marginBottom: 2 },
   perkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -790,7 +792,7 @@ const s = StyleSheet.create({
   menuTitle: { fontSize: 13, fontWeight: '700', color: '#E2E8F0' },
   menuSubtitle: { fontSize: 11, color: '#475569', marginTop: 1 },
   menuBadge: { backgroundColor: 'rgba(245,158,11,0.1)', borderRadius: 7, paddingHorizontal: 7, paddingVertical: 3 },
-  menuBadgeText: { fontSize: 10, fontWeight: '800', color: '#F59E0B' },
+  menuBadgeText: { fontSize: 11, fontWeight: '800', color: '#F59E0B' },
 
   /* Version & logout */
   version: { textAlign: 'center', fontSize: 11, color: '#1A2332', marginTop: 28, marginBottom: 12, fontWeight: '600', letterSpacing: 1 },

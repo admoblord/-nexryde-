@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
   ScrollView, Modal, TextInput, Platform, Animated, Easing, KeyboardAvoidingView,
-  Switch,
+  Switch, StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1347,6 +1347,7 @@ function BookInDriveStyle() {
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
       {/* MAP SECTION */}
       <View style={s.mapArea}>
         {pickupCoords ? (

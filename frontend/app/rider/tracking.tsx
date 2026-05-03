@@ -9,6 +9,7 @@ import {
   Platform,
   Linking,
   Modal,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -817,6 +818,7 @@ export default function TrackingScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#0A0F1A" />
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
         <View style={styles.header}>
@@ -1505,7 +1507,7 @@ const favStyles = StyleSheet.create({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: '#0A0F1A',
   },
   safeArea: {
     flex: 1,
@@ -1521,16 +1523,16 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: COLORS.white,
+    backgroundColor: 'rgba(255,255,255,0.08)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   headerTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   placeholder: {
     width: 44,
@@ -1558,10 +1560,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   liveTripHero: {
-    backgroundColor: COLORS.white,
+    backgroundColor: '#111827',
     borderRadius: BORDER_RADIUS.xl,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
     padding: SPACING.md,
     marginBottom: SPACING.md,
     flexDirection: 'row',
@@ -1572,12 +1574,12 @@ const styles = StyleSheet.create({
   liveTripHeroTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '900',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   liveTripHeroText: {
     marginTop: 4,
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
     lineHeight: 18,
     fontWeight: '600',
   },
@@ -1601,12 +1603,12 @@ const styles = StyleSheet.create({
   },
   mapPlaceholder: {
     height: 200,
-    backgroundColor: COLORS.lightSurface,
+    backgroundColor: '#1A2332',
     borderRadius: BORDER_RADIUS.xxl,
     marginBottom: SPACING.lg,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   mapOverlay: {
     flex: 1,
@@ -1617,25 +1619,25 @@ const styles = StyleSheet.create({
   mapTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   mapSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
     marginTop: 4,
   },
   statusCard: {
-    backgroundColor: COLORS.white,
+    backgroundColor: '#111827',
     borderRadius: BORDER_RADIUS.xxl,
     padding: SPACING.xl,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 8,
   },
   actionsCard: {
     marginTop: SPACING.lg,
@@ -1645,14 +1647,14 @@ const styles = StyleSheet.create({
   },
   actionBtn: {
     minWidth: '47%',
-    backgroundColor: COLORS.white,
+    backgroundColor: '#111827',
     borderRadius: BORDER_RADIUS.xl,
     paddingVertical: SPACING.md,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   actionBtnSuccess: {
     borderColor: COLORS.success,
@@ -1661,7 +1663,7 @@ const styles = StyleSheet.create({
   actionBtnText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   driverLocationBadge: {
     flexDirection: 'row',
@@ -1718,11 +1720,11 @@ const styles = StyleSheet.create({
   recordingBanner: {
     width: '100%',
     marginTop: SPACING.md,
-    backgroundColor: COLORS.gray50,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   recordingRow: {
     flexDirection: 'row',
@@ -1732,29 +1734,29 @@ const styles = StyleSheet.create({
   recordingTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   recordingText: {
     marginTop: SPACING.xs,
     fontSize: FONT_SIZE.xs,
     lineHeight: 18,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
   },
   recordingMeta: {
     marginTop: SPACING.xs,
     fontSize: FONT_SIZE.xs,
     fontWeight: '700',
-    color: COLORS.gray500,
+    color: 'rgba(255,255,255,0.4)',
   },
   speedSpikeCard: {
     width: '100%',
     marginTop: SPACING.md,
-    backgroundColor: '#FEF2F2',
+    backgroundColor: 'rgba(239,68,68,0.12)',
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: '#FECACA',
+    borderColor: 'rgba(239,68,68,0.3)',
   },
   speedSpikeHeader: {
     flexDirection: 'row',
@@ -1771,7 +1773,7 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     lineHeight: 18,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.65)',
   },
   speedSpikeMeta: {
     marginTop: SPACING.xs,
@@ -1803,7 +1805,7 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     lineHeight: 18,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.65)',
   },
   safeArrivalMeta: {
     marginTop: SPACING.xs,
@@ -1832,14 +1834,14 @@ const styles = StyleSheet.create({
   shieldTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   shieldText: {
     marginTop: SPACING.xs,
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     lineHeight: 18,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
   },
   shieldMeta: {
     marginTop: SPACING.xs,
@@ -1868,14 +1870,14 @@ const styles = StyleSheet.create({
   geoFenceTitle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   geoFenceText: {
     marginTop: SPACING.xs,
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     lineHeight: 18,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
   },
   geoFenceMeta: {
     marginTop: SPACING.xs,
@@ -1885,11 +1887,11 @@ const styles = StyleSheet.create({
   },
   guardianCard: {
     marginTop: SPACING.lg,
-    backgroundColor: '#FFF7ED',
+    backgroundColor: 'rgba(245,158,11,0.12)',
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: '#FED7AA',
+    borderColor: 'rgba(245,158,11,0.3)',
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: SPACING.sm,
@@ -1903,7 +1905,7 @@ const styles = StyleSheet.create({
   guardianText: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.65)',
     lineHeight: 18,
   },
   guardianActions: {
@@ -1923,7 +1925,7 @@ const styles = StyleSheet.create({
     borderColor: COLORS.success,
   },
   guardianHelpBtn: {
-    backgroundColor: '#FEF2F2',
+    backgroundColor: 'rgba(239,68,68,0.12)',
     borderColor: COLORS.error,
   },
   guardianSafeBtnText: {
@@ -1948,12 +1950,12 @@ const styles = StyleSheet.create({
   statusTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
     marginBottom: 4,
   },
   statusSubtitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: 'rgba(255,255,255,0.55)',
     marginBottom: SPACING.lg,
   },
   routeInfo: {
@@ -1972,12 +1974,12 @@ const styles = StyleSheet.create({
   },
   routeText: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    color: '#F8FAFC',
   },
   routeLine: {
     width: 2,
     height: 24,
-    backgroundColor: COLORS.lightBorder,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     marginLeft: 5,
     marginVertical: 4,
   },
@@ -1986,7 +1988,7 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.lg,
   },
   cancelButton: {
-    backgroundColor: COLORS.white,
+    backgroundColor: 'rgba(239,68,68,0.1)',
     borderRadius: BORDER_RADIUS.xl,
     paddingVertical: SPACING.lg,
     alignItems: 'center',

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Constants from 'expo-constants';
 import {
   View,
   Text,
@@ -12,6 +13,7 @@ import {
   Animated,
   UIManager,
   Dimensions,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -238,6 +240,7 @@ export default function RiderProfileScreen() {
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor="#080E17" />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={[s.scroll, { paddingBottom: tabPad + 24 }]}
@@ -405,7 +408,7 @@ export default function RiderProfileScreen() {
         </Section>
 
         {/* ── VERSION ── */}
-        <Text style={s.version}>NEXRYDE v1.0.0</Text>
+        <Text style={s.version}>NEXRYDE v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
 
         {/* ── LOGOUT ── */}
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
@@ -537,12 +540,12 @@ const s = StyleSheet.create({
   statsRow: { flexDirection: 'row', alignItems: 'center', gap: 0 },
   statChip: { alignItems: 'center', paddingHorizontal: 20 },
   statValue: { fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
-  statLabel: { fontSize: 10, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statLabel: { fontSize: 11, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   statsDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.07)' },
 
   /* Grid */
   gridSection: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4 },
-  gridTitle: { fontSize: 10, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
+  gridTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionTile: {
     backgroundColor: 'rgba(255,255,255,0.04)',
@@ -564,7 +567,7 @@ const s = StyleSheet.create({
 
   /* Section */
   section: { paddingHorizontal: 20, paddingTop: 24 },
-  sectionTitle: { fontSize: 10, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
+  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
   sectionCard: {
     backgroundColor: 'rgba(255,255,255,0.03)',
     borderRadius: 18,
@@ -606,7 +609,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  scorePerksChipText: { fontSize: 10, fontWeight: '700', color: '#FBBF24' },
+  scorePerksChipText: { fontSize: 11, fontWeight: '700', color: '#FBBF24' },
   scoreBreak: { padding: 16, gap: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   scoreBarWrap: { gap: 5 },
   scoreBarRow: { flexDirection: 'row', justifyContent: 'space-between' },
@@ -616,7 +619,7 @@ const s = StyleSheet.create({
   scoreBarFill: { height: '100%', borderRadius: 3 },
   verifRow: { flexDirection: 'row', gap: 8, padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
   verifChip: { flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
-  verifChipText: { fontSize: 10, fontWeight: '700' },
+  verifChipText: { fontSize: 11, fontWeight: '700' },
   perksWrap: { padding: 14, gap: 8 },
   perksHeader: { fontSize: 11, fontWeight: '800', color: '#475569', marginBottom: 2 },
   perkRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -648,7 +651,7 @@ const s = StyleSheet.create({
   menuTitle: { fontSize: 13, fontWeight: '700', color: '#E2E8F0' },
   menuSubtitle: { fontSize: 11, color: '#475569', marginTop: 1 },
   menuBadge: { backgroundColor: 'rgba(245,158,11,0.12)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 3 },
-  menuBadgeText: { fontSize: 10, fontWeight: '800', color: '#F59E0B' },
+  menuBadgeText: { fontSize: 11, fontWeight: '800', color: '#F59E0B' },
 
   /* Version & logout */
   version: { textAlign: 'center', fontSize: 11, color: '#1E293B', marginTop: 28, marginBottom: 12, fontWeight: '600', letterSpacing: 1 },
