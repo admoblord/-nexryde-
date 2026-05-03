@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -8,74 +8,104 @@ import {
   ActivityIndicator,
   Alert,
   RefreshControl,
+  Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, useThemeColors } from '@/src/constants/theme';
+import * as Haptics from 'expo-haptics';
+import { SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { getFavoriteDrivers, removeFavoriteDriver, getTripsWithDriver } from '@/src/services/api';
 
+// ── Palette ────────────────────────────────────────────────────────────────
+const C = {
+  bg:       '#020617',
+  bgMid:    '#0B1223',
+  card:     '#0F172A',
+  border:   '#1E293B',
+  green:    '#22C55E',
+  greenDim: '#052E16',
+  blue:     '#3B82F6',
+  amber:    '#F59E0B',
+  red:      '#EF4444',
+  purple:   '#A78BFA',
+  white:    '#FFFFFF',
+  muted:    '#94A3B8',
+  dim:      '#334155',
+};
+
+// ── Avatar gradient palettes per driver (index mod) ────────────────────────
+const AVATAR_GRADIENTS = [
+  ['#1D4ED8', '#2563EB'],
+  ['#065F46', '#047857'],
+  ['#7C3AED', '#6D28D9'],
+  ['#B45309', '#92400E'],
+  ['#0E7490', '#0891B2'],
+] as [string, string][];
+
 interface FavoriteDriver {
-  id: string;
-  name: string;
-  rating: number;
-  totalTrips: number;
-  vehicle: string;
-  plate: string;
-  isOnline: boolean;
-  lastSeen: string;
-  profileImage?: string;
+  id:            string;
+  name:          string;
+  rating:        number;
+  totalTrips:    number;
+  vehicle:       string;
+  plate:         string;
+  isOnline:      boolean;
+  lastSeen:      string;
   ridesTogether: number;
-  totalSpent: number;
+  totalSpent:    number;
 }
 
 export default function FavoriteDriversScreen() {
   const router = useRouter();
   const { user } = useAppStore();
-  const { colors } = useThemeColors();
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [loading,         setLoading]         = useState(true);
+  const [refreshing,      setRefreshing]      = useState(false);
   const [favoriteDrivers, setFavoriteDrivers] = useState<FavoriteDriver[]>([]);
+
+  // Entry animation
+  const listFade  = useRef(new Animated.Value(0)).current;
+  const listSlide = useRef(new Animated.Value(24)).current;
 
   const loadFavoriteDrivers = useCallback(async () => {
     try {
       setLoading(true);
-      if (!user?.id) {
-        setFavoriteDrivers([]);
-        return;
-      }
-      const response = await getFavoriteDrivers(user.id);
+      if (!user?.id) { setFavoriteDrivers([]); return; }
+      const response  = await getFavoriteDrivers(user.id);
       const rawDrivers = response.data?.favorite_drivers || response.data;
       const rows = Array.isArray(rawDrivers) ? rawDrivers : [];
 
       const mapped: FavoriteDriver[] = await Promise.all(
-        rows.map(async (d: any) => {
+        rows.map(async (d: any, idx: number) => {
           const driverId = d.driver_id || d.id;
           let ridesTogether = 0;
-          let totalSpent = 0;
+          let totalSpent    = 0;
           try {
             const histRes = await getTripsWithDriver(user!.id, driverId);
             ridesTogether = histRes.data?.total_rides || 0;
-            totalSpent = histRes.data?.total_spent || 0;
+            totalSpent    = histRes.data?.total_spent  || 0;
           } catch {}
           return {
-            id: driverId,
-            name: d.name || 'Driver',
-            rating: Number(d.rating || 0),
-            totalTrips: Number(d.total_trips || 0),
-            vehicle: d.vehicle_model || d.vehicle || 'Vehicle',
-            plate: d.vehicle_plate || d.plate || '',
-            isOnline: Boolean(d.is_online),
-            lastSeen: d.is_online ? 'Online now' : 'Offline',
+            id:            driverId,
+            name:          d.name || 'Driver',
+            rating:        Number(d.rating || 0),
+            totalTrips:    Number(d.total_trips || 0),
+            vehicle:       d.vehicle_model || d.vehicle || 'Vehicle',
+            plate:         d.vehicle_plate || d.plate || '',
+            isOnline:      Boolean(d.is_online),
+            lastSeen:      d.is_online ? 'Online now' : 'Offline',
             ridesTogether,
             totalSpent,
           };
         })
       );
+
+      // Online drivers first
+      mapped.sort((a, b) => Number(b.isOnline) - Number(a.isOnline));
       setFavoriteDrivers(mapped);
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Failed to load favorite drivers');
     } finally {
       setLoading(false);
@@ -87,58 +117,51 @@ export default function FavoriteDriversScreen() {
     loadFavoriteDrivers();
   }, [loadFavoriteDrivers]);
 
+  useEffect(() => {
+    if (!loading) {
+      Animated.parallel([
+        Animated.timing(listFade,  { toValue: 1, duration: 420, useNativeDriver: true }),
+        Animated.spring(listSlide, { toValue: 0, tension: 70, friction: 9, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [loading]);
+
   const handleRequestDriver = (driver: FavoriteDriver) => {
     if (!driver.isOnline) {
       Alert.alert(
         'Driver Offline',
-        `${driver.name} is currently offline. Last seen ${driver.lastSeen}. Would you like to book a regular ride instead?`,
+        `${driver.name} is currently offline. Book a regular ride instead?`,
         [
           { text: 'Cancel', style: 'cancel' },
-          { text: 'Book Regular Ride', onPress: () => router.push('/rider/book') }
+          { text: 'Book Regular Ride', onPress: () => router.push('/rider/book') },
         ]
       );
       return;
     }
-
-    Alert.alert(
-      `Request ${driver.name}?`,
-      `Send ride request directly to ${driver.name}? They'll get priority notification.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Send Request',
-          onPress: () => {
-            router.push({
-              pathname: '/rider/book',
-              params: { requestedDriverId: driver.id, driverName: driver.name }
-            });
-          }
-        }
-      ]
-    );
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    router.push({
+      pathname: '/rider/book',
+      params: { requestedDriverId: driver.id, driverName: driver.name },
+    });
   };
 
   const handleRemoveFavorite = (driver: FavoriteDriver) => {
     Alert.alert(
-      'Remove Favorite',
-      `Remove ${driver.name} from your favorites?`,
+      'Remove Favourite',
+      `Remove ${driver.name} from your favourites?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove',
-          style: 'destructive',
+          text: 'Remove', style: 'destructive',
           onPress: async () => {
             try {
-              if (user?.id) {
-                await removeFavoriteDriver(user.id, driver.id);
-              }
-              setFavoriteDrivers(favoriteDrivers.filter(d => d.id !== driver.id));
-              Alert.alert('Success', `${driver.name} removed from favorites`);
-            } catch (error) {
-              Alert.alert('Error', 'Failed to remove favorite');
+              if (user?.id) await removeFavoriteDriver(user.id, driver.id);
+              setFavoriteDrivers((prev) => prev.filter((d) => d.id !== driver.id));
+            } catch {
+              Alert.alert('Error', 'Failed to remove favourite');
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -148,174 +171,193 @@ export default function FavoriteDriversScreen() {
     loadFavoriteDrivers();
   };
 
-  const renderDriverCard = (driver: FavoriteDriver) => (
-    <View key={driver.id} style={styles.driverCard}>
-      {/* Driver Header */}
-      <View style={styles.driverHeader}>
-        <View style={styles.driverInfo}>
-          {/* Avatar */}
-          <View style={styles.avatar}>
-            {driver.profileImage ? (
-              <Text style={styles.avatarText}>{driver.name.charAt(0).toUpperCase()}</Text>
-            ) : (
-              <Text style={styles.avatarText}>
-                {driver.name.charAt(0).toUpperCase()}
+  const onlineCount  = favoriteDrivers.filter((d) => d.isOnline).length;
+  const offlineCount = favoriteDrivers.length - onlineCount;
+
+  // ── Driver card ────────────────────────────────────────────────────────
+  const renderDriverCard = (driver: FavoriteDriver, idx: number) => {
+    const gradColors = AVATAR_GRADIENTS[idx % AVATAR_GRADIENTS.length];
+    return (
+      <View key={driver.id} style={s.driverCard}>
+        {/* Avatar + status dot */}
+        <View style={s.cardTop}>
+          <LinearGradient colors={gradColors} style={s.avatar}>
+            <Text style={s.avatarText}>{driver.name.charAt(0).toUpperCase()}</Text>
+            {driver.isOnline && <View style={s.onlineDot} />}
+          </LinearGradient>
+
+          <View style={s.cardInfo}>
+            <Text style={s.cardName}>{driver.name}</Text>
+            <View style={s.cardSubRow}>
+              {driver.rating > 0 && (
+                <>
+                  <Ionicons name="star" size={12} color={C.amber} />
+                  <Text style={s.cardRating}>{driver.rating.toFixed(1)}</Text>
+                </>
+              )}
+              <Text style={s.cardVehicle}>{driver.vehicle}{driver.plate ? ` · ${driver.plate}` : ''}</Text>
+            </View>
+            <View style={[s.statusPill, driver.isOnline ? s.statusOnline : s.statusOffline]}>
+              <View style={[s.statusDot, { backgroundColor: driver.isOnline ? C.green : C.dim }]} />
+              <Text style={[s.statusText, { color: driver.isOnline ? C.green : C.muted }]}>
+                {driver.lastSeen}
               </Text>
-            )}
-            {driver.isOnline && <View style={styles.onlineBadge} />}
-          </View>
-
-          {/* Info */}
-          <View style={styles.driverDetails}>
-            <Text style={styles.driverName}>{driver.name}</Text>
-            <View style={styles.ratingRow}>
-              <Ionicons name="star" size={14} color={COLORS.accent} />
-              <Text style={styles.ratingText}>{driver.rating}</Text>
-              <Text style={styles.tripsText}>• {driver.totalTrips} trips</Text>
-            </View>
-            <View style={styles.vehicleRow}>
-              <Ionicons name="car" size={14} color={COLORS.lightTextMuted} />
-              <Text style={styles.vehicleText}>{driver.vehicle} • {driver.plate}</Text>
             </View>
           </View>
+
+          {/* Remove X */}
+          <TouchableOpacity
+            style={s.removeBtn}
+            onPress={() => handleRemoveFavorite(driver)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${driver.name} from favourites`}
+          >
+            <Ionicons name="close-circle" size={22} color={C.dim} />
+          </TouchableOpacity>
         </View>
 
-        {/* Remove Button */}
-        <TouchableOpacity 
-          style={styles.removeButton}
-          onPress={() => handleRemoveFavorite(driver)}
-          accessibilityLabel={"Remove " + driver.name + " from favorites"}
-          accessibilityRole="button"
-        >
-          <Ionicons name="close-circle" size={24} color={COLORS.error} />
-        </TouchableOpacity>
-      </View>
-
-      {/* Ride history stats */}
-      {driver.ridesTogether > 0 && (
-        <View style={styles.historyRow}>
-          <View style={styles.historyItem}>
-            <Ionicons name="repeat" size={14} color={COLORS.accentBlue} />
-            <Text style={styles.historyText}>{driver.ridesTogether} rides together</Text>
+        {/* Rides-together stats */}
+        {driver.ridesTogether > 0 && (
+          <View style={s.statsRow}>
+            <View style={s.statChip}>
+              <Ionicons name="repeat" size={12} color={C.blue} />
+              <Text style={s.statChipText}>{driver.ridesTogether} rides together</Text>
+            </View>
+            <View style={s.statChip}>
+              <Ionicons name="cash-outline" size={12} color={C.green} />
+              <Text style={s.statChipText}>{CURRENCY}{driver.totalSpent.toLocaleString()} spent</Text>
+            </View>
           </View>
-          <View style={styles.historyItem}>
-            <Ionicons name="cash-outline" size={14} color={COLORS.accentGreen} />
-            <Text style={styles.historyText}>{'\u20A6'}{driver.totalSpent.toLocaleString()} spent</Text>
-          </View>
-        </View>
-      )}
-
-      {/* Status */}
-      <View style={[styles.statusBadge, driver.isOnline ? styles.statusOnline : styles.statusOffline]}>
-        <View style={[styles.statusDot, { backgroundColor: driver.isOnline ? COLORS.success : COLORS.gray400 }]} />
-        <Text style={[styles.statusText, { color: driver.isOnline ? COLORS.success : COLORS.gray400 }]}>
-          {driver.lastSeen}
-        </Text>
-      </View>
-
-      {/* Action Buttons */}
-      <View style={styles.actionRow}>
-        <TouchableOpacity
-          style={styles.profileButton}
-          onPress={() => router.push({ pathname: '/rider/driver-details', params: { driverId: driver.id } })}
-          accessibilityLabel={"View " + driver.name + " profile"}
-          accessibilityRole="button"
-        >
-          <Ionicons name="person-outline" size={18} color={COLORS.primary} />
-          <Text style={styles.profileButtonText}>View Profile</Text>
-        </TouchableOpacity>
-
-        {driver.isOnline ? (
-          <TouchableOpacity 
-            style={[styles.requestButton, { flex: 1 }]}
-            onPress={() => handleRequestDriver(driver)}
-            accessibilityLabel={"Request ride from " + driver.name}
-            accessibilityRole="button"
-          >
-            <LinearGradient
-              colors={[COLORS.accentGreen, COLORS.accentBlue]}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-              style={styles.requestGradient}
-            >
-              <Ionicons name="car" size={20} color={COLORS.white} />
-              <Text style={styles.requestButtonText}>Request Ride</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity 
-            style={[styles.notifyButton, { flex: 1 }]}
-            onPress={() => {
-              Alert.alert('Notification Set!', `You'll be notified when ${driver.name} comes online.`);
-            }}
-            accessibilityLabel={"Notify when " + driver.name + " is online"}
-            accessibilityRole="button"
-          >
-            <Ionicons name="notifications-outline" size={20} color={COLORS.accentBlue} />
-            <Text style={styles.notifyButtonText}>Notify When Online</Text>
-          </TouchableOpacity>
         )}
-      </View>
-    </View>
-  );
 
+        {/* Action buttons */}
+        <View style={s.actionRow}>
+          <TouchableOpacity
+            style={s.profileBtn}
+            onPress={() => router.push({ pathname: '/rider/driver-details', params: { driverId: driver.id } })}
+            accessibilityRole="button"
+          >
+            <Ionicons name="person-outline" size={16} color={C.muted} />
+            <Text style={s.profileBtnText}>Profile</Text>
+          </TouchableOpacity>
+
+          {driver.isOnline ? (
+            <TouchableOpacity
+              style={s.bookBtn}
+              onPress={() => handleRequestDriver(driver)}
+              accessibilityRole="button"
+              accessibilityLabel={`Request ride from ${driver.name}`}
+            >
+              <LinearGradient
+                colors={[C.green, '#16A34A']}
+                start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                style={s.bookBtnGrad}
+              >
+                <Ionicons name="car" size={16} color={C.white} />
+                <Text style={s.bookBtnText}>Book Now</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={s.notifyBtn}
+              onPress={() => Alert.alert('Notification Set!', `You'll be notified when ${driver.name} comes online.`)}
+              accessibilityRole="button"
+            >
+              <Ionicons name="notifications-outline" size={16} color={C.blue} />
+              <Text style={s.notifyBtnText}>Notify When Online</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  // ── Loading ────────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <View style={[styles.loadingContainer, { backgroundColor: colors.background }]}>
-        <ActivityIndicator size="large" color={COLORS.accentGreen} />
-        <Text style={[styles.loadingText, { color: colors.textMuted }]}>Loading your favorites...</Text>
-      </View>
+      <SafeAreaView style={s.container}>
+        <View style={s.loadingWrap}>
+          <ActivityIndicator size="large" color={C.green} />
+          <Text style={s.loadingText}>Loading your favourites...</Text>
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView style={s.container}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => router.back()}
-          accessibilityLabel="Go back"
-          accessibilityRole="button"
-        >
-          <Ionicons name="arrow-back" size={24} color={COLORS.white} />
+      <LinearGradient colors={['#052E16', '#0B1223']} style={s.header}>
+        <TouchableOpacity style={s.backBtn} onPress={() => router.back()} accessibilityRole="button">
+          <Ionicons name="arrow-back" size={22} color={C.white} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Favorite Drivers</Text>
-        <View style={styles.placeholder} />
-      </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.headerTitle}>My Favourite Drivers</Text>
+          {favoriteDrivers.length > 0 && (
+            <Text style={s.headerSub}>
+              {onlineCount > 0 ? `${onlineCount} online now · ` : ''}{favoriteDrivers.length} saved
+            </Text>
+          )}
+        </View>
+        <Ionicons name="heart" size={22} color={C.green} />
+      </LinearGradient>
 
-      {/* Info Banner */}
-      <View style={styles.infoBanner}>
-        <Ionicons name="information-circle" size={20} color={COLORS.accentBlue} />
-        <Text style={styles.infoText}>
-          Request rides from your trusted drivers directly!
-        </Text>
-      </View>
+      {/* Info strip */}
+      {favoriteDrivers.length > 0 && (
+        <View style={s.infoStrip}>
+          <Ionicons name="flash" size={14} color={C.green} />
+          <Text style={s.infoStripText}>Tap "Book Now" to skip the queue and request your favourite directly</Text>
+        </View>
+      )}
 
-      <ScrollView 
-        contentContainerStyle={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+      <ScrollView
+        contentContainerStyle={[s.content, favoriteDrivers.length === 0 && s.contentEmpty]}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.green} />}
+        showsVerticalScrollIndicator={false}
       >
         {favoriteDrivers.length > 0 ? (
-          favoriteDrivers.map(renderDriverCard)
+          <Animated.View style={{ opacity: listFade, transform: [{ translateY: listSlide }] }}>
+            {/* Online section */}
+            {onlineCount > 0 && (
+              <>
+                <View style={s.sectionHeader}>
+                  <View style={s.sectionDot} />
+                  <Text style={s.sectionLabel}>Available Now</Text>
+                </View>
+                {favoriteDrivers
+                  .filter((d) => d.isOnline)
+                  .map((d, i) => renderDriverCard(d, i))}
+              </>
+            )}
+
+            {/* Offline section */}
+            {offlineCount > 0 && (
+              <>
+                <View style={s.sectionHeader}>
+                  <View style={[s.sectionDot, { backgroundColor: C.dim }]} />
+                  <Text style={[s.sectionLabel, { color: C.muted }]}>Offline</Text>
+                </View>
+                {favoriteDrivers
+                  .filter((d) => !d.isOnline)
+                  .map((d, i) => renderDriverCard(d, onlineCount + i))}
+              </>
+            )}
+          </Animated.View>
         ) : (
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <Ionicons name="star-outline" size={64} color={COLORS.gray400} />
-            </View>
-            <Text style={[styles.emptyTitle, { color: colors.text }]}>No Favorite Drivers Yet</Text>
-            <Text style={[styles.emptyText, { color: colors.textMuted }]}>
-              After a great ride, add drivers to your favorites to request them directly!
+          /* Empty state */
+          <View style={s.emptyWrap}>
+            <LinearGradient colors={['#052E16', '#0F172A']} style={s.emptyIconWrap}>
+              <Ionicons name="heart-outline" size={44} color={C.green} />
+            </LinearGradient>
+            <Text style={s.emptyTitle}>No Favourites Yet</Text>
+            <Text style={s.emptyText}>
+              After a great ride, tap the heart icon on the receipt to save a driver. You can then request them directly — skipping the normal queue.
             </Text>
-            <TouchableOpacity 
-              style={styles.emptyButton}
-              onPress={() => router.push('/rider/book')}
-              accessibilityLabel="Book your first ride"
-              accessibilityRole="button"
-            >
-              <Text style={styles.emptyButtonText}>Book Your First Ride</Text>
+            <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/rider/book')} accessibilityRole="button">
+              <LinearGradient colors={[C.green, '#16A34A']} style={s.emptyBtnGrad}>
+                <Ionicons name="car" size={18} color={C.white} />
+                <Text style={s.emptyBtnText}>Book a Ride</Text>
+              </LinearGradient>
             </TouchableOpacity>
           </View>
         )}
@@ -324,291 +366,68 @@ export default function FavoriteDriversScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.lightBackground,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: COLORS.lightBackground,
-  },
-  loadingText: {
-    marginTop: SPACING.md,
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.xl,
-    borderBottomLeftRadius: BORDER_RADIUS.xxl,
-    borderBottomRightRadius: BORDER_RADIUS.xxl,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  headerTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: -0.5,
-  },
-  placeholder: {
-    width: 44,
-  },
-  infoBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    backgroundColor: COLORS.accentBlueSoft,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.md,
-    marginHorizontal: SPACING.lg,
-    marginTop: SPACING.lg,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  infoText: {
-    flex: 1,
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.accentBlue,
-  },
-  content: {
-    padding: SPACING.lg,
-  },
-  driverCard: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
-    borderWidth: 1,
-    borderColor: COLORS.lightBorder,
-  },
-  driverHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: SPACING.md,
-  },
-  driverInfo: {
-    flexDirection: 'row',
-    flex: 1,
-    gap: SPACING.md,
-  },
-  avatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: COLORS.accentGreen,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  avatarText: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  onlineBadge: {
-    position: 'absolute',
-    bottom: 2,
-    right: 2,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: COLORS.success,
-    borderWidth: 3,
-    borderColor: COLORS.white,
-  },
-  driverDetails: {
-    flex: 1,
-    justifyContent: 'center',
-  },
-  driverName: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '900',
-    color: COLORS.lightTextPrimary,
-    marginBottom: SPACING.xs,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    marginBottom: SPACING.xs,
-  },
-  ratingText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: COLORS.lightTextPrimary,
-  },
-  tripsText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
-  },
-  vehicleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-  },
-  vehicleText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
-  },
-  removeButton: {
-    width: 40,
-    height: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  historyRow: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-    marginBottom: SPACING.sm,
-  },
-  historyItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    backgroundColor: COLORS.gray100,
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-  },
-  historyText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
-    color: COLORS.lightTextPrimary,
-  },
-  statusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.xs,
-    paddingVertical: SPACING.xs,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.full,
-    marginBottom: SPACING.md,
-    alignSelf: 'flex-start',
-  },
-  statusOnline: {
-    backgroundColor: COLORS.success + '15',
-  },
-  statusOffline: {
-    backgroundColor: COLORS.gray100,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  statusText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  actionRow: {
-    flexDirection: 'row',
-    gap: SPACING.sm,
-  },
-  profileButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.xs,
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1.5,
-    borderColor: COLORS.primary,
-  },
-  profileButtonText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '800',
-    color: COLORS.primary,
-  },
-  requestButton: {
-    borderRadius: BORDER_RADIUS.lg,
-    overflow: 'hidden',
-  },
-  requestGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    paddingVertical: SPACING.md,
-  },
-  requestButtonText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
-  notifyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: SPACING.sm,
-    paddingVertical: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.accentBlueSoft,
-    borderWidth: 1,
-    borderColor: COLORS.accentBlue + '30',
-  },
-  notifyButtonText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '800',
-    color: COLORS.accentBlue,
-  },
-  emptyState: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.xxl * 3,
-  },
-  emptyIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.gray100,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: SPACING.xl,
-  },
-  emptyTitle: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '900',
-    color: COLORS.lightTextPrimary,
-    marginBottom: SPACING.sm,
-  },
-  emptyText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.lightTextMuted,
-    textAlign: 'center',
-    maxWidth: 280,
-    lineHeight: 22,
-    marginBottom: SPACING.xl,
-  },
-  emptyButton: {
-    paddingVertical: SPACING.md,
-    paddingHorizontal: SPACING.xl,
-    backgroundColor: COLORS.accentGreen,
-    borderRadius: BORDER_RADIUS.lg,
-  },
-  emptyButtonText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '900',
-    color: COLORS.white,
-  },
+const s = StyleSheet.create({
+  container:    { flex: 1, backgroundColor: C.bg },
+  loadingWrap:  { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText:  { color: C.muted, fontWeight: '600', fontSize: FONT_SIZE.sm },
+
+  /* Header */
+  header:       { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16, gap: 12 },
+  backBtn:      { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.1)', alignItems: 'center', justifyContent: 'center' },
+  headerTitle:  { fontSize: FONT_SIZE.lg, fontWeight: '900', color: C.white },
+  headerSub:    { fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#86EFAC', marginTop: 2 },
+
+  /* Info strip */
+  infoStrip:    { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(34,197,94,0.08)', paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+  infoStripText:{ flex: 1, fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#86EFAC', lineHeight: 18 },
+
+  content:      { padding: 16 },
+  contentEmpty: { flex: 1 },
+
+  /* Section headers */
+  sectionHeader:{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10, marginTop: 4 },
+  sectionDot:   { width: 8, height: 8, borderRadius: 4, backgroundColor: C.green },
+  sectionLabel: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: C.green, textTransform: 'uppercase', letterSpacing: 1 },
+
+  /* Driver card */
+  driverCard:   { backgroundColor: C.card, borderRadius: 18, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: C.border, gap: 12 },
+  cardTop:      { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  avatar:       { width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', position: 'relative' },
+  avatarText:   { fontSize: FONT_SIZE.xl, fontWeight: '900', color: C.white },
+  onlineDot:    { position: 'absolute', bottom: 1, right: 1, width: 15, height: 15, borderRadius: 8, backgroundColor: C.green, borderWidth: 2.5, borderColor: C.card },
+  cardInfo:     { flex: 1, gap: 4 },
+  cardName:     { fontSize: FONT_SIZE.md, fontWeight: '900', color: C.white },
+  cardSubRow:   { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  cardRating:   { fontSize: FONT_SIZE.xs, fontWeight: '800', color: C.amber },
+  cardVehicle:  { fontSize: FONT_SIZE.xs, fontWeight: '600', color: C.muted },
+  statusPill:   { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-start', paddingHorizontal: 9, paddingVertical: 4, borderRadius: 20, marginTop: 2 },
+  statusOnline: { backgroundColor: 'rgba(34,197,94,0.12)' },
+  statusOffline:{ backgroundColor: 'rgba(100,116,139,0.12)' },
+  statusDot:    { width: 6, height: 6, borderRadius: 3 },
+  statusText:   { fontSize: FONT_SIZE.xs - 1, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.5 },
+  removeBtn:    { padding: 4, marginTop: -2 },
+
+  /* Stats */
+  statsRow:     { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  statChip:     { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: C.bgMid, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5 },
+  statChipText: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: C.white },
+
+  /* Actions */
+  actionRow:    { flexDirection: 'row', gap: 8 },
+  profileBtn:   { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1, borderColor: C.border },
+  profileBtnText:{ fontSize: FONT_SIZE.xs, fontWeight: '800', color: C.muted },
+  bookBtn:      { flex: 1, borderRadius: 12, overflow: 'hidden' },
+  bookBtnGrad:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11 },
+  bookBtnText:  { fontSize: FONT_SIZE.sm, fontWeight: '900', color: C.white },
+  notifyBtn:    { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 10, borderRadius: 12, backgroundColor: 'rgba(59,130,246,0.1)', borderWidth: 1, borderColor: C.blue + '30' },
+  notifyBtnText:{ fontSize: FONT_SIZE.xs, fontWeight: '800', color: C.blue },
+
+  /* Empty */
+  emptyWrap:    { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 64, paddingHorizontal: 32, gap: 16 },
+  emptyIconWrap:{ width: 96, height: 96, borderRadius: 48, alignItems: 'center', justifyContent: 'center' },
+  emptyTitle:   { fontSize: FONT_SIZE.xl, fontWeight: '900', color: C.white, textAlign: 'center' },
+  emptyText:    { fontSize: FONT_SIZE.sm, fontWeight: '600', color: C.muted, textAlign: 'center', lineHeight: 22, maxWidth: 280 },
+  emptyBtn:     { borderRadius: 14, overflow: 'hidden', marginTop: 8 },
+  emptyBtnGrad: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 28, paddingVertical: 13 },
+  emptyBtnText: { fontSize: FONT_SIZE.md, fontWeight: '900', color: C.white },
 });
