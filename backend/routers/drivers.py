@@ -499,6 +499,162 @@ async def update_driver_profile(user_id: str, request: Request, body: DriverProf
     return profile
 
 
+# ==================== MULTI-VEHICLE MANAGEMENT ====================
+
+def _build_vehicle_entry(data: dict, is_active: bool = False) -> dict:
+    """Normalise and build a vehicle dict from request data."""
+    return {
+        "id": data.get("id") or str(uuid.uuid4()),
+        "type": str(data.get("type") or data.get("vehicle_type") or "").strip(),
+        "make": str(data.get("make") or data.get("vehicle_make") or "").strip(),
+        "model": str(data.get("model") or data.get("vehicle_model") or "").strip(),
+        "year": str(data.get("year") or data.get("vehicle_year") or "").strip(),
+        "color": str(data.get("color") or data.get("vehicle_color") or "").strip(),
+        "plate": str(data.get("plate") or data.get("vehicle_plate_number") or data.get("vehicle_plate") or "").strip().upper(),
+        "is_active": bool(is_active),
+        "verification_status": data.get("verification_status", "not_submitted"),
+        "documents": data.get("documents") or {},
+        "registered_at": data.get("registered_at") or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@drivers_router.get("/drivers/{user_id}/vehicles")
+async def list_driver_vehicles(user_id: str, request: Request):
+    """Return all vehicles registered to this driver."""
+    verify_owner_strict(request, user_id)
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "vehicles": 1, "vehicle_model": 1, "vehicle_make": 1, "vehicle_year": 1, "vehicle_type": 1, "vehicle_color": 1, "vehicle_plate_number": 1, "vehicle_plate": 1, "verification_status": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+    vehicles = list(profile.get("vehicles") or [])
+    # Back-compat: synthesise from flat fields if no array yet
+    if not vehicles and profile.get("vehicle_model"):
+        vs = profile.get("verification_status", "not_submitted")
+        vehicles = [_build_vehicle_entry({
+            "id": "default",
+            "type": profile.get("vehicle_type", ""),
+            "make": profile.get("vehicle_make", ""),
+            "model": profile.get("vehicle_model", ""),
+            "year": str(profile.get("vehicle_year", "")),
+            "color": profile.get("vehicle_color", ""),
+            "plate": profile.get("vehicle_plate_number") or profile.get("vehicle_plate", ""),
+            "verification_status": "verified" if vs == "approved" else vs,
+        }, is_active=True)]
+    active_exists = any(v.get("is_active") for v in vehicles)
+    if vehicles and not active_exists:
+        vehicles[0]["is_active"] = True
+    return {"vehicles": vehicles, "count": len(vehicles)}
+
+
+@drivers_router.post("/drivers/{user_id}/vehicles")
+async def add_driver_vehicle(user_id: str, request: Request):
+    """Add a new vehicle to the driver's profile. New vehicles start as not_submitted."""
+    verify_owner_strict(request, user_id)
+    body = await request.json()
+    required = ["model", "year", "color", "plate"]
+    missing = [f for f in required if not str(body.get(f) or "").strip()]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Missing required fields: {', '.join(missing)}")
+
+    new_vehicle = _build_vehicle_entry(body, is_active=False)
+
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "vehicles": 1, "vehicle_model": 1, "vehicle_make": 1, "vehicle_year": 1, "vehicle_type": 1, "vehicle_color": 1, "vehicle_plate_number": 1, "vehicle_plate": 1, "verification_status": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+
+    vehicles = list(profile.get("vehicles") or [])
+    if not vehicles and profile.get("vehicle_model"):
+        vs = profile.get("verification_status", "not_submitted")
+        vehicles = [_build_vehicle_entry({
+            "id": "default",
+            "type": profile.get("vehicle_type", ""),
+            "make": profile.get("vehicle_make", ""),
+            "model": profile.get("vehicle_model", ""),
+            "year": str(profile.get("vehicle_year", "")),
+            "color": profile.get("vehicle_color", ""),
+            "plate": profile.get("vehicle_plate_number") or profile.get("vehicle_plate", ""),
+            "verification_status": "verified" if vs == "approved" else vs,
+        }, is_active=True)]
+
+    # Prevent duplicate plate
+    plates = [v.get("plate", "").upper() for v in vehicles]
+    if new_vehicle["plate"].upper() in plates:
+        raise HTTPException(status_code=409, detail=f"A vehicle with plate {new_vehicle['plate']} is already registered.")
+
+    vehicles.append(new_vehicle)
+    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"vehicles": vehicles}}, upsert=True)
+    return {"vehicle": new_vehicle, "vehicles": vehicles, "message": "Vehicle added. Submit documents to verify it."}
+
+
+@drivers_router.put("/drivers/{user_id}/vehicles/{vehicle_id}/activate")
+async def activate_driver_vehicle(user_id: str, vehicle_id: str, request: Request):
+    """Set a specific vehicle as the active one (only one can be active)."""
+    verify_owner_strict(request, user_id)
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "vehicles": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+    vehicles = list(profile.get("vehicles") or [])
+    target = next((v for v in vehicles if v.get("id") == vehicle_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    for v in vehicles:
+        v["is_active"] = (v.get("id") == vehicle_id)
+    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"vehicles": vehicles}})
+    return {"vehicles": vehicles, "active_vehicle": target, "message": f"{target.get('make', '')} {target.get('model', '')} set as active vehicle."}
+
+
+@drivers_router.put("/drivers/{user_id}/vehicles/{vehicle_id}")
+async def update_driver_vehicle(user_id: str, vehicle_id: str, request: Request):
+    """Update editable fields (color, plate) on an existing vehicle."""
+    verify_owner_strict(request, user_id)
+    body = await request.json()
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "vehicles": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+    vehicles = list(profile.get("vehicles") or [])
+    updated = None
+    for v in vehicles:
+        if v.get("id") == vehicle_id:
+            if body.get("color"):
+                v["color"] = str(body["color"]).strip()
+            if body.get("plate"):
+                v["plate"] = str(body["plate"]).strip().upper()
+            if body.get("model"):
+                v["model"] = str(body["model"]).strip()
+            if body.get("year"):
+                v["year"] = str(body["year"]).strip()
+            if body.get("type"):
+                v["type"] = str(body["type"]).strip()
+            if body.get("make"):
+                v["make"] = str(body["make"]).strip()
+            updated = v
+            break
+    if not updated:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"vehicles": vehicles}})
+    return {"vehicle": updated, "vehicles": vehicles}
+
+
+@drivers_router.delete("/drivers/{user_id}/vehicles/{vehicle_id}")
+async def remove_driver_vehicle(user_id: str, vehicle_id: str, request: Request):
+    """Remove a vehicle. Cannot remove the last vehicle or the currently active one if it is the only vehicle."""
+    verify_owner_strict(request, user_id)
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "vehicles": 1})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+    vehicles = list(profile.get("vehicles") or [])
+    if len(vehicles) <= 1:
+        raise HTTPException(status_code=400, detail="Cannot remove your only registered vehicle.")
+    target = next((v for v in vehicles if v.get("id") == vehicle_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    was_active = target.get("is_active", False)
+    vehicles = [v for v in vehicles if v.get("id") != vehicle_id]
+    if was_active and vehicles:
+        vehicles[0]["is_active"] = True
+    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"vehicles": vehicles}})
+    return {"vehicles": vehicles, "message": "Vehicle removed."}
+
+
 @drivers_router.put("/drivers/{user_id}/categories")
 async def update_driver_categories(user_id: str, http_request: Request, body: DriverCategoriesUpdate):
     """Update which ride categories this driver is willing to accept."""

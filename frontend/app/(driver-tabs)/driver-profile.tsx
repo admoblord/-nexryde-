@@ -50,12 +50,21 @@ export default function DriverProfileScreen() {
   const loadDriverProfile = useCallback(async () => {
     if (!user?.id) return;
     try {
-      const res = await getDriverProfile(user.id);
-      const p = res.data as any;
-      setDriverCity(p?.city || '');
-      setDriverFullName(p?.full_name || '');
-      setDriverVehicles(p?.vehicles || []);
-      setIsApproved(p?.verification_status === 'approved');
+      const [profileRes, vehiclesRes] = await Promise.allSettled([
+        getDriverProfile(user.id),
+        fetch(`${require('@/src/services/api').BACKEND_URL}/api/drivers/${user.id}/vehicles`, {
+          headers: require('@/src/services/api').getAuthHeaders(),
+        }).then(r => r.json()).catch(() => ({ vehicles: [] })),
+      ]);
+      if (profileRes.status === 'fulfilled') {
+        const p = profileRes.value.data as any;
+        setDriverCity(p?.city || '');
+        setDriverFullName(p?.full_name || '');
+        setIsApproved(p?.verification_status === 'approved');
+      }
+      if (vehiclesRes.status === 'fulfilled') {
+        setDriverVehicles((vehiclesRes.value as any)?.vehicles || []);
+      }
     } catch { /* non-critical */ }
   }, [user?.id]);
 
@@ -256,42 +265,63 @@ export default function DriverProfileScreen() {
         </View>
 
         {/* Vehicle summary card */}
-        <TouchableOpacity
-          style={[styles.vehicleSummaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-          onPress={() => router.push('/driver/vehicle')}
-          activeOpacity={0.88}
-        >
-          <View style={styles.vehicleSummaryHeader}>
-            <View style={styles.vehicleSummaryIconWrap}>
-              <Ionicons name="car-sport" size={22} color={COLORS.primary} />
-            </View>
-            <Text style={[styles.vehicleSummaryTitle, { color: colors.text }]}>My Vehicles</Text>
-            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
-          </View>
-          {driverVehicles.length > 0 ? (
-            driverVehicles.map((v) => (
-              <View key={v.id} style={styles.vehicleSummaryRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.vehicleSummaryName, { color: colors.text }]}>
-                    {[v.make, v.model].filter(Boolean).join(' ') || 'Vehicle'}
-                  </Text>
-                  <Text style={[styles.vehicleSummaryDetail, { color: colors.textMuted }]}>
-                    {[v.color, v.year, v.plate].filter(Boolean).join(' • ')}
-                  </Text>
+        {(() => {
+          const activeV = driverVehicles.find((v: DriverVehicle) => (v as any).is_active);
+          const otherCount = driverVehicles.filter((v: DriverVehicle) => !(v as any).is_active).length;
+          return (
+            <TouchableOpacity
+              style={[styles.vehicleSummaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => router.push('/driver/vehicle')}
+              activeOpacity={0.88}
+            >
+              <View style={styles.vehicleSummaryHeader}>
+                <View style={styles.vehicleSummaryIconWrap}>
+                  <Ionicons name="car-sport" size={22} color={COLORS.primary} />
                 </View>
-                {v.is_default && (
+                <Text style={[styles.vehicleSummaryTitle, { color: colors.text }]}>My Vehicles</Text>
+                {driverVehicles.length > 0 && (
+                  <View style={styles.vehicleCountBadge}>
+                    <Text style={styles.vehicleCountText}>{driverVehicles.length}</Text>
+                  </View>
+                )}
+                <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+              </View>
+
+              {activeV ? (
+                <View style={styles.vehicleSummaryActiveRow}>
+                  <View style={styles.vehicleSummaryActiveDot} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.vehicleSummaryName, { color: colors.text }]}>
+                      {[activeV.make, activeV.model].filter(Boolean).join(' ') || 'Active Vehicle'}
+                    </Text>
+                    <Text style={[styles.vehicleSummaryDetail, { color: colors.textMuted }]}>
+                      {[activeV.color, activeV.year, activeV.plate].filter(Boolean).join(' • ')}
+                    </Text>
+                  </View>
                   <View style={styles.vehicleActiveBadge}>
                     <Text style={styles.vehicleActiveBadgeText}>Active</Text>
                   </View>
-                )}
-              </View>
-            ))
-          ) : (
-            <Text style={[styles.vehicleSummaryEmpty, { color: colors.textMuted }]}>
-              No vehicle registered yet
-            </Text>
-          )}
-        </TouchableOpacity>
+                </View>
+              ) : driverVehicles.length > 0 ? (
+                <View style={styles.vehicleSummaryRow}>
+                  <Text style={[styles.vehicleSummaryDetail, { color: colors.textMuted }]}>
+                    {driverVehicles.length} vehicle{driverVehicles.length > 1 ? 's' : ''} registered
+                  </Text>
+                </View>
+              ) : (
+                <Text style={[styles.vehicleSummaryEmpty, { color: colors.textMuted }]}>
+                  No vehicle registered yet — tap to add
+                </Text>
+              )}
+
+              {otherCount > 0 && (
+                <Text style={[styles.vehicleSummaryDetail, { color: colors.textMuted, paddingTop: SPACING.xs }]}>
+                  +{otherCount} other vehicle{otherCount > 1 ? 's' : ''} · tap to switch
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        })()}
 
         <ProfileQuickActions
           title="Quick Actions"
@@ -665,6 +695,24 @@ const styles = StyleSheet.create({
   vehicleSummaryName: { fontSize: FONT_SIZE.sm, fontWeight: '700' },
   vehicleSummaryDetail: { fontSize: FONT_SIZE.xs, fontWeight: '500', marginTop: 2 },
   vehicleSummaryEmpty: { fontSize: FONT_SIZE.sm, fontStyle: 'italic', paddingVertical: SPACING.xs },
+  vehicleSummaryActiveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray100,
+  },
+  vehicleSummaryActiveDot: {
+    width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A',
+  },
+  vehicleCountBadge: {
+    backgroundColor: COLORS.primary,
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
+    marginRight: 2,
+  },
+  vehicleCountText: { fontSize: 11, fontWeight: '800', color: COLORS.white },
   vehicleActiveBadge: {
     backgroundColor: '#D1FAE5',
     paddingHorizontal: SPACING.sm,
