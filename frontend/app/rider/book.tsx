@@ -1779,11 +1779,6 @@ function BookInDriveStyle() {
                         <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>⚡ Priority match</Text>
                       </View>
                     )}
-                    {/* Anti-surge badge — always visible during fare estimation */}
-                    <View style={{ backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' }}>
-                      <Ionicons name="shield-checkmark-outline" size={12} color="#10B981" />
-                      <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700' }}>No surge pricing</Text>
-                    </View>
                     {fareDetails?.first_ride_discount_applied && (
                       <View style={{ backgroundColor: 'rgba(0,212,106,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(0,212,106,0.35)' }}>
                         <Ionicons name="gift-outline" size={12} color="#00D46A" />
@@ -1822,6 +1817,22 @@ function BookInDriveStyle() {
                   <Text style={s.fareBtnText}>+</Text>
                 </TouchableOpacity>
               </Animated.View>
+              {/* Anti-surge guarantee badge — always visible once fare is ready */}
+              {currentFare > 0 && (
+                <TouchableOpacity
+                  style={s.noSurgeBadge}
+                  activeOpacity={0.75}
+                  onPress={() => Alert.alert(
+                    'No Surge Pricing — Ever',
+                    'Nexryde guarantees stable, fair prices for riders during peak demand. Instead of charging you more, Nexryde pays drivers a guaranteed hourly floor from its own earnings — so you never pay a surge premium.',
+                    [{ text: 'Got it', style: 'default' }]
+                  )}
+                >
+                  <Ionicons name="shield-checkmark" size={14} color="#10B981" />
+                  <Text style={s.noSurgeBadgeText}>No surge pricing — fare is fixed</Text>
+                  <Ionicons name="information-circle-outline" size={13} color="#6EE7B7" />
+                </TouchableOpacity>
+              )}
               <View>
                 <Text style={s.paySectionLabel}>Pay with</Text>
                 <View style={s.payRow}>
@@ -2596,6 +2607,25 @@ const s = StyleSheet.create({
   fareBtn: { width: 48, height: 48, borderRadius: 24, backgroundColor: COLORS.cardLight, alignItems: 'center', justifyContent: 'center' },
   fareBtnText: { fontSize: 24, fontWeight: '800', color: COLORS.white },
   fareAmount: { fontSize: 36, fontWeight: '900', color: COLORS.lime },
+  noSurgeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    alignSelf: 'center',
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderRadius: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(16,185,129,0.3)',
+    marginTop: 2,
+  },
+  noSurgeBadgeText: {
+    color: '#10B981',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   paySectionLabel: { fontSize: 12, fontWeight: '700', color: COLORS.muted, marginBottom: 8 },
   payRow: { flexDirection: 'row', gap: 10 },
   payChip: {

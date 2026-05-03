@@ -130,6 +130,8 @@ export default function ModernDriverHome() {
   );
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
   const [earningsGuarantee, setEarningsGuarantee] = useState<any>(null);
+  const [guaranteeInfoOpen, setGuaranteeInfoOpen] = useState(false);
+  const guaranteeBarAnim = useRef(new Animated.Value(0)).current;
 
   // Load real earnings from backend
   useEffect(() => {
@@ -162,7 +164,17 @@ export default function ModernDriverHome() {
             week: weekEarnings,
             trips: Number(user?.total_trips ?? todaySummary.total_trips ?? 0),
           });
-          setEarningsGuarantee(todayData.guarantee || null);
+          const g = todayData.guarantee || null;
+          setEarningsGuarantee(g);
+          if (g?.active) {
+            // Animate progress bar from 0 → actual %
+            guaranteeBarAnim.setValue(0);
+            Animated.timing(guaranteeBarAnim, {
+              toValue: Math.min(100, Number(g.progress_pct || 0)),
+              duration: 900,
+              useNativeDriver: false,
+            }).start();
+          }
           setEarningsError(false);
         }
       } catch {
@@ -957,18 +969,30 @@ export default function ModernDriverHome() {
     <SafeAreaView style={styles.container} edges={['top']}>
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
 
-      {/* SIM Swap Alert Banner — non-blocking, shown only on genuine risk */}
+      {/* SIM Swap Alert Banner — non-blocking, appears only on genuine SIM change */}
       {simSwapAlert && (
         <View style={styles.simSwapBanner}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-            <Ionicons name="shield-checkmark" size={20} color="#FFF" />
-            <View style={{ flex: 1 }}>
-              <Text style={styles.simSwapBannerTitle}>Security Alert</Text>
-              <Text style={styles.simSwapBannerText}>A new SIM was detected. Contact support if this wasn't you.</Text>
-            </View>
+          <View style={styles.simSwapBannerIconWrap}>
+            <Ionicons name="shield-half-outline" size={20} color="#FFF" />
           </View>
-          <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 4 }}>
-            <Ionicons name="close" size={18} color="rgba(255,255,255,0.8)" />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.simSwapBannerTitle}>Security Alert: New SIM Detected</Text>
+            <Text style={styles.simSwapBannerText}>
+              Your account has been temporarily secured. If this wasn't you, contact support immediately.
+            </Text>
+            <TouchableOpacity
+              onPress={() => {
+                Linking.openURL('mailto:security@nexryde.com?subject=SIM%20Swap%20Alert').catch(() =>
+                  Linking.openURL('https://wa.me/2348000000000?text=SIM+swap+alert+on+my+account')
+                );
+              }}
+              style={styles.simSwapContactBtn}
+            >
+              <Text style={styles.simSwapContactBtnText}>Contact Support →</Text>
+            </TouchableOpacity>
+          </View>
+          <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 6, alignSelf: 'flex-start' }}>
+            <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
         </View>
       )}
@@ -1276,90 +1300,164 @@ export default function ModernDriverHome() {
           const floor = Number(g.minimum_hourly_earnings || 0);
           const earned = Number(g.current_hour_earnings || 0);
           const gap = Number(g.top_up_gap || 0);
-          const pct = Math.min(100, Number(g.progress_pct || 0));
           const aboveFloor = Boolean(g.above_floor) || earned >= floor;
 
-          // Standby — show only a compact chip when driver is offline
+          // ── Standby mode: compact chip only ──────────────────────────
           if (!g.active) {
             return (
-              <View style={styles.guaranteeChip}>
+              <TouchableOpacity style={styles.guaranteeChip} onPress={() => setGuaranteeInfoOpen(true)} activeOpacity={0.75}>
                 <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.accentGreen} />
                 <Text style={styles.guaranteeChipText}>
                   Earnings Guarantee · Next: {g.next_window_label || 'See schedule'}
                 </Text>
-              </View>
+                <Ionicons name="information-circle-outline" size={13} color="#15803D" />
+              </TouchableOpacity>
             );
           }
 
-          // Active window — full rich card
+          // ── Active window — full rich card ────────────────────────────
           const accentColor = aboveFloor ? '#16A34A' : '#D97706';
           const bgColor = aboveFloor ? '#F0FDF4' : '#FFFBEB';
           const borderColor = aboveFloor ? '#86EFAC' : '#FCD34D';
-          const barFill = aboveFloor ? '#16A34A' : '#F59E0B';
+          const barFillColor = aboveFloor ? '#16A34A' : '#F59E0B';
+
+          // Animated bar width from guaranteed hook
+          const barWidth = guaranteeBarAnim.interpolate({
+            inputRange: [0, 100],
+            outputRange: ['0%', '100%'],
+          });
 
           return (
-            <View style={[styles.guaranteeCard, { backgroundColor: bgColor, borderColor }]}>
-              {/* Header row */}
-              <View style={styles.guaranteeHeader}>
-                <View style={[styles.guaranteeIconWrap, { backgroundColor: aboveFloor ? '#DCFCE7' : '#FEF3C7' }]}>
-                  <Ionicons
-                    name={(g.icon as any) || 'shield-checkmark-outline'}
-                    size={18}
-                    color={accentColor}
-                  />
-                </View>
-                <View style={{ flex: 1, marginLeft: 10 }}>
-                  <Text style={[styles.guaranteeTitle, { color: accentColor }]}>{g.title}</Text>
-                  <Text style={styles.guaranteeReason}>{g.reason}</Text>
-                </View>
-                {g.window_ends_label ? (
-                  <View style={styles.guaranteeEndBadge}>
-                    <Text style={styles.guaranteeEndBadgeText}>Until {g.window_ends_label}</Text>
+            <>
+              <View style={[styles.guaranteeCard, { backgroundColor: bgColor, borderColor }]}>
+                {/* Header row */}
+                <View style={styles.guaranteeHeader}>
+                  <View style={[styles.guaranteeIconWrap, { backgroundColor: aboveFloor ? '#DCFCE7' : '#FEF3C7' }]}>
+                    <Ionicons
+                      name={(g.icon as any) || 'shield-checkmark-outline'}
+                      size={18}
+                      color={accentColor}
+                    />
                   </View>
-                ) : null}
-              </View>
+                  <View style={{ flex: 1, marginLeft: 10 }}>
+                    <Text style={[styles.guaranteeTitle, { color: accentColor }]}>{g.title}</Text>
+                    <Text style={styles.guaranteeReason}>{g.reason}</Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    {g.window_ends_label ? (
+                      <View style={styles.guaranteeEndBadge}>
+                        <Text style={styles.guaranteeEndBadgeText}>Until {g.window_ends_label}</Text>
+                      </View>
+                    ) : null}
+                    <TouchableOpacity onPress={() => setGuaranteeInfoOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                      <Ionicons name="information-circle-outline" size={18} color={accentColor} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
 
-              {/* Progress bar */}
-              <View style={styles.guaranteeBarBg}>
-                <View style={[styles.guaranteeBarFill, { width: `${pct}%` as any, backgroundColor: barFill }]} />
-              </View>
+                {/* Animated progress bar */}
+                <View>
+                  <View style={styles.guaranteeBarBg}>
+                    <Animated.View style={[styles.guaranteeBarFill, { width: barWidth, backgroundColor: barFillColor }]} />
+                  </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
+                    <Text style={{ fontSize: 10, color: '#9CA3AF' }}>₦0</Text>
+                    <Text style={{ fontSize: 10, color: '#9CA3AF', fontWeight: '600' }}>
+                      Floor: ₦{floor.toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
 
-              {/* Earnings row */}
-              <View style={styles.guaranteeEarningsRow}>
-                <View style={styles.guaranteeEarningsItem}>
-                  <Text style={styles.guaranteeEarningsLabel}>This hour</Text>
-                  <Text style={[styles.guaranteeEarningsValue, { color: accentColor }]}>
-                    ₦{earned.toLocaleString()}
+                {/* Earnings row */}
+                <View style={styles.guaranteeEarningsRow}>
+                  <View style={styles.guaranteeEarningsItem}>
+                    <Text style={styles.guaranteeEarningsLabel}>
+                      {isOnline ? 'This hour' : 'If online'}
+                    </Text>
+                    <Text style={[styles.guaranteeEarningsValue, { color: isOnline ? accentColor : '#9CA3AF' }]}>
+                      {isOnline ? `₦${earned.toLocaleString()}` : '—'}
+                    </Text>
+                  </View>
+                  <View style={styles.guaranteeEarningsDivider} />
+                  <View style={styles.guaranteeEarningsItem}>
+                    <Text style={styles.guaranteeEarningsLabel}>Guaranteed floor</Text>
+                    <Text style={styles.guaranteeEarningsValue}>₦{floor.toLocaleString()}</Text>
+                  </View>
+                  <View style={styles.guaranteeEarningsDivider} />
+                  <View style={styles.guaranteeEarningsItem}>
+                    <Text style={styles.guaranteeEarningsLabel}>
+                      {!isOnline ? 'Go online' : aboveFloor ? 'Surplus ✓' : 'Nexryde covers'}
+                    </Text>
+                    <Text style={[styles.guaranteeEarningsValue, {
+                      color: !isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706',
+                    }]}>
+                      {!isOnline ? 'to earn' : aboveFloor
+                        ? `+₦${Math.max(0, earned - floor).toLocaleString()}`
+                        : `₦${gap.toLocaleString()}`}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Status line */}
+                <View style={styles.guaranteeStatusRow}>
+                  <Ionicons
+                    name={!isOnline ? 'power-outline' : aboveFloor ? 'checkmark-circle' : 'shield-half-outline'}
+                    size={14}
+                    color={!isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706'}
+                  />
+                  <Text style={[styles.guaranteeStatusText, {
+                    color: !isOnline ? '#6B7280' : aboveFloor ? '#15803D' : '#92400E',
+                  }]}>
+                    {!isOnline
+                      ? `Go online now to activate the ₦${floor.toLocaleString()}/hr earnings floor.`
+                      : aboveFloor
+                        ? "You've exceeded the guaranteed floor this hour — great work!"
+                        : `Nexryde will top up ₦${gap.toLocaleString()} if this hour ends below the floor.`}
                   </Text>
                 </View>
-                <View style={[styles.guaranteeEarningsDivider]} />
-                <View style={styles.guaranteeEarningsItem}>
-                  <Text style={styles.guaranteeEarningsLabel}>Floor</Text>
-                  <Text style={styles.guaranteeEarningsValue}>₦{floor.toLocaleString()}</Text>
-                </View>
-                <View style={styles.guaranteeEarningsDivider} />
-                <View style={styles.guaranteeEarningsItem}>
-                  <Text style={styles.guaranteeEarningsLabel}>{aboveFloor ? 'Surplus' : 'Covered by Nexryde'}</Text>
-                  <Text style={[styles.guaranteeEarningsValue, { color: aboveFloor ? '#16A34A' : '#D97706' }]}>
-                    {aboveFloor ? `+₦${(earned - floor).toLocaleString()}` : `₦${gap.toLocaleString()}`}
-                  </Text>
-                </View>
               </View>
 
-              {/* Status line */}
-              <View style={styles.guaranteeStatusRow}>
-                <Ionicons
-                  name={aboveFloor ? 'checkmark-circle' : 'information-circle-outline'}
-                  size={14}
-                  color={aboveFloor ? '#16A34A' : '#D97706'}
-                />
-                <Text style={[styles.guaranteeStatusText, { color: aboveFloor ? '#15803D' : '#92400E' }]}>
-                  {aboveFloor
-                    ? "You've exceeded the floor — great work!"
-                    : `Nexryde will top up ₦${gap.toLocaleString()} if this hour ends below the floor.`}
-                </Text>
-              </View>
-            </View>
+              {/* ── Guarantee Info Modal ─────────────────────────────── */}
+              <Modal visible={guaranteeInfoOpen} transparent animationType="fade" onRequestClose={() => setGuaranteeInfoOpen(false)}>
+                <TouchableOpacity style={styles.guaranteeModalOverlay} activeOpacity={1} onPress={() => setGuaranteeInfoOpen(false)}>
+                  <View style={styles.guaranteeModal}>
+                    <View style={styles.guaranteeModalHeader}>
+                      <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="shield-checkmark" size={20} color="#16A34A" />
+                      </View>
+                      <View style={{ flex: 1, marginLeft: 12 }}>
+                        <Text style={styles.guaranteeModalTitle}>Earnings Guarantee</Text>
+                        <Text style={styles.guaranteeModalSubtitle}>How it works for you</Text>
+                      </View>
+                      <TouchableOpacity onPress={() => setGuaranteeInfoOpen(false)}>
+                        <Ionicons name="close-circle" size={24} color="#D1D5DB" />
+                      </TouchableOpacity>
+                    </View>
+
+                    {[
+                      { icon: 'trending-up-outline', color: '#16A34A', title: 'Guaranteed hourly floor', body: `During this window, Nexryde guarantees you earn at least ₦${floor.toLocaleString()} per hour while online.` },
+                      { icon: 'wallet-outline', color: '#2563EB', title: 'Nexryde covers the gap', body: 'If you earn less than the floor in an hour, Nexryde automatically tops up the difference directly to your wallet.' },
+                      { icon: 'people-outline', color: '#7C3AED', title: 'Riders pay fair prices', body: 'Because Nexryde absorbs peak costs, riders never see surge pricing. Prices stay stable and predictable — always.' },
+                      { icon: 'time-outline', color: '#D97706', title: 'Active windows', body: 'Morning Rush 6–10 AM · Evening Peak 5–9 PM · Rain Cover Noon–7 PM (rainy months). You must be online during the window.' },
+                    ].map((item, i) => (
+                      <View key={i} style={styles.guaranteeModalRow}>
+                        <View style={[styles.guaranteeModalIcon, { backgroundColor: item.color + '18' }]}>
+                          <Ionicons name={item.icon as any} size={16} color={item.color} />
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.guaranteeModalRowTitle}>{item.title}</Text>
+                          <Text style={styles.guaranteeModalRowBody}>{item.body}</Text>
+                        </View>
+                      </View>
+                    ))}
+
+                    <TouchableOpacity style={styles.guaranteeModalBtn} onPress={() => setGuaranteeInfoOpen(false)}>
+                      <Text style={styles.guaranteeModalBtnText}>Got it</Text>
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              </Modal>
+            </>
           );
         })()}
         {/* EARNINGS CARDS - PRIORITY */}
@@ -1519,23 +1617,47 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray50,
   },
   simSwapBanner: {
-    backgroundColor: '#B91C1C',
+    backgroundColor: '#991B1B',
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingHorizontal: 16,
-    paddingVertical: 10,
-    gap: 8,
+    paddingVertical: 12,
+    gap: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#7F1D1D',
+  },
+  simSwapBannerIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
   },
   simSwapBannerTitle: {
     color: '#FFF',
     fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 1,
+    fontWeight: '800',
+    marginBottom: 2,
   },
   simSwapBannerText: {
-    color: 'rgba(255,255,255,0.9)',
+    color: 'rgba(255,255,255,0.85)',
     fontSize: 12,
-    lineHeight: 16,
+    lineHeight: 17,
+  },
+  simSwapContactBtn: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  simSwapContactBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   header: {
     paddingHorizontal: 20,
@@ -1961,6 +2083,71 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#15803D',
     fontWeight: '600',
+  },
+  // ── Guarantee info modal ────────────────────────────────────────────
+  guaranteeModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'flex-end',
+  },
+  guaranteeModal: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    padding: 24,
+    paddingBottom: 36,
+    gap: 16,
+  },
+  guaranteeModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  guaranteeModalTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    color: '#111827',
+  },
+  guaranteeModalSubtitle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 1,
+  },
+  guaranteeModalRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  guaranteeModalIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  guaranteeModalRowTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1F2937',
+    marginBottom: 2,
+  },
+  guaranteeModalRowBody: {
+    fontSize: 12,
+    color: '#6B7280',
+    lineHeight: 17,
+  },
+  guaranteeModalBtn: {
+    backgroundColor: '#16A34A',
+    borderRadius: 14,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  guaranteeModalBtnText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '800',
   },
   offlineSyncTitle: {
     fontSize: 15,

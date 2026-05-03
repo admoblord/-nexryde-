@@ -2423,15 +2423,20 @@ async def update_driver_salary_mode(driver_id: str, payload: DriverSalaryModeUpd
 @drivers_router.get("/driver/earnings/{driver_id}")
 async def get_driver_earnings_dashboard(driver_id: str, request: Request, period: str = "today"):
     verify_owner_strict(request, driver_id)
-    now = datetime.utcnow()
+    # Use UTC for DB queries (all timestamps stored as UTC)
+    now_utc = datetime.utcnow()
+    # Use Nigeria WAT (UTC+1) for window/time-of-day logic so guarantee windows
+    # fire at the correct local time for Nigerian drivers.
+    WAT_OFFSET = timedelta(hours=1)
+    now = now_utc + WAT_OFFSET  # Nigeria local time for window calculations
     if period == "today":
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) - WAT_OFFSET
     elif period == "week":
-        start_date = now - timedelta(days=7)
+        start_date = now_utc - timedelta(days=7)
     elif period == "month":
-        start_date = now - timedelta(days=30)
+        start_date = now_utc - timedelta(days=30)
     else:
-        start_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_date = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) - WAT_OFFSET
     trips = await db.trips.find(
         match_completed_trip_paid_for_earnings(
             driver_id=driver_id,
@@ -2456,11 +2461,13 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
         daily_breakdown[trip_date]["distance"] += trip.get("distance_km", 0)
     avg_per_trip = total_earnings / total_trips if total_trips > 0 else 0
     avg_per_km = total_earnings / total_distance if total_distance > 0 else 0
-    hours_worked = (now - start_date).total_seconds() / 3600
-    projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 and period == "today" else total_earnings / max(1, (now - start_date).days)
+    hours_worked = (now_utc - (start_date + WAT_OFFSET)).total_seconds() / 3600
+    projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 and period == "today" else total_earnings / max(1, (now_utc - start_date).days)
     profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "salary_mode": 1}) or {}
+    # `now` is WAT local time — correct for window calculations
     guarantee_window = _anti_surge_window(now)
-    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+    # DB timestamps are in UTC — use UTC for filtering current-hour trips
+    current_hour_start_utc = now_utc.replace(minute=0, second=0, microsecond=0)
     current_hour_trips = [
         trip for trip in trips
         if (
@@ -2468,7 +2475,7 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
                 trip.get("completed_at")
                 if isinstance(trip.get("completed_at"), datetime)
                 else datetime.fromisoformat(str(trip.get("completed_at")).replace("Z", "+00:00")).replace(tzinfo=None)
-            ) >= current_hour_start
+            ) >= current_hour_start_utc
         )
     ]
     current_hour_earnings = sum(float(trip.get("fare", 0) or 0) for trip in current_hour_trips)
@@ -2489,7 +2496,7 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
         "top_up_gap": round(top_up_gap, 2),
         "progress_pct": progress_pct,
         "above_floor": above_floor,
-        "protected_until": (current_hour_start + timedelta(hours=1)).isoformat(),
+        "protected_until": (current_hour_start_utc + timedelta(hours=1)).isoformat(),
         "window_ends_at": guarantee_window.get("window_ends_at"),
         "window_ends_label": guarantee_window.get("window_ends_label"),
         "next_window_label": guarantee_window.get("next_window_label"),
