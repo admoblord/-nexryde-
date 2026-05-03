@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
   ScrollView, Modal, TextInput, Platform, Animated, Easing, KeyboardAvoidingView,
+  Switch,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -185,6 +186,9 @@ function BookInDriveStyle() {
   const [estateName, setEstateName] = useState('');
   const [estateGateCode, setEstateGateCode] = useState('');
   const [savingGateCode, setSavingGateCode] = useState(false);
+  const [gateCodeSaved, setGateCodeSaved] = useState(false);
+  const [includeGateCode, setIncludeGateCode] = useState(false);
+  const [editingGateCode, setEditingGateCode] = useState(false);
   const [recentDestinations, setRecentDestinations] = useState<
     Array<{ address?: string; description?: string; lat?: number; lng?: number }>
   >([]);
@@ -307,8 +311,14 @@ function BookInDriveStyle() {
     (async () => {
       try {
         const res = await getRiderPreferences(user.id);
-        setEstateName(String(res.data?.estate_name || ''));
-        setEstateGateCode(String(res.data?.estate_gate_code || ''));
+        const name = String(res.data?.estate_name || '');
+        const code = String(res.data?.estate_gate_code || '');
+        setEstateName(name);
+        setEstateGateCode(code);
+        if (code) {
+          setGateCodeSaved(true);
+          setIncludeGateCode(true);
+        }
       } catch {}
     })();
   }, [user?.id]);
@@ -1088,6 +1098,8 @@ function BookInDriveStyle() {
           trip_type: 'intra',
           preferred_driver_id: requestedDriverId || undefined,
           ride_preferences: ridePreferences,
+          estate_name: (includeGateCode && estateName.trim()) ? estateName.trim() : undefined,
+          estate_gate_code: (includeGateCode && estateGateCode.trim()) ? estateGateCode.trim() : undefined,
         }),
       });
       const result = await res.json().catch(() => ({}));
@@ -1132,18 +1144,36 @@ function BookInDriveStyle() {
 
   const handleSaveGateCode = async () => {
     if (!user?.id) return;
+    if (!estateGateCode.trim()) {
+      Alert.alert('Gate Code Required', 'Enter the gate code before saving.');
+      return;
+    }
     setSavingGateCode(true);
     try {
       await updateRiderPreferences(user.id, {
         estate_name: estateName.trim() || null,
         estate_gate_code: estateGateCode.trim() || null,
       });
-      Alert.alert('Saved', 'Your estate gate code will auto-share with the driver for 10 minutes after arrival.');
+      setGateCodeSaved(true);
+      setIncludeGateCode(true);
+      setEditingGateCode(false);
     } catch {
-      Alert.alert('Error', 'Could not save estate gate code.');
+      Alert.alert('Error', 'Could not save estate gate code. Try again.');
     } finally {
       setSavingGateCode(false);
     }
+  };
+
+  const handleClearGateCode = async () => {
+    if (!user?.id) return;
+    try {
+      await updateRiderPreferences(user.id, { estate_name: null, estate_gate_code: null });
+      setEstateName('');
+      setEstateGateCode('');
+      setGateCodeSaved(false);
+      setIncludeGateCode(false);
+      setEditingGateCode(false);
+    } catch {}
   };
 
   const pollForDriver = (id: string | null) => {
@@ -1874,30 +1904,117 @@ function BookInDriveStyle() {
                   })}
                 </View>
               </View>
+              {/* ── Estate Gate Code ─────────────────────────────────── */}
               <View>
-                <Text style={s.paySectionLabel}>Estate gate code</Text>
-                <Text style={s.preferenceHint}>Auto-shares with the driver for 10 minutes after they arrive at your estate gate.</Text>
-                <View style={s.gateCard}>
-                  <TextInput
-                    value={estateName}
-                    onChangeText={setEstateName}
-                    placeholder="Estate or apartment name"
-                    placeholderTextColor={COLORS.dim}
-                    style={s.gateInput}
-                  />
-                  <TextInput
-                    value={estateGateCode}
-                    onChangeText={setEstateGateCode}
-                    placeholder="Gate code"
-                    placeholderTextColor={COLORS.dim}
-                    style={s.gateInput}
-                    autoCapitalize="characters"
-                  />
-                  <TouchableOpacity style={s.gateSaveBtn} onPress={handleSaveGateCode} disabled={savingGateCode}>
-                    <Ionicons name="shield-checkmark-outline" size={16} color={COLORS.white} />
-                    <Text style={s.gateSaveBtnText}>{savingGateCode ? 'Saving...' : 'Save Gate Code'}</Text>
-                  </TouchableOpacity>
+                <View style={s.gateSectionHeader}>
+                  <View style={s.gateSectionLeft}>
+                    <View style={s.gateIconBadge}>
+                      <Ionicons name="key" size={14} color="#F59E0B" />
+                    </View>
+                    <View>
+                      <Text style={s.paySectionLabel}>Estate Gate Code</Text>
+                      <Text style={s.preferenceHint}>Shared with driver automatically on arrival.</Text>
+                    </View>
+                  </View>
+                  {gateCodeSaved && (
+                    <Switch
+                      value={includeGateCode}
+                      onValueChange={setIncludeGateCode}
+                      trackColor={{ false: COLORS.dim, true: '#065F46' }}
+                      thumbColor={includeGateCode ? '#22C55E' : '#94A3B8'}
+                    />
+                  )}
                 </View>
+
+                {/* Saved + collapsed state */}
+                {gateCodeSaved && !editingGateCode ? (
+                  <View style={[s.gateSavedCard, !includeGateCode && s.gateSavedCardOff]}>
+                    <View style={s.gateSavedRow}>
+                      <Ionicons
+                        name={includeGateCode ? 'shield-checkmark' : 'shield-outline'}
+                        size={20}
+                        color={includeGateCode ? '#22C55E' : COLORS.dim}
+                      />
+                      <View style={{ flex: 1 }}>
+                        {estateName ? (
+                          <Text style={s.gateSavedEstate} numberOfLines={1}>{estateName}</Text>
+                        ) : null}
+                        <Text style={[s.gateSavedCode, !includeGateCode && { color: COLORS.dim }]}>
+                          {estateGateCode.replace(/./g, '●')}
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <TouchableOpacity onPress={() => setEditingGateCode(true)} style={s.gateEditBtn}>
+                          <Ionicons name="create-outline" size={14} color={COLORS.muted} />
+                          <Text style={s.gateEditBtnText}>Edit</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={handleClearGateCode} style={s.gateEditBtn}>
+                          <Ionicons name="trash-outline" size={14} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                    {includeGateCode && (
+                      <View style={s.gateActivePill}>
+                        <View style={s.gateActiveDot} />
+                        <Text style={s.gateActivePillText}>Active for this ride · shared on arrival</Text>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  /* Input form (new or editing) */
+                  <View style={s.gateCard}>
+                    <View style={s.gateInputWrapper}>
+                      <Ionicons name="home-outline" size={16} color={COLORS.muted} style={s.gateInputIcon} />
+                      <TextInput
+                        value={estateName}
+                        onChangeText={setEstateName}
+                        placeholder="Estate or apartment name (optional)"
+                        placeholderTextColor={COLORS.dim}
+                        style={s.gateInputField}
+                      />
+                    </View>
+                    <View style={s.gateInputWrapper}>
+                      <Ionicons name="key-outline" size={16} color="#F59E0B" style={s.gateInputIcon} />
+                      <TextInput
+                        value={estateGateCode}
+                        onChangeText={setEstateGateCode}
+                        placeholder="Gate code  e.g. 1234 or A#7"
+                        placeholderTextColor={COLORS.dim}
+                        style={[s.gateInputField, { letterSpacing: 2 }]}
+                        autoCapitalize="characters"
+                        returnKeyType="done"
+                        onSubmitEditing={handleSaveGateCode}
+                      />
+                    </View>
+                    <LinearGradient
+                      colors={['#065F46', '#047857']}
+                      start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                      style={s.gateSaveBtnGrad}
+                    >
+                      <TouchableOpacity
+                        style={s.gateSaveBtn}
+                        onPress={handleSaveGateCode}
+                        disabled={savingGateCode}
+                        accessibilityRole="button"
+                        accessibilityLabel="Save gate code"
+                      >
+                        {savingGateCode ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="shield-checkmark-outline" size={16} color="#fff" />
+                            <Text style={s.gateSaveBtnText}>Save Gate Code</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </LinearGradient>
+                    {editingGateCode && (
+                      <TouchableOpacity onPress={() => setEditingGateCode(false)} style={s.gateCancelBtn}>
+                        <Text style={s.gateCancelBtnText}>Cancel</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                )}
               </View>
               {/* Nearby driver count hint */}
               {nearbyDrivers.length > 0 && !isLoading && (
@@ -2669,11 +2786,106 @@ const s = StyleSheet.create({
   },
   preferenceChipText: { fontSize: 12, fontWeight: '700', color: COLORS.muted },
   preferenceChipTextOn: { color: COLORS.white },
+  /* ── Gate code section ───────────────────────────── */
+  gateSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  gateSectionLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flex: 1,
+  },
+  gateIconBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gateSavedCard: {
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
+  gateSavedCardOff: {
+    backgroundColor: 'rgba(100,116,139,0.08)',
+    borderColor: 'rgba(100,116,139,0.2)',
+  },
+  gateSavedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gateSavedEstate: {
+    fontSize: 11,
+    color: COLORS.muted,
+    fontWeight: '600',
+  },
+  gateSavedCode: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: COLORS.white,
+    letterSpacing: 4,
+  },
+  gateEditBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: 'rgba(100,116,139,0.15)',
+  },
+  gateEditBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.muted,
+  },
+  gateActivePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  gateActiveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: '#22C55E',
+  },
+  gateActivePillText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#86EFAC',
+  },
   gateCard: {
     backgroundColor: COLORS.cardLight,
     borderRadius: 16,
     padding: 12,
     gap: 10,
+  },
+  gateInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+  },
+  gateInputIcon: {},
+  gateInputField: {
+    flex: 1,
+    color: COLORS.white,
+    fontSize: 14,
+    fontWeight: '700',
   },
   gateInput: {
     backgroundColor: COLORS.card,
@@ -2684,16 +2896,23 @@ const s = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  gateSaveBtnGrad: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
   gateSaveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: COLORS.blue,
-    borderRadius: 12,
-    paddingVertical: 12,
+    paddingVertical: 13,
   },
   gateSaveBtnText: { fontSize: 13, fontWeight: '800', color: COLORS.white },
+  gateCancelBtn: {
+    alignItems: 'center',
+    paddingVertical: 6,
+  },
+  gateCancelBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.muted },
   findBtn: {
     borderRadius: 18,
     overflow: 'hidden',

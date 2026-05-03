@@ -13,6 +13,8 @@ import {
   Easing,
   Platform,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
@@ -313,6 +315,9 @@ export default function DriverTripsScreen() {
   const tabPad = useTabBottomPad(8);
   const [lastSpeedSpikeAlertAt, setLastSpeedSpikeAlertAt] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
+  const [gateSecs, setGateSecs] = useState<number | null>(null);
+  const gateCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const gateCopiedRef = useRef(false);
 
   useEffect(() => {
     loadPendingTrips();
@@ -320,6 +325,45 @@ export default function DriverTripsScreen() {
     const interval = setInterval(loadPendingTrips, 18000);
     return () => clearInterval(interval);
   }, []);
+
+  // ── Gate code countdown timer ────────────────────────────────────────────
+  useEffect(() => {
+    const gateAccess = currentTrip?.estate_gate_access;
+    const isArrived = currentTrip?.status === 'arrived';
+    if (!isArrived || !gateAccess?.available || !gateAccess?.gate_code) {
+      if (gateCountdownRef.current) {
+        clearInterval(gateCountdownRef.current);
+        gateCountdownRef.current = null;
+      }
+      setGateSecs(null);
+      return;
+    }
+    // Calculate remaining seconds from shared_at + 10 min window
+    const computeRemaining = () => {
+      const sharedAt = gateAccess.shared_at
+        ? new Date(gateAccess.shared_at).getTime()
+        : Date.now();
+      const expiresAt = sharedAt + 10 * 60 * 1000;
+      return Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+    };
+    setGateSecs(computeRemaining());
+    if (gateCountdownRef.current) clearInterval(gateCountdownRef.current);
+    gateCountdownRef.current = setInterval(() => {
+      const remaining = computeRemaining();
+      setGateSecs(remaining);
+      if (remaining <= 0 && gateCountdownRef.current) {
+        clearInterval(gateCountdownRef.current);
+        gateCountdownRef.current = null;
+      }
+    }, 1000);
+    return () => {
+      if (gateCountdownRef.current) clearInterval(gateCountdownRef.current);
+    };
+  }, [
+    currentTrip?.status,
+    currentTrip?.estate_gate_access?.available,
+    currentTrip?.estate_gate_access?.shared_at,
+  ]);
 
   const recoverActiveTrip = async () => {
     if (!user?.id) return;
@@ -983,17 +1027,80 @@ export default function DriverTripsScreen() {
             </View>
           </View>
 
-          {currentTrip.estate_gate_access?.available && currentTrip.status === 'arrived' && (
-            <View style={styles.gateCodeCard}>
-              <View style={styles.gateCodeHeader}>
-                <Ionicons name="key-outline" size={18} color={COLORS.warning} />
-                <Text style={styles.gateCodeTitle}>Estate Gate Code</Text>
-              </View>
-              <Text style={styles.gateCodeValue}>{currentTrip.estate_gate_access?.gate_code}</Text>
-              <Text style={styles.gateCodeText}>
+          {/* ── Estate indicator (accepted/arrived) ─────────────────── */}
+          {currentTrip.estate_gate_access?.has_saved_code &&
+            ['accepted', 'arrived'].includes(currentTrip.status) && (
+            <View style={styles.estateIndicator}>
+              <Ionicons name="business-outline" size={13} color="#F59E0B" />
+              <Text style={styles.estateIndicatorText}>
                 {currentTrip.estate_gate_access?.estate_name
-                  ? `${currentTrip.estate_gate_access.estate_name} gate access is live for 10 minutes.`
-                  : 'Gate access is live for 10 minutes from arrival.'}
+                  ? `Gated estate — ${currentTrip.estate_gate_access.estate_name}`
+                  : 'Gated estate pickup'}
+              </Text>
+              {currentTrip.status === 'accepted' && (
+                <Text style={styles.estateIndicatorHint}> · code shared on arrival</Text>
+              )}
+            </View>
+          )}
+
+          {/* ── Full gate code card (arrived) ────────────────────────── */}
+          {currentTrip.estate_gate_access?.available &&
+            currentTrip.status === 'arrived' && (
+            <View style={styles.gateCodeCardPremium}>
+              {/* Header */}
+              <View style={styles.gateCodeHeaderRow}>
+                <View style={styles.gateCodeIconBadge}>
+                  <Ionicons name="key" size={16} color="#F59E0B" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.gateCodeTitle}>Estate Gate Code</Text>
+                  {currentTrip.estate_gate_access?.estate_name ? (
+                    <Text style={styles.gateCodeEstate}>
+                      {currentTrip.estate_gate_access.estate_name}
+                    </Text>
+                  ) : null}
+                </View>
+                {gateSecs !== null && gateSecs > 0 && (
+                  <View style={styles.gateTimerPill}>
+                    <Ionicons name="timer-outline" size={11} color="#FCD34D" />
+                    <Text style={styles.gateTimerText}>
+                      {`${Math.floor(gateSecs / 60)}:${String(gateSecs % 60).padStart(2, '0')}`}
+                    </Text>
+                  </View>
+                )}
+                {gateSecs === 0 && (
+                  <View style={[styles.gateTimerPill, { backgroundColor: '#7F1D1D' }]}>
+                    <Text style={[styles.gateTimerText, { color: '#FCA5A5' }]}>Expired</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Code display */}
+              <View style={styles.gateCodeDisplay}>
+                <Text style={styles.gateCodeValueLarge}>
+                  {currentTrip.estate_gate_access?.gate_code}
+                </Text>
+                <TouchableOpacity
+                  style={styles.gateCopyBtn}
+                  onPress={async () => {
+                    const code = currentTrip.estate_gate_access?.gate_code ?? '';
+                    await Clipboard.setStringAsync(code);
+                    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                    gateCopiedRef.current = true;
+                    Alert.alert('Copied', `Gate code "${code}" copied to clipboard.`);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Copy gate code"
+                >
+                  <Ionicons name="copy-outline" size={16} color="#F59E0B" />
+                  <Text style={styles.gateCopyBtnText}>Copy</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.gateCodeText}>
+                {gateSecs !== null && gateSecs <= 0
+                  ? 'This gate code has expired. Ask the rider for access.'
+                  : 'Enter this code at the estate gate to let yourself in.'}
               </Text>
             </View>
           )}
@@ -1333,6 +1440,100 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.textSecondary,
     lineHeight: 18,
+  },
+  /* ── Enhanced estate gate code styles ──────────────────── */
+  estateIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: SPACING.sm,
+    backgroundColor: 'rgba(245,158,11,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.25)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  estateIndicatorText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '700',
+    color: '#FCD34D',
+  },
+  estateIndicatorHint: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '500',
+    color: COLORS.textSecondary,
+  },
+  gateCodeCardPremium: {
+    marginTop: SPACING.md,
+    backgroundColor: '#1C1106',
+    borderWidth: 1.5,
+    borderColor: '#78350F',
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.md,
+    gap: 12,
+  },
+  gateCodeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  gateCodeIconBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(245,158,11,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gateCodeEstate: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  gateTimerPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#451A03',
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+  },
+  gateTimerText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#FCD34D',
+    fontVariant: ['tabular-nums'],
+  },
+  gateCodeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#292109',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  gateCodeValueLarge: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#FDE68A',
+    letterSpacing: 6,
+  },
+  gateCopyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(245,158,11,0.18)',
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  gateCopyBtnText: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#F59E0B',
   },
   speedViolationCard: {
     marginTop: SPACING.md,
