@@ -21,7 +21,9 @@
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app"
       },
       "android": {
-        "buildType": "app-bundle"
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease",
+        "resourceClass": "medium"
       }
     }
   },
