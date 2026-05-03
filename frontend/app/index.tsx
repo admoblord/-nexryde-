@@ -1,5 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Animated, Platform, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  Animated,
+  Platform,
+  Easing,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -15,38 +24,59 @@ import {
 
 const { width, height } = Dimensions.get('window');
 
-// Premium Color Palette
-const COLORS = {
-  background: '#020617',
-  primary: '#0F172A',
+const C = {
+  bg: '#020617',
+  bgMid: '#0B1223',
   green: '#22C55E',
   greenLight: '#4ADE80',
-  greenBright: '#00FF7F',
+  greenNeon: '#00FF7F',
   blue: '#3B82F6',
   blueDark: '#1D4ED8',
-  purple: '#8B5CF6',
   white: '#FFFFFF',
-  textSecondary: '#CBD5E1',
-  textMuted: '#94A3B8',
+  muted: '#94A3B8',
+  dim: '#334155',
 };
 
 const DRIVER_CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
-const STARTUP_STATUS_TIMEOUT_MS = 2500;
+const STARTUP_TIMEOUT_MS = 2500;
 
 export default function SplashScreen() {
   const router = useRouter();
-  // Start with checking = false for web compatibility (SecureStore doesn't work on web)
-  const [checking, setChecking] = useState(Platform.OS === 'web' ? false : true);
-  
+  const [showSplash, setShowSplash] = useState(false); // show CTA splash after no session
+  const [checking, setChecking] = useState(Platform.OS !== 'web');
+
   const setUser = useAppStore((s) => s.setUser);
   const setIsAuthenticated = useAppStore((s) => s.setIsAuthenticated);
   const setToken = useAppStore((s) => s.setToken);
-  
-  // Start with visible values for web compatibility, animate on mobile
-  const fadeAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 1 : 0)).current;
-  const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 30)).current;
-  const scaleAnim = useRef(new Animated.Value(1)).current;
-  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  // ── Animation refs ────────────────────────────────────────────────
+  const screenFade = useRef(new Animated.Value(0)).current;         // whole screen
+  const leftBarY = useRef(new Animated.Value(-120)).current;        // left logo bar slides down
+  const rightBarY = useRef(new Animated.Value(120)).current;        // right logo bar slides up
+  const logoScale = useRef(new Animated.Value(0.7)).current;
+  const logoOpacity = useRef(new Animated.Value(0)).current;
+  const textFade = useRef(new Animated.Value(0)).current;
+  const textY = useRef(new Animated.Value(20)).current;
+  const taglineFade = useRef(new Animated.Value(0)).current;
+  const dot1 = useRef(new Animated.Value(0.3)).current;
+  const dot2 = useRef(new Animated.Value(0.3)).current;
+  const dot3 = useRef(new Animated.Value(0.3)).current;
+  const glowScale = useRef(new Animated.Value(1)).current;
+  const ctaFade = useRef(new Animated.Value(0)).current;
+  const ctaY = useRef(new Animated.Value(40)).current;
+
+  // ── Helper ─────────────────────────────────────────────────────────
+  const fetchJsonWithTimeout = async (url: string, opts: RequestInit = {}) => {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), STARTUP_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { ...opts, signal: ctrl.signal });
+      const data = await res.json().catch(() => ({}));
+      return { response: res, data };
+    } finally {
+      clearTimeout(t);
+    }
+  };
 
   const isDriverCameraResumeActive = async (userData: any) => {
     if (userData?.role !== 'driver') return false;
@@ -59,627 +89,526 @@ export default function SplashScreen() {
         return false;
       }
       return !resume.driverId || String(resume.driverId) === String(userData.id);
-    } catch {
-      return false;
-    }
+    } catch { return false; }
   };
 
-  const fetchJsonWithTimeout = async (url: string, options: RequestInit = {}) => {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), STARTUP_STATUS_TIMEOUT_MS);
-    try {
-      const response = await fetch(url, { ...options, signal: controller.signal });
-      const data = await response.json().catch(() => ({}));
-      return { response, data };
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
-
-  // 🔐 CHECK FOR SAVED LOGIN ON APP START
+  // ── Entry animation ────────────────────────────────────────────────
   useEffect(() => {
-    // On web, immediately show splash (SecureStore doesn't work reliably)
-    if (Platform.OS === 'web') {
-      setChecking(false);
-      return;
-    }
-    
-    checkSavedLogin();
-    
-    // Safety timeout - if checking takes too long, show splash screen anyway
-    const timeout = setTimeout(() => {
-      setChecking(false);
-    }, 3000);
-    
-    return () => clearTimeout(timeout);
-  }, []); // ✅ FIX: Added empty dependency array (runs once on mount)
+    if (Platform.OS === 'web') return;
 
-  const checkSavedLogin = async () => {
+    // Sequence: screen fades in → logo bars slide in → logo scales → text → tagline → dots
+    Animated.sequence([
+      // Screen fade-in
+      Animated.timing(screenFade, { toValue: 1, duration: 300, useNativeDriver: true }),
+
+      // Logo bars animate simultaneously
+      Animated.parallel([
+        Animated.spring(leftBarY, { toValue: 0, tension: 80, friction: 9, useNativeDriver: true }),
+        Animated.spring(rightBarY, { toValue: 0, tension: 80, friction: 9, useNativeDriver: true }),
+        Animated.timing(logoOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.spring(logoScale, { toValue: 1, tension: 60, friction: 8, useNativeDriver: true }),
+      ]),
+
+      // Brand name fades in
+      Animated.parallel([
+        Animated.timing(textFade, { toValue: 1, duration: 450, useNativeDriver: true }),
+        Animated.spring(textY, { toValue: 0, tension: 70, friction: 10, useNativeDriver: true }),
+      ]),
+
+      // Tagline fades in
+      Animated.timing(taglineFade, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+
+    // Glow pulse loop
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowScale, { toValue: 1.25, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        Animated.timing(glowScale, { toValue: 1, duration: 1800, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      ])
+    ).start();
+
+    // Dots loading animation — sequential wave
+    const dotLoop = () => {
+      const wave = (anim: Animated.Value, delay: number) =>
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(anim, { toValue: 1, duration: 350, useNativeDriver: true }),
+          Animated.timing(anim, { toValue: 0.3, duration: 350, useNativeDriver: true }),
+        ]);
+      Animated.loop(
+        Animated.parallel([
+          wave(dot1, 0),
+          wave(dot2, 200),
+          wave(dot3, 400),
+        ])
+      ).start();
+    };
+    const dotTimer = setTimeout(dotLoop, 800);
+    return () => clearTimeout(dotTimer);
+  }, []);
+
+  // ── Session check ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (Platform.OS === 'web') { setChecking(false); return; }
+
+    const safetyTimeout = setTimeout(() => setChecking(false), 3000);
+    checkSession();
+    return () => clearTimeout(safetyTimeout);
+  }, []);
+
+  const checkSession = async () => {
     try {
-      if (__DEV__) console.warn('Checking for saved login session...');
-      
-      // Wrap in try-catch to handle SecureStore errors gracefully
       try {
         const isLoggedIn = await isUserLoggedIn();
-        
         if (isLoggedIn) {
           const userData = await getUserSession();
-          if (!userData) {
-            setChecking(false);
-            return;
+          if (!userData) { setChecking(false); return; }
+
+          const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } =
+            await import('@/utils/authStorage');
+          const [bioEnabled, bioSupported, cameraResume] = await Promise.all([
+            isBiometricEnabled(),
+            isBiometricSupported(),
+            isDriverCameraResumeActive(userData),
+          ]);
+
+          if (bioEnabled && bioSupported && !cameraResume) {
+            const auth = await authenticateWithBiometrics();
+            if (!auth.success) { setChecking(false); return; }
           }
 
-          // Import biometric functions
-          const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } = await import('@/utils/authStorage');
-          
-          // Check if biometric login is enabled
-          const biometricEnabled = await isBiometricEnabled();
-          const biometricSupported = await isBiometricSupported();
-          const cameraResumeActive = await isDriverCameraResumeActive(userData);
-          
-          if (biometricEnabled && biometricSupported && !cameraResumeActive) {
-            // Request biometric authentication
-            const authResult = await authenticateWithBiometrics();
-            
-            if (!authResult.success) {
-              setChecking(false);
-              return;
-            }
-            
-          }
-
-          // Restore user state
           setUser(userData);
           setToken(userData.token || null);
           setIsAuthenticated(true);
-          
-          // Navigate to home immediately for instant feel, then verify in background.
-          const authHeaders: Record<string, string> = userData.token
-            ? { Authorization: `Bearer ${userData.token}` }
-            : {};
 
+          // Navigate IMMEDIATELY — no waiting
           if (userData.role === 'driver') {
             router.replace('/(driver-tabs)/driver-home');
           } else {
             router.replace('/(rider-tabs)/rider-home');
           }
 
-          // Background verification — home screens will handle redirects if needed.
+          // Background onboarding check
+          const headers: Record<string, string> = userData.token
+            ? { Authorization: `Bearer ${userData.token}` } : {};
           (async () => {
             try {
               if (userData.role === 'driver') {
                 const u = { id: userData.id, phone: userData.phone, name: userData.name, email: userData.email };
                 const { response: st, data } = await fetchJsonWithTimeout(
-                  `${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`,
-                  { headers: authHeaders },
-                );
+                  `${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`, { headers });
                 if (!st.ok || !data?.completed) {
                   const step = data?.step;
-                  if (step === 'terms') {
-                    router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
-                  } else if (step === 'profile') {
-                    router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
-                  } else if (step === 'documents_rejected') {
-                    router.replace({ pathname: '/(auth)/driver-verification-status', params: driverDocumentsRouteParams(u) });
-                  } else if (step === 'documents') {
-                    router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
-                  }
+                  if (step === 'terms') router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
+                  else if (step === 'profile') router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
+                  else if (step === 'documents_rejected') router.replace({ pathname: '/(auth)/driver-verification-status', params: driverDocumentsRouteParams(u) });
+                  else if (step === 'documents') router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
                 }
                 return;
               }
-              const { response: riderStatusRes, data: riderStatus } = await fetchJsonWithTimeout(
-                `${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`,
-                { headers: authHeaders },
-              );
-              if (!riderStatusRes.ok || !riderStatus?.completed) {
-                router.replace('/(auth)/rider-verification');
-              }
-            } catch {
-              // Network error — user is already on home, let them continue.
-            }
+              const { response: rr, data: rs } = await fetchJsonWithTimeout(
+                `${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`, { headers });
+              if (!rr.ok || !rs?.completed) router.replace('/(auth)/rider-verification');
+            } catch { /* stay on home */ }
           })();
-
           return;
         }
-      } catch {
-        /* storage unavailable */
-      }
-      
+      } catch { /* storage unavailable */ }
+
       const onboardingDone = await AsyncStorage.getItem('onboarding_complete');
-      if (!onboardingDone) {
-        router.replace('/onboarding');
-        return;
-      }
-      
+      if (!onboardingDone) { router.replace('/onboarding'); return; }
       setChecking(false);
-    } catch (error) {
-      if (__DEV__) console.warn('Error checking saved login:', error);
-      setChecking(false);
-    }
+    } catch { setChecking(false); }
   };
 
+  // ── CTA splash entry (no session) ─────────────────────────────────
   useEffect(() => {
-    // Entry animation (only on mobile)
-    if (Platform.OS !== 'web') {
+    if (!checking) {
+      setShowSplash(true);
       Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 800,
-          useNativeDriver: true,
-        }),
-        Animated.spring(scaleAnim, {
-          toValue: 1,
-          friction: 8,
-          tension: 40,
-          useNativeDriver: true,
-        }),
+        Animated.timing(ctaFade, { toValue: 1, duration: 500, useNativeDriver: true }),
+        Animated.spring(ctaY, { toValue: 0, tension: 60, friction: 10, useNativeDriver: true }),
       ]).start();
     }
+  }, [checking]);
 
-    // Pulse animation for glow effect
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1.2,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 2000,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  }, []);
-
-  // Branded loading screen while restoring session
-  if (checking) {
-    return (
-      <View style={styles.container}>
-        <LinearGradient
-          colors={[COLORS.background, COLORS.primary, COLORS.background]}
-          style={StyleSheet.absoluteFillObject}
-          start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 1 }}
-        />
-        <View style={styles.loadingContainer}>
-          <View style={styles.loadingLogoContainer}>
-            <LinearGradient colors={[COLORS.greenBright, COLORS.green]} style={styles.loadingLogoLeft} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
-            <LinearGradient colors={[COLORS.blue, COLORS.blueDark]} style={styles.loadingLogoRight} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} />
-            <View style={styles.roadLine}>
-              <View style={styles.roadDash} />
-              <View style={styles.roadDash} />
-              <View style={styles.roadDash} />
-            </View>
-          </View>
-          <View style={styles.loadingBrandRow}>
-            <Text style={styles.loadingBrandNex}>NEX</Text>
-            <Text style={styles.loadingBrandRyde}>RYDE</Text>
-          </View>
-          <ActivityIndicator size="small" color={COLORS.green} style={{ marginTop: 32 }} />
-        </View>
-      </View>
-    );
-  }
-
+  // ── Branded loading state (used for BOTH checking AND splash) ──────
   return (
-    <View style={styles.container}>
-      {/* Background Gradient */}
+    <Animated.View style={[styles.root, { opacity: screenFade }]}>
+      {/* Background gradient */}
       <LinearGradient
-        colors={[COLORS.background, COLORS.primary, COLORS.background]}
+        colors={[C.bg, C.bgMid, '#0D1F3C']}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
       />
 
-      {/* Animated Glow Effects */}
-      <Animated.View style={[styles.glowTop, { transform: [{ scale: pulseAnim }] }]} />
-      <Animated.View style={[styles.glowBottom, { transform: [{ scale: pulseAnim }] }]} />
-      <View style={styles.glowCenter} />
+      {/* Ambient glow orbs */}
+      <Animated.View style={[styles.glowOrb, styles.glowOrbGreen, { transform: [{ scale: glowScale }] }]} />
+      <Animated.View style={[styles.glowOrb, styles.glowOrbBlue, { transform: [{ scale: glowScale }] }]} />
+      <View style={styles.glowOrbCenter} />
 
-      {/* Main Content */}
-      <Animated.View 
-        style={[
-          styles.mainContent,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }, { scale: scaleAnim }]
-          }
-        ]}
-      >
-        {/* Logo Section */}
-        <View style={styles.logoSection}>
-          {/* N Logo with Road - Premium Design */}
-          <View style={styles.logoContainer}>
-            <LinearGradient
-              colors={[COLORS.greenBright, COLORS.green]}
-              style={styles.logoLeft}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-            />
-            <LinearGradient
-              colors={[COLORS.blue, COLORS.blueDark]}
-              style={styles.logoRight}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 0, y: 1 }}
-            />
-            <View style={styles.roadLine}>
-              <View style={styles.roadDash} />
-              <View style={styles.roadDash} />
-              <View style={styles.roadDash} />
-            </View>
-            {/* Glow effect on logo */}
-            <View style={styles.logoGlow} />
-          </View>
-          
-          {/* Brand Name - Bigger & Bolder */}
-          <View style={styles.brandContainer}>
-            <Text style={styles.brandNex}>NEX</Text>
-            <Text style={styles.brandRyde}>RYDE</Text>
-          </View>
+      {/* ── LOGO SECTION ───────────────────────────────────────────── */}
+      <Animated.View style={[styles.logoWrap, { opacity: logoOpacity, transform: [{ scale: logoScale }] }]}>
+        {/* Left bar — slides down from top */}
+        <Animated.View style={[styles.logoBarLeft, { transform: [{ translateY: leftBarY }] }]}>
+          <LinearGradient
+            colors={[C.greenNeon, C.green]}
+            style={styles.logoBarGrad}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+          />
+        </Animated.View>
 
-          {/* Tagline Badge */}
-          <View style={styles.taglineBadge}>
-            <View style={[styles.taglineDot, { backgroundColor: COLORS.green }]} />
-            <Text style={styles.taglineText}>RIDE SMART. RIDE SAFE.</Text>
-            <View style={[styles.taglineDot, { backgroundColor: COLORS.blue }]} />
-          </View>
+        {/* Right bar — slides up from bottom */}
+        <Animated.View style={[styles.logoBarRight, { transform: [{ translateY: rightBarY }] }]}>
+          <LinearGradient
+            colors={[C.blue, C.blueDark]}
+            style={styles.logoBarGrad}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 0, y: 1 }}
+          />
+        </Animated.View>
+
+        {/* Road dashes */}
+        <View style={styles.road}>
+          <View style={styles.roadDash} />
+          <View style={styles.roadDash} />
+          <View style={styles.roadDash} />
         </View>
 
-        {/* Subtitle */}
-        <Text style={styles.subtitle}>Safe and reliable rides, every day.</Text>
-        <Text style={styles.subtitleNote}>Service availability may vary by city.</Text>
+        {/* Logo glow */}
+        <Animated.View style={[styles.logoGlow, { transform: [{ scale: glowScale }] }]} />
+      </Animated.View>
 
-        {/* Features Row - More Visible */}
-        <View style={styles.featuresContainer}>
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.green + '30' }]}>
-              <Ionicons name="shield-checkmark" size={20} color={COLORS.green} />
-            </View>
-            <Text style={styles.featureText}>Driver{'\n'}Checks</Text>
-          </View>
-          
-          <View style={styles.featureDivider} />
-          
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.blue + '30' }]}>
-              <Ionicons name="cash" size={20} color={COLORS.blue} />
-            </View>
-            <Text style={styles.featureText}>Fair{'\n'}Pricing</Text>
-          </View>
-          
-          <View style={styles.featureDivider} />
-          
-          <View style={styles.featureItem}>
-            <View style={[styles.featureIcon, { backgroundColor: COLORS.purple + '30' }]}>
-              <Ionicons name="flash" size={20} color={COLORS.purple} />
-            </View>
-            <Text style={styles.featureText}>Fast{'\n'}Pickup</Text>
-          </View>
+      {/* ── BRAND NAME ─────────────────────────────────────────────── */}
+      <Animated.View style={[styles.brandWrap, { opacity: textFade, transform: [{ translateY: textY }] }]}>
+        <Text style={styles.brandNex}>NEX</Text>
+        <Text style={styles.brandRyde}>RYDE</Text>
+      </Animated.View>
+
+      {/* ── TAGLINE ────────────────────────────────────────────────── */}
+      <Animated.View style={[styles.taglineBadge, { opacity: taglineFade }]}>
+        <View style={[styles.taglineDot, { backgroundColor: C.green }]} />
+        <Text style={styles.taglineText}>RIDE SMART · RIDE SAFE</Text>
+        <View style={[styles.taglineDot, { backgroundColor: C.blue }]} />
+      </Animated.View>
+
+      {/* ── LOADING DOTS (while checking) or CTA (no session) ─────── */}
+      {checking ? (
+        <View style={styles.dotsRow}>
+          <Animated.View style={[styles.dot, { opacity: dot1 }]} />
+          <Animated.View style={[styles.dot, { opacity: dot2 }]} />
+          <Animated.View style={[styles.dot, { opacity: dot3 }]} />
         </View>
+      ) : showSplash ? (
+        <Animated.View style={[styles.ctaWrap, { opacity: ctaFade, transform: [{ translateY: ctaY }] }]}>
+          {/* Feature pills */}
+          <View style={styles.featurePills}>
+            <View style={styles.featurePill}>
+              <Ionicons name="shield-checkmark" size={14} color={C.green} />
+              <Text style={styles.featurePillText}>Verified Drivers</Text>
+            </View>
+            <View style={styles.featurePill}>
+              <Ionicons name="cash" size={14} color={C.blue} />
+              <Text style={styles.featurePillText}>Fair Pricing</Text>
+            </View>
+            <View style={styles.featurePill}>
+              <Ionicons name="flash" size={14} color="#F59E0B" />
+              <Text style={styles.featurePillText}>Fast Pickup</Text>
+            </View>
+          </View>
 
-        {/* CTA Button - Premium Design */}
-        <View style={styles.buttonContainer}>
+          {/* Primary CTA */}
           <TouchableOpacity
-            activeOpacity={0.9}
-            style={styles.buttonWrapper}
+            activeOpacity={0.88}
             onPress={async () => {
               const done = await AsyncStorage.getItem('onboarding_complete');
-              if (!done) {
-                router.push('/onboarding');
-              } else {
-                router.push('/(auth)/login');
-              }
+              router.push(done ? '/(auth)/login' : '/onboarding');
             }}
-            accessibilityLabel="Begin your journey, go to login"
+            accessibilityLabel="Get started"
             accessibilityRole="button"
           >
             <LinearGradient
-              colors={[COLORS.greenLight, COLORS.green, COLORS.blue]}
-              style={styles.ctaButton}
+              colors={[C.greenLight, C.green, C.blue]}
+              style={styles.ctaBtn}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 0 }}
             >
-              <Text style={styles.ctaText}>Begin Your Journey</Text>
-              <View style={styles.arrowCircle}>
-                <Ionicons name="arrow-forward" size={20} color={COLORS.primary} />
+              <Text style={styles.ctaBtnText}>Get Started</Text>
+              <View style={styles.ctaArrow}>
+                <Ionicons name="arrow-forward" size={20} color={C.bg} />
               </View>
             </LinearGradient>
           </TouchableOpacity>
-        </View>
 
-      </Animated.View>
+          {/* Sign in link */}
+          <TouchableOpacity
+            onPress={() => router.push('/(auth)/login')}
+            style={styles.signinLink}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.signinText}>Already have an account? </Text>
+            <Text style={[styles.signinText, { color: C.green, fontWeight: '800' }]}>Sign in</Text>
+          </TouchableOpacity>
+        </Animated.View>
+      ) : null}
 
-      {/* Bottom Branding */}
-      <View style={styles.bottomContainer}>
-        <Text style={styles.bottomText}>POWERED BY ADMOBLORDGROUP</Text>
+      {/* Bottom tag */}
+      <View style={styles.bottomTag}>
+        <Text style={styles.bottomTagText}>NIGERIA'S PREMIUM RIDE EXPERIENCE</Text>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
+const LOGO_W = 110;
+const LOGO_H = 110;
+const BAR_W = 40;
+
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  glowTop: {
-    position: 'absolute',
-    top: height * 0.1,
-    left: width * 0.1,
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    backgroundColor: COLORS.green,
-    opacity: 0.15,
-  },
-  glowBottom: {
-    position: 'absolute',
-    bottom: height * 0.2,
-    right: width * 0.05,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: COLORS.blue,
-    opacity: 0.12,
-  },
-  glowCenter: {
-    position: 'absolute',
-    top: height * 0.35,
-    left: width * 0.3,
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: COLORS.purple,
-    opacity: 0.08,
-  },
-  mainContent: {
-    flex: 1,
+    backgroundColor: C.bg,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 28,
   },
-  logoSection: {
-    alignItems: 'center',
-    marginBottom: 24,
+
+  // ── Glows ─────────────────────────────────────────────────────────
+  glowOrb: {
+    position: 'absolute',
+    borderRadius: 9999,
   },
-  logoContainer: {
-    width: 100,
-    height: 100,
+  glowOrbGreen: {
+    width: 260,
+    height: 260,
+    top: height * 0.08,
+    left: -60,
+    backgroundColor: C.green,
+    opacity: 0.09,
+  },
+  glowOrbBlue: {
+    width: 220,
+    height: 220,
+    bottom: height * 0.15,
+    right: -40,
+    backgroundColor: C.blue,
+    opacity: 0.09,
+  },
+  glowOrbCenter: {
+    position: 'absolute',
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    top: height * 0.3,
+    left: width / 2 - 150,
+    backgroundColor: '#6366F1',
+    opacity: 0.04,
+  },
+
+  // ── Logo ──────────────────────────────────────────────────────────
+  logoWrap: {
+    width: LOGO_W,
+    height: LOGO_H,
     position: 'relative',
-    marginBottom: 20,
+    marginBottom: 28,
+    overflow: 'hidden',
   },
-  logoLeft: {
+  logoBarLeft: {
     position: 'absolute',
     left: 8,
     top: 0,
-    width: 38,
-    height: 100,
+    width: BAR_W,
+    height: LOGO_H,
+    overflow: 'hidden',
     borderTopLeftRadius: 10,
     borderBottomLeftRadius: 10,
     transform: [{ skewX: '-8deg' }],
   },
-  logoRight: {
+  logoBarRight: {
     position: 'absolute',
     right: 8,
     top: 0,
-    width: 38,
-    height: 100,
+    width: BAR_W,
+    height: LOGO_H,
+    overflow: 'hidden',
     borderTopRightRadius: 10,
     borderBottomRightRadius: 10,
     transform: [{ skewX: '8deg' }],
   },
-  roadLine: {
+  logoBarGrad: {
+    flex: 1,
+  },
+  road: {
     position: 'absolute',
     left: '50%',
-    marginLeft: -2.5,
-    top: 15,
-    bottom: 15,
-    width: 5,
+    marginLeft: -3,
+    top: 14,
+    bottom: 14,
+    width: 6,
     alignItems: 'center',
     justifyContent: 'space-around',
+    zIndex: 2,
   },
   roadDash: {
-    width: 5,
-    height: 12,
-    backgroundColor: COLORS.white,
-    borderRadius: 2.5,
+    width: 6,
+    height: 14,
+    backgroundColor: C.white,
+    borderRadius: 3,
+    opacity: 0.9,
   },
   logoGlow: {
     position: 'absolute',
-    top: -10,
-    left: -10,
-    right: -10,
-    bottom: -10,
-    borderRadius: 20,
-    backgroundColor: COLORS.green,
-    opacity: 0.15,
+    top: -20,
+    left: -20,
+    right: -20,
+    bottom: -20,
+    borderRadius: 30,
+    backgroundColor: C.green,
+    opacity: 0.12,
   },
-  brandContainer: {
+
+  // ── Brand name ────────────────────────────────────────────────────
+  brandWrap: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 16,
   },
   brandNex: {
-    fontSize: 48,
+    fontSize: 52,
     fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: 3,
+    color: C.white,
+    letterSpacing: 4,
   },
   brandRyde: {
-    fontSize: 48,
+    fontSize: 52,
     fontWeight: '900',
-    color: COLORS.green,
-    letterSpacing: 3,
+    color: C.green,
+    letterSpacing: 4,
   },
+
+  // ── Tagline ───────────────────────────────────────────────────────
   taglineBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 30,
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,0.06)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    marginTop: 16,
-    gap: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    marginBottom: 56,
   },
   taglineDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+  },
+  taglineText: {
+    color: C.white,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 2.5,
+  },
+
+  // ── Loading dots ──────────────────────────────────────────────────
+  dotsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+  },
+  dot: {
     width: 8,
     height: 8,
     borderRadius: 4,
+    backgroundColor: C.green,
   },
-  taglineText: {
-    color: COLORS.white,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 2,
+
+  // ── CTA section ───────────────────────────────────────────────────
+  ctaWrap: {
+    width: '100%',
+    paddingHorizontal: 28,
+    alignItems: 'center',
+    gap: 16,
+    marginTop: 8,
   },
-  subtitle: {
-    color: COLORS.white,
-    fontSize: 19,
-    fontWeight: '700',
-    marginBottom: 8,
-    letterSpacing: 0.2,
-    textAlign: 'center',
+  featurePills: {
+    flexDirection: 'row',
+    gap: 10,
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
-  subtitleNote: {
-    color: COLORS.textMuted,
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 34,
-    letterSpacing: 0.2,
-    textAlign: 'center',
-  },
-  featuresContainer: {
+  featurePill: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 48,
-    gap: 16,
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
   },
-  featureItem: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  featureIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  featureText: {
-    color: COLORS.textSecondary,
+  featurePillText: {
+    color: C.white,
     fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    lineHeight: 16,
+    fontWeight: '700',
   },
-  featureDivider: {
-    width: 1,
-    height: 50,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  buttonContainer: {
+  ctaBtn: {
     width: '100%',
-    paddingHorizontal: 8,
-  },
-  buttonWrapper: {
-    borderRadius: 32,
-    overflow: 'hidden',
-    shadowColor: COLORS.green,
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  ctaButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 20,
     paddingHorizontal: 32,
     borderRadius: 32,
+    shadowColor: C.green,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    elevation: 14,
   },
-  ctaText: {
-    color: COLORS.primary,
+  ctaBtnText: {
+    color: C.bg,
     fontSize: 18,
-    fontWeight: '800',
-    marginRight: 16,
+    fontWeight: '900',
     letterSpacing: 0.5,
+    marginRight: 16,
   },
-  arrowCircle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(15, 23, 42, 0.3)',
+  ctaArrow: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(2,6,23,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bottomContainer: {
+  signinLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  signinText: {
+    color: C.muted,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // ── Bottom tag ────────────────────────────────────────────────────
+  bottomTag: {
     position: 'absolute',
-    bottom: 48,
+    bottom: 44,
     left: 0,
     right: 0,
     alignItems: 'center',
   },
-  bottomText: {
-    color: COLORS.textMuted,
+  bottomTagText: {
+    color: C.dim,
     fontSize: 10,
+    fontWeight: '700',
     letterSpacing: 2,
-    fontWeight: '600',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingLogoContainer: {
-    width: 72,
-    height: 72,
-    position: 'relative',
-    marginBottom: 16,
-  },
-  loadingLogoLeft: {
-    position: 'absolute',
-    left: 6,
-    top: 0,
-    width: 28,
-    height: 72,
-    borderTopLeftRadius: 8,
-    borderBottomLeftRadius: 8,
-    transform: [{ skewX: '-8deg' }],
-  },
-  loadingLogoRight: {
-    position: 'absolute',
-    right: 6,
-    top: 0,
-    width: 28,
-    height: 72,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    transform: [{ skewX: '8deg' }],
-  },
-  loadingBrandRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  loadingBrandNex: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: COLORS.white,
-    letterSpacing: 3,
-  },
-  loadingBrandRyde: {
-    fontSize: 32,
-    fontWeight: '900',
-    color: COLORS.green,
-    letterSpacing: 3,
   },
 });
