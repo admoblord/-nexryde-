@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -94,6 +95,7 @@ function toneColor(tone: SafeRow['tone']) {
 
 export default function DriverSafetyHubScreen() {
   const router = useRouter();
+  const tabPad = useTabBottomPad(8);
 
   // Police state picker
   const [showPolicePicker, setShowPolicePicker] = useState(false);
@@ -183,7 +185,7 @@ export default function DriverSafetyHubScreen() {
         </Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabPad }]} showsVerticalScrollIndicator={false}>
 
         {/* Emergency Quick Actions */}
         <View style={styles.quickSection}>
@@ -303,7 +305,6 @@ export default function DriverSafetyHubScreen() {
           </View>
         ))}
 
-        <View style={{ height: 40 }} />
       </ScrollView>
 
       {/* State Police Picker Modal */}
@@ -385,7 +386,7 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.white, letterSpacing: 0.3 },
   heroSub: { marginTop: SPACING.xs, fontSize: FONT_SIZE.sm, fontWeight: '600', color: 'rgba(255,255,255,0.8)', lineHeight: 20 },
 
-  scroll: { padding: SPACING.lg, paddingBottom: SPACING.huge },
+  scroll: { padding: SPACING.lg },
 
   quickSection: { marginBottom: SPACING.lg },
   quickLabel: {

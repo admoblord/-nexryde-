@@ -178,7 +178,7 @@ export default function RiderSafetyScreen() {
   const { user, currentTrip } = useAppStore();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
   const sosPulse = useRef(new Animated.Value(1)).current;

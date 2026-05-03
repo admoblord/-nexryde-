@@ -137,7 +137,7 @@ export default function DriverTripsTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, currentTrip } = useAppStore();
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
 
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -465,7 +465,7 @@ export default function DriverTripsTab() {
           keyExtractor={item => item.id || item._id || Math.random().toString()}
           ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[styles.listContent, { paddingBottom: tabPad + 20 }]}
+          contentContainerStyle={[styles.listContent, { paddingBottom: tabPad }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl

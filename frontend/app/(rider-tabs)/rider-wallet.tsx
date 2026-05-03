@@ -15,6 +15,7 @@ import {
   Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { LinearGradient } from 'expo-linear-gradient';
 import axios from 'axios';
 import { Ionicons } from '@expo/vector-icons';
@@ -79,6 +80,7 @@ type TopupState =
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBottomPad(8);
 
   const [balance, setBalance] = useState(0);
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);
@@ -402,7 +404,7 @@ export default function RiderWalletScreen() {
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <ScrollView
-        contentContainerStyle={[s.scroll, { paddingBottom: Math.max(insets.bottom, 16) + 80 }]}
+        contentContainerStyle={[s.scroll, { paddingBottom: tabPad }]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.green} />}
         showsVerticalScrollIndicator={false}
       >

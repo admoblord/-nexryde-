@@ -278,7 +278,7 @@ export default function ModernDriverHome() {
   }, [isOnline, incomingRide, activeCategories.length]);
   // ─────────────────────────────────────────────────────────────────────────
 
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const navigationInFlightRef = useRef(false);
   const guardedPush = useCallback(
     (route: string) => {
@@ -1507,7 +1507,6 @@ export default function ModernDriverHome() {
           </View>
         </Animated.View>
 
-        <View style={{ height: 100 }} />
       </ScrollView>
       <DriverRideRequestModal
         visible={!!incomingRide}

@@ -25,7 +25,7 @@ export default function RiderTripsScreen() {
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const [trips, setTrips] = useState<any[]>([]);
 
   const loadTrips = useCallback(async () => {

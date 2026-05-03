@@ -758,7 +758,6 @@ export default function DriverCommunityScreen() {
               </TouchableOpacity>
             ))}
 
-            <View style={{ height: 80 }} />
           </>
         )}
       </ScrollView>

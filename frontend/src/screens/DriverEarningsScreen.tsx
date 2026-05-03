@@ -23,7 +23,7 @@ export default function DriverEarningsScreen() {
   const { user } = useAppStore();
   const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(true);
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState<any>(null);
   const [bankReady, setBankReady] = useState(false);

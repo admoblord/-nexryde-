@@ -10,6 +10,7 @@ import {
   Modal,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,6 +36,7 @@ interface DriverVehicle {
 export default function DriverProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const tabPad = useTabBottomPad(8);
   const { user, logout, setUser, subscription } = useAppStore();
   const { colors } = useThemeColors();
   const [showSwitchModal, setShowSwitchModal] = useState(false);
@@ -219,7 +221,7 @@ export default function DriverProfileScreen() {
         style={styles.scroll}
         contentContainerStyle={[
           styles.content,
-          { paddingBottom: Math.max(insets.bottom, 24) + 100 },
+          { paddingBottom: tabPad },
         ]}
         showsVerticalScrollIndicator={false}
       >

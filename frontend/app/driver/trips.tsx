@@ -310,7 +310,7 @@ export default function DriverTripsScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const hasActiveTrip = Boolean(currentTrip?.id);
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const [lastSpeedSpikeAlertAt, setLastSpeedSpikeAlertAt] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
 

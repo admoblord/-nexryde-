@@ -49,7 +49,7 @@ export default function ModernRiderHome() {
   const [votingDriverId, setVotingDriverId] = useState<string | null>(null);
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
   const [recentTripsLoading, setRecentTripsLoading] = useState(false);
-  const tabPad = useTabBottomPad(16);
+  const tabPad = useTabBottomPad(8);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [completedTripCount, setCompletedTripCount] = useState<number>(-1);
 
