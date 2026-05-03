@@ -49,7 +49,26 @@ export function stripHtml(html: string): string {
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
     .replace(/\s+/g, ' ')
+    .replace(/\.\s*\./g, '.')   // collapse double periods from div replacement
     .trim();
+}
+
+/**
+ * Convert a Google Directions instruction to natural Nigerian-English voice text.
+ * Handles roundabouts, U-turns, highway exits, and clean direction phrasing.
+ */
+export function toVoiceText(instruction: string): string {
+  if (!instruction) return '';
+  let t = instruction;
+  // Normalize slash-separated road names: "A/B Road" → "A B Road"
+  t = t.replace(/\//g, ' ');
+  // Expand abbreviations common in Nigerian maps
+  t = t.replace(/\bSt\b/g, 'Street');
+  t = t.replace(/\bAve\b/g, 'Avenue');
+  t = t.replace(/\bRd\b/g, 'Road');
+  t = t.replace(/\bBlvd\b/g, 'Boulevard');
+  t = t.replace(/\bJct\b/g, 'Junction');
+  return t.trim();
 }
 
 // ── Haversine distance in metres ───────────────────────────────────────────
@@ -95,9 +114,11 @@ function pointToSegmentM(
 
 // ── Format distance for voice & display ───────────────────────────────────
 export function fmtDistanceVoice(m: number): string {
+  if (m < 50) return `about ${Math.round(m / 10) * 10} meters`;
   if (m < 100) return `${Math.round(m / 10) * 10} meters`;
-  if (m < 1000) return `${Math.round(m / 50) * 50} meters`;
+  if (m < 950) return `${Math.round(m / 50) * 50} meters`;
   const km = m / 1000;
+  if (km < 1.1) return 'about 1 kilometer';
   return km < 2 ? `${km.toFixed(1)} kilometers` : `${Math.round(km)} kilometers`;
 }
 
@@ -165,7 +186,7 @@ export async function fetchDirections(
     const leg = route.legs[0];
 
     const steps: NavStep[] = leg.steps.map((s: any) => ({
-      instruction: stripHtml(s.html_instructions),
+      instruction: toVoiceText(stripHtml(s.html_instructions)),
       maneuver: s.maneuver ?? 'straight',
       distanceM: s.distance?.value ?? 0,
       durationSec: s.duration?.value ?? 0,
