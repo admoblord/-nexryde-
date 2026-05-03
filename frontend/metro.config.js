@@ -40,9 +40,7 @@ config.transformer = {
 // ── Exclude web-only & server-only file variants ──────────────────────────────
 config.resolver = {
   ...config.resolver,
-  // Prefer .native.ts/.native.tsx over .web.ts/.web.tsx for Android/iOS builds
-  sourceExts: ['tsx', 'ts', 'jsx', 'js', 'json', 'cjs', 'mjs'],
-  // Block test/storybook files from being bundled
+  // Block test/storybook files from being bundled (keep Expo's default sourceExts/assetExts intact)
   blockList: [
     /.*\/__tests__\/.*/,
     /.*\.test\.(ts|tsx|js|jsx)$/,
