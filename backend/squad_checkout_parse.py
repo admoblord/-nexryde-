@@ -142,8 +142,49 @@ def generate_squad_inline_transaction_ref(prefix: str = "NXWR") -> str:
     return generate_nexryde_squad_transaction_ref()
 
 
+_SQUAD_CHECKOUT_DOMAINS = (
+    "pay.squadco.com",
+    "sandbox-pay.squadco.com",
+    "checkout.squadco.com",
+    "sandbox-checkout.squadco.com",
+    "squadco.com",
+    "squad.co",
+)
+
+
+def _is_squad_checkout_url(url: str) -> bool:
+    """Return True only if the URL belongs to Squad's own payment domains."""
+    try:
+        s = str(url or "").strip().lower()
+        if not s.startswith("https://"):
+            return False
+        host = s.split("/")[2]
+        return any(host == d or host.endswith("." + d) for d in _SQUAD_CHECKOUT_DOMAINS)
+    except Exception:
+        return False
+
+
+def build_squad_checkout_url(transaction_ref: str, *, sandbox: bool = False) -> str:
+    """Construct the Squad inline checkout URL from a transaction reference.
+
+    Squad's inline checkout URL is always:
+      https://pay.squadco.com/{transaction_ref}          (live)
+      https://sandbox-pay.squadco.com/{transaction_ref}  (sandbox)
+    This is the AUTHORITATIVE URL — it doesn't depend on what Squad returns in the
+    initiate response (which sometimes omits the URL or returns the callback_url).
+    """
+    base = "https://sandbox-pay.squadco.com" if sandbox else "https://pay.squadco.com"
+    return f"{base}/{transaction_ref}"
+
+
 def extract_squad_checkout_url(provider_payload: dict, data: dict) -> Optional[str]:
-    """Resolve checkout / payment URL from Squad initiate responses (field names vary by API version)."""
+    """Resolve checkout / payment URL from Squad initiate responses (field names vary by API version).
+
+    Only URLs belonging to Squad's own domains are returned — backend callback URLs
+    (e.g. nexryde-backend-*.run.app) are rejected so they are never opened in-app.
+    """
+    candidates: list[str] = []
+
     if isinstance(data, dict):
         url = extract_squad_field(
             data,
@@ -158,9 +199,8 @@ def extract_squad_checkout_url(provider_payload: dict, data: dict) -> Optional[s
             "checkout_link",
         )
         if url:
-            s = str(url).strip()
-            if s:
-                return s
+            candidates.append(str(url).strip())
+
     if isinstance(provider_payload, dict):
         url = extract_squad_field(
             provider_payload,
@@ -169,16 +209,20 @@ def extract_squad_checkout_url(provider_payload: dict, data: dict) -> Optional[s
             "auth_url",
         )
         if url:
-            s = str(url).strip()
-            if s:
-                return s
+            candidates.append(str(url).strip())
+
         nested = provider_payload.get("data")
         if isinstance(nested, list) and nested:
             first = nested[0]
             if isinstance(first, dict):
                 u = extract_squad_field(first, "checkout_url", "authorization_url", "url", "link")
                 if u:
-                    s = str(u).strip()
-                    if s:
-                        return s
+                    candidates.append(str(u).strip())
+
+    # Return only URLs that genuinely belong to Squad's payment domains.
+    # This prevents backend callback/API URLs from being treated as checkout URLs.
+    for c in candidates:
+        if c and _is_squad_checkout_url(c):
+            return c
+
     return None

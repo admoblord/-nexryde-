@@ -29,6 +29,7 @@ from squad_checkout_parse import (
     sanitize_squad_transaction_initiate_payload,
     squad_dynamic_va_response_ok,
     squad_initiate_response_ok,
+    build_squad_checkout_url,
 )
 from database import db
 from smart_pricing import (
@@ -62,6 +63,11 @@ NEXRYDE_PUBLIC_URL = (
     or ""
 ).rstrip("/")
 SQUAD_CALLBACK_URL = (os.environ.get("SQUAD_CALLBACK_URL") or "").strip()
+# Controls the Squad inline checkout page base URL.
+# Live:    https://pay.squadco.com   (default)
+# Sandbox: https://sandbox-pay.squadco.com
+SQUAD_CHECKOUT_BASE_URL = (os.environ.get("SQUAD_CHECKOUT_BASE_URL") or "").rstrip("/")
+_SQUAD_IS_SANDBOX = "sandbox" in SQUAD_BASE_URL.lower()
 
 def _squad_dynamic_va_duration_seconds() -> int:
     """Squad dynamic VA `duration` (seconds); minimum 60."""
@@ -924,6 +930,30 @@ def _squad_headers() -> dict:
 _squad_extract_checkout_url = extract_squad_checkout_url
 
 
+def _resolve_squad_checkout_url(provider_payload: dict, data: dict, transaction_ref: str) -> str:
+    """Return the Squad checkout URL for a given transaction.
+
+    Priority:
+    1. URL explicitly returned by Squad in the initiate response (only if Squad domain).
+    2. SQUAD_CHECKOUT_BASE_URL env var override (e.g. for sandbox).
+    3. Constructed URL from known Squad inline checkout pattern:
+       https://pay.squadco.com/{transaction_ref}
+
+    The callback URL (our own backend URL) is NEVER used as a checkout URL.
+    """
+    # 1. Try Squad's response
+    from_response = _squad_extract_checkout_url(provider_payload, data)
+    if from_response:
+        return from_response
+
+    # 2. Env-var override
+    if SQUAD_CHECKOUT_BASE_URL:
+        return f"{SQUAD_CHECKOUT_BASE_URL}/{transaction_ref}"
+
+    # 3. Construct from well-known Squad URL pattern
+    return build_squad_checkout_url(transaction_ref, sandbox=_SQUAD_IS_SANDBOX)
+
+
 async def _verify_squad_transaction(reference: str) -> dict:
     if not SQUAD_SECRET_KEY:
         return {"verified": False, "reason": "SQUAD_SECRET_KEY not configured", "provider": "squad"}
@@ -1776,10 +1806,14 @@ async def initiate_subscription_checkout(
 
     data = provider_payload.get("data") if isinstance(provider_payload, dict) else {}
     data = data if isinstance(data, dict) else {}
-    checkout_url = _squad_extract_checkout_url(provider_payload, data)
+    checkout_url = _resolve_squad_checkout_url(provider_payload, data, transaction_ref)
+    logger.info(
+        "Squad subscription checkout_url resolved driver=%s ref=%s url=%s",
+        driver_id, transaction_ref, checkout_url,
+    )
     if not checkout_url:
         logger.error(
-            "Squad checkout success but no URL in response; data keys=%s",
+            "Squad checkout success but no URL resolved; data keys=%s",
             list(data.keys()) if isinstance(data, dict) else type(data),
         )
         fail_at = datetime.utcnow()
@@ -2388,7 +2422,13 @@ async def initiate_rider_wallet_checkout(
 
     data = pp_dict.get("data") if isinstance(pp_dict.get("data"), dict) else {}
     data = data if isinstance(data, dict) else {}
-    checkout_url = _squad_extract_checkout_url(pp_dict, data)
+    # Resolve checkout URL: Squad's response if it's a genuine Squad domain URL,
+    # otherwise construct from the transaction_ref (Squad's pay.squadco.com/{ref} pattern).
+    checkout_url = _resolve_squad_checkout_url(pp_dict, data, transaction_ref)
+    logger.info(
+        "Squad wallet checkout_url resolved user=%s ref=%s url=%s",
+        user_id, transaction_ref, checkout_url,
+    )
     if not checkout_url:
         fail_at = datetime.utcnow()
         await db.wallet_payment_intents.update_one(
