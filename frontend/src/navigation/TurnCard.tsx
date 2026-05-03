@@ -47,7 +47,148 @@ interface TurnCardProps {
   onToggleMute: () => void;
   /** Whether nav is active at all */
   active: boolean;
+  /** Pass 'arrived' to show the pickup code waiting card */
+  tripStatus?: string;
 }
+
+// ── Arrived-at-pickup card (unique to Nexryde — shown instead of nav when status=arrived) ──
+function ArrivedCard() {
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
+
+  useEffect(() => {
+    Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.12, duration: 700, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loopRef.current = loop;
+    loop.start();
+    return () => { loopRef.current?.stop(); loopRef.current = null; };
+  }, []);
+
+  return (
+    <Animated.View style={[arrivedStyles.wrap, { opacity: fadeAnim }]}>
+      <LinearGradient
+        colors={['rgba(8,12,24,0.97)', 'rgba(12,20,40,0.94)']}
+        style={arrivedStyles.card}
+      >
+        <View style={arrivedStyles.row}>
+          {/* Pulsing green dot */}
+          <Animated.View style={[arrivedStyles.pulseRing, { transform: [{ scale: pulseAnim }] }]}>
+            <View style={arrivedStyles.pulseDot} />
+          </Animated.View>
+
+          <View style={arrivedStyles.textBlock}>
+            <Text style={arrivedStyles.title}>You have arrived</Text>
+            <Text style={arrivedStyles.subtitle}>Ask the rider for their 4-digit pickup code</Text>
+          </View>
+        </View>
+
+        {/* Code entry hint */}
+        <View style={arrivedStyles.codeHintRow}>
+          {[0, 1, 2, 3].map((i) => (
+            <View key={i} style={arrivedStyles.codeBox}>
+              <Text style={arrivedStyles.codeBoxText}>—</Text>
+            </View>
+          ))}
+        </View>
+        <Text style={arrivedStyles.codeHint}>Enter the code from your trip screen to start</Text>
+      </LinearGradient>
+    </Animated.View>
+  );
+}
+
+const arrivedStyles = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    top: 8,
+    left: 8,
+    right: 8,
+    zIndex: 30,
+  },
+  card: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.3)',
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 10,
+    shadowColor: '#22c55e',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 14,
+    gap: 10,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  pulseRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(34,197,94,0.4)',
+  },
+  pulseDot: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#22c55e',
+  },
+  textBlock: {
+    flex: 1,
+    gap: 3,
+  },
+  title: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#22c55e',
+    letterSpacing: -0.3,
+  },
+  subtitle: {
+    fontSize: 12,
+    color: '#94a3b8',
+    fontWeight: '500',
+    lineHeight: 16,
+  },
+  codeHintRow: {
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+  codeBox: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    borderWidth: 2,
+    borderColor: 'rgba(34,197,94,0.35)',
+    backgroundColor: 'rgba(34,197,94,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  codeBoxText: {
+    fontSize: 16,
+    color: '#334155',
+    fontWeight: '700',
+  },
+  codeHint: {
+    fontSize: 11,
+    color: '#475569',
+    textAlign: 'center',
+    fontWeight: '500',
+  },
+});
 
 function ArrowIcon({ maneuver, color, size = 38 }: { maneuver: string; color: string; size?: number }) {
   const rotation = maneuverToRotation(maneuver);
@@ -84,20 +225,29 @@ function ArrowIcon({ maneuver, color, size = 38 }: { maneuver: string; color: st
 function DistanceBadge({ metres }: { metres: number }) {
   const color = metres > 400 ? '#22c55e' : metres > 150 ? '#f59e0b' : '#f87171';
   const anim = useRef(new Animated.Value(1)).current;
+  const loopRef = useRef<Animated.CompositeAnimation | null>(null);
 
   useEffect(() => {
     if (metres < 150) {
-      Animated.loop(
+      loopRef.current?.stop();
+      const loop = Animated.loop(
         Animated.sequence([
           Animated.timing(anim, { toValue: 1.08, duration: 500, useNativeDriver: true }),
           Animated.timing(anim, { toValue: 1, duration: 500, useNativeDriver: true }),
         ])
-      ).start();
+      );
+      loopRef.current = loop;
+      loop.start();
     } else {
-      anim.stopAnimation();
+      loopRef.current?.stop();
+      loopRef.current = null;
       anim.setValue(1);
     }
-  }, [metres < 150]);
+    return () => {
+      loopRef.current?.stop();
+      loopRef.current = null;
+    };
+  }, [metres < 150]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Animated.Text style={[styles.distance, { color, transform: [{ scale: anim }] }]}>
@@ -119,8 +269,12 @@ export function TurnCard({
   muted,
   onToggleMute,
   active,
+  tripStatus,
 }: TurnCardProps) {
   if (!active || Platform.OS === 'web') return null;
+
+  // Arrived at pickup — show the unique "waiting for code" card
+  if (tripStatus === 'arrived') return <ArrivedCard />;
 
   if (loading) {
     return (

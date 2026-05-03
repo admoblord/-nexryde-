@@ -38,6 +38,7 @@ import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRi
 import { useTripSafetyRecording } from '@/src/hooks/useTripSafetyRecording';
 import MapComponent from '@/src/components/MapComponent';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
+import { fetchDirections } from '@/src/navigation/navUtils';
 import notificationService from '@/src/services/notifications';
 import { RideRecordingService } from '@/src/services/rideRecording';
 
@@ -53,6 +54,9 @@ export default function TrackingScreen() {
   const [driverLocation, setDriverLocation] = useState<any>(null);
   const [guardianAlert, setGuardianAlert] = useState<any>(null);
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
+  // Road-snapped polyline from Google Directions (fetched once per trip segment)
+  const [snappedPolyline, setSnappedPolyline] = useState<Array<{ latitude: number; longitude: number }>>([]);
+  const snappedPolylineKeyRef = useRef('');
   const [faceVerifiedAtStart, setFaceVerifiedAtStart] = useState(false);
   const [silentProtecting, setSilentProtecting] = useState(false);
   const [checkingDriverFace, setCheckingDriverFace] = useState(false);
@@ -160,8 +164,11 @@ export default function TrackingScreen() {
   const pickupCoords = getCoords(currentTrip?.pickup_location);
   const dropoffCoords = getCoords(currentTrip?.dropoff_location);
   const liveDriverCoords = getCoords(driverLocation);
+  // Prefer road-snapped Google Directions polyline; fall back to straight-segment heuristic
   const routePolyline =
-    pickupCoords && dropoffCoords
+    snappedPolyline.length > 0
+      ? snappedPolyline
+      : pickupCoords && dropoffCoords
       ? [
           { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
           ...(liveDriverCoords && (tripStatus === 'accepted' || tripStatus === 'arrived' || tripStatus === 'ongoing')
@@ -189,6 +196,22 @@ export default function TrackingScreen() {
       active = false;
     };
   }, [pickupCoords?.lat, pickupCoords?.lng, dropoffCoords?.lat, dropoffCoords?.lng]);
+
+  // Fetch road-snapped polyline from Google Directions ONCE per segment (driver→pickup or pickup→drop)
+  useEffect(() => {
+    const GOOGLE_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
+    if (!GOOGLE_KEY) return;
+    const originCoords = tripStatus === 'ongoing' ? pickupCoords : (liveDriverCoords ?? pickupCoords);
+    const destCoords = tripStatus === 'ongoing' ? dropoffCoords : pickupCoords;
+    if (!originCoords || !destCoords) return;
+    const key = `${tripStatus === 'ongoing' ? 'drop' : 'pickup'}|${originCoords.lat.toFixed(4)},${originCoords.lng.toFixed(4)}|${destCoords.lat.toFixed(4)},${destCoords.lng.toFixed(4)}`;
+    if (key === snappedPolylineKeyRef.current) return;
+    snappedPolylineKeyRef.current = key;
+    fetchDirections(originCoords.lat, originCoords.lng, destCoords.lat, destCoords.lng, GOOGLE_KEY)
+      .then((res) => { if (res) setSnappedPolyline(res.overviewCoords); })
+      .catch(() => {});
+  }, [tripStatus, pickupCoords?.lat, pickupCoords?.lng, dropoffCoords?.lat, dropoffCoords?.lng, liveDriverCoords?.lat, liveDriverCoords?.lng]);
+
   const mapTitle =
     tripStatus === 'accepted'
       ? 'Driver is on the way'

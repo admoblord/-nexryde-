@@ -144,7 +144,8 @@ export default function DriverOfferRoutePreview({
   darkOverlay = false,
 }: Props) {
   const [mapReady, setMapReady] = useState(Platform.OS === 'web');
-  const polylineAnim = useRef(new Animated.Value(0)).current;
+  const [routeOpacity, setRouteOpacity] = useState(0);
+  const chipFadeAnim = useRef(new Animated.Value(0)).current;
 
   const region = useMemo((): MapRegion => {
     if (mapPreviewRegion) {
@@ -191,13 +192,16 @@ export default function DriverOfferRoutePreview({
 
   useEffect(() => {
     if (mapReady && lineCoords.length >= 2) {
-      polylineAnim.setValue(0);
-      Animated.timing(polylineAnim, {
-        toValue: 1, duration: 1200, useNativeDriver: true,
+      // Fade-in route polyline and chips after map is ready
+      const timeout = setTimeout(() => setRouteOpacity(1), 300);
+      Animated.timing(chipFadeAnim, {
+        toValue: 1, duration: 600,
+        useNativeDriver: true,
         easing: Easing.out(Easing.quad),
       }).start();
+      return () => clearTimeout(timeout);
     }
-  }, [mapReady, lineCoords.length]);
+  }, [mapReady, lineCoords.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const showA = pickupLat != null && pickupLng != null && Number.isFinite(pickupLat);
   const showB = dropLat != null && dropLng != null && Number.isFinite(dropLat);
@@ -250,6 +254,7 @@ export default function DriverOfferRoutePreview({
               coordinates={lineCoords}
               strokeColor="rgba(14,165,233,0.25)"
               strokeWidth={10}
+              strokeOpacity={routeOpacity}
               lineDashPattern={isStraightLine ? [8, 6] : undefined}
             />
             {/* Main route line */}
@@ -257,6 +262,7 @@ export default function DriverOfferRoutePreview({
               coordinates={lineCoords}
               strokeColor="#0ea5e9"
               strokeWidth={4}
+              strokeOpacity={routeOpacity}
               lineDashPattern={isStraightLine ? [8, 6] : undefined}
               geodesic
             />
@@ -299,7 +305,7 @@ export default function DriverOfferRoutePreview({
 
       {/* Top-left: distance to pickup chip */}
       {distToPickupKm != null && (
-        <View style={styles.chipTopLeft}>
+        <Animated.View style={[styles.chipTopLeft, { opacity: chipFadeAnim }]}>
           <Ionicons name="navigate" size={12} color="#0ea5e9" />
           <Text style={styles.chipText}>
             {distToPickupKm < 1
@@ -309,12 +315,12 @@ export default function DriverOfferRoutePreview({
           {etaToPickupMin != null && (
             <Text style={styles.chipTextMuted}> · ~{etaToPickupMin}min</Text>
           )}
-        </View>
+        </Animated.View>
       )}
 
       {/* Top-right: trip stats chip */}
       {(distanceKm != null || durationMins != null) && (
-        <View style={styles.chipTopRight}>
+        <Animated.View style={[styles.chipTopRight, { opacity: chipFadeAnim }]}>
           {distanceKm != null && (
             <Text style={styles.chipText}>{Number(distanceKm).toFixed(distanceKm >= 10 ? 0 : 1)}km</Text>
           )}
@@ -324,7 +330,7 @@ export default function DriverOfferRoutePreview({
           {durationMins != null && (
             <Text style={styles.chipText}>~{durationMins}min</Text>
           )}
-        </View>
+        </Animated.View>
       )}
 
       {/* Bottom: address strip */}

@@ -454,6 +454,170 @@ function DriverPreviewCard({
   );
 }
 
+/* ─── Driver Approaching Counter ─────────────────────────────── */
+function DriverApproachingBar({ distanceKm }: { distanceKm: number }) {
+  const distM = Math.round(distanceKm * 1000);
+  const fillAnim = useRef(new Animated.Value(0)).current;
+  const maxShow = 800; // show this bar when < 800 m away
+
+  useEffect(() => {
+    const pct = Math.max(0, Math.min(1, 1 - distM / maxShow));
+    Animated.timing(fillAnim, {
+      toValue: pct,
+      duration: 600,
+      useNativeDriver: false,
+    }).start();
+  }, [distM]);
+
+  const color = distM > 400 ? '#22C55E' : distM > 150 ? '#F59E0B' : '#EF4444';
+  const label =
+    distM < 50 ? 'Almost there!' : distM < 1000 ? `${distM} m away` : `${distanceKm.toFixed(1)} km`;
+
+  return (
+    <View style={approachStyles.wrap}>
+      <View style={approachStyles.bar}>
+        <Animated.View
+          style={[
+            approachStyles.fill,
+            {
+              width: fillAnim.interpolate({ inputRange: [0, 1], outputRange: ['0%', '100%'] }),
+              backgroundColor: color,
+            },
+          ]}
+        />
+      </View>
+      <View style={approachStyles.labelRow}>
+        <Ionicons name="car-sport" size={13} color={color} />
+        <Text style={[approachStyles.label, { color }]}>Driver is {label}</Text>
+      </View>
+    </View>
+  );
+}
+
+const approachStyles = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    top: 8,
+    left: 12,
+    right: 12,
+    zIndex: 20,
+    gap: 4,
+  },
+  bar: {
+    height: 4,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  fill: {
+    height: 4,
+    borderRadius: 2,
+  },
+  labelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 2,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+});
+
+/* ─── Driver Arrived Banner ───────────────────────────────────── */
+function DriverArrivedBanner() {
+  const slideAnim = useRef(new Animated.Value(-80)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(slideAnim, {
+        toValue: 0,
+        useNativeDriver: true,
+        tension: 65,
+        friction: 10,
+      }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 300, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  return (
+    <Animated.View
+      style={[
+        arrivedBannerStyles.wrap,
+        { transform: [{ translateY: slideAnim }], opacity: opacityAnim },
+      ]}
+    >
+      <LinearGradient
+        colors={['#052e16', '#14532d']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 0 }}
+        style={arrivedBannerStyles.banner}
+      >
+        <View style={arrivedBannerStyles.iconWrap}>
+          <Ionicons name="checkmark-circle" size={22} color="#22C55E" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={arrivedBannerStyles.title}>Your driver has arrived!</Text>
+          <Text style={arrivedBannerStyles.sub}>
+            Share your 4-digit pickup code when you meet your driver
+          </Text>
+        </View>
+      </LinearGradient>
+    </Animated.View>
+  );
+}
+
+const arrivedBannerStyles = StyleSheet.create({
+  wrap: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 25,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+  },
+  banner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.4)',
+    shadowColor: '#22C55E',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 12,
+  },
+  iconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  title: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#22C55E',
+    letterSpacing: -0.2,
+  },
+  sub: {
+    fontSize: 11,
+    color: 'rgba(134,239,172,0.8)',
+    fontWeight: '500',
+    marginTop: 2,
+    lineHeight: 15,
+  },
+});
+
 /* ─── ETA chip overlay ────────────────────────────────────────── */
 function EtaChip({ etaMin, distanceKm }: { etaMin: number | null; distanceKm: number | null }) {
   if (etaMin == null && distanceKm == null) return null;
@@ -754,8 +918,16 @@ export default function RideMap({
         ) : null}
       </MapView>
 
+      {/* ── Driver arrived banner (top) ── */}
+      {tripStatus === 'arrived' ? <DriverArrivedBanner /> : null}
+
+      {/* ── Driver approaching distance bar (when within 800 m) ── */}
+      {tripStatus === 'accepted' && activeLL && distanceKm != null && distanceKm < 0.8 ? (
+        <DriverApproachingBar distanceKm={distanceKm} />
+      ) : null}
+
       {/* ── ETA chip top-right ── */}
-      {activeLL && (tripStatus === 'accepted' || tripStatus === 'ongoing') ? (
+      {activeLL && (tripStatus === 'accepted' || tripStatus === 'ongoing') && tripStatus !== 'arrived' ? (
         <EtaChip etaMin={etaMin} distanceKm={distanceKm} />
       ) : null}
 
@@ -763,7 +935,7 @@ export default function RideMap({
       {userPanned && activeLL ? <RecenterButton onPress={handleRecenter} /> : null}
 
       {/* ── Driver preview card ── */}
-      {activeLL && activeDriverMeta ? (
+      {activeLL && activeDriverMeta && tripStatus !== 'arrived' ? (
         <DriverPreviewCard
           name={String(activeDriverMeta.name || 'Driver')}
           vehicle={activeDriverMeta.vehicle}
@@ -804,9 +976,9 @@ export function RideMapDangerCircles({
         rotateEnabled={false}
         pitchEnabled={false}
       >
-        {zones.slice(0, 8).map((z) => (
+        {zones.slice(0, 8).map((z, idx) => (
           <Circle
-            key={z.area}
+            key={`zone-${idx}-${z.area}`}
             center={{ latitude: z.lat, longitude: z.lng }}
             radius={750}
             strokeColor="rgba(239, 68, 68, 0.95)"

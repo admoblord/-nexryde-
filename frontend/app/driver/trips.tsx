@@ -189,12 +189,14 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
     }
     prevDriverRef.current = { lat: driverLat, lng: driverLng };
     if (!userPanned) {
-      mapRef.current.animateCamera({
-        center: { latitude: driverLat, longitude: driverLng },
-        zoom: 16,
-        heading: bearingRef.current,
-        pitch: 25,
-      }, { duration: 900 });
+      try {
+        mapRef.current.animateCamera({
+          center: { latitude: driverLat, longitude: driverLng },
+          zoom: 16,
+          heading: bearingRef.current,
+          pitch: 25,
+        }, { duration: 900 });
+      } catch { /* native map may not be ready */ }
     }
   }, [driverLat, driverLng, mapReady, userPanned]);
 
@@ -209,9 +211,9 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
     return { etaMin: min < 1 ? 1 : min > 90 ? null : min, distanceKm: km };
   }, [driverLat, driverLng, status, pickupLat, pickupLng, dropLat, dropLng]);
 
-  const showPickup = status !== 'ongoing' && pickupLat != null && Number.isFinite(pickupLat);
-  const showDrop = dropLat != null && Number.isFinite(dropLat);
-  const showDriver = driverLat != null && Number.isFinite(driverLat);
+  const showPickup = status !== 'ongoing' && pickupLat != null && Number.isFinite(pickupLat) && pickupLng != null && Number.isFinite(pickupLng);
+  const showDrop = dropLat != null && Number.isFinite(dropLat) && dropLng != null && Number.isFinite(dropLng);
+  const showDriver = driverLat != null && Number.isFinite(driverLat) && driverLng != null && Number.isFinite(driverLng);
   const showRider = riderLat != null && Number.isFinite(riderLat!);
 
   // Use Google Directions overview polyline when available; fallback to straight line
@@ -365,6 +367,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
         muted={nav.muted}
         onToggleMute={nav.toggleMute}
         active={navActive}
+        tripStatus={status}
       />
 
       {/* ETA chip — top-right */}
