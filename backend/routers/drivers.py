@@ -442,6 +442,48 @@ async def get_driver_profile(user_id: str, request: Request):
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
     profile["_id"] = str(profile["_id"])
+
+    # Derive nin_verified: driver has a NIN number AND their documents were approved.
+    nin_raw = str(profile.get("nin_number") or profile.get("nin") or "").strip()
+    is_approved = profile.get("verification_status") == "approved"
+    nin_verified = bool(nin_raw) and is_approved
+    profile["nin_verified"] = nin_verified
+
+    # Derive document statuses so the UI can reflect the real state.
+    license_ok = is_approved and bool(profile.get("license_uploaded") or profile.get("drivers_license"))
+    passport_ok = is_approved and bool(profile.get("passport_photo"))
+    insurance_ok = is_approved and bool(profile.get("insurance"))
+    profile["document_statuses"] = {
+        "nin": "verified" if nin_verified else ("submitted" if nin_raw else "not_submitted"),
+        "drivers_license": "verified" if license_ok else ("pending" if is_approved else "not_submitted"),
+        "passport_photo": "verified" if passport_ok else ("pending" if is_approved else "not_submitted"),
+        "insurance": "verified" if insurance_ok else ("pending" if is_approved else "not_submitted"),
+        "all_verified": is_approved,
+    }
+
+    # Build vehicles[] for backward compat: if profile has single-vehicle fields but no array, synthesize.
+    vehicles = [dict(v) for v in (profile.get("vehicles") or [])]
+    if not vehicles and profile.get("vehicle_model"):
+        vehicles = [{
+            "id": "default",
+            "type": profile.get("vehicle_type", ""),
+            "make": profile.get("vehicle_make", ""),
+            "model": profile.get("vehicle_model", ""),
+            "year": str(profile.get("vehicle_year", "")),
+            "color": profile.get("vehicle_color", ""),
+            "plate": profile.get("vehicle_plate_number") or profile.get("vehicle_plate", ""),
+            "is_default": True,
+        }]
+    profile["vehicles"] = vehicles
+
+    # driverProfileComplete flag: front-end can use this to skip onboarding.
+    profile["driver_profile_complete"] = bool(
+        nin_verified
+        and is_approved
+        and len(vehicles) > 0
+        and profile.get("profile_completed")
+    )
+
     return profile
 
 @drivers_router.put("/drivers/{user_id}/profile")
@@ -914,6 +956,30 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         profile = await db.driver_profiles.find_one({"user_id": driver_id})
         if not profile:
             return {"step": "documents", "completed": False}
+
+        # Short-circuit: if the driver is fully verified and completed, skip every other check.
+        _vehicles_fast = profile.get("vehicles") or (
+            [{}] if profile.get("vehicle_model") else []
+        )
+        _nin_fast = str(profile.get("nin_number") or profile.get("nin") or "").strip()
+        _fast_complete = bool(
+            _nin_fast
+            and profile.get("documents_verified")
+            and profile.get("verification_status") == "approved"
+            and len(_vehicles_fast) > 0
+            and profile.get("profile_completed")
+        )
+        if _fast_complete:
+            return {
+                "step": "approved",
+                "completed": True,
+                "verification_status": "approved",
+                "vehicle_registered": True,
+                "driver_profile_complete": True,
+                "nin_verified": True,
+                "vehicles_count": len(_vehicles_fast),
+            }
+
         verification_status = profile.get("verification_status")
         documents_submitted = bool(profile.get("documents_submitted"))
         if verification_status in {"pending", "pending_review", "under_review", "ai_reviewing"} or (
@@ -968,7 +1034,30 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
                 {"$set": {"profile_completed": True, "onboarding_step": "approved"}}
             )
 
-        return {"step": "approved", "completed": True, "verification_status": "approved", "vehicle_registered": profile.get("vehicle_registered", False)}
+        # Compute driver_profile_complete: once all key checks pass, the driver should NEVER
+        # see onboarding again. We include vehicles count from the stored vehicles array.
+        vehicles = profile.get("vehicles") or []
+        if not vehicles and profile.get("vehicle_model"):
+            vehicles = [{}]  # synthesise from flat fields — at least one exists
+        nin_raw = str(profile.get("nin_number") or profile.get("nin") or "").strip()
+        nin_ok = bool(nin_raw)
+        driver_profile_complete = bool(
+            nin_ok
+            and profile.get("documents_verified")
+            and profile.get("verification_status") == "approved"
+            and len(vehicles) > 0
+            and profile.get("profile_completed")
+        )
+
+        return {
+            "step": "approved",
+            "completed": True,
+            "verification_status": "approved",
+            "vehicle_registered": profile.get("vehicle_registered", bool(vehicles)),
+            "driver_profile_complete": driver_profile_complete,
+            "nin_verified": nin_ok and profile.get("verification_status") == "approved",
+            "vehicles_count": len(vehicles),
+        }
     except Exception as e:
         logger.error(f"Onboarding status error: {str(e)}")
         return {"step": "error", "completed": False}
@@ -1093,6 +1182,20 @@ async def complete_driver_profile(request: dict, http_request: Request):
             # NOTE: do NOT set documents_verified or verification_status here —
             # those are controlled exclusively by the admin approval flow.
         }.items() if v is not None}
+
+        # Build/update vehicles array so it is always consistent with the flat fields.
+        vehicle_entry = {
+            "id": str(uuid.uuid4()),
+            "type": str(request.get("vehicle_type") or ""),
+            "make": str(request.get("vehicle_make") or ""),
+            "model": str(request.get("vehicle_model") or ""),
+            "year": str(request.get("vehicle_year") or ""),
+            "color": str(request.get("vehicle_color") or ""),
+            "plate": str(request.get("vehicle_plate_number") or ""),
+            "is_default": True,
+            "registered_at": datetime.now(timezone.utc).isoformat(),
+        }
+        profile_update["vehicles"] = [vehicle_entry]
 
         await db.driver_profiles.update_one({"user_id": driver_id}, {"$set": profile_update}, upsert=True)
         await db.users.update_one({"id": driver_id}, {"$set": {"profile_completed": True}})

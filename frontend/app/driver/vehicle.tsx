@@ -1,319 +1,551 @@
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
-  TextInput,
   TouchableOpacity,
   Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
-import { Card, Button } from '@/src/components/UI';
 import { useAppStore } from '@/src/store/appStore';
-import { getDriverProfile, updateDriverProfile } from '@/src/services/api';
+import { getDriverProfile, BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+
+interface Vehicle {
+  id: string;
+  type: string;
+  make: string;
+  model: string;
+  year: string;
+  color: string;
+  plate: string;
+  is_default?: boolean;
+}
+
+const VEHICLE_TYPE_OPTIONS = ['Economy', 'Comfort', 'XL', 'Premium', 'Sedan', 'SUV', 'Hatchback', 'Minivan'];
 
 export default function VehicleScreen() {
   const router = useRouter();
   const { user, driverProfile, setDriverProfile } = useAppStore();
-  const [loading, setLoading] = useState(false);
+
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState(false);
-  const [vehicleType, setVehicleType] = useState('');
-  const [vehicleModel, setVehicleModel] = useState('');
-  const [vehiclePlate, setVehiclePlate] = useState('');
+  const [isApproved, setIsApproved] = useState(false);
 
-  useEffect(() => {
-    loadProfile();
-  }, []);
+  // Edit modal state
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
+  const [editColor, setEditColor] = useState('');
+  const [editPlate, setEditPlate] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     if (!user?.id) return;
     setLoadError(false);
     try {
-      const response = await getDriverProfile(user.id);
-      setDriverProfile(response.data);
-      setVehicleType(response.data.vehicle_type || '');
-      setVehicleModel(response.data.vehicle_model || '');
-      setVehiclePlate(response.data.vehicle_plate || '');
+      const res = await getDriverProfile(user.id);
+      const profile = res.data as any;
+      setDriverProfile(profile);
+      setVehicles(profile?.vehicles || []);
+      setIsApproved(profile?.verification_status === 'approved');
     } catch {
       setLoadError(true);
-    }
-  };
-
-  const handleSave = async () => {
-    if (!user?.id) return;
-    setLoading(true);
-    try {
-      const response = await updateDriverProfile(user.id, {
-        vehicle_type: vehicleType,
-        vehicle_model: vehicleModel,
-        vehicle_plate: vehiclePlate,
-      });
-      setDriverProfile(response.data);
-      Alert.alert('Success', 'Vehicle details updated successfully');
-    } catch (error: any) {
-      Alert.alert('Error', error.response?.data?.detail || 'Failed to update');
     } finally {
       setLoading(false);
+      setRefreshing(false);
+    }
+  }, [user?.id, setDriverProfile]);
+
+  useEffect(() => { void loadProfile(); }, [loadProfile]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    void loadProfile();
+  };
+
+  const openEditModal = (vehicle: Vehicle) => {
+    setEditingVehicle(vehicle);
+    setEditColor(vehicle.color);
+    setEditPlate(vehicle.plate);
+    setEditModalVisible(true);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  };
+
+  const saveVehicleEdits = async () => {
+    if (!editingVehicle || !user?.id) return;
+    setSaving(true);
+    try {
+      const updated: Vehicle = { ...editingVehicle, color: editColor.trim(), plate: editPlate.trim() };
+      const newVehicles = vehicles.map(v => v.id === updated.id ? updated : v);
+      // Persist flat fields (backward compat) + vehicles array
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/profile`, {
+        method: 'PUT',
+        headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vehicle_color: updated.color,
+          vehicle_plate_number: updated.plate,
+          vehicle_plate: updated.plate,
+          vehicles: newVehicles,
+        }),
+      });
+      if (!response.ok) throw new Error('Failed to update');
+      setVehicles(newVehicles);
+      setDriverProfile({ ...(driverProfile || {}), vehicles: newVehicles } as any);
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setEditModalVisible(false);
+      Alert.alert('Updated', 'Vehicle details saved.');
+    } catch {
+      Alert.alert('Error', 'Could not save changes. Try again.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const vehicleTypes = ['Sedan', 'SUV', 'Hatchback', 'Minivan', 'Motorcycle'];
+  const setDefaultVehicle = (vehicleId: string) => {
+    const updated = vehicles.map(v => ({ ...v, is_default: v.id === vehicleId }));
+    setVehicles(updated);
+    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    // Persist
+    fetch(`${BACKEND_URL}/api/drivers/${user!.id}/profile`, {
+      method: 'PUT',
+      headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vehicles: updated }),
+    }).catch(() => null);
+  };
+
+  const getVehicleTypeIcon = (type: string): React.ComponentProps<typeof Ionicons>['name'] => {
+    const t = type.toLowerCase();
+    if (t.includes('xl') || t.includes('suv') || t.includes('minivan')) return 'bus';
+    if (t.includes('premium')) return 'diamond';
+    if (t.includes('comfort')) return 'star';
+    return 'car-sport';
+  };
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content}>
-        {/* Header */}
-        <View style={styles.header}>          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.title}>Vehicle Details</Text>
-        </View>
+      {/* Header */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>My Vehicles</Text>
+        <View style={{ width: 40 }} />
+      </View>
 
-        {/* Load error banner */}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
+        {/* Error state */}
         {loadError && (
           <View style={styles.errorBanner}>
             <Ionicons name="alert-circle-outline" size={18} color={COLORS.error} />
-            <Text style={styles.errorBannerText}>Could not load vehicle info.</Text>
+            <Text style={styles.errorText}>Could not load vehicle info.</Text>
             <TouchableOpacity onPress={loadProfile}>
-              <Text style={styles.errorBannerRetry}>Retry</Text>
+              <Text style={styles.retryText}>Retry</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* Vehicle Type */}
-        <Text style={styles.label}>Vehicle Type</Text>
-        <View style={styles.typeContainer}>
-          {vehicleTypes.map((type) => (
+        {/* Loading skeleton */}
+        {loading && !loadError && (
+          <View style={styles.loadingCenter}>
+            <ActivityIndicator size="large" color={COLORS.primary} />
+            <Text style={styles.loadingText}>Loading your vehicles…</Text>
+          </View>
+        )}
+
+        {/* Vehicles list */}
+        {!loading && vehicles.length > 0 && (
+          <>
+            {isApproved && (
+              <LinearGradient
+                colors={['#059669', '#10B981']}
+                style={styles.approvedBanner}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+              >
+                <Ionicons name="shield-checkmark" size={22} color={COLORS.white} />
+                <Text style={styles.approvedBannerText}>
+                  Vehicle verified — you are cleared for ride requests
+                </Text>
+              </LinearGradient>
+            )}
+
+            <Text style={styles.sectionLabel}>Registered Vehicles</Text>
+
+            {vehicles.map((vehicle) => (
+              <View key={vehicle.id} style={[styles.vehicleCard, vehicle.is_default && styles.vehicleCardDefault]}>
+                {vehicle.is_default && (
+                  <View style={styles.defaultBadge}>
+                    <Ionicons name="checkmark-circle" size={12} color={COLORS.white} />
+                    <Text style={styles.defaultBadgeText}>Active</Text>
+                  </View>
+                )}
+
+                <View style={styles.vehicleCardTop}>
+                  <View style={styles.vehicleIconWrap}>
+                    <Ionicons name={getVehicleTypeIcon(vehicle.type)} size={28} color={COLORS.primary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.vehicleName}>
+                      {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Unknown Vehicle'}
+                    </Text>
+                    <Text style={styles.vehicleDetail}>
+                      {[vehicle.color, vehicle.year, vehicle.plate].filter(Boolean).join(' • ')}
+                    </Text>
+                    {vehicle.type ? (
+                      <View style={styles.typePill}>
+                        <Text style={styles.typePillText}>{vehicle.type}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                </View>
+
+                <View style={styles.vehicleActions}>
+                  <TouchableOpacity
+                    style={styles.editButton}
+                    onPress={() => openEditModal(vehicle)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="create-outline" size={16} color={COLORS.primary} />
+                    <Text style={styles.editButtonText}>Edit</Text>
+                  </TouchableOpacity>
+
+                  {vehicles.length > 1 && !vehicle.is_default && (
+                    <TouchableOpacity
+                      style={styles.defaultButton}
+                      onPress={() => setDefaultVehicle(vehicle.id)}
+                      activeOpacity={0.8}
+                    >
+                      <Ionicons name="radio-button-on-outline" size={16} color="#059669" />
+                      <Text style={styles.defaultButtonText}>Set Active</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
+        {/* Empty state */}
+        {!loading && vehicles.length === 0 && !loadError && (
+          <View style={styles.emptyState}>
+            <View style={styles.emptyIcon}>
+              <Ionicons name="car-outline" size={48} color={COLORS.gray300} />
+            </View>
+            <Text style={styles.emptyTitle}>No vehicles registered</Text>
+            <Text style={styles.emptySubtitle}>
+              Complete your driver profile to register your vehicle.
+            </Text>
             <TouchableOpacity
-              key={type}
-              style={[
-                styles.typeOption,
-                vehicleType === type && styles.typeOptionSelected
-              ]}
-              onPress={() => setVehicleType(type)}
+              style={styles.registerButton}
+              onPress={() => router.push('/(auth)/driver-profile' as any)}
+              activeOpacity={0.88}
             >
-              <Text style={[
-                styles.typeText,
-                vehicleType === type && styles.typeTextSelected
-              ]}>{type}</Text>
+              <Ionicons name="add-circle-outline" size={20} color={COLORS.white} />
+              <Text style={styles.registerButtonText}>Complete Driver Profile</Text>
             </TouchableOpacity>
-          ))}
-        </View>
-
-        {/* Vehicle Model */}
-        <Text style={styles.label}>Vehicle Model</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g., Toyota Corolla 2020"
-          placeholderTextColor={COLORS.gray400}
-          value={vehicleModel}
-          onChangeText={setVehicleModel}
-        />
-
-        {/* Plate Number */}
-        <Text style={styles.label}>Plate Number</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="e.g., ABC 123 XY"
-          placeholderTextColor={COLORS.gray400}
-          value={vehiclePlate}
-          onChangeText={setVehiclePlate}
-          autoCapitalize="characters"
-        />
-
-        {/* Verification Status */}
-        <Card style={styles.verificationCard}>
-          <Text style={styles.verificationTitle}>Document Verification</Text>
-          
-          <View style={styles.verificationItem}>
-            <Ionicons 
-              name={driverProfile?.license_uploaded ? 'checkmark-circle' : 'alert-circle'} 
-              size={24} 
-              color={driverProfile?.license_uploaded ? COLORS.success : COLORS.warning} 
-            />
-            <View style={styles.verificationInfo}>
-              <Text style={styles.verificationLabel}>Driver's License</Text>
-              <Text style={styles.verificationStatus}>
-                {driverProfile?.license_uploaded ? 'Uploaded' : 'Not uploaded'}
-              </Text>
-            </View>
           </View>
+        )}
 
-          <View style={styles.verificationItem}>
-            <Ionicons 
-              name={driverProfile?.vehicle_docs_uploaded ? 'checkmark-circle' : 'alert-circle'} 
-              size={24} 
-              color={driverProfile?.vehicle_docs_uploaded ? COLORS.success : COLORS.warning} 
-            />
-            <View style={styles.verificationInfo}>
-              <Text style={styles.verificationLabel}>Vehicle Documents</Text>
-              <Text style={styles.verificationStatus}>
-                {driverProfile?.vehicle_docs_uploaded ? 'Uploaded' : 'Not uploaded'}
-              </Text>
-            </View>
+        {/* Compliance note */}
+        {!loading && vehicles.length > 0 && (
+          <View style={styles.note}>
+            <Ionicons name="information-circle-outline" size={16} color={COLORS.gray400} />
+            <Text style={styles.noteText}>
+              To add a new vehicle, contact NEXRYDE support with your new vehicle documents.
+            </Text>
           </View>
-
-          <TouchableOpacity
-            style={styles.uploadButton}
-            onPress={() => router.push('/(auth)/driver-documents')}
-            activeOpacity={0.8}
-          >
-            <Ionicons name="cloud-upload" size={20} color={COLORS.primary} />
-            <Text style={styles.uploadButtonText}>Upload / Update Documents</Text>
-          </TouchableOpacity>
-        </Card>
-
-        <Button
-          title={loading ? 'Saving...' : 'Save Changes'}
-          onPress={handleSave}
-          loading={loading}
-          disabled={!vehicleType || !vehicleModel || !vehiclePlate}
-          style={styles.saveButton}
-        />
+        )}
       </ScrollView>
+
+      {/* Edit modal */}
+      <Modal
+        visible={editModalVisible}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Edit Vehicle</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
+                <Ionicons name="close" size={24} color={COLORS.gray500} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.inputLabel}>Vehicle Color</Text>
+            <TextInput
+              style={styles.textInput}
+              value={editColor}
+              onChangeText={setEditColor}
+              placeholder="e.g. Dark Gray"
+              placeholderTextColor={COLORS.gray400}
+              autoCapitalize="words"
+            />
+
+            <Text style={styles.inputLabel}>Plate Number</Text>
+            <TextInput
+              style={styles.textInput}
+              value={editPlate}
+              onChangeText={setEditPlate}
+              placeholder="e.g. KTU65KE"
+              placeholderTextColor={COLORS.gray400}
+              autoCapitalize="characters"
+            />
+
+            <TouchableOpacity
+              style={[styles.saveButton, saving && { opacity: 0.7 }]}
+              onPress={saveVehicleEdits}
+              disabled={saving}
+              activeOpacity={0.88}
+            >
+              {saving
+                ? <ActivityIndicator color={COLORS.white} />
+                : <>
+                    <Ionicons name="checkmark" size={18} color={COLORS.white} />
+                    <Text style={styles.saveButtonText}>Save Changes</Text>
+                  </>
+              }
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
-  content: {
-    padding: SPACING.md,
-    paddingBottom: SPACING.xxl,
-  },
+  container: { flex: 1, backgroundColor: COLORS.gray50 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.lg,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: COLORS.white,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: SPACING.md,
-    ...SHADOWS.sm,
-  },
-  title: {
-    fontSize: FONT_SIZE.xxl,
-    fontWeight: '700',
-    color: COLORS.textPrimary,
-  },
-  label: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.sm,
-  },
-  typeContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: SPACING.sm,
-    marginBottom: SPACING.lg,
-  },
-  typeOption: {
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: COLORS.white,
-    borderWidth: 1,
-    borderColor: COLORS.gray200,
-  },
-  typeOptionSelected: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-  typeText: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
-  },
-  typeTextSelected: {
-    color: COLORS.white,
-  },
-  input: {
-    backgroundColor: COLORS.white,
-    borderRadius: BORDER_RADIUS.lg,
-    borderWidth: 1,
-    borderColor: COLORS.gray200,
+    justifyContent: 'space-between',
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.lg,
+    backgroundColor: COLORS.white,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.gray100,
   },
-  verificationCard: {
-    marginBottom: SPACING.lg,
-  },
-  verificationTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '600',
-    color: COLORS.textPrimary,
-    marginBottom: SPACING.md,
-  },
-  verificationItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  verificationInfo: {
-    marginLeft: SPACING.md,
-  },
-  verificationLabel: {
-    fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
-    fontWeight: '500',
-  },
-  verificationStatus: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.textSecondary,
-  },
-  uploadButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: SPACING.md,
-    borderTopWidth: 1,
-    borderTopColor: COLORS.gray200,
-    marginTop: SPACING.sm,
-  },
-  uploadButtonText: {
-    marginLeft: SPACING.sm,
-    color: COLORS.primary,
-    fontWeight: '600',
-  },
-  saveButton: {
-    marginTop: 'auto',
-  },
+  backButton: { padding: SPACING.sm },
+  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
+  content: { padding: SPACING.lg, paddingBottom: 40 },
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    backgroundColor: COLORS.errorSoft,
+    backgroundColor: '#FEF2F2',
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.lg,
     borderWidth: 1,
-    borderColor: COLORS.error + '40',
+    borderColor: '#FECACA',
   },
-  errorBannerText: {
+  errorText: { flex: 1, fontSize: FONT_SIZE.sm, color: COLORS.error, fontWeight: '600' },
+  retryText: { fontSize: FONT_SIZE.sm, color: COLORS.primary, fontWeight: '700' },
+  loadingCenter: { alignItems: 'center', paddingVertical: SPACING.xxxl, gap: SPACING.md },
+  loadingText: { fontSize: FONT_SIZE.sm, color: COLORS.gray400 },
+  approvedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.sm,
+  },
+  approvedBannerText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.white },
+  sectionLabel: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: COLORS.gray500,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: SPACING.md,
+  },
+  vehicleCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray100,
+    ...SHADOWS.sm,
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  vehicleCardDefault: {
+    borderColor: COLORS.primary,
+    borderWidth: 1.5,
+  },
+  defaultBadge: {
+    position: 'absolute',
+    top: SPACING.sm,
+    right: SPACING.sm,
+    backgroundColor: '#16A34A',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  defaultBadgeText: { fontSize: 10, fontWeight: '800', color: COLORS.white },
+  vehicleCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md, marginBottom: SPACING.md },
+  vehicleIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vehicleName: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray900, marginBottom: 4 },
+  vehicleDetail: { fontSize: FONT_SIZE.sm, color: COLORS.gray500, fontWeight: '500', lineHeight: 20 },
+  typePill: {
+    marginTop: SPACING.xs,
+    alignSelf: 'flex-start',
+    backgroundColor: '#EFF6FF',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  typePillText: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
+  vehicleActions: {
+    flexDirection: 'row',
+    gap: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray100,
+    paddingTop: SPACING.md,
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  editButtonText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.primary },
+  defaultButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  defaultButtonText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#059669' },
+  emptyState: { alignItems: 'center', paddingVertical: SPACING.xxxl, gap: SPACING.md },
+  emptyIcon: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    backgroundColor: COLORS.gray100,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: COLORS.gray800 },
+  emptySubtitle: {
+    fontSize: FONT_SIZE.sm,
+    color: COLORS.gray400,
+    textAlign: 'center',
+    paddingHorizontal: SPACING.xl,
+    lineHeight: 20,
+  },
+  registerButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.xl,
+    paddingVertical: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginTop: SPACING.sm,
+    ...SHADOWS.md,
+  },
+  registerButtonText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
+  note: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: SPACING.xs,
+    backgroundColor: COLORS.gray100,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    marginTop: SPACING.sm,
+  },
+  noteText: { flex: 1, fontSize: FONT_SIZE.xs, color: COLORS.gray500, lineHeight: 18 },
+  modalOverlay: {
     flex: 1,
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.error,
-    fontWeight: '600',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
   },
-  errorBannerRetry: {
-    fontSize: FONT_SIZE.sm,
-    color: COLORS.primary,
-    fontWeight: '700',
+  modalSheet: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: BORDER_RADIUS.xxxl,
+    borderTopRightRadius: BORDER_RADIUS.xxxl,
+    padding: SPACING.xl,
+    paddingTop: SPACING.lg,
+    gap: SPACING.sm,
   },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: COLORS.gray200,
+    alignSelf: 'center',
+    marginBottom: SPACING.sm,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: SPACING.md,
+  },
+  modalTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray900 },
+  inputLabel: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray700, marginTop: SPACING.sm },
+  textInput: {
+    backgroundColor: COLORS.gray50,
+    borderWidth: 1,
+    borderColor: COLORS.gray200,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.md,
+    fontSize: FONT_SIZE.md,
+    color: COLORS.gray900,
+    marginTop: SPACING.xs,
+  },
+  saveButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.sm,
+    backgroundColor: COLORS.primary,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
+    marginTop: SPACING.lg,
+    ...SHADOWS.md,
+  },
+  saveButtonText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
 });

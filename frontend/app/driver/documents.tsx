@@ -1,76 +1,138 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { BACKEND_URL, getAuthHeaders, getDriverProfile } from '@/src/services/api';
 import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
 import { useAppStore } from '@/src/store/appStore';
+
+interface DocStatus {
+  id: string;
+  name: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  status: 'verified' | 'pending' | 'not_submitted' | 'expired';
+  detail?: string;
+}
 
 export default function DocumentsScreen() {
   const router = useRouter();
   const { user } = useAppStore();
-  const [documents, setDocuments] = React.useState([
-    { id: 'nin', name: 'National ID (NIN)', status: 'not_uploaded', icon: 'id-card-outline' },
-    { id: 'license', name: "Driver's License", status: 'not_uploaded', icon: 'card-outline' },
-    { id: 'passport', name: 'Passport Photo', status: 'not_uploaded', icon: 'person-circle-outline' },
-    { id: 'vehicle_reg', name: 'Vehicle Registration', status: 'not_uploaded', icon: 'car-outline' },
-    { id: 'insurance', name: 'Insurance Certificate', status: 'not_uploaded', icon: 'shield-checkmark-outline' },
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [isApproved, setIsApproved] = useState(false);
+  const [ninVerified, setNinVerified] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState('');
+  const [documents, setDocuments] = useState<DocStatus[]>([
+    { id: 'nin', name: 'National ID (NIN)', icon: 'card', status: 'not_submitted' },
+    { id: 'drivers_license', name: "Driver's License", icon: 'car', status: 'not_submitted' },
+    { id: 'passport_photo', name: 'Passport Photo', icon: 'person', status: 'not_submitted' },
+    { id: 'vehicle_registration', name: 'Vehicle Registration', icon: 'document-text', status: 'not_submitted' },
+    { id: 'vehicle_license', name: 'Vehicle License Document', icon: 'receipt', status: 'not_submitted' },
+    { id: 'road_worthiness', name: 'Road Worthiness Certificate', icon: 'construct', status: 'not_submitted' },
+    { id: 'insurance', name: 'Vehicle Insurance', icon: 'umbrella', status: 'not_submitted' },
+    { id: 'vehicle_front', name: 'Vehicle Photo (Front)', icon: 'camera', status: 'not_submitted' },
+    { id: 'vehicle_interior', name: 'Vehicle Interior Photo', icon: 'image', status: 'not_submitted' },
+    { id: 'vehicle_ac', name: 'AC System Photo', icon: 'snow', status: 'not_submitted' },
   ]);
 
-  React.useEffect(() => {
-    const loadDocs = async () => {
-      if (!user?.id) return;
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/documents`, {
-          headers: getAuthHeaders(),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          const docs = Array.isArray(data?.documents) ? data.documents : [];
-          setDocuments(prev => prev.map(d => {
-            const backendDoc = docs.find((x: any) =>
-              x.id === d.id ||
-              (d.id === 'license' && x.id === 'drivers_license') ||
-              (d.id === 'passport' && x.id === 'passport_photo') ||
-              (d.id === 'vehicle_reg' && x.id === 'vehicle_registration')
-            );
-            return {
-              ...d,
-              status: backendDoc?.status || d.status,
-            };
-          }));
+  const loadData = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      // Fetch enriched profile (includes nin_verified, document_statuses, vehicles)
+      const profileRes = await getDriverProfile(user.id);
+      const profile = profileRes.data as any;
+      const approved = profile?.verification_status === 'approved';
+      const ninOk: boolean = Boolean(profile?.nin_verified);
+      setIsApproved(approved);
+      setNinVerified(ninOk);
+      setVerificationStatus(profile?.verification_status || '');
+
+      // Build status per document from the archived verification record
+      const docsRes = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/documents`, {
+        headers: getAuthHeaders(),
+      });
+      const docsData = docsRes.ok ? await docsRes.json() : {};
+      const archived: Record<string, any> = (docsData?.documents) || {};
+
+      setDocuments(prev => prev.map((doc) => {
+        // NIN: special case — verified if profile says so
+        if (doc.id === 'nin') {
+          if (ninOk) return { ...doc, status: 'verified', detail: 'Identity confirmed' };
+          const hasNin = Boolean(profile?.nin_number || profile?.nin);
+          return { ...doc, status: hasNin ? 'pending' : 'not_submitted' };
         }
-      } catch { /* keep defaults */ }
-    };
-    loadDocs();
+        // All others: if approved → verified; if in archived with a status → use it; else not_submitted
+        if (approved) return { ...doc, status: 'verified' };
+        const archived_doc = archived[doc.id];
+        if (archived_doc?.status) return { ...doc, status: archived_doc.status };
+        // Check if any file was uploaded (archived has the doc key)
+        if (archived[doc.id]) return { ...doc, status: 'pending' };
+        return doc;
+      }));
+    } catch {
+      // Keep defaults on error.
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, [user?.id]);
 
-  const getStatusColor = (status: string) => {
+  useEffect(() => { void loadData(); }, [loadData]);
+
+  const onRefresh = () => {
+    setRefreshing(true);
+    void loadData();
+  };
+
+  const getStatusColor = (status: DocStatus['status']) => {
     switch (status) {
-      case 'verified': return COLORS.success;
-      case 'pending': return COLORS.warning;
+      case 'verified': return '#16A34A';
+      case 'pending': return '#D97706';
       case 'expired': return COLORS.error;
       default: return COLORS.gray400;
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusBg = (status: DocStatus['status']) => {
+    switch (status) {
+      case 'verified': return '#D1FAE5';
+      case 'pending': return '#FEF3C7';
+      case 'expired': return '#FEE2E2';
+      default: return COLORS.gray100;
+    }
+  };
+
+  const getStatusText = (status: DocStatus['status']) => {
     switch (status) {
       case 'verified': return 'Verified';
-      case 'pending': return 'Pending Review';
+      case 'pending': return 'Under Review';
       case 'expired': return 'Expired';
       default: return 'Not Uploaded';
     }
   };
+
+  const getStatusIcon = (status: DocStatus['status']): React.ComponentProps<typeof Ionicons>['name'] => {
+    switch (status) {
+      case 'verified': return 'checkmark-circle';
+      case 'pending': return 'time';
+      case 'expired': return 'alert-circle';
+      default: return 'cloud-upload-outline';
+    }
+  };
+
+  const verifiedCount = documents.filter(d => d.status === 'verified').length;
+  const allVerified = verifiedCount === documents.length;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -82,59 +144,129 @@ export default function DocumentsScreen() {
         <View style={{ width: 40 }} />
       </View>
 
-      <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.infoCard}>
-          <Ionicons name="information-circle" size={24} color={COLORS.info} />
-          <Text style={styles.infoText}>
-            Keep your compliance documents up to date to remain approved and eligible for ride requests.
-          </Text>
-        </View>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* Status banner */}
+        <LinearGradient
+          colors={allVerified ? ['#059669', '#10B981'] : isApproved ? ['#059669', '#10B981'] : verifiedCount > 0 ? ['#D97706', '#F59E0B'] : ['#1E3A5F', '#2563EB']}
+          style={styles.statusBanner}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+        >
+          <Ionicons
+            name={isApproved ? 'shield-checkmark' : 'time'}
+            size={32}
+            color={COLORS.white}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.bannerTitle}>
+              {isApproved
+                ? 'All Documents Verified'
+                : verificationStatus === 'pending_review' || verificationStatus === 'pending'
+                  ? 'Documents Under Review'
+                  : 'Verification Pending'}
+            </Text>
+            <Text style={styles.bannerSubtitle}>
+              {isApproved
+                ? `${verifiedCount}/${documents.length} documents confirmed by NEXRYDE`
+                : `${verifiedCount}/${documents.length} verified · Your documents are being reviewed`}
+            </Text>
+          </View>
+        </LinearGradient>
 
-        {documents.map((doc) => (
-          <TouchableOpacity 
-            key={doc.id} 
-            style={styles.documentCard}
-            onPress={() => Alert.alert('Document Status', `${doc.name}: ${getStatusText(doc.status)}`)}
-          >
-            <View style={[styles.iconWrap, { backgroundColor: getStatusColor(doc.status) + '20' }]}>
-              <Ionicons name={doc.icon as any} size={24} color={getStatusColor(doc.status)} />
+        {/* NIN special card */}
+        {ninVerified && (
+          <View style={styles.ninVerifiedCard}>
+            <View style={styles.ninVerifiedLeft}>
+              <View style={[styles.ninIcon, { backgroundColor: '#D1FAE5' }]}>
+                <Ionicons name="checkmark-circle" size={24} color="#16A34A" />
+              </View>
+              <View>
+                <Text style={styles.ninVerifiedTitle}>National ID (NIN)</Text>
+                <Text style={styles.ninVerifiedSub}>Identity Verified</Text>
+              </View>
             </View>
-            <View style={styles.documentInfo}>
-              <Text style={styles.documentName}>{doc.name}</Text>
-              <View style={styles.statusRow}>
-                <View style={[styles.statusDot, { backgroundColor: getStatusColor(doc.status) }]} />
-                <Text style={[styles.statusText, { color: getStatusColor(doc.status) }]}>
+            <View style={styles.verifiedBadge}>
+              <Text style={styles.verifiedBadgeText}>VERIFIED</Text>
+            </View>
+          </View>
+        )}
+
+        {/* Document list */}
+        <Text style={styles.sectionTitle}>Document Status</Text>
+        {loading ? (
+          <View style={styles.loadingRow}>
+            <Ionicons name="hourglass-outline" size={24} color={COLORS.gray400} />
+            <Text style={styles.loadingText}>Loading documents…</Text>
+          </View>
+        ) : (
+          documents.map((doc, idx) => (
+            <View
+              key={doc.id}
+              style={[
+                styles.documentCard,
+                idx === documents.length - 1 && { marginBottom: 0 },
+              ]}
+            >
+              <View style={[styles.docIconWrap, { backgroundColor: getStatusBg(doc.status) }]}>
+                <Ionicons name={doc.icon} size={22} color={getStatusColor(doc.status)} />
+              </View>
+              <View style={styles.docInfo}>
+                <Text style={styles.docName}>{doc.name}</Text>
+                {doc.detail ? (
+                  <Text style={[styles.docDetail, { color: getStatusColor(doc.status) }]}>
+                    {doc.detail}
+                  </Text>
+                ) : null}
+              </View>
+              <View style={[styles.statusBadge, { backgroundColor: getStatusBg(doc.status) }]}>
+                <Ionicons name={getStatusIcon(doc.status)} size={14} color={getStatusColor(doc.status)} />
+                <Text style={[styles.statusBadgeText, { color: getStatusColor(doc.status) }]}>
                   {getStatusText(doc.status)}
                 </Text>
               </View>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={COLORS.gray400} />
-          </TouchableOpacity>
-        ))}
+          ))
+        )}
 
-        <TouchableOpacity 
-          style={styles.updateButton}
-          onPress={() => {
-            if (!user?.id) return;
-            router.push({
-              pathname: '/(auth)/driver-documents',
-              params: driverDocumentsRouteParams(user),
-            });
-          }}
-        >
-          <Ionicons name="cloud-upload-outline" size={20} color={COLORS.white} />
-          <Text style={styles.updateButtonText}>Update Documents</Text>
-        </TouchableOpacity>
+        {/* Update documents CTA — only show if not approved */}
+        {!isApproved && (
+          <TouchableOpacity
+            style={styles.updateButton}
+            onPress={() => {
+              if (!user?.id) return;
+              router.push({
+                pathname: '/(auth)/driver-documents',
+                params: driverDocumentsRouteParams(user),
+              });
+            }}
+            activeOpacity={0.88}
+          >
+            <Ionicons name="cloud-upload-outline" size={20} color={COLORS.white} />
+            <Text style={styles.updateButtonText}>
+              {verificationStatus ? 'Update / Resubmit Documents' : 'Upload Documents'}
+            </Text>
+          </TouchableOpacity>
+        )}
+
+        {isApproved && (
+          <View style={styles.approvedNote}>
+            <Ionicons name="lock-closed" size={16} color="#059669" />
+            <Text style={styles.approvedNoteText}>
+              Your driver account is fully verified. Documents are stored securely.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.gray50,
-  },
+  container: { flex: 1, backgroundColor: COLORS.gray50 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -145,32 +277,64 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: COLORS.gray100,
   },
-  backButton: {
-    padding: SPACING.sm,
-  },
-  headerTitle: {
-    fontSize: FONT_SIZE.lg,
-    fontWeight: '800',
-    color: COLORS.gray800,
-  },
-  content: {
-    padding: SPACING.lg,
-  },
-  infoCard: {
+  backButton: { padding: SPACING.sm },
+  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
+  content: { padding: SPACING.lg, paddingBottom: 40 },
+  statusBanner: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: COLORS.infoSoft,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg,
+    alignItems: 'center',
+    gap: SPACING.md,
+    padding: SPACING.lg,
+    borderRadius: BORDER_RADIUS.xl,
     marginBottom: SPACING.lg,
-    gap: SPACING.sm,
+    ...SHADOWS.md,
   },
-  infoText: {
-    flex: 1,
+  bannerTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.white },
+  bannerSubtitle: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.85)', marginTop: 2 },
+  ninVerifiedCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#F0FDF4',
+    borderWidth: 1.5,
+    borderColor: '#86EFAC',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: SPACING.lg,
+  },
+  ninVerifiedLeft: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+  ninIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: BORDER_RADIUS.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  ninVerifiedTitle: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#065F46' },
+  ninVerifiedSub: { fontSize: FONT_SIZE.sm, color: '#059669', fontWeight: '600', marginTop: 2 },
+  verifiedBadge: {
+    backgroundColor: '#16A34A',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  verifiedBadgeText: { fontSize: 10, fontWeight: '800', color: COLORS.white, letterSpacing: 0.5 },
+  sectionTitle: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.info,
-    lineHeight: 20,
+    fontWeight: '800',
+    color: COLORS.gray500,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
+    marginBottom: SPACING.md,
   },
+  loadingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.xl,
+    justifyContent: 'center',
+  },
+  loadingText: { fontSize: FONT_SIZE.sm, color: COLORS.gray400 },
   documentCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -179,38 +343,27 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     marginBottom: SPACING.sm,
     ...SHADOWS.sm,
+    gap: SPACING.sm,
   },
-  iconWrap: {
-    width: 48,
-    height: 48,
+  docIconWrap: {
+    width: 44,
+    height: 44,
     borderRadius: BORDER_RADIUS.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  documentInfo: {
-    flex: 1,
-    marginLeft: SPACING.md,
-  },
-  documentName: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.gray800,
-  },
-  statusRow: {
+  docInfo: { flex: 1 },
+  docName: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray800 },
+  docDetail: { fontSize: FONT_SIZE.xs, fontWeight: '600', marginTop: 2 },
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 4,
+    gap: 4,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 4,
+    borderRadius: BORDER_RADIUS.full,
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: SPACING.xs,
-  },
-  statusText: {
-    fontSize: FONT_SIZE.sm,
-    fontWeight: '600',
-  },
+  statusBadgeText: { fontSize: 11, fontWeight: '700' },
   updateButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -218,12 +371,20 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary,
     padding: SPACING.lg,
     borderRadius: BORDER_RADIUS.xl,
-    marginTop: SPACING.lg,
+    marginTop: SPACING.xl,
     gap: SPACING.sm,
+    ...SHADOWS.md,
   },
-  updateButtonText: {
-    fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+  updateButtonText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
+  approvedNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    marginTop: SPACING.xl,
+    padding: SPACING.md,
+    backgroundColor: '#F0FDF4',
+    borderRadius: BORDER_RADIUS.lg,
   },
+  approvedNoteText: { fontSize: FONT_SIZE.sm, color: '#059669', fontWeight: '600' },
 });

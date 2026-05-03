@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Constants from 'expo-constants';
 import {
   View,
@@ -14,12 +14,23 @@ import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, useThemeColors } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
-import { deleteUserAccount, getUserTrustSummary, updateUser } from '@/src/services/api';
+import { deleteUserAccount, getDriverProfile, getUserTrustSummary, updateUser } from '@/src/services/api';
 import * as ImagePicker from 'expo-image-picker';
 import { ProfileHeroCard } from '@/src/components/profile/ProfileHeroCard';
 import { ProfileQuickActions } from '@/src/components/profile/ProfileQuickActions';
 import { BiometricScanner, EmergencyButton, LoadingSpinner, UserCard } from '@/src/components/tier1';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+
+interface DriverVehicle {
+  id: string;
+  type: string;
+  make: string;
+  model: string;
+  year: string;
+  color: string;
+  plate: string;
+  is_default?: boolean;
+}
 
 export default function DriverProfileScreen() {
   const router = useRouter();
@@ -29,6 +40,27 @@ export default function DriverProfileScreen() {
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [profileImage, setProfileImage] = useState(user?.profile_image || null);
   const isDriverVerified = useMemo(() => Boolean(user?.is_verified), [user?.is_verified]);
+
+  // Driver-specific profile data
+  const [driverCity, setDriverCity] = useState('');
+  const [driverFullName, setDriverFullName] = useState('');
+  const [driverVehicles, setDriverVehicles] = useState<DriverVehicle[]>([]);
+  const [isApproved, setIsApproved] = useState(false);
+
+  const loadDriverProfile = useCallback(async () => {
+    if (!user?.id) return;
+    try {
+      const res = await getDriverProfile(user.id);
+      const p = res.data as any;
+      setDriverCity(p?.city || '');
+      setDriverFullName(p?.full_name || '');
+      setDriverVehicles(p?.vehicles || []);
+      setIsApproved(p?.verification_status === 'approved');
+    } catch { /* non-critical */ }
+  }, [user?.id]);
+
+  useEffect(() => { void loadDriverProfile(); }, [loadDriverProfile]);
+
   const [trustSummary, setTrustSummary] = useState<null | {
     nexryde_score: number;
     rider_risk_score: number;
@@ -193,6 +225,73 @@ export default function DriverProfileScreen() {
           colors={colors}
           onAvatarPress={handleProfilePictureUpload}
         />
+
+        {/* Driver identity summary: name, city, verification */}
+        <View style={[styles.identityCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <View style={styles.identityRow}>
+            <Ionicons name="person-circle-outline" size={20} color={isApproved ? '#059669' : COLORS.gray400} />
+            <Text style={[styles.identityLabel, { color: colors.textMuted }]}>Name</Text>
+            <Text style={[styles.identityValue, { color: colors.text }]}>{driverFullName || user?.name || '—'}</Text>
+          </View>
+          <View style={styles.identityDivider} />
+          <View style={styles.identityRow}>
+            <Ionicons name="location-outline" size={20} color={COLORS.primary} />
+            <Text style={[styles.identityLabel, { color: colors.textMuted }]}>City</Text>
+            <Text style={[styles.identityValue, { color: colors.text }]}>{driverCity || '—'}</Text>
+          </View>
+          <View style={styles.identityDivider} />
+          <View style={styles.identityRow}>
+            <Ionicons
+              name={isApproved ? 'shield-checkmark' : 'time-outline'}
+              size={20}
+              color={isApproved ? '#059669' : '#D97706'}
+            />
+            <Text style={[styles.identityLabel, { color: colors.textMuted }]}>Status</Text>
+            <View style={[styles.statusPill, { backgroundColor: isApproved ? '#D1FAE5' : '#FEF3C7' }]}>
+              <Text style={[styles.statusPillText, { color: isApproved ? '#059669' : '#D97706' }]}>
+                {isApproved ? 'Verified Driver' : 'Pending Verification'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Vehicle summary card */}
+        <TouchableOpacity
+          style={[styles.vehicleSummaryCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+          onPress={() => router.push('/driver/vehicle')}
+          activeOpacity={0.88}
+        >
+          <View style={styles.vehicleSummaryHeader}>
+            <View style={styles.vehicleSummaryIconWrap}>
+              <Ionicons name="car-sport" size={22} color={COLORS.primary} />
+            </View>
+            <Text style={[styles.vehicleSummaryTitle, { color: colors.text }]}>My Vehicles</Text>
+            <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </View>
+          {driverVehicles.length > 0 ? (
+            driverVehicles.map((v) => (
+              <View key={v.id} style={styles.vehicleSummaryRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.vehicleSummaryName, { color: colors.text }]}>
+                    {[v.make, v.model].filter(Boolean).join(' ') || 'Vehicle'}
+                  </Text>
+                  <Text style={[styles.vehicleSummaryDetail, { color: colors.textMuted }]}>
+                    {[v.color, v.year, v.plate].filter(Boolean).join(' • ')}
+                  </Text>
+                </View>
+                {v.is_default && (
+                  <View style={styles.vehicleActiveBadge}>
+                    <Text style={styles.vehicleActiveBadgeText}>Active</Text>
+                  </View>
+                )}
+              </View>
+            ))
+          ) : (
+            <Text style={[styles.vehicleSummaryEmpty, { color: colors.textMuted }]}>
+              No vehicle registered yet
+            </Text>
+          )}
+        </TouchableOpacity>
 
         <ProfileQuickActions
           title="Quick Actions"
@@ -512,6 +611,67 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   scroll: { flex: 1 },
   content: { padding: SPACING.lg },
+  identityCard: {
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 1,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.sm,
+  },
+  identityRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm,
+  },
+  identityDivider: { height: 1, backgroundColor: COLORS.gray100, marginVertical: 2 },
+  identityLabel: { fontSize: FONT_SIZE.sm, fontWeight: '600', width: 56 },
+  identityValue: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700' },
+  statusPill: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  statusPillText: { fontSize: 12, fontWeight: '800' },
+  vehicleSummaryCard: {
+    borderRadius: BORDER_RADIUS.xl,
+    borderWidth: 1,
+    padding: SPACING.md,
+    marginBottom: SPACING.lg,
+    ...SHADOWS.sm,
+  },
+  vehicleSummaryHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    marginBottom: SPACING.sm,
+  },
+  vehicleSummaryIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#EFF6FF',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vehicleSummaryTitle: { flex: 1, fontSize: FONT_SIZE.md, fontWeight: '800' },
+  vehicleSummaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray100,
+  },
+  vehicleSummaryName: { fontSize: FONT_SIZE.sm, fontWeight: '700' },
+  vehicleSummaryDetail: { fontSize: FONT_SIZE.xs, fontWeight: '500', marginTop: 2 },
+  vehicleSummaryEmpty: { fontSize: FONT_SIZE.sm, fontStyle: 'italic', paddingVertical: SPACING.xs },
+  vehicleActiveBadge: {
+    backgroundColor: '#D1FAE5',
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 3,
+    borderRadius: BORDER_RADIUS.full,
+  },
+  vehicleActiveBadgeText: { fontSize: 10, fontWeight: '800', color: '#059669' },
   menuSection: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
