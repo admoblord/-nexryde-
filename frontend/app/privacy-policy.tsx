@@ -143,14 +143,14 @@ const PRIVACY_HTML = `
   <div class="rights-item"><strong>Objection</strong><span>Object to processing based on legitimate interests.</span></div>
   <div class="rights-item"><strong>Withdraw Consent</strong><span>Turn off face unlock or safety recording from in-app Settings.</span></div>
 </div>
-<p>Email <a href="mailto:privacy@nexryde.com">privacy@nexryde.com</a> to exercise any right. Response within 30 days.</p>
+<p>Email <a href="mailto:admin@admoblordgroup.com">admin@admoblordgroup.com</a> to exercise any right. Response within 30 days.</p>
 <p>You may also lodge a complaint with the <strong>Nigeria Data Protection Commission (NDPC)</strong> at <a href="https://ndpc.gov.ng">ndpc.gov.ng</a>.</p>
 
 <h2>7. Location</h2>
 <p>Foreground location is required to book and track rides. Background location is required only when a driver is online. You can adjust permissions in device Settings, but disabling location will prevent booking or receiving rides.</p>
 
 <h2>8. Children</h2>
-<p>NEXRYDE is not for persons under 18. If we discover a minor has created an account, we will delete it immediately. Contact support@nexryde.com if you believe a minor is using NEXRYDE.</p>
+<p>NEXRYDE is not for persons under 18. If we discover a minor has created an account, we will delete it immediately. Contact admin@admoblordgroup.com if you believe a minor is using NEXRYDE.</p>
 
 <h2>9. International Transfers</h2>
 <p>Data may be processed on Google Cloud (us-central1) and MongoDB Atlas servers. Both providers are bound by data protection contracts meeting international standards.</p>
@@ -159,9 +159,9 @@ const PRIVACY_HTML = `
 <p>Material changes will be notified in-app and by email at least 14 days before the new policy takes effect. Continued use constitutes acceptance.</p>
 
 <div class="contact-box">
-  <p><strong>Privacy / Data Requests:</strong> <a href="mailto:privacy@nexryde.com">privacy@nexryde.com</a></p>
-  <p><strong>Customer Support:</strong> <a href="mailto:support@nexryde.com">support@nexryde.com</a></p>
-  <p><strong>Legal:</strong> <a href="mailto:legal@nexryde.com">legal@nexryde.com</a></p>
+  <p><strong>Privacy / Data Requests:</strong> <a href="mailto:admin@admoblordgroup.com">admin@admoblordgroup.com</a></p>
+  <p><strong>Customer Support:</strong> <a href="mailto:admin@admoblordgroup.com">admin@admoblordgroup.com</a></p>
+  <p><strong>Legal:</strong> <a href="mailto:admin@admoblordgroup.com">admin@admoblordgroup.com</a></p>
 </div>
 
 <footer>© 2026 NEXRYDE — AdmoblordGroup. Registered Data Controller under the Nigeria Data Protection Act 2023.</footer>

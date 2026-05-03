@@ -1263,7 +1263,7 @@ async def get_support_contacts():
     police_numbers = [n.strip() for n in (os.environ.get("NEXRYDE_PUBLIC_POLICE_NUMBERS", "+234199")).split(",") if n.strip()]
     return {
         "support_phone": "+2348089297811",
-        "support_email": "support@nexryde.com",
+        "support_email": "admin@admoblordgroup.com",
         "nigerian_police_numbers": police_numbers,
         "emergency_line": "+234199",
     }

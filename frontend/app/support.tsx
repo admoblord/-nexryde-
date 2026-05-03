@@ -81,7 +81,7 @@ export default function SupportScreen() {
   const [sending, setSending] = useState(false);
   const [listening, setListening] = useState(false);
   const [supportPhone, setSupportPhone] = useState('+2348089297811');
-  const [supportEmail, setSupportEmail] = useState('support@nexryde.com');
+  const [supportEmail, setSupportEmail] = useState('admin@admoblordgroup.com');
   const [stateQuery, setStateQuery] = useState('');
   const [detectedState, setDetectedState] = useState('');
   const [searchTouched, setSearchTouched] = useState(false);

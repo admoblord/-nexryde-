@@ -262,7 +262,7 @@ export default function DriverTermsScreen() {
             <Text style={styles.sectionHeader}>12. Contact & Support</Text>
             <Text style={styles.paragraph}>
               For questions or support:{'\n'}
-              • Email: support@nexryde.com{'\n'}
+              • Email: admin@admoblordgroup.com{'\n'}
               • Phone: +234 808 929 7811{'\n'}
               • In-app chat support available 24/7{'\n'}
               • Visit: https://nexryde-backend-993913300770.us-central1.run.app/support-page

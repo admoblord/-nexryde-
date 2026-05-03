@@ -22,7 +22,7 @@ admin_router = APIRouter(prefix="/api", tags=["Admin"])
 
 # ==================== ADMIN ENDPOINTS ====================
 
-_admin_email = os.environ.get("ADMIN_EMAIL", "admin@nexryde.com")
+_admin_email = os.environ.get("ADMIN_EMAIL", "admin@admoblordgroup.com")
 _admin_password = os.environ.get("ADMIN_PASSWORD")
 if not _admin_password:
     logger.warning("ADMIN_PASSWORD not set in environment - using a generated fallback")

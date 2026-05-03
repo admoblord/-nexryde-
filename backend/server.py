@@ -1714,7 +1714,7 @@ async def serve_support_page():
     support_file = ROOT_DIR / "support-page.html"
     if support_file.exists():
         return FileResponse(support_file, media_type="text/html")
-    return {"redirect": "mailto:support@nexryde.com", "email": "support@nexryde.com", "message": "Contact NEXRYDE support at support@nexryde.com"}
+    return {"redirect": "mailto:admin@admoblordgroup.com", "email": "admin@admoblordgroup.com", "message": "Contact NEXRYDE support at admin@admoblordgroup.com"}
 
 @app.get("/delete-account", include_in_schema=False)
 async def serve_delete_account():

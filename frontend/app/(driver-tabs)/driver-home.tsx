@@ -1018,7 +1018,7 @@ export default function ModernDriverHome() {
             </Text>
             <TouchableOpacity
               onPress={() => {
-                Linking.openURL('mailto:security@nexryde.com?subject=SIM%20Swap%20Alert').catch(() =>
+                Linking.openURL('mailto:admin@admoblordgroup.com?subject=SIM%20Swap%20Alert').catch(() =>
                   Linking.openURL('https://wa.me/2348000000000?text=SIM+swap+alert+on+my+account')
                 );
               }}

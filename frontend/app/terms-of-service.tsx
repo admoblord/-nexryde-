@@ -93,7 +93,7 @@ const TERMS_HTML = `
 <ul>
   <li>Provide accurate information during registration.</li>
   <li>Keep your account credentials confidential.</li>
-  <li>Notify us immediately of unauthorised access at support@nexryde.com.</li>
+  <li>Notify us immediately of unauthorised access at admin@admoblordgroup.com.</li>
   <li>One person, one account per role. Duplicate accounts may all be deactivated.</li>
 </ul>
 
@@ -169,9 +169,9 @@ const TERMS_HTML = `
 <p>Request account deletion from within the app. Some records may be retained for up to 5 years for legal and compliance purposes.</p>
 
 <div class="contact-box">
-  <p><strong>Support:</strong> support@nexryde.com</p>
-  <p><strong>Legal:</strong> legal@nexryde.com</p>
-  <p><strong>Privacy:</strong> privacy@nexryde.com</p>
+  <p><strong>Support:</strong> admin@admoblordgroup.com</p>
+  <p><strong>Legal:</strong> admin@admoblordgroup.com</p>
+  <p><strong>Privacy:</strong> admin@admoblordgroup.com</p>
 </div>
 
 <footer>© 2026 NEXRYDE — AdmoblordGroup. All rights reserved.</footer>
