@@ -1,7 +1,7 @@
 // Fix for react-native-google-places-autocomplete web compatibility
 import 'react-native-get-random-values';
 
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Text, Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
@@ -12,12 +12,21 @@ import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { QueryProvider } from '@/src/providers/QueryProvider';
 import { useNotifications } from '@/src/hooks/useNotifications';
+import { useAppStore } from '@/src/store/appStore';
 import React, { useEffect } from 'react';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ── Referral deep-link key ────────────────────────────────────────────────────
 export const REFERRAL_CODE_STORAGE_KEY = '@nexryde_pending_referral';
+
+// ── Action deep-link routes ───────────────────────────────────────────────────
+const ACTION_ROUTES: Record<string, string> = {
+  go_online: '/(driver-tabs)/driver-home?action=go_online',
+  resume:    '/(driver-tabs)/driver-home?action=resume',
+  my_trips:  '/(driver-tabs)/driver-trips',
+  wallet:    '/(driver-tabs)/driver-earnings',
+};
 
 /**
  * Extract a referral identifier from any Nexryde invite URL.
@@ -65,20 +74,61 @@ async function handleInviteUrl(url: string) {
   } catch { /* storage unavailable */ }
 }
 
+/**
+ * Extracts a quick-action key from nexryde://action/{key} URLs.
+ * Returns null for any other URL shape.
+ */
+function extractActionKey(url: string): string | null {
+  try {
+    const parsed = Linking.parse(url);
+    // scheme = nexryde, hostname = action (parsed as path on some platforms)
+    if (parsed.scheme === 'nexryde') {
+      const pathParts = (parsed.path || '').split('/').filter(Boolean);
+      // nexryde://action/go_online → path = 'action/go_online'
+      if (pathParts[0] === 'action' && pathParts[1]) return pathParts[1];
+      // Some parsers put the host in hostname
+      if (parsed.hostname === 'action' && pathParts[0]) return pathParts[0];
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function RootLayout() {
+  const router = useRouter();
+  const { user } = useAppStore();
+
   // ── Deep link listener ──────────────────────────────────────────────────────
   useEffect(() => {
+    const handleUrl = (url: string) => {
+      // Action deep links (widget / shortcuts) take priority
+      const actionKey = extractActionKey(url);
+      if (actionKey) {
+        const route = ACTION_ROUTES[actionKey];
+        if (route) {
+          // Only navigate if a driver is logged in
+          if (user?.role === 'driver' || !user) {
+            router.push(route as any);
+          }
+          return;
+        }
+      }
+      // Otherwise try as referral invite URL
+      void handleInviteUrl(url);
+    };
+
     // Handle the URL that launched the app (cold start / killed state)
     Linking.getInitialURL().then((url) => {
-      if (url) void handleInviteUrl(url);
+      if (url) handleUrl(url);
     }).catch(() => {});
 
     // Handle URLs while app is in foreground / background
     const sub = Linking.addEventListener('url', ({ url }) => {
-      void handleInviteUrl(url);
+      handleUrl(url);
     });
     return () => sub.remove();
-  }, []);
+  }, [user?.role]);
 
   try {
     useNotifications();

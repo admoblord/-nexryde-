@@ -21,6 +21,7 @@ import {
   driverDocumentsRouteParams,
   driverProfileRouteParams,
 } from '@/src/utils/driverOnboardingNav';
+import { loadDriverState } from '@/src/services/driverStateService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -48,6 +49,15 @@ export default function SplashScreen() {
   const setUser = useAppStore((s) => s.setUser);
   const setIsAuthenticated = useAppStore((s) => s.setIsAuthenticated);
   const setToken = useAppStore((s) => s.setToken);
+
+  // ── Fast-resume: skip animations entirely for returning logged-in users ────
+  const [skipAnimation, setSkipAnimation] = useState(false);
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    isUserLoggedIn().then((loggedIn) => {
+      if (loggedIn) setSkipAnimation(true);
+    }).catch(() => {});
+  }, []);
 
   // ── Animation refs ────────────────────────────────────────────────
   const screenFade = useRef(new Animated.Value(0)).current;         // whole screen
@@ -92,9 +102,9 @@ export default function SplashScreen() {
     } catch { return false; }
   };
 
-  // ── Entry animation ────────────────────────────────────────────────
+  // ── Entry animation (new users only — returning users skip straight to their screen) ──
   useEffect(() => {
-    if (Platform.OS === 'web') return;
+    if (Platform.OS === 'web' || skipAnimation) return;
 
     // Sequence: screen fades in → logo bars slide in → logo scales → text → tagline → dots
     Animated.sequence([
@@ -181,9 +191,18 @@ export default function SplashScreen() {
           setToken(userData.token || null);
           setIsAuthenticated(true);
 
-          // Navigate IMMEDIATELY — no waiting
+          // ── Smart Resume ─────────────────────────────────────────────────
           if (userData.role === 'driver') {
-            router.replace('/(driver-tabs)/driver-home');
+            const driverState = await loadDriverState(userData.id).catch(() => null);
+            if (driverState?.activeTripId) {
+              // Driver was mid-trip — go straight to the tracking screen
+              router.replace({
+                pathname: '/driver/tracking' as any,
+                params: { tripId: driverState.activeTripId },
+              });
+            } else {
+              router.replace('/(driver-tabs)/driver-home');
+            }
           } else {
             router.replace('/(rider-tabs)/rider-home');
           }

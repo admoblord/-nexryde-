@@ -61,6 +61,10 @@ export function useNotifications() {
       if (data?.type === 'trial_ended' && user?.role === 'driver') {
         router.push('/driver/subscription');
       }
+      // "You're offline — go online now" action notification
+      if (data?.type === 'go_online' && user?.role === 'driver') {
+        router.push('/(driver-tabs)/driver-home?action=go_online' as any);
+      }
       if (data?.type === 'feature_update') {
         const route = typeof data?.route === 'string' ? data.route : '/(rider-tabs)/rider-home';
         const featureId = typeof data?.feature_id === 'string' ? data.feature_id : '';

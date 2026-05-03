@@ -1,6 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="app_name">NEXRYDE</string>
-  <string name="expo_system_ui_user_interface_style" translatable="false">automatic</string>
-  <string name="expo_splash_screen_resize_mode" translatable="false">contain</string>
-  <string name="expo_splash_screen_status_bar_translucent" translatable="false">false</string>
+  <!-- App Shortcuts (long-press app icon) -->
+  <string name="shortcut_go_online_short">Go Online</string>
+  <string name="shortcut_go_online_long">Go Online – Start Earning</string>
+  <string name="shortcut_my_trips_short">My Trips</string>
+  <string name="shortcut_my_trips_long">View My Trip History</string>
+  <string name="shortcut_wallet_short">Wallet</string>
+  <string name="shortcut_wallet_long">Open My Wallet</string>
+
+  <!-- Home Screen Widget -->
+  <string name="widget_driver_status_description">Nexryde Driver Status – go online instantly</string>
 </resources>

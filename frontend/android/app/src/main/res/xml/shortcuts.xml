@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+  <!-- Shortcut 1: Go Online -->
+  <shortcut
+    android:shortcutId="go_online"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="@string/shortcut_go_online_short"
+    android:shortcutLongLabel="@string/shortcut_go_online_long">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="nexryde://action/go_online"
+      android:targetPackage="com.nexryde.app"
+      android:targetClass="com.nexryde.app.MainActivity" />
+    <categories android:name="android.shortcut.conversation" />
+  </shortcut>
+
+  <!-- Shortcut 2: My Trips -->
+  <shortcut
+    android:shortcutId="my_trips"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="@string/shortcut_my_trips_short"
+    android:shortcutLongLabel="@string/shortcut_my_trips_long">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="nexryde://action/my_trips"
+      android:targetPackage="com.nexryde.app"
+      android:targetClass="com.nexryde.app.MainActivity" />
+    <categories android:name="android.shortcut.conversation" />
+  </shortcut>
+
+  <!-- Shortcut 3: Wallet -->
+  <shortcut
+    android:shortcutId="wallet"
+    android:enabled="true"
+    android:icon="@mipmap/ic_launcher"
+    android:shortcutShortLabel="@string/shortcut_wallet_short"
+    android:shortcutLongLabel="@string/shortcut_wallet_long">
+    <intent
+      android:action="android.intent.action.VIEW"
+      android:data="nexryde://action/wallet"
+      android:targetPackage="com.nexryde.app"
+      android:targetClass="com.nexryde.app.MainActivity" />
+    <categories android:name="android.shortcut.conversation" />
+  </shortcut>
+
+</shortcuts>

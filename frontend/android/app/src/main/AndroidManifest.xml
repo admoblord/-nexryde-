@@ -33,13 +33,44 @@
         <action android:name="android.intent.action.MAIN"/>
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
+      <!-- Existing nexryde:// deep links (referral etc.) -->
       <intent-filter>
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="nexryde"/>
       </intent-filter>
+      <!-- nexryde://action/* — widget taps + app shortcuts -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="nexryde" android:host="action"/>
+      </intent-filter>
+      <!-- https://nexryde.app/invite/* — referral Universal Links -->
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="nexryde.app" android:pathPrefix="/invite"/>
+      </intent-filter>
+      <!-- App shortcuts (long-press icon) -->
+      <meta-data
+        android:name="android.app.shortcuts"
+        android:resource="@xml/shortcuts"/>
     </activity>
+
+    <!-- ── Nexryde Driver Status home-screen widget ─────────────────────── -->
+    <receiver
+      android:name=".widget.DriverStatusWidgetProvider"
+      android:exported="true">
+      <intent-filter>
+        <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+      </intent-filter>
+      <meta-data
+        android:name="android.appwidget.provider"
+        android:resource="@xml/rn_widget_driver_status"/>
+    </receiver>
     <uses-library android:name="org.apache.http.legacy" android:required="false"/>
   </application>
 </manifest>

@@ -1,5 +1,21 @@
 const IS_DEV = process.env.APP_VARIANT === "development";
 
+const widgetConfig = {
+  fonts: [],
+  widgets: [
+    {
+      name: 'DriverStatus',
+      label: 'Nexryde Driver Status',
+      minWidth: '180dp',
+      minHeight: '110dp',
+      targetCellWidth: 3,
+      targetCellHeight: 2,
+      description: 'Go online instantly from your home screen',
+      updatePeriodMillis: 1800000,
+    },
+  ],
+};
+
 const GOOGLE_MAPS_API_KEY =
   process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || "";
 const BACKEND_URL =
@@ -10,6 +26,10 @@ const PRIVACY_POLICY_URL = `${BACKEND_URL}/privacy-policy`;
 
 module.exports = ({ config }) => ({
   ...config,
+  plugins: [
+    ...(config.plugins || []),
+    ['react-native-android-widget', widgetConfig],
+  ],
   extra: {
     ...config.extra,
     BACKEND_URL,

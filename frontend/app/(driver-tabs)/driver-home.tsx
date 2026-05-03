@@ -1,4 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useLocalSearchParams } from 'expo-router';
+import {
+  saveDriverState,
+  updateDriverOnlineStatus,
+  updateDriverLastScreen,
+} from '@/src/services/driverStateService';
 import {
   View,
   Text,
@@ -117,6 +123,11 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
 export default function ModernDriverHome() {
   const router = useRouter();
   const { user, token, setCurrentTrip, setCurrentLocation } = useAppStore();
+
+  // ── Quick-access action (from widget tap or app shortcut) ─────────────────
+  const { action: rawAction } = useLocalSearchParams<{ action?: string }>();
+  const pendingAction = typeof rawAction === 'string' ? rawAction : '';
+  const autoActionFiredRef = useRef(false);
   const { language, setLanguage, availableLanguages, t } = useLanguage();
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(isOnline);
@@ -301,6 +312,8 @@ export default function ModernDriverHome() {
       const profile = await response.json();
       const serverOnline = Boolean(profile?.is_online);
       setIsOnline(serverOnline);
+      // Persist authoritative server state so the widget and smart-resume reflect reality
+      void updateDriverOnlineStatus(serverOnline, user.id);
     } catch {}
   };
   const fetchIncomingRide = useCallback(async () => {
@@ -328,13 +341,42 @@ export default function ModernDriverHome() {
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
-    
+
     // Check onboarding status first — this is the verification gate
     initializeOfflineMode();
     checkOnboardingStatus();
     hydrateOnlineState();
     void getQueueSize().then(setOfflineQueueCount);
+
+    // Persist last-screen so smart resume and widget know where we are
+    if (user?.id) {
+      void saveDriverState({
+        isOnline: isOnlineRef.current,
+        lastScreen: 'home',
+        activeTripId: null,
+        userId: user.id,
+      });
+    }
   }, []);
+
+  // ── Auto go-online from widget / shortcut / notification ─────────────────
+  useEffect(() => {
+    if (!pendingAction || autoActionFiredRef.current) return;
+    if (pendingAction !== 'go_online') return;
+    autoActionFiredRef.current = true;
+    // Wait for hydrateOnlineState to complete (≈ 400 ms on fast networks)
+    const t = setTimeout(() => {
+      if (!isOnlineRef.current) {
+        void (async () => {
+          try {
+            // Use the same toggle path so all guards (approval, trial) run normally
+            await handleToggleOnline();
+          } catch {}
+        })();
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [pendingAction]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
@@ -858,6 +900,10 @@ export default function ModernDriverHome() {
         fetchIncomingRide();
       } else {
         setIncomingRide(null);
+      }
+      // Persist so widget and smart-resume reflect the new status instantly
+      if (user?.id) {
+        void updateDriverOnlineStatus(nextStatus, user.id);
       }
     } catch {
       Alert.alert('Network Error', 'Could not update online status. Check your connection.');
