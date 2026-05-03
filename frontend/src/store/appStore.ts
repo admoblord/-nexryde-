@@ -75,6 +75,12 @@ export interface Trip {
     available?: boolean;
     gate_code?: string;
     estate_name?: string;
+    /** ISO timestamp when code was shared with the driver */
+    shared_at?: string | null;
+    /** ISO timestamp when the code window expires */
+    expires_at?: string | null;
+    /** Whether the rider has saved a gate code in their preferences */
+    has_saved_code?: boolean;
   };
   geo_fence_trip_lock?: Record<string, unknown> | null;
   speed_spike_alert?: Record<string, unknown> | null;

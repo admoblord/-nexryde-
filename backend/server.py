@@ -1325,6 +1325,14 @@ async def get_active_trip(user_id: str, request: Request):
         )
         if not trip:
             return {"active": False}
+        # Attach estate_gate_access so driver trips screen sees the gate countdown
+        try:
+            from routers.trips import _build_estate_gate_access
+            gate = await _build_estate_gate_access(trip, user_id)
+            if gate:
+                trip["estate_gate_access"] = gate
+        except Exception:
+            pass
         return {"active": True, "trip": trip}
     except HTTPException:
         raise
