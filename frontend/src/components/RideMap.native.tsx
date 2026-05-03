@@ -763,9 +763,9 @@ export default function RideMap({
       {userPanned && activeLL ? <RecenterButton onPress={handleRecenter} /> : null}
 
       {/* ── Driver preview card ── */}
-      {activeLL && activeDriverMeta?.name ? (
+      {activeLL && activeDriverMeta ? (
         <DriverPreviewCard
-          name={String(activeDriverMeta.name)}
+          name={String(activeDriverMeta.name || 'Driver')}
           vehicle={activeDriverMeta.vehicle}
           plate={activeDriverMeta.plate}
           rating={activeDriverMeta.rating}

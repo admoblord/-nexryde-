@@ -150,21 +150,24 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
   const bearingRef = useRef(0);
   const prevDriverRef = useRef<{ lat: number; lng: number } | null>(null);
 
-  // Stable initial region (only computed once — avoids map reload)
+  // Stable initial region (only computed once — avoids map reload on re-render)
   const focalLat = driverLat ?? pickupLat ?? 6.5244;
   const focalLng = driverLng ?? pickupLng ?? 3.3792;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   const initialRegion = useMemo(() => ({
     latitude: focalLat,
     longitude: focalLng,
     latitudeDelta: 0.03,
     longitudeDelta: 0.03,
-  }), []); // eslint-disable-line react-hooks/exhaustive-deps
+  }), [Boolean(driverLat ?? pickupLat)]); // recompute only when coords go from null → available
 
-  // Bearing-aware camera follow
+  // Bearing-aware camera follow (skip re-animate if driver moved < 5 m to avoid over-animating GPS jitter)
   useEffect(() => {
     if (!mapReady || !mapRef.current || !driverLat || !driverLng) return;
     const prev = prevDriverRef.current;
-    if (prev && (prev.lat !== driverLat || prev.lng !== driverLng)) {
+    if (prev) {
+      const moved = haversineDriverKm(prev.lat, prev.lng, driverLat, driverLng);
+      if (moved < 0.005) return; // < 5 m — skip
       bearingRef.current = calcDriverBearing(prev.lat, prev.lng, driverLat, driverLng);
     }
     prevDriverRef.current = { lat: driverLat, lng: driverLng };
