@@ -335,14 +335,20 @@ export default function TrackingScreen() {
       setInvisibleShieldMode(t.invisible_shield_mode || null);
       setSafeArrivalCheck(t.safe_arrival_check || null);
       if (t.driver_id) {
-        setDriverInfo({
+        // Merge with existing driverInfo to preserve profile_image, face_image and real rating
+        setDriverInfo((prev: any) => ({
+          ...(prev || {}),
           driver_id: t.driver_id,
-          name: t.driver_name || 'Driver',
-          rating: 4.5,
-          vehicle: t.vehicle_model || 'Vehicle',
-          plate: t.vehicle_plate || '',
-          color: t.vehicle_color || '',
-        });
+          name: t.driver_name || prev?.name || 'Driver',
+          // Prefer real rating from initial load; fall back to trip's driver_rating
+          rating: prev?.rating ?? prev?.avg_rating ?? t.driver_rating ?? null,
+          vehicle: t.vehicle_model || prev?.vehicle || 'Vehicle',
+          plate: t.vehicle_plate || prev?.plate || '',
+          color: t.vehicle_color || prev?.color || '',
+          // Always preserve image fields from the initial full load
+          profile_image: prev?.profile_image || null,
+          face_image: prev?.face_image || null,
+        }));
       }
       {
         const prev = useAppStore.getState().currentTrip;
