@@ -1779,6 +1779,11 @@ function BookInDriveStyle() {
                         <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>⚡ Priority match</Text>
                       </View>
                     )}
+                    {/* Anti-surge badge — always visible during fare estimation */}
+                    <View style={{ backgroundColor: 'rgba(16,185,129,0.12)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' }}>
+                      <Ionicons name="shield-checkmark-outline" size={12} color="#10B981" />
+                      <Text style={{ color: '#10B981', fontSize: 11, fontWeight: '700' }}>No surge pricing</Text>
+                    </View>
                     {fareDetails?.first_ride_discount_applied && (
                       <View style={{ backgroundColor: 'rgba(0,212,106,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(0,212,106,0.35)' }}>
                         <Ionicons name="gift-outline" size={12} color="#00D46A" />

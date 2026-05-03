@@ -175,46 +175,86 @@ TIER_CONFIG = {
 
 
 def _anti_surge_window(now: datetime) -> dict:
+    """
+    Returns the active earnings-guarantee window for the current time.
+
+    During active windows Nexryde guarantees a minimum hourly earnings floor.
+    If a driver earns less, Nexryde covers the gap — so riders never see surge pricing.
+    """
     hour = now.hour
     weekday = now.weekday()
     is_weekend = weekday >= 5
 
+    # Compute the wall-clock end of the current hour for window_ends_at
+    current_hour_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+
     if 6 <= hour < 10:
+        window_ends_at = now.replace(hour=10, minute=0, second=0, microsecond=0)
         return {
             "active": True,
             "window_key": "morning_rush",
             "title": "Morning Rush Guarantee",
+            "icon": "sunny-outline",
             "reason": "Work and school commute hours",
             "minimum_hourly_earnings": 6500 if is_weekend else 7000,
+            "window_ends_at": window_ends_at.isoformat(),
+            "window_ends_label": "10:00 AM",
+            "current_hour_ends_at": current_hour_end.isoformat(),
         }
     if 17 <= hour < 21:
+        window_ends_at = now.replace(hour=21, minute=0, second=0, microsecond=0)
         return {
             "active": True,
             "window_key": "evening_peak",
             "title": "Evening Peak Guarantee",
+            "icon": "moon-outline",
             "reason": "Closing-hour demand and traffic peak",
             "minimum_hourly_earnings": 7000 if is_weekend else 7500,
+            "window_ends_at": window_ends_at.isoformat(),
+            "window_ends_label": "9:00 PM",
+            "current_hour_ends_at": current_hour_end.isoformat(),
         }
     if 12 <= hour < 19 and now.month in {4, 5, 6, 7, 9, 10}:
+        window_ends_at = now.replace(hour=19, minute=0, second=0, microsecond=0)
         return {
             "active": True,
             "window_key": "rain_cover",
             "title": "Rain Cover Guarantee",
+            "icon": "rainy-outline",
             "reason": "Wet-weather availability protection",
             "minimum_hourly_earnings": 6000,
+            "window_ends_at": window_ends_at.isoformat(),
+            "window_ends_label": "7:00 PM",
+            "current_hour_ends_at": current_hour_end.isoformat(),
         }
 
-    next_window = "6:00 AM"
+    # Standby — compute next window start
     if hour < 6:
-        next_window = "6:00 AM"
-    elif hour < 17:
-        next_window = "5:00 PM"
+        next_start = now.replace(hour=6, minute=0, second=0, microsecond=0)
+        next_label = "6:00 AM"
+    elif 10 <= hour < 12:
+        next_start = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        next_label = "12:00 PM (Rain Cover)" if now.month in {4, 5, 6, 7, 9, 10} else "5:00 PM"
+    elif 12 <= hour < 17:
+        next_start = now.replace(hour=17, minute=0, second=0, microsecond=0)
+        next_label = "5:00 PM"
+    else:
+        # After 21:00 — next window is morning of next day
+        next_start = (now + timedelta(days=1)).replace(hour=6, minute=0, second=0, microsecond=0)
+        next_label = "6:00 AM tomorrow"
+
     return {
         "active": False,
         "window_key": "standby",
-        "title": "Guarantee standby",
-        "reason": f"Next anti-surge window starts by {next_window}",
+        "title": "Earnings Guarantee",
+        "icon": "shield-checkmark-outline",
+        "reason": f"Next guaranteed window at {next_label}",
         "minimum_hourly_earnings": 5500,
+        "window_ends_at": None,
+        "window_ends_label": None,
+        "next_window_starts_at": next_start.isoformat(),
+        "next_window_label": next_label,
+        "current_hour_ends_at": current_hour_end.isoformat(),
     }
 
 
@@ -2432,20 +2472,36 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
         )
     ]
     current_hour_earnings = sum(float(trip.get("fare", 0) or 0) for trip in current_hour_trips)
-    top_up_gap = max(0.0, float(guarantee_window["minimum_hourly_earnings"]) - current_hour_earnings)
+    floor = float(guarantee_window["minimum_hourly_earnings"])
+    top_up_gap = max(0.0, floor - current_hour_earnings)
+    progress_pct = min(100.0, round((current_hour_earnings / floor * 100) if floor > 0 else 0, 1))
+    above_floor = current_hour_earnings >= floor
+
     guarantee = {
         "active": bool(guarantee_window["active"]),
         "title": guarantee_window["title"],
+        "icon": guarantee_window.get("icon", "shield-checkmark-outline"),
         "reason": guarantee_window["reason"],
         "window_key": guarantee_window["window_key"],
-        "minimum_hourly_earnings": float(guarantee_window["minimum_hourly_earnings"]),
+        "minimum_hourly_earnings": floor,
         "current_hour_earnings": round(current_hour_earnings, 2),
         "current_hour_trip_count": len(current_hour_trips),
         "top_up_gap": round(top_up_gap, 2),
+        "progress_pct": progress_pct,
+        "above_floor": above_floor,
         "protected_until": (current_hour_start + timedelta(hours=1)).isoformat(),
+        "window_ends_at": guarantee_window.get("window_ends_at"),
+        "window_ends_label": guarantee_window.get("window_ends_label"),
+        "next_window_label": guarantee_window.get("next_window_label"),
+        "next_window_starts_at": guarantee_window.get("next_window_starts_at"),
         "message": (
-            f"NEXRYDE guarantees at least ₦{int(guarantee_window['minimum_hourly_earnings']):,}/hour "
-            f"during {guarantee_window['title'].lower()}."
+            f"NEXRYDE guarantees at least ₦{int(floor):,}/hour "
+            f"during {guarantee_window['title'].lower()}. "
+            + (
+                f"Nexryde will top up ₦{int(top_up_gap):,} if you don't reach the floor this hour."
+                if not above_floor and guarantee_window["active"]
+                else "You have already exceeded the earnings floor this hour."
+            )
         ),
     }
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)

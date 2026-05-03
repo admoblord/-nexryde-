@@ -1270,28 +1270,98 @@ export default function ModernDriverHome() {
             </View>
           </View>
         )}
-        {earningsGuarantee && (
-          <View style={[styles.offlineSyncCard, styles.guaranteeBanner]}>
-            <View style={[styles.offlineSyncIcon, styles.guaranteeIcon]}>
-              <Ionicons
-                name={earningsGuarantee.active ? 'thunderstorm-outline' : 'shield-checkmark-outline'}
-                size={18}
-                color={earningsGuarantee.active ? COLORS.warning : COLORS.accentGreen}
-              />
+        {/* ── EARNINGS GUARANTEE CARD ─────────────────────────────────── */}
+        {earningsGuarantee && (() => {
+          const g = earningsGuarantee;
+          const floor = Number(g.minimum_hourly_earnings || 0);
+          const earned = Number(g.current_hour_earnings || 0);
+          const gap = Number(g.top_up_gap || 0);
+          const pct = Math.min(100, Number(g.progress_pct || 0));
+          const aboveFloor = Boolean(g.above_floor) || earned >= floor;
+
+          // Standby — show only a compact chip when driver is offline
+          if (!g.active) {
+            return (
+              <View style={styles.guaranteeChip}>
+                <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.accentGreen} />
+                <Text style={styles.guaranteeChipText}>
+                  Earnings Guarantee · Next: {g.next_window_label || 'See schedule'}
+                </Text>
+              </View>
+            );
+          }
+
+          // Active window — full rich card
+          const accentColor = aboveFloor ? '#16A34A' : '#D97706';
+          const bgColor = aboveFloor ? '#F0FDF4' : '#FFFBEB';
+          const borderColor = aboveFloor ? '#86EFAC' : '#FCD34D';
+          const barFill = aboveFloor ? '#16A34A' : '#F59E0B';
+
+          return (
+            <View style={[styles.guaranteeCard, { backgroundColor: bgColor, borderColor }]}>
+              {/* Header row */}
+              <View style={styles.guaranteeHeader}>
+                <View style={[styles.guaranteeIconWrap, { backgroundColor: aboveFloor ? '#DCFCE7' : '#FEF3C7' }]}>
+                  <Ionicons
+                    name={(g.icon as any) || 'shield-checkmark-outline'}
+                    size={18}
+                    color={accentColor}
+                  />
+                </View>
+                <View style={{ flex: 1, marginLeft: 10 }}>
+                  <Text style={[styles.guaranteeTitle, { color: accentColor }]}>{g.title}</Text>
+                  <Text style={styles.guaranteeReason}>{g.reason}</Text>
+                </View>
+                {g.window_ends_label ? (
+                  <View style={styles.guaranteeEndBadge}>
+                    <Text style={styles.guaranteeEndBadgeText}>Until {g.window_ends_label}</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              {/* Progress bar */}
+              <View style={styles.guaranteeBarBg}>
+                <View style={[styles.guaranteeBarFill, { width: `${pct}%` as any, backgroundColor: barFill }]} />
+              </View>
+
+              {/* Earnings row */}
+              <View style={styles.guaranteeEarningsRow}>
+                <View style={styles.guaranteeEarningsItem}>
+                  <Text style={styles.guaranteeEarningsLabel}>This hour</Text>
+                  <Text style={[styles.guaranteeEarningsValue, { color: accentColor }]}>
+                    ₦{earned.toLocaleString()}
+                  </Text>
+                </View>
+                <View style={[styles.guaranteeEarningsDivider]} />
+                <View style={styles.guaranteeEarningsItem}>
+                  <Text style={styles.guaranteeEarningsLabel}>Floor</Text>
+                  <Text style={styles.guaranteeEarningsValue}>₦{floor.toLocaleString()}</Text>
+                </View>
+                <View style={styles.guaranteeEarningsDivider} />
+                <View style={styles.guaranteeEarningsItem}>
+                  <Text style={styles.guaranteeEarningsLabel}>{aboveFloor ? 'Surplus' : 'Covered by Nexryde'}</Text>
+                  <Text style={[styles.guaranteeEarningsValue, { color: aboveFloor ? '#16A34A' : '#D97706' }]}>
+                    {aboveFloor ? `+₦${(earned - floor).toLocaleString()}` : `₦${gap.toLocaleString()}`}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Status line */}
+              <View style={styles.guaranteeStatusRow}>
+                <Ionicons
+                  name={aboveFloor ? 'checkmark-circle' : 'information-circle-outline'}
+                  size={14}
+                  color={aboveFloor ? '#16A34A' : '#D97706'}
+                />
+                <Text style={[styles.guaranteeStatusText, { color: aboveFloor ? '#15803D' : '#92400E' }]}>
+                  {aboveFloor
+                    ? "You've exceeded the floor — great work!"
+                    : `Nexryde will top up ₦${gap.toLocaleString()} if this hour ends below the floor.`}
+                </Text>
+              </View>
             </View>
-            <View style={styles.offlineSyncTextWrap}>
-              <Text style={styles.offlineSyncTitle}>
-                {earningsGuarantee.active ? 'Anti-surge protection active' : 'Anti-surge protection standby'}
-              </Text>
-              <Text style={styles.offlineSyncSubtitle}>
-                Floor {`₦${Number(earningsGuarantee.minimum_hourly_earnings || 0).toLocaleString()}`}/hour. Current hour {`₦${Number(earningsGuarantee.current_hour_earnings || 0).toLocaleString()}`}.
-                {Number(earningsGuarantee.top_up_gap || 0) > 0
-                  ? ` Nexryde cover gap: ₦${Number(earningsGuarantee.top_up_gap || 0).toLocaleString()}.`
-                  : ' You are already above the guarantee.'}
-              </Text>
-            </View>
-          </View>
-        )}
+          );
+        })()}
         {/* EARNINGS CARDS - PRIORITY */}
         <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <TouchableOpacity
@@ -1788,12 +1858,109 @@ const styles = StyleSheet.create({
   offlineSyncTextWrap: {
     flex: 1,
   },
-  guaranteeBanner: {
+  // ── Earnings Guarantee Card ─────────────────────────────────────────
+  guaranteeCard: {
+    marginTop: 16,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    padding: 16,
+    gap: 12,
+  },
+  guaranteeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  guaranteeIconWrap: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  guaranteeTitle: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
+  },
+  guaranteeReason: {
+    fontSize: 11,
+    color: '#6B7280',
+    marginTop: 1,
+  },
+  guaranteeEndBadge: {
+    backgroundColor: 'rgba(0,0,0,0.06)',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  guaranteeEndBadgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#374151',
+  },
+  guaranteeBarBg: {
+    height: 6,
+    backgroundColor: 'rgba(0,0,0,0.07)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  guaranteeBarFill: {
+    height: 6,
+    borderRadius: 3,
+  },
+  guaranteeEarningsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  guaranteeEarningsItem: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 2,
+  },
+  guaranteeEarningsDivider: {
+    width: 1,
+    height: 28,
+    backgroundColor: 'rgba(0,0,0,0.08)',
+  },
+  guaranteeEarningsLabel: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    fontWeight: '500',
+  },
+  guaranteeEarningsValue: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#1F2937',
+  },
+  guaranteeStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  guaranteeStatusText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '500',
+  },
+  // Compact standby chip (when not in an active window)
+  guaranteeChip: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
     backgroundColor: '#ECFDF5',
+    borderRadius: 20,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderWidth: 1,
     borderColor: '#86EFAC',
   },
-  guaranteeIcon: {
-    backgroundColor: '#DCFCE7',
+  guaranteeChipText: {
+    fontSize: 11,
+    color: '#15803D',
+    fontWeight: '600',
   },
   offlineSyncTitle: {
     fontSize: 15,
