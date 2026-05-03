@@ -12,49 +12,54 @@ import {
   RefreshControl,
   Animated,
   Platform,
+  StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
+import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
+// ─── Types ─────────────────────────────────────────────────────────────────────
 interface Vehicle {
-  id: string;
-  type: string;
-  make: string;
-  model: string;
-  year: string;
-  color: string;
-  plate: string;
-  is_active: boolean;
+  id: string; type: string; make: string; model: string;
+  year: string; color: string; plate: string; is_active: boolean;
   verification_status: 'verified' | 'pending' | 'not_submitted' | string;
-  documents?: Record<string, any>;
-  registered_at?: string;
+  documents?: Record<string, any>; registered_at?: string;
 }
 
 const VEHICLE_TYPES = ['Economy', 'Comfort', 'XL', 'Premium', 'SUV', 'Minivan', 'Hatchback'];
 
+// ─── Car emoji by type ──────────────────────────────────────────────────────────
+function vehicleEmoji(type: string): string {
+  const t = (type ?? '').toLowerCase();
+  if (t.includes('premium')) return '🏎️';
+  if (t.includes('suv') || t.includes('minivan')) return '🚙';
+  if (t.includes('xl')) return '🚐';
+  return '🚗';
+}
+
 function vehicleTypeIcon(type: string): React.ComponentProps<typeof Ionicons>['name'] {
-  const t = type.toLowerCase();
+  const t = (type ?? '').toLowerCase();
   if (t.includes('xl') || t.includes('suv') || t.includes('minivan')) return 'bus-outline';
   if (t.includes('premium')) return 'diamond-outline';
   if (t.includes('comfort')) return 'star-outline';
   return 'car-sport-outline';
 }
 
+// ─── Status helpers ─────────────────────────────────────────────────────────────
 function statusColor(s: string) {
-  if (s === 'verified' || s === 'approved') return '#16A34A';
-  if (s === 'pending' || s === 'pending_review') return '#D97706';
-  return '#6B7280';
+  if (s === 'verified' || s === 'approved') return '#4ADE80';
+  if (s === 'pending' || s === 'pending_review') return '#FCD34D';
+  return '#94A3B8';
 }
-function statusBg(s: string) {
-  if (s === 'verified' || s === 'approved') return '#D1FAE5';
-  if (s === 'pending' || s === 'pending_review') return '#FEF3C7';
-  return '#F3F4F6';
+function statusBgDark(s: string) {
+  if (s === 'verified' || s === 'approved') return 'rgba(74,222,128,0.14)';
+  if (s === 'pending' || s === 'pending_review') return 'rgba(252,211,77,0.14)';
+  return 'rgba(148,163,184,0.12)';
 }
 function statusLabel(s: string) {
   if (s === 'verified' || s === 'approved') return 'Verified';
@@ -62,32 +67,83 @@ function statusLabel(s: string) {
   return 'Unverified';
 }
 
-const COLOR_SWATCHES: Record<string, string> = {
-  white: '#FFFFFF', black: '#1C1C1C', silver: '#C0C0C0', gray: '#808080', grey: '#808080',
-  red: '#EF4444', blue: '#3B82F6', green: '#22C55E', yellow: '#EAB308', orange: '#F97316',
-  gold: '#EAB308', brown: '#92400E', maroon: '#7F1D1D', navy: '#1E3A5F', beige: '#E7D9B8',
-  'dark gray': '#4B5563', 'dark grey': '#4B5563', 'pearl white': '#F5F5F0',
-  'wine red': '#7F1D1D', champagne: '#F7E7CE', pink: '#EC4899',
+// ─── Colour swatch map ──────────────────────────────────────────────────────────
+const COLOR_HEX: Record<string, string> = {
+  white: '#F5F5F5', black: '#1C1C1C', silver: '#C0C0C0', gray: '#808080',
+  grey: '#808080', red: '#EF4444', blue: '#3B82F6', green: '#22C55E',
+  yellow: '#EAB308', orange: '#F97316', gold: '#D97706', brown: '#92400E',
+  maroon: '#7F1D1D', navy: '#1E3A8A', beige: '#E7D9B8', pink: '#EC4899',
+  'dark gray': '#4B5563', 'dark grey': '#4B5563', 'pearl white': '#F0F0F0',
+  champagne: '#F7E7CE', 'wine red': '#7F1D1D', purple: '#7C3AED',
 };
-
-function colorSwatch(colorLabel: string): string | null {
-  const key = colorLabel?.toLowerCase().trim();
-  return COLOR_SWATCHES[key] ?? null;
+function carGlowColor(colorLabel: string): string {
+  const hex = COLOR_HEX[(colorLabel ?? '').toLowerCase().trim()];
+  return hex ?? '#3B82F6';
 }
 
-function ColorDot({ color, size = 14 }: { color: string; size?: number }) {
-  const hex = colorSwatch(color);
+// ─── ColorDot ───────────────────────────────────────────────────────────────────
+function ColorDot({ color, size = 12 }: { color: string; size?: number }) {
+  const hex = COLOR_HEX[(color ?? '').toLowerCase().trim()];
   if (!hex) return null;
   return (
     <View style={{
       width: size, height: size, borderRadius: size / 2,
       backgroundColor: hex,
-      borderWidth: 1,
-      borderColor: hex === '#FFFFFF' || hex === '#F5F5F0' ? '#CBD5E1' : 'transparent',
+      borderWidth: 1.5,
+      borderColor: hex === '#F5F5F0' || hex === '#F5F5F5' ? '#475569' : 'rgba(255,255,255,0.2)',
     }} />
   );
 }
 
+// ─── Car preview panel (shown inside active card) ───────────────────────────────
+function CarPreview({ type, color }: { type: string; color: string }) {
+  const glowColor = carGlowColor(color);
+  const emoji = vehicleEmoji(type);
+  const floatAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(floatAnim, { toValue: -6, duration: 1800, useNativeDriver: true }),
+        Animated.timing(floatAnim, { toValue: 0, duration: 1800, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [floatAnim]);
+
+  return (
+    <View style={cp.wrap}>
+      {/* Glow beneath car */}
+      <View style={[cp.glow, { backgroundColor: glowColor }]} />
+      {/* Floating car emoji */}
+      <Animated.Text style={[cp.emoji, { transform: [{ translateY: floatAnim }] }]}>
+        {emoji}
+      </Animated.Text>
+      {/* Ground reflection line */}
+      <View style={cp.groundLine} />
+    </View>
+  );
+}
+const cp = StyleSheet.create({
+  wrap: { alignItems: 'center', justifyContent: 'flex-end', height: 110, marginVertical: 4 },
+  glow: {
+    position: 'absolute',
+    bottom: 10,
+    width: 130,
+    height: 24,
+    borderRadius: 60,
+    opacity: 0.22,
+    transform: [{ scaleX: 1.3 }],
+  },
+  emoji: { fontSize: 84, lineHeight: 90, includeFontPadding: false },
+  groundLine: {
+    width: 140, height: 1.5,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 2,
+    marginTop: 4,
+  },
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 export default function VehicleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -102,22 +158,9 @@ export default function VehicleScreen() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const showSuccess = (msg: string) => {
-    setSuccessMessage(msg);
-    if (successTimer.current) clearTimeout(successTimer.current);
-    successTimer.current = setTimeout(() => setSuccessMessage(null), 3500);
-  };
-
-  // Add vehicle modal
+  // Add modal
   const [addModalVisible, setAddModalVisible] = useState(false);
-  const [addForm, setAddForm] = useState({
-    type: 'Economy',
-    make: '',
-    model: '',
-    year: '',
-    color: '',
-    plate: '',
-  });
+  const [addForm, setAddForm] = useState({ type: 'Economy', make: '', model: '', year: '', color: '', plate: '' });
   const [adding, setAdding] = useState(false);
 
   // Edit modal
@@ -130,16 +173,15 @@ export default function VehicleScreen() {
   const [editYear, setEditYear] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Animated active card pulse
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 1.015, duration: 1200, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 1200, useNativeDriver: true }),
-      ])
-    ).start();
-  }, [pulseAnim]);
+  // Card entrance animation
+  const cardSlide = useRef(new Animated.Value(40)).current;
+  const cardFade  = useRef(new Animated.Value(0)).current;
+
+  const showSuccess = (msg: string) => {
+    setSuccessMessage(msg);
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = setTimeout(() => setSuccessMessage(null), 3500);
+  };
 
   const apiBase = `${BACKEND_URL}/api/drivers/${user?.id}/vehicles`;
 
@@ -148,16 +190,21 @@ export default function VehicleScreen() {
     setLoadError(false);
     try {
       const res = await fetch(apiBase, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to fetch');
+      if (!res.ok) throw new Error('Failed');
       const data = await res.json();
       setVehicles(data.vehicles || []);
+      // Entrance animation
+      Animated.parallel([
+        Animated.timing(cardSlide, { toValue: 0, duration: 420, useNativeDriver: true }),
+        Animated.timing(cardFade,  { toValue: 1, duration: 420, useNativeDriver: true }),
+      ]).start();
     } catch {
       setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id, apiBase]);
+  }, [user?.id, apiBase, cardSlide, cardFade]);
 
   useEffect(() => { void loadVehicles(); }, [loadVehicles]);
 
@@ -168,15 +215,12 @@ export default function VehicleScreen() {
     setSwitchingId(vehicle.id);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      const res = await fetch(`${apiBase}/${vehicle.id}/activate`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-      });
+      const res = await fetch(`${apiBase}/${vehicle.id}/activate`, { method: 'PUT', headers: getAuthHeaders() });
       if (!res.ok) throw new Error('Failed');
       const data = await res.json();
       setVehicles(data.vehicles || []);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      showSuccess('Active vehicle switched successfully.');
+      showSuccess('Active vehicle switched.');
     } catch {
       Alert.alert('Error', 'Could not switch vehicle. Try again.');
     } finally {
@@ -185,12 +229,8 @@ export default function VehicleScreen() {
   };
 
   const openEdit = (v: Vehicle) => {
-    setEditTarget(v);
-    setEditMake(v.make);
-    setEditModel(v.model);
-    setEditYear(v.year);
-    setEditColor(v.color);
-    setEditPlate(v.plate);
+    setEditTarget(v); setEditMake(v.make); setEditModel(v.model);
+    setEditYear(v.year); setEditColor(v.color); setEditPlate(v.plate);
     setEditModalVisible(true);
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
@@ -202,22 +242,16 @@ export default function VehicleScreen() {
       const res = await fetch(`${apiBase}/${editTarget.id}`, {
         method: 'PUT',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          make: editMake.trim(),
-          model: editModel.trim(),
-          year: editYear.trim(),
-          color: editColor.trim(),
-          plate: editPlate.trim(),
-        }),
+        body: JSON.stringify({ make: editMake.trim(), model: editModel.trim(), year: editYear.trim(), color: editColor.trim(), plate: editPlate.trim() }),
       });
       if (!res.ok) throw new Error('Failed');
       const data = await res.json();
       setVehicles(data.vehicles || []);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditModalVisible(false);
-      showSuccess('Vehicle details updated.');
+      showSuccess('Vehicle updated.');
     } catch {
-      Alert.alert('Error', 'Could not save changes. Try again.');
+      Alert.alert('Error', 'Could not save changes.');
     } finally {
       setSaving(false);
     }
@@ -226,23 +260,18 @@ export default function VehicleScreen() {
   const handleRemove = (vehicle: Vehicle) => {
     Alert.alert(
       'Remove Vehicle',
-      `Remove ${[vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.plate}? This cannot be undone.`,
+      `Remove ${[vehicle.make, vehicle.model].filter(Boolean).join(' ') || vehicle.plate}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Remove',
-          style: 'destructive',
+          text: 'Remove', style: 'destructive',
           onPress: async () => {
             setRemovingId(vehicle.id);
             try {
-              const res = await fetch(`${apiBase}/${vehicle.id}`, {
-                method: 'DELETE',
-                headers: getAuthHeaders(),
-              });
+              const res = await fetch(`${apiBase}/${vehicle.id}`, { method: 'DELETE', headers: getAuthHeaders() });
               if (!res.ok) {
                 const err = await res.json().catch(() => ({}));
-                Alert.alert('Cannot remove', err?.detail || 'Failed to remove vehicle.');
-                return;
+                Alert.alert('Cannot remove', err?.detail || 'Failed.'); return;
               }
               const data = await res.json();
               setVehicles(data.vehicles || []);
@@ -259,341 +288,352 @@ export default function VehicleScreen() {
   };
 
   const handleAdd = async () => {
-    const missing = [];
+    const missing: string[] = [];
     if (!addForm.model.trim()) missing.push('Model');
     if (!addForm.year.trim()) missing.push('Year');
     if (!addForm.color.trim()) missing.push('Color');
     if (!addForm.plate.trim()) missing.push('Plate');
-    if (missing.length) {
-      Alert.alert('Missing fields', `Please fill in: ${missing.join(', ')}`);
-      return;
-    }
+    if (missing.length) { Alert.alert('Missing fields', `Please fill: ${missing.join(', ')}`); return; }
     setAdding(true);
     try {
       const res = await fetch(apiBase, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: addForm.type,
-          make: addForm.make.trim(),
-          model: addForm.model.trim(),
-          year: addForm.year.trim(),
-          color: addForm.color.trim(),
-          plate: addForm.plate.trim(),
-        }),
+        body: JSON.stringify({ type: addForm.type, make: addForm.make.trim(), model: addForm.model.trim(), year: addForm.year.trim(), color: addForm.color.trim(), plate: addForm.plate.trim() }),
       });
       const data = await res.json();
-      if (!res.ok) {
-        Alert.alert('Could not add vehicle', data?.detail || 'Please try again.');
-        return;
-      }
+      if (!res.ok) { Alert.alert('Could not add', data?.detail || 'Try again.'); return; }
       setVehicles(data.vehicles || []);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setAddModalVisible(false);
       setAddForm({ type: 'Economy', make: '', model: '', year: '', color: '', plate: '' });
-      showSuccess('Vehicle added! It will be verified before accepting rides.');
+      showSuccess('Vehicle added — pending verification.');
     } catch {
-      Alert.alert('Error', 'Could not add vehicle. Check your connection.');
+      Alert.alert('Error', 'Could not add vehicle. Check connection.');
     } finally {
       setAdding(false);
     }
   };
 
-  const activeVehicle = vehicles.find(v => v.is_active);
-  const otherVehicles = vehicles.filter(v => !v.is_active);
+  const activeVehicle  = vehicles.find(v => v.is_active);
+  const otherVehicles  = vehicles.filter(v => !v.is_active);
+  const isVerified     = (v: Vehicle) => v.verification_status === 'verified' || v.verification_status === 'approved';
 
+  // ─── Render ─────────────────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#111827" />
+    <SafeAreaView style={s.container} edges={['top']}>
+      <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
+
+      {/* ── Header ── */}
+      <View style={s.header}>
+        <TouchableOpacity onPress={() => router.back()} style={s.headerBtn}>
+          <Ionicons name="arrow-back" size={22} color="#fff" />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>My Vehicles</Text>
-        <TouchableOpacity
-          style={styles.addBtn}
-          onPress={() => setAddModalVisible(true)}
-          activeOpacity={0.8}
-        >
-          <Ionicons name="add" size={22} color={COLORS.primary} />
+        <Text style={s.headerTitle}>My Vehicles</Text>
+        <TouchableOpacity style={s.headerAddBtn} onPress={() => setAddModalVisible(true)} activeOpacity={0.8}>
+          <Ionicons name="add" size={20} color="#00D46A" />
         </TouchableOpacity>
       </View>
 
-      {/* Success toast */}
-      {successMessage && (
-        <View style={styles.successToast}>
-          <Ionicons name="checkmark-circle" size={18} color="#16A34A" />
-          <Text style={styles.successToastText}>{successMessage}</Text>
+      {/* ── Success toast ── */}
+      {successMessage ? (
+        <View style={s.toast}>
+          <Ionicons name="checkmark-circle" size={16} color="#4ADE80" />
+          <Text style={s.toastText}>{successMessage}</Text>
         </View>
-      )}
+      ) : null}
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]}
+        contentContainerStyle={[s.content, { paddingBottom: Math.max(insets.bottom, 16) + 32 }]}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00D46A" />}
       >
-        {loadError && (
-          <View style={styles.errorBanner}>
-            <Ionicons name="alert-circle-outline" size={18} color="#EF4444" />
-            <Text style={styles.errorText}>Could not load vehicles.</Text>
-            <TouchableOpacity onPress={loadVehicles}>
-              <Text style={styles.retryText}>Retry</Text>
-            </TouchableOpacity>
+        {/* ── Error ── */}
+        {loadError ? (
+          <View style={s.errorBanner}>
+            <Ionicons name="alert-circle-outline" size={16} color="#F87171" />
+            <Text style={s.errorText}>Could not load vehicles.</Text>
+            <TouchableOpacity onPress={loadVehicles}><Text style={s.retryText}>Retry</Text></TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
-        {loading && !loadError && (
-          <View style={styles.loadingCenter}>
-            <ActivityIndicator size="large" color={COLORS.primary} />
-            <Text style={styles.loadingText}>Loading vehicles…</Text>
+        {/* ── Loading ── */}
+        {loading && !loadError ? (
+          <View style={s.loadCenter}>
+            <ActivityIndicator size="large" color="#00D46A" />
+            <Text style={s.loadText}>Loading your garage…</Text>
           </View>
-        )}
+        ) : null}
 
-        {!loading && vehicles.length === 0 && !loadError && (
-          <View style={styles.emptyState}>
-            <LinearGradient colors={['#EFF6FF', '#DBEAFE']} style={styles.emptyIconCircle}>
-              <Ionicons name="car-outline" size={52} color={COLORS.primary} />
+        {/* ── Empty state ── */}
+        {!loading && vehicles.length === 0 && !loadError ? (
+          <View style={s.emptyWrap}>
+            <LinearGradient colors={['#111827', '#1e293b']} style={s.emptyCircle}>
+              <Text style={{ fontSize: 64 }}>🚗</Text>
             </LinearGradient>
-            <Text style={styles.emptyTitle}>No Vehicles Registered</Text>
-            <Text style={styles.emptySubtitle}>
-              Add your vehicle to start accepting rides on NEXRYDE.
-            </Text>
-            <TouchableOpacity style={styles.emptyAddBtn} onPress={() => setAddModalVisible(true)} activeOpacity={0.88}>
-              <Ionicons name="add-circle-outline" size={20} color={COLORS.white} />
-              <Text style={styles.emptyAddBtnText}>Add Your First Vehicle</Text>
+            <Text style={s.emptyTitle}>No Vehicles Yet</Text>
+            <Text style={s.emptySub}>Add your vehicle to start accepting rides on NEXRYDE.</Text>
+            <TouchableOpacity style={s.emptyBtn} onPress={() => setAddModalVisible(true)} activeOpacity={0.88}>
+              <Ionicons name="add-circle-outline" size={19} color="#fff" />
+              <Text style={s.emptyBtnText}>Add Your First Vehicle</Text>
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
-        {/* Active vehicle */}
-        {!loading && activeVehicle && (
-          <>
-            <Text style={styles.sectionLabel}>ACTIVE VEHICLE</Text>
-            <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
+        {/* ══════════════════════════════════════════════════════════════════
+            ACTIVE VEHICLE CARD
+        ══════════════════════════════════════════════════════════════════ */}
+        {!loading && activeVehicle ? (
+          <Animated.View style={{ opacity: cardFade, transform: [{ translateY: cardSlide }] }}>
+            <Text style={s.sectionLabel}>ACTIVE VEHICLE</Text>
+
+            {/* Outer glow layer */}
+            <View style={s.activeGlowWrap}>
               <LinearGradient
-                colors={['#1E3A5F', '#2563EB']}
-                style={styles.activeCard}
+                colors={['#0F2344', '#102F5E', '#0A1F3C']}
+                style={s.activeCard}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <View style={styles.activeCardTop}>
-                  <View style={styles.activeIconWrap}>
-                    <Ionicons name={vehicleTypeIcon(activeVehicle.type)} size={30} color={COLORS.white} />
-                  </View>
+                {/* Mesh top-right shimmer */}
+                <LinearGradient
+                  colors={['rgba(0,212,106,0.12)', 'transparent']}
+                  style={s.activeShimmer}
+                  start={{ x: 1, y: 0 }}
+                  end={{ x: 0, y: 1 }}
+                  pointerEvents="none"
+                />
+
+                {/* ── Top: name + Active badge ── */}
+                <View style={s.activeTop}>
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.activeVehicleName}>
+                    <Text style={s.activeName} numberOfLines={1}>
                       {[activeVehicle.make, activeVehicle.model].filter(Boolean).join(' ') || 'My Vehicle'}
                     </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3 }}>
-                      <ColorDot color={activeVehicle.color} size={12} />
-                      <Text style={styles.activeVehicleDetail}>
-                        {[activeVehicle.color, activeVehicle.year, activeVehicle.plate].filter(Boolean).join(' • ')}
+                    <View style={s.activeDetailRow}>
+                      <ColorDot color={activeVehicle.color} size={11} />
+                      <Text style={s.activeDetail}>
+                        {[activeVehicle.color, activeVehicle.year].filter(Boolean).join('  •  ')}
                       </Text>
                     </View>
                   </View>
-                  <View style={styles.activeBadge}>
-                    <Ionicons name="radio-button-on" size={12} color="#4ADE80" />
-                    <Text style={styles.activeBadgeText}>Active</Text>
+                  <View style={s.activeBadge}>
+                    <View style={s.activeDot} />
+                    <Text style={s.activeBadgeText}>Active</Text>
                   </View>
                 </View>
 
-                {/* Verification status bar */}
-                <View style={styles.activeStatusRow}>
-                  <View style={[styles.activeStatusPill, {
-                    backgroundColor: activeVehicle.verification_status === 'verified' || activeVehicle.verification_status === 'approved' ? 'rgba(74,222,128,0.2)' : 'rgba(251,191,36,0.2)',
-                  }]}>
+                {/* ── Car preview ── */}
+                <CarPreview type={activeVehicle.type} color={activeVehicle.color} />
+
+                {/* ── Plate badge ── */}
+                <View style={s.plateBadgeRow}>
+                  <View style={s.plateBadge}>
+                    <Ionicons name="card-outline" size={12} color="rgba(255,255,255,0.5)" />
+                    <Text style={s.plateBadgeText}>{activeVehicle.plate || '—'}</Text>
+                  </View>
+                </View>
+
+                {/* ── Status chips ── */}
+                <View style={s.chipsRow}>
+                  <View style={[s.chip, { backgroundColor: statusBgDark(activeVehicle.verification_status) }]}>
                     <Ionicons
-                      name={activeVehicle.verification_status === 'verified' || activeVehicle.verification_status === 'approved' ? 'shield-checkmark' : 'time'}
-                      size={13}
-                      color={activeVehicle.verification_status === 'verified' || activeVehicle.verification_status === 'approved' ? '#4ADE80' : '#FCD34D'}
+                      name={isVerified(activeVehicle) ? 'shield-checkmark' : 'time-outline'}
+                      size={12}
+                      color={statusColor(activeVehicle.verification_status)}
                     />
-                    <Text style={[styles.activeStatusText, {
-                      color: activeVehicle.verification_status === 'verified' || activeVehicle.verification_status === 'approved' ? '#4ADE80' : '#FCD34D',
-                    }]}>
+                    <Text style={[s.chipText, { color: statusColor(activeVehicle.verification_status) }]}>
                       {statusLabel(activeVehicle.verification_status)}
                     </Text>
                   </View>
                   {activeVehicle.type ? (
-                    <View style={styles.activeTypePill}>
-                      <Text style={styles.activeTypeText}>{activeVehicle.type}</Text>
+                    <View style={[s.chip, { backgroundColor: 'rgba(255,255,255,0.08)' }]}>
+                      <Ionicons name={vehicleTypeIcon(activeVehicle.type)} size={12} color="rgba(255,255,255,0.65)" />
+                      <Text style={[s.chipText, { color: 'rgba(255,255,255,0.75)' }]}>{activeVehicle.type}</Text>
                     </View>
                   ) : null}
                 </View>
 
-                {/* Edit action row */}
-                <View style={styles.activeActions}>
-                  <TouchableOpacity style={styles.activeEditBtn} onPress={() => openEdit(activeVehicle)} activeOpacity={0.8}>
-                    <Ionicons name="create-outline" size={16} color="rgba(255,255,255,0.9)" />
-                    <Text style={styles.activeEditBtnText}>Edit</Text>
+                {/* ── Actions ── */}
+                <View style={s.activeActions}>
+                  <TouchableOpacity style={s.activeActionBtn} onPress={() => openEdit(activeVehicle)} activeOpacity={0.8}>
+                    <Ionicons name="create-outline" size={15} color="rgba(255,255,255,0.85)" />
+                    <Text style={s.activeActionText}>Edit</Text>
                   </TouchableOpacity>
-                  {vehicles.length > 1 && (
+                  {vehicles.length > 1 ? (
                     <TouchableOpacity
-                      style={styles.activeEditBtn}
+                      style={[s.activeActionBtn, s.activeActionDanger]}
                       onPress={() => handleRemove(activeVehicle)}
                       activeOpacity={0.8}
                     >
-                      <Ionicons name="trash-outline" size={16} color="rgba(255,100,100,0.9)" />
-                      <Text style={[styles.activeEditBtnText, { color: 'rgba(255,100,100,0.9)' }]}>Remove</Text>
+                      <Ionicons name="trash-outline" size={15} color="#F87171" />
+                      <Text style={[s.activeActionText, { color: '#F87171' }]}>Remove</Text>
                     </TouchableOpacity>
-                  )}
+                  ) : null}
                 </View>
               </LinearGradient>
-            </Animated.View>
-          </>
-        )}
+            </View>
+          </Animated.View>
+        ) : null}
 
-        {/* Other vehicles */}
-        {!loading && otherVehicles.length > 0 && (
+        {/* ══════════════════════════════════════════════════════════════════
+            OTHER VEHICLES
+        ══════════════════════════════════════════════════════════════════ */}
+        {!loading && otherVehicles.length > 0 ? (
           <>
-            <Text style={[styles.sectionLabel, { marginTop: SPACING.xl }]}>OTHER VEHICLES</Text>
+            <Text style={[s.sectionLabel, { marginTop: 28 }]}>OTHER VEHICLES</Text>
             {otherVehicles.map((vehicle) => (
-              <View key={vehicle.id} style={styles.vehicleCard}>
-                <View style={styles.vehicleCardLeft}>
-                  <View style={styles.vehicleIconWrap}>
-                    <Ionicons name={vehicleTypeIcon(vehicle.type)} size={24} color={COLORS.primary} />
-                  </View>
+              <Animated.View key={vehicle.id} style={{ opacity: cardFade }}>
+                <View style={s.otherCard}>
+                  {/* Left icon */}
+                  <LinearGradient
+                    colors={['#1a2a45', '#0f1e35']}
+                    style={s.otherIconWrap}
+                  >
+                    <Text style={{ fontSize: 26 }}>{vehicleEmoji(vehicle.type)}</Text>
+                  </LinearGradient>
+
+                  {/* Info */}
                   <View style={{ flex: 1 }}>
-                    <Text style={styles.vehicleName}>
+                    <Text style={s.otherName} numberOfLines={1}>
                       {[vehicle.make, vehicle.model].filter(Boolean).join(' ') || 'Vehicle'}
                     </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                      <ColorDot color={vehicle.color} size={11} />
-                      <Text style={styles.vehicleDetail}>
-                        {[vehicle.color, vehicle.year, vehicle.plate].filter(Boolean).join(' • ')}
+                    <View style={s.otherDetailRow}>
+                      <ColorDot color={vehicle.color} size={10} />
+                      <Text style={s.otherDetail}>
+                        {[vehicle.color, vehicle.year, vehicle.plate].filter(Boolean).join(' · ')}
                       </Text>
                     </View>
-                    <View style={[styles.verificationChip, { backgroundColor: statusBg(vehicle.verification_status) }]}>
-                      <View style={[styles.verificationDot, { backgroundColor: statusColor(vehicle.verification_status) }]} />
-                      <Text style={[styles.verificationChipText, { color: statusColor(vehicle.verification_status) }]}>
+                    <View style={[s.chip, s.chipSm, { backgroundColor: statusBgDark(vehicle.verification_status), marginTop: 6, alignSelf: 'flex-start' }]}>
+                      <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: statusColor(vehicle.verification_status) }} />
+                      <Text style={[s.chipText, { color: statusColor(vehicle.verification_status), fontSize: 10 }]}>
                         {statusLabel(vehicle.verification_status)}
                       </Text>
                     </View>
                   </View>
-                </View>
 
-                <View style={styles.vehicleCardActions}>
-                  <TouchableOpacity
-                    style={styles.switchBtn}
-                    onPress={() => handleSwitch(vehicle)}
-                    activeOpacity={0.8}
-                    disabled={switchingId === vehicle.id}
-                  >
-                    {switchingId === vehicle.id
-                      ? <ActivityIndicator size="small" color={COLORS.white} />
-                      : <>
-                          <Ionicons name="swap-horizontal" size={14} color={COLORS.white} />
-                          <Text style={styles.switchBtnText}>Switch</Text>
-                        </>
-                    }
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.editIconBtn} onPress={() => openEdit(vehicle)} activeOpacity={0.8}>
-                    <Ionicons name="create-outline" size={18} color={COLORS.primary} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.removeIconBtn}
-                    onPress={() => handleRemove(vehicle)}
-                    activeOpacity={0.8}
-                    disabled={removingId === vehicle.id}
-                  >
-                    {removingId === vehicle.id
-                      ? <ActivityIndicator size="small" color="#EF4444" />
-                      : <Ionicons name="trash-outline" size={18} color="#EF4444" />
-                    }
-                  </TouchableOpacity>
+                  {/* Actions */}
+                  <View style={s.otherActions}>
+                    <TouchableOpacity
+                      style={s.switchBtn}
+                      onPress={() => handleSwitch(vehicle)}
+                      disabled={switchingId === vehicle.id}
+                      activeOpacity={0.8}
+                    >
+                      {switchingId === vehicle.id
+                        ? <ActivityIndicator size="small" color="#fff" />
+                        : <>
+                            <Ionicons name="swap-horizontal" size={13} color="#fff" />
+                            <Text style={s.switchBtnText}>Switch</Text>
+                          </>
+                      }
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.iconBtn} onPress={() => openEdit(vehicle)}>
+                      <Ionicons name="create-outline" size={16} color="#60A5FA" />
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.iconBtn, s.iconBtnRed]} onPress={() => handleRemove(vehicle)} disabled={removingId === vehicle.id}>
+                      {removingId === vehicle.id
+                        ? <ActivityIndicator size="small" color="#F87171" />
+                        : <Ionicons name="trash-outline" size={16} color="#F87171" />
+                      }
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </View>
+              </Animated.View>
             ))}
           </>
-        )}
+        ) : null}
 
-        {/* Add vehicle CTA at bottom */}
-        {!loading && vehicles.length > 0 && (
-          <TouchableOpacity style={styles.addVehicleRow} onPress={() => setAddModalVisible(true)} activeOpacity={0.88}>
-            <View style={styles.addVehicleIcon}>
-              <Ionicons name="add" size={22} color={COLORS.primary} />
+        {/* ── Add vehicle CTA ── */}
+        {!loading && vehicles.length > 0 ? (
+          <TouchableOpacity style={s.addRow} onPress={() => setAddModalVisible(true)} activeOpacity={0.85}>
+            <View style={s.addRowIcon}>
+              <Ionicons name="add" size={22} color="#00D46A" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={styles.addVehicleText}>Add Another Vehicle</Text>
-              <Text style={styles.addVehicleSubtext}>New vehicle will require verification</Text>
+              <Text style={s.addRowText}>Add Another Vehicle</Text>
+              <Text style={s.addRowSub}>New vehicle will require verification</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#9CA3AF" />
+            <Ionicons name="chevron-forward" size={17} color="#4B5563" />
           </TouchableOpacity>
-        )}
+        ) : null}
 
-        <View style={styles.infoNote}>
-          <Ionicons name="information-circle-outline" size={16} color="#6B7280" />
-          <Text style={styles.infoNoteText}>
+        {/* ── Info note ── */}
+        <View style={s.infoNote}>
+          <Ionicons name="information-circle-outline" size={15} color="#4B5563" />
+          <Text style={s.infoNoteText}>
             Only your active vehicle is used when you go online. Switch anytime without leaving the app.
           </Text>
         </View>
       </ScrollView>
 
-      {/* ===== ADD VEHICLE MODAL ===== */}
+      {/* ════════════════════════════════════════════════════════════════════
+          ADD VEHICLE MODAL
+      ════════════════════════════════════════════════════════════════════ */}
       <Modal visible={addModalVisible} animationType="slide" transparent onRequestClose={() => setAddModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
-            <View style={styles.modalDragHandle} />
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Add New Vehicle</Text>
-              <TouchableOpacity onPress={() => setAddModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
+            <View style={s.modalHandle} />
+            <View style={s.modalHeaderRow}>
+              <Text style={s.modalTitle}>Add New Vehicle</Text>
+              <TouchableOpacity onPress={() => setAddModalVisible(false)} style={s.modalCloseBtn}>
+                <Ionicons name="close" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
 
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {/* Vehicle type selector */}
-              <Text style={styles.inputLabel}>Vehicle Type</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeScroll}>
+              <Text style={s.inputLabel}>Vehicle Type</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
                 {VEHICLE_TYPES.map(t => (
                   <TouchableOpacity
                     key={t}
-                    style={[styles.typePill, addForm.type === t && styles.typePillActive]}
-                    onPress={() => setAddForm(f => ({ ...f, type: t }))}
+                    style={[s.typePill, addForm.type === t && s.typePillOn]}
+                    onPress={() => { setAddForm(f => ({ ...f, type: t })); Haptics.selectionAsync(); }}
                   >
-                    <Text style={[styles.typePillText, addForm.type === t && styles.typePillTextActive]}>{t}</Text>
+                    <Text style={[s.typePillText, addForm.type === t && s.typePillTextOn]}>{t}</Text>
                   </TouchableOpacity>
                 ))}
               </ScrollView>
 
-              <Text style={styles.inputLabel}>Make <Text style={styles.optional}>(e.g. Honda)</Text></Text>
-              <TextInput style={styles.input} value={addForm.make} onChangeText={v => setAddForm(f => ({ ...f, make: v }))} placeholder="Toyota, Honda, Hyundai…" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+              <Text style={s.inputLabel}>Make <Text style={s.optional}>(e.g. Honda)</Text></Text>
+              <TextInput style={s.input} value={addForm.make} onChangeText={v => setAddForm(f => ({ ...f, make: v }))} placeholder="Toyota, Honda, Hyundai…" placeholderTextColor="#4B5563" autoCapitalize="words" />
 
-              <Text style={styles.inputLabel}>Model <Text style={styles.required}>*</Text></Text>
-              <TextInput style={styles.input} value={addForm.model} onChangeText={v => setAddForm(f => ({ ...f, model: v }))} placeholder="Corolla, Accord, Elantra…" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+              <Text style={s.inputLabel}>Model <Text style={s.required}>*</Text></Text>
+              <TextInput style={s.input} value={addForm.model} onChangeText={v => setAddForm(f => ({ ...f, model: v }))} placeholder="Corolla, Accord, Elantra…" placeholderTextColor="#4B5563" autoCapitalize="words" />
 
-              <View style={styles.rowInputs}>
+              <View style={{ flexDirection: 'row' }}>
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Year <Text style={styles.required}>*</Text></Text>
-                  <TextInput style={styles.input} value={addForm.year} onChangeText={v => setAddForm(f => ({ ...f, year: v }))} placeholder="2020" placeholderTextColor="#9CA3AF" keyboardType="number-pad" maxLength={4} />
+                  <Text style={s.inputLabel}>Year <Text style={s.required}>*</Text></Text>
+                  <TextInput style={s.input} value={addForm.year} onChangeText={v => setAddForm(f => ({ ...f, year: v }))} placeholder="2020" placeholderTextColor="#4B5563" keyboardType="number-pad" maxLength={4} />
                 </View>
-                <View style={styles.rowInputGap} />
+                <View style={{ width: 12 }} />
                 <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Color <Text style={styles.required}>*</Text></Text>
-                  <TextInput style={styles.input} value={addForm.color} onChangeText={v => setAddForm(f => ({ ...f, color: v }))} placeholder="Silver" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+                  <Text style={s.inputLabel}>Color <Text style={s.required}>*</Text></Text>
+                  <TextInput style={s.input} value={addForm.color} onChangeText={v => setAddForm(f => ({ ...f, color: v }))} placeholder="Silver" placeholderTextColor="#4B5563" autoCapitalize="words" />
                 </View>
               </View>
 
-              <Text style={styles.inputLabel}>Plate Number <Text style={styles.required}>*</Text></Text>
-              <TextInput style={[styles.input, styles.plateInput]} value={addForm.plate} onChangeText={v => setAddForm(f => ({ ...f, plate: v.toUpperCase() }))} placeholder="ABC123XY" placeholderTextColor="#9CA3AF" autoCapitalize="characters" />
+              <Text style={s.inputLabel}>Plate Number <Text style={s.required}>*</Text></Text>
+              <TextInput
+                style={[s.input, { fontWeight: '800', letterSpacing: 2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }]}
+                value={addForm.plate}
+                onChangeText={v => setAddForm(f => ({ ...f, plate: v.toUpperCase() }))}
+                placeholder="ABC 123 XY"
+                placeholderTextColor="#4B5563"
+                autoCapitalize="characters"
+              />
 
-              <View style={styles.modalNote}>
-                <Ionicons name="alert-circle-outline" size={16} color="#D97706" />
-                <Text style={styles.modalNoteText}>
-                  New vehicles require document verification before accepting rides. You will be contacted by NEXRYDE support.
-                </Text>
+              <View style={s.modalNote}>
+                <Ionicons name="alert-circle-outline" size={15} color="#FCD34D" />
+                <Text style={s.modalNoteText}>New vehicles require document verification before accepting rides.</Text>
               </View>
 
-              <TouchableOpacity
-                style={[styles.addConfirmBtn, adding && { opacity: 0.7 }]}
-                onPress={handleAdd}
-                disabled={adding}
-                activeOpacity={0.88}
-              >
+              <TouchableOpacity style={[s.confirmBtn, adding && { opacity: 0.65 }]} onPress={handleAdd} disabled={adding} activeOpacity={0.88}>
                 {adding
-                  ? <ActivityIndicator color={COLORS.white} />
+                  ? <ActivityIndicator color="#fff" />
                   : <>
-                      <Ionicons name="checkmark-circle-outline" size={20} color={COLORS.white} />
-                      <Text style={styles.addConfirmBtnText}>Add Vehicle</Text>
+                      <Ionicons name="checkmark-circle-outline" size={19} color="#fff" />
+                      <Text style={s.confirmBtnText}>Add Vehicle</Text>
                     </>
                 }
               </TouchableOpacity>
@@ -602,50 +642,54 @@ export default function VehicleScreen() {
         </View>
       </Modal>
 
-      {/* ===== EDIT VEHICLE MODAL ===== */}
+      {/* ════════════════════════════════════════════════════════════════════
+          EDIT VEHICLE MODAL
+      ════════════════════════════════════════════════════════════════════ */}
       <Modal visible={editModalVisible} animationType="slide" transparent onRequestClose={() => setEditModalVisible(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
-            <View style={styles.modalDragHandle} />
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Edit Vehicle</Text>
-              <TouchableOpacity onPress={() => setEditModalVisible(false)}>
-                <Ionicons name="close" size={24} color="#6B7280" />
+        <View style={s.modalOverlay}>
+          <View style={[s.modalSheet, { paddingBottom: Math.max(insets.bottom, 20) + 8 }]}>
+            <View style={s.modalHandle} />
+            <View style={s.modalHeaderRow}>
+              <Text style={s.modalTitle}>Edit Vehicle</Text>
+              <TouchableOpacity onPress={() => setEditModalVisible(false)} style={s.modalCloseBtn}>
+                <Ionicons name="close" size={20} color="#9CA3AF" />
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.inputLabel}>Make</Text>
-            <TextInput style={styles.input} value={editMake} onChangeText={setEditMake} placeholder="Toyota, Honda…" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+            <Text style={s.inputLabel}>Make</Text>
+            <TextInput style={s.input} value={editMake} onChangeText={setEditMake} placeholder="Toyota, Honda…" placeholderTextColor="#4B5563" autoCapitalize="words" />
 
-            <Text style={styles.inputLabel}>Model</Text>
-            <TextInput style={styles.input} value={editModel} onChangeText={setEditModel} placeholder="Corolla, Accord…" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+            <Text style={s.inputLabel}>Model</Text>
+            <TextInput style={s.input} value={editModel} onChangeText={setEditModel} placeholder="Corolla, Accord…" placeholderTextColor="#4B5563" autoCapitalize="words" />
 
-            <View style={styles.rowInputs}>
+            <View style={{ flexDirection: 'row' }}>
               <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Year</Text>
-                <TextInput style={styles.input} value={editYear} onChangeText={setEditYear} placeholder="2020" placeholderTextColor="#9CA3AF" keyboardType="number-pad" maxLength={4} />
+                <Text style={s.inputLabel}>Year</Text>
+                <TextInput style={s.input} value={editYear} onChangeText={setEditYear} placeholder="2020" placeholderTextColor="#4B5563" keyboardType="number-pad" maxLength={4} />
               </View>
-              <View style={styles.rowInputGap} />
+              <View style={{ width: 12 }} />
               <View style={{ flex: 1 }}>
-                <Text style={styles.inputLabel}>Color</Text>
-                <TextInput style={styles.input} value={editColor} onChangeText={setEditColor} placeholder="Dark Gray" placeholderTextColor="#9CA3AF" autoCapitalize="words" />
+                <Text style={s.inputLabel}>Color</Text>
+                <TextInput style={s.input} value={editColor} onChangeText={setEditColor} placeholder="Dark Gray" placeholderTextColor="#4B5563" autoCapitalize="words" />
               </View>
             </View>
 
-            <Text style={styles.inputLabel}>Plate Number</Text>
-            <TextInput style={[styles.input, styles.plateInput]} value={editPlate} onChangeText={v => setEditPlate(v.toUpperCase())} placeholder="KTU65KE" placeholderTextColor="#9CA3AF" autoCapitalize="characters" />
+            <Text style={s.inputLabel}>Plate Number</Text>
+            <TextInput
+              style={[s.input, { fontWeight: '800', letterSpacing: 2, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' }]}
+              value={editPlate}
+              onChangeText={v => setEditPlate(v.toUpperCase())}
+              placeholder="KTU 65 KE"
+              placeholderTextColor="#4B5563"
+              autoCapitalize="characters"
+            />
 
-            <TouchableOpacity
-              style={[styles.addConfirmBtn, saving && { opacity: 0.7 }]}
-              onPress={handleSaveEdit}
-              disabled={saving}
-              activeOpacity={0.88}
-            >
+            <TouchableOpacity style={[s.confirmBtn, saving && { opacity: 0.65 }]} onPress={handleSaveEdit} disabled={saving} activeOpacity={0.88}>
               {saving
-                ? <ActivityIndicator color={COLORS.white} />
+                ? <ActivityIndicator color="#fff" />
                 : <>
-                    <Ionicons name="checkmark" size={20} color={COLORS.white} />
-                    <Text style={styles.addConfirmBtnText}>Save Changes</Text>
+                    <Ionicons name="checkmark" size={19} color="#fff" />
+                    <Text style={s.confirmBtnText}>Save Changes</Text>
                   </>
               }
             </TouchableOpacity>
@@ -656,226 +700,251 @@ export default function VehicleScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  successToast: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#F0FDF4',
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: '#BBF7D0',
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
-  },
-  successToastText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#15803D' },
+// ─── Styles ─────────────────────────────────────────────────────────────────────
+const BG = '#0D1420';
+const CARD_BG = '#111827';
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: BG },
+
+  // ── Header
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white,
-    borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
-    ...Platform.select({ ios: { shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.05, shadowRadius: 3 } }),
-    elevation: 2,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingVertical: 12,
+    backgroundColor: BG,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)',
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: '#111827' },
-  addBtn: {
+  headerBtn: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#EFF6FF',
+    backgroundColor: 'rgba(255,255,255,0.07)',
     alignItems: 'center', justifyContent: 'center',
   },
-  content: { padding: SPACING.lg },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: '#fff', letterSpacing: 0.2 },
+  headerAddBtn: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: 'rgba(0,212,106,0.12)',
+    borderWidth: 1, borderColor: 'rgba(0,212,106,0.25)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // ── Toast
+  toast: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(74,222,128,0.1)',
+    borderBottomWidth: 1, borderBottomColor: 'rgba(74,222,128,0.2)',
+    paddingHorizontal: 16, paddingVertical: 10,
+  },
+  toastText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#4ADE80' },
+
+  content: { paddingHorizontal: 16, paddingTop: 20 },
+
+  // ── Error
   errorBanner: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    backgroundColor: '#FEF2F2', borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md, marginBottom: SPACING.lg,
-    borderWidth: 1, borderColor: '#FECACA',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(239,68,68,0.1)', borderRadius: 12, padding: 12,
+    marginBottom: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)',
   },
-  errorText: { flex: 1, fontSize: FONT_SIZE.sm, color: '#EF4444', fontWeight: '600' },
-  retryText: { fontSize: FONT_SIZE.sm, color: COLORS.primary, fontWeight: '700' },
-  loadingCenter: { alignItems: 'center', paddingVertical: 60, gap: SPACING.md },
-  loadingText: { fontSize: FONT_SIZE.sm, color: '#9CA3AF' },
-  emptyState: { alignItems: 'center', paddingVertical: 48, gap: SPACING.md },
-  emptyIconCircle: {
-    width: 108, height: 108, borderRadius: 54,
+  errorText: { flex: 1, fontSize: 13, color: '#F87171', fontWeight: '600' },
+  retryText: { fontSize: 13, color: '#60A5FA', fontWeight: '700' },
+
+  // ── Loading
+  loadCenter: { alignItems: 'center', paddingVertical: 60, gap: 12 },
+  loadText: { fontSize: 14, color: '#4B5563' },
+
+  // ── Empty
+  emptyWrap: { alignItems: 'center', paddingVertical: 48, gap: 14 },
+  emptyCircle: {
+    width: 116, height: 116, borderRadius: 58,
     alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.08)',
   },
-  emptyTitle: { fontSize: FONT_SIZE.xl, fontWeight: '800', color: '#111827' },
-  emptySubtitle: {
-    fontSize: FONT_SIZE.sm, color: '#6B7280',
-    textAlign: 'center', paddingHorizontal: 32, lineHeight: 22,
+  emptyTitle: { fontSize: 20, fontWeight: '900', color: '#fff' },
+  emptySub: { fontSize: 14, color: '#4B5563', textAlign: 'center', paddingHorizontal: 28, lineHeight: 22 },
+  emptyBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#00D46A', paddingHorizontal: 24, paddingVertical: 13,
+    borderRadius: 20, marginTop: 6,
+    shadowColor: '#00D46A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 10, elevation: 8,
   },
-  emptyAddBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    backgroundColor: COLORS.primary, paddingHorizontal: SPACING.xl,
-    paddingVertical: SPACING.md, borderRadius: BORDER_RADIUS.xl,
-    marginTop: SPACING.sm, ...SHADOWS.md,
-  },
-  emptyAddBtnText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
+  emptyBtnText: { fontSize: 15, fontWeight: '800', color: '#fff' },
+
   sectionLabel: {
-    fontSize: 11, fontWeight: '800', color: '#6B7280',
-    letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: SPACING.sm,
+    fontSize: 10, fontWeight: '800', color: '#4B5563',
+    letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 10,
   },
-  // Active card
+
+  // ── Active card
+  activeGlowWrap: {
+    borderRadius: 26,
+    shadowColor: '#1D4ED8',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.55,
+    shadowRadius: 20,
+    elevation: 16,
+    marginBottom: 6,
+  },
   activeCard: {
-    borderRadius: BORDER_RADIUS.xl + 4,
-    padding: SPACING.lg,
-    marginBottom: SPACING.sm,
-    ...SHADOWS.lg,
+    borderRadius: 26, overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(0,212,106,0.18)',
+    paddingHorizontal: 20, paddingTop: 20, paddingBottom: 16,
   },
-  activeCardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md, marginBottom: SPACING.md },
-  activeIconWrap: {
-    width: 56, height: 56, borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    alignItems: 'center', justifyContent: 'center',
+  activeShimmer: {
+    position: 'absolute', top: 0, right: 0,
+    width: '60%', height: '50%',
+    borderRadius: 26,
   },
-  activeVehicleName: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: COLORS.white, lineHeight: 26 },
-  activeVehicleDetail: { fontSize: FONT_SIZE.sm, color: 'rgba(255,255,255,0.75)', marginTop: 4, lineHeight: 20 },
+  activeTop: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 6 },
+  activeName: { fontSize: 22, fontWeight: '900', color: '#fff', lineHeight: 27 },
+  activeDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  activeDetail: { fontSize: 13, color: 'rgba(255,255,255,0.6)', fontWeight: '500' },
   activeBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(74,222,128,0.2)',
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  activeBadgeText: { fontSize: 12, fontWeight: '800', color: '#4ADE80' },
-  activeStatusRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.md },
-  activeStatusPill: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
-  },
-  activeStatusText: { fontSize: 12, fontWeight: '700' },
-  activeTypePill: {
-    paddingHorizontal: 10, paddingVertical: 4,
-    borderRadius: BORDER_RADIUS.full,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  activeTypeText: { fontSize: 12, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
-  activeActions: {
-    flexDirection: 'row', gap: SPACING.sm,
-    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)',
-    paddingTop: SPACING.md,
-  },
-  activeEditBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: 'rgba(74,222,128,0.15)',
+    borderWidth: 1, borderColor: 'rgba(74,222,128,0.3)',
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
+    marginLeft: 8, marginTop: 2,
   },
-  activeEditBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: 'rgba(255,255,255,0.9)' },
-  // Other vehicle cards
-  vehicleCard: {
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md, marginBottom: SPACING.sm,
-    flexDirection: 'row', alignItems: 'center',
-    borderWidth: 1, borderColor: '#F1F5F9',
-    ...SHADOWS.sm,
+  activeDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#4ADE80' },
+  activeBadgeText: { fontSize: 12, fontWeight: '800', color: '#4ADE80' },
+
+  // plate badge
+  plateBadgeRow: { alignItems: 'center', marginTop: 4, marginBottom: 4 },
+  plateBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 16, paddingVertical: 6, borderRadius: 10,
   },
-  vehicleCardLeft: { flex: 1, flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm },
-  vehicleIconWrap: {
-    width: 48, height: 48, borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center',
+  plateBadgeText: {
+    fontSize: 15, fontWeight: '900', color: 'rgba(255,255,255,0.85)',
+    letterSpacing: 3, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
   },
-  vehicleName: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#111827' },
-  vehicleDetail: { fontSize: FONT_SIZE.xs, color: '#6B7280', fontWeight: '500', marginTop: 2, lineHeight: 18 },
-  verificationChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    alignSelf: 'flex-start', marginTop: SPACING.xs,
-    paddingHorizontal: SPACING.sm, paddingVertical: 2,
-    borderRadius: BORDER_RADIUS.full,
+
+  chipsRow: { flexDirection: 'row', gap: 8, marginBottom: 14, marginTop: 8 },
+  chip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20,
   },
-  verificationDot: { width: 6, height: 6, borderRadius: 3 },
-  verificationChipText: { fontSize: 11, fontWeight: '700' },
-  vehicleCardActions: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: SPACING.sm },
+  chipSm: { paddingHorizontal: 8, paddingVertical: 3 },
+  chipText: { fontSize: 12, fontWeight: '700' },
+
+  activeActions: {
+    flexDirection: 'row', gap: 8,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingTop: 14,
+  },
+  activeActionBtn: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 16, paddingVertical: 9,
+    borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)',
+  },
+  activeActionDanger: { backgroundColor: 'rgba(248,113,113,0.08)', borderColor: 'rgba(248,113,113,0.2)' },
+  activeActionText: { fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.85)' },
+
+  // ── Other vehicle cards
+  otherCard: {
+    backgroundColor: CARD_BG,
+    borderRadius: 20, padding: 14,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+    marginBottom: 10,
+  },
+  otherIconWrap: {
+    width: 54, height: 54, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
+  },
+  otherName: { fontSize: 15, fontWeight: '800', color: '#fff' },
+  otherDetailRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
+  otherDetail: { fontSize: 12, color: '#6B7280', fontWeight: '500' },
+  otherActions: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   switchBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: COLORS.primary, paddingHorizontal: 10,
-    paddingVertical: 6, borderRadius: BORDER_RADIUS.md, minWidth: 64,
-    justifyContent: 'center',
+    backgroundColor: '#1D4ED8', paddingHorizontal: 10, paddingVertical: 7,
+    borderRadius: 10, minWidth: 62, justifyContent: 'center',
   },
-  switchBtnText: { fontSize: 12, fontWeight: '800', color: COLORS.white },
-  editIconBtn: {
-    width: 34, height: 34, borderRadius: BORDER_RADIUS.md,
-    backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center',
+  switchBtnText: { fontSize: 12, fontWeight: '800', color: '#fff' },
+  iconBtn: {
+    width: 32, height: 32, borderRadius: 10,
+    backgroundColor: 'rgba(96,165,250,0.1)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  removeIconBtn: {
-    width: 34, height: 34, borderRadius: BORDER_RADIUS.md,
-    backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center',
+  iconBtnRed: { backgroundColor: 'rgba(248,113,113,0.1)' },
+
+  // ── Add row
+  addRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: CARD_BG, borderRadius: 20, padding: 14,
+    marginTop: 10, borderWidth: 1.5,
+    borderColor: 'rgba(0,212,106,0.22)', borderStyle: 'dashed',
   },
-  // Add row
-  addVehicleRow: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md, marginTop: SPACING.md,
-    borderWidth: 1.5, borderColor: '#BFDBFE', borderStyle: 'dashed',
+  addRowIcon: {
+    width: 44, height: 44, borderRadius: 14,
+    backgroundColor: 'rgba(0,212,106,0.1)',
+    borderWidth: 1, borderColor: 'rgba(0,212,106,0.2)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  addVehicleIcon: {
-    width: 44, height: 44, borderRadius: BORDER_RADIUS.md,
-    backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center',
-  },
-  addVehicleText: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#1D4ED8' },
-  addVehicleSubtext: { fontSize: FONT_SIZE.xs, color: '#6B7280', marginTop: 2 },
-  // Info note
+  addRowText: { fontSize: 15, fontWeight: '800', color: '#00D46A' },
+  addRowSub: { fontSize: 12, color: '#4B5563', marginTop: 2 },
+
+  // ── Info note
   infoNote: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.xs,
-    backgroundColor: '#F9FAFB', padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.lg, marginTop: SPACING.lg,
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    padding: 12, borderRadius: 12, marginTop: 18,
+    backgroundColor: 'rgba(255,255,255,0.03)',
   },
-  infoNoteText: { flex: 1, fontSize: FONT_SIZE.xs, color: '#6B7280', lineHeight: 18 },
-  // Modals
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
-  },
+  infoNoteText: { flex: 1, fontSize: 12, color: '#4B5563', lineHeight: 18 },
+
+  // ── Modal
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalSheet: {
-    backgroundColor: COLORS.white,
-    borderTopLeftRadius: 28, borderTopRightRadius: 28,
-    paddingHorizontal: SPACING.lg, paddingTop: SPACING.md,
+    backgroundColor: '#111827',
+    borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingHorizontal: 20, paddingTop: 12,
+    borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },
-  modalDragHandle: {
-    width: 40, height: 4, borderRadius: 2,
-    backgroundColor: '#D1D5DB', alignSelf: 'center', marginBottom: SPACING.md,
+  modalHandle: {
+    width: 36, height: 4, borderRadius: 2,
+    backgroundColor: '#374151', alignSelf: 'center', marginBottom: 16,
   },
-  modalHeader: {
+  modalHeaderRow: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: SPACING.lg,
+    marginBottom: 20,
   },
-  modalTitle: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: '#111827' },
-  inputLabel: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#374151', marginBottom: SPACING.xs, marginTop: SPACING.sm },
-  optional: { fontWeight: '400', color: '#9CA3AF' },
-  required: { color: '#EF4444' },
+  modalTitle: { fontSize: 18, fontWeight: '900', color: '#fff' },
+  modalCloseBtn: {
+    width: 34, height: 34, borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  inputLabel: { fontSize: 13, fontWeight: '700', color: '#9CA3AF', marginBottom: 6, marginTop: 14 },
+  optional: { fontWeight: '400', color: '#4B5563' },
+  required: { color: '#F87171' },
   input: {
-    backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#E5E7EB',
-    borderRadius: BORDER_RADIUS.lg, paddingHorizontal: SPACING.md,
-    paddingVertical: 12, fontSize: FONT_SIZE.md, color: '#111827',
+    backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#1F2D42',
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+    fontSize: 15, color: '#fff',
   },
-  plateInput: { fontWeight: '800', letterSpacing: 2 },
-  rowInputs: { flexDirection: 'row', alignItems: 'flex-start' },
-  rowInputGap: { width: SPACING.md },
-  typeScroll: { marginBottom: SPACING.sm, marginTop: SPACING.xs },
   typePill: {
-    paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.full, backgroundColor: '#F3F4F6',
-    borderWidth: 1, borderColor: '#E5E7EB', marginRight: SPACING.xs,
+    paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, backgroundColor: '#1e293b',
+    borderWidth: 1, borderColor: '#1F2D42', marginRight: 8,
   },
-  typePillActive: { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
-  typePillText: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: '#374151' },
-  typePillTextActive: { color: COLORS.white },
+  typePillOn: { backgroundColor: '#1D4ED8', borderColor: '#2563EB' },
+  typePillText: { fontSize: 13, fontWeight: '600', color: '#6B7280' },
+  typePillTextOn: { color: '#fff' },
   modalNote: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.sm,
-    backgroundColor: '#FFFBEB', borderRadius: BORDER_RADIUS.lg,
-    padding: SPACING.md, marginTop: SPACING.lg,
-    borderWidth: 1, borderColor: '#FDE68A',
+    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
+    backgroundColor: 'rgba(252,211,77,0.08)',
+    borderRadius: 12, padding: 12, marginTop: 16,
+    borderWidth: 1, borderColor: 'rgba(252,211,77,0.2)',
   },
-  modalNoteText: { flex: 1, fontSize: FONT_SIZE.xs, color: '#92400E', lineHeight: 18 },
-  addConfirmBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: SPACING.sm,
-    backgroundColor: COLORS.primary, padding: SPACING.lg,
-    borderRadius: BORDER_RADIUS.xl, marginTop: SPACING.lg, ...SHADOWS.md,
+  modalNoteText: { flex: 1, fontSize: 12, color: '#FCD34D', lineHeight: 18 },
+  confirmBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    backgroundColor: '#00D46A', padding: 16, borderRadius: 20, marginTop: 20,
+    shadowColor: '#00D46A', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 10, elevation: 8,
   },
-  addConfirmBtnText: { fontSize: FONT_SIZE.md, fontWeight: '800', color: COLORS.white },
+  confirmBtnText: { fontSize: 16, fontWeight: '900', color: '#fff' },
 });
