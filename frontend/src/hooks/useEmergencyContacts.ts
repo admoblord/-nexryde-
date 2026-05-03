@@ -34,11 +34,18 @@ export function useEmergencyContacts(userId?: string | null) {
     void refresh();
   }, [refresh]);
 
+  const [error, setError] = useState<string | null>(null);
+
   const createContact = useCallback(
     async (contact: EmergencyContact) => {
       if (!userId) return;
-      await addEmergencyContact(userId, contact);
-      await refresh();
+      setError(null);
+      try {
+        await addEmergencyContact(userId, contact);
+        await refresh();
+      } catch (e: any) {
+        setError(e?.message ?? 'Failed to add contact');
+      }
     },
     [refresh, userId]
   );
@@ -46,8 +53,13 @@ export function useEmergencyContacts(userId?: string | null) {
   const deleteContact = useCallback(
     async (phone: string) => {
       if (!userId) return;
-      await removeEmergencyContact(userId, phone);
-      await refresh();
+      setError(null);
+      try {
+        await removeEmergencyContact(userId, phone);
+        await refresh();
+      } catch (e: any) {
+        setError(e?.message ?? 'Failed to remove contact');
+      }
     },
     [refresh, userId]
   );
@@ -55,6 +67,7 @@ export function useEmergencyContacts(userId?: string | null) {
   return {
     contacts,
     loading,
+    error,
     refresh,
     createContact,
     deleteContact,

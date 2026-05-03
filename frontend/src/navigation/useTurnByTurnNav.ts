@@ -29,10 +29,16 @@ export interface TurnNavState {
   nextStep: NavStep | null;
   /** Metres to end of current step */
   distToStep: number | null;
+  /** Total metres of the whole segment route */
+  totalRouteM: number;
+  /** Estimated metres remaining to destination (sum of remaining steps) */
+  remainingRouteM: number | null;
   /** Full-route overview polyline for MapView */
   overviewCoords: Array<{ latitude: number; longitude: number }>;
   stepIndex: number;
   totalSteps: number;
+  /** Driver speed in km/h derived from consecutive GPS positions */
+  speedKmh: number | null;
   muted: boolean;
   toggleMute: () => void;
 }
@@ -51,11 +57,15 @@ export function useTurnByTurnNav(
   const [result, setResult] = useState<DirectionsResult | null>(null);
   const [stepIndex, setStepIndex] = useState(0);
   const [muted, setMuted] = useState(false);
+  // Incrementing this token forces the fetch effect to re-run (off-route recalculation)
+  const [recalcToken, setRecalcToken] = useState(0);
 
   const prevPosRef = useRef<{ lat: number; lng: number } | null>(null);
+  const prevPosTimeRef = useRef<number | null>(null);
   const announcedRef = useRef<Set<string>>(new Set());
   const fetchKeyRef = useRef('');
   const mutedRef = useRef(false);
+  const speedKmhRef = useRef<number | null>(null);
   mutedRef.current = muted;
 
   const speak = useCallback((text: string) => {
@@ -64,13 +74,14 @@ export function useTurnByTurnNav(
     Speech.speak(text, { language: 'en-NG', rate: 0.91, pitch: 1.0 });
   }, []);
 
-  // ── Fetch directions once per segment ─────────────────────────────────────
+  // ── Fetch directions once per segment (re-runs on recalcToken change for off-route) ──
   useEffect(() => {
     const active = status === 'accepted' || status === 'ongoing';
     if (!active || !originLat || !originLng || !destLat || !destLng || !GOOGLE_KEY) return;
 
-    const key = `${status}|${originLat.toFixed(5)},${originLng.toFixed(5)}|${destLat.toFixed(5)},${destLng.toFixed(5)}`;
-    if (key === fetchKeyRef.current) return; // already fetched for this segment
+    // Build a stable key; recalcToken forces a fresh fetch after off-route detection
+    const key = `${status}|${originLat.toFixed(5)},${originLng.toFixed(5)}|${destLat.toFixed(5)},${destLng.toFixed(5)}|${recalcToken}`;
+    if (key === fetchKeyRef.current) return;
     fetchKeyRef.current = key;
 
     setLoading(true);
@@ -78,24 +89,39 @@ export function useTurnByTurnNav(
     setResult(null);
     announcedRef.current.clear();
 
-    fetchDirections(originLat, originLng, destLat, destLng, GOOGLE_KEY).then((res) => {
-      setLoading(false);
-      if (!res) return;
-      setResult(res);
-      const dest = status === 'accepted' ? 'pickup location' : 'destination';
-      const km = (res.totalDistanceM / 1000).toFixed(1);
-      speak(`Navigation started. Your ${dest} is ${km} kilometers away. Follow the route.`);
-    });
-  }, [status, originLat, originLng, destLat, destLng, speak]);
+    fetchDirections(originLat, originLng, destLat, destLng, GOOGLE_KEY)
+      .then((res) => {
+        setLoading(false);
+        if (!res) return;
+        setResult(res);
+        if (recalcToken === 0) {
+          const dest = status === 'accepted' ? 'pickup location' : 'destination';
+          const km = (res.totalDistanceM / 1000).toFixed(1);
+          speak(`Navigation started. Your ${dest} is ${km} kilometers away. Follow the route.`);
+        }
+      })
+      .catch(() => setLoading(false));
+  }, [status, originLat, originLng, destLat, destLng, speak, recalcToken]);
 
   // ── Track driver position, advance steps, announce ────────────────────────
   useEffect(() => {
     if (!driverLat || !driverLng || !result || result.steps.length === 0) return;
 
     // Skip if driver barely moved
+    const now = Date.now();
     const prev = prevPosRef.current;
-    if (prev && haversineM(prev.lat, prev.lng, driverLat, driverLng) < EVAL_MIN_MOVE) return;
+    const movedM = prev ? haversineM(prev.lat, prev.lng, driverLat, driverLng) : Infinity;
+    if (movedM < EVAL_MIN_MOVE) return;
+
+    // Compute live speed from GPS delta
+    if (prev && prevPosTimeRef.current) {
+      const elapsedSec = (now - prevPosTimeRef.current) / 1000;
+      if (elapsedSec > 0.5 && elapsedSec < 30) {
+        speedKmhRef.current = (movedM / elapsedSec) * 3.6;
+      }
+    }
     prevPosRef.current = { lat: driverLat, lng: driverLng };
+    prevPosTimeRef.current = now;
 
     const steps = result.steps;
     let idx = stepIndex;
@@ -159,15 +185,14 @@ export function useTurnByTurnNav(
       }
     }
 
-    // Off-route detection — refetch if driver strays far from entire route
+    // Off-route detection — refetch by bumping recalcToken (triggers the fetch effect)
     const allCoords = result.steps.flatMap((s) => s.stepCoords);
     const offDist = minDistToPolylineM(driverLat, driverLng, allCoords);
-    if (offDist > OFF_ROUTE_THRESHOLD && driverLat && driverLng && destLat && destLng) {
-      // Force a refetch by clearing the cached key
-      fetchKeyRef.current = '';
+    if (offDist > OFF_ROUTE_THRESHOLD) {
       speak('Recalculating route.');
+      setRecalcToken((t) => t + 1);
     }
-  }, [driverLat, driverLng, result, stepIndex, status, speak, destLat, destLng]);
+  }, [driverLat, driverLng, result, stepIndex, status, speak]);
 
   // Reset when status changes segment
   useEffect(() => {
@@ -183,14 +208,23 @@ export function useTurnByTurnNav(
       ? haversineM(driverLat, driverLng, currentStep.endLat, currentStep.endLng)
       : null;
 
+  // Remaining route = distance to current step end + all subsequent steps
+  const remainingRouteM =
+    distToStep != null
+      ? distToStep + steps.slice(stepIndex + 1).reduce((acc, s) => acc + s.distanceM, 0)
+      : null;
+
   return {
     loading,
     currentStep,
     nextStep,
     distToStep,
+    totalRouteM: result?.totalDistanceM ?? 0,
+    remainingRouteM,
     overviewCoords: result?.overviewCoords ?? [],
     stepIndex,
     totalSteps: steps.length,
+    speedKmh: speedKmhRef.current,
     muted,
     toggleMute: () => setMuted((v) => !v),
   };

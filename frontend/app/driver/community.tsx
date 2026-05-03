@@ -314,7 +314,8 @@ export default function DriverCommunityScreen() {
 
   // Poll Card Component
   const renderPollCard = (poll: Poll) => {
-    const maxVotes = Math.max(...poll.options.map(o => o.votes), 1);
+    const opts = poll.options ?? [];
+    const maxVotes = opts.length ? Math.max(...opts.map(o => o.votes), 1) : 1;
     return (
       <View key={poll.poll_id} style={styles.pollCard}>
         <View style={styles.pollHeader}>
@@ -324,7 +325,7 @@ export default function DriverCommunityScreen() {
         </View>
         <Text style={styles.pollQuestion}>{poll.question}</Text>
         <Text style={styles.pollBy}>by {poll.user_name}</Text>
-        {poll.options.map((opt, idx) => {
+        {opts.map((opt, idx) => {
           const pct = poll.total_votes > 0 ? Math.round((opt.votes / poll.total_votes) * 100) : 0;
           return (
             <TouchableOpacity
@@ -333,7 +334,7 @@ export default function DriverCommunityScreen() {
               onPress={() => poll.is_active && voteOnPoll(poll.poll_id, idx)}
               disabled={!poll.is_active}
             >
-              <View style={[styles.pollBar, { width: `${pct}%`, backgroundColor: pct === Math.round((maxVotes / poll.total_votes) * 100) ? '#8B5CF620' : '#F1F5F9' }]} />
+              <View style={[styles.pollBar, { width: `${pct}%`, backgroundColor: poll.total_votes > 0 && pct === Math.round((maxVotes / poll.total_votes) * 100) ? '#8B5CF620' : '#F1F5F9' }]} />
               <View style={styles.pollOptionContent}>
                 <Text style={styles.pollOptionText}>{opt.text}</Text>
                 <Text style={styles.pollPct}>{pct}%</Text>

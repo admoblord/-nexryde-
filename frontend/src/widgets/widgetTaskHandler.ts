@@ -21,7 +21,7 @@ async function getIsOnline(): Promise<boolean> {
  * Registered once in index.ts via registerWidgetTaskHandler().
  */
 export async function widgetTaskHandler(props: WidgetTaskHandlerProps): Promise<void> {
-  const { widgetAction } = props.widgetInfo;
+  const { widgetAction } = props.widgetInfo as { widgetAction?: string };
 
   switch (widgetAction) {
     case 'WIDGET_ADDED':

@@ -709,7 +709,7 @@ export default function RiderWalletScreen() {
                   style={s.referralShareBtn}
                   onPress={() => {
                     const url = inviteUrl || buildInviteUrl(referralUsername, referralCode);
-                    const msg = buildShareMessage(referralUsername, referralCode, user?.name);
+                    const msg = buildShareMessage(referralUsername, referralCode, user?.name ?? undefined);
                     const { Share } = require('react-native');
                     Share.share({ message: msg, url }, { dialogTitle: 'Invite to Nexryde' }).catch(() => {});
                   }}

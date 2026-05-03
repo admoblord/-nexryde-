@@ -42,7 +42,7 @@ export function DriverStatusWidget({ isOnline }: Props) {
       >
         <TextWidget
           text="NEXRYDE"
-          style={{ fontSize: 11, fontStyle: 'bold', color: '#22C55E' }}
+          style={{ fontSize: 11, fontWeight: '700', color: '#22C55E' }}
         />
         <FlexWidget
           style={{
@@ -62,7 +62,7 @@ export function DriverStatusWidget({ isOnline }: Props) {
         />
         <TextWidget
           text={statusLabel}
-          style={{ fontSize: 22, fontStyle: 'bold', color: '#FFFFFF' }}
+          style={{ fontSize: 22, fontWeight: '700', color: '#FFFFFF' }}
         />
       </FlexWidget>
 
@@ -81,7 +81,7 @@ export function DriverStatusWidget({ isOnline }: Props) {
       >
         <TextWidget
           text={btnLabel}
-          style={{ fontSize: 13, fontStyle: 'bold', color: btnText }}
+          style={{ fontSize: 13, fontWeight: '700', color: btnText }}
         />
       </FlexWidget>
     </FlexWidget>

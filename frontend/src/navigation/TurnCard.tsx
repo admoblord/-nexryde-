@@ -35,8 +35,14 @@ interface TurnCardProps {
   currentStep: NavStep | null;
   nextStep: NavStep | null;
   distToStep: number | null;
+  /** Total metres for the current segment (for progress bar) */
+  totalRouteM?: number;
+  /** Metres remaining on the whole segment */
+  remainingRouteM?: number | null;
   stepIndex: number;
   totalSteps: number;
+  /** Driver's current speed in km/h (from GPS or haversine delta) */
+  speedKmh?: number | null;
   muted: boolean;
   onToggleMute: () => void;
   /** Whether nav is active at all */
@@ -105,8 +111,11 @@ export function TurnCard({
   currentStep,
   nextStep,
   distToStep,
+  totalRouteM,
+  remainingRouteM,
   stepIndex,
   totalSteps,
+  speedKmh,
   muted,
   onToggleMute,
   active,
@@ -127,6 +136,12 @@ export function TurnCard({
   if (!currentStep) return null;
 
   const accentColor = maneuverToColor(currentStep.maneuver);
+
+  // Route progress: 0–1
+  const progress =
+    totalRouteM && totalRouteM > 0 && remainingRouteM != null
+      ? Math.max(0, Math.min(1, 1 - remainingRouteM / totalRouteM))
+      : null;
 
   return (
     <View style={styles.wrap}>
@@ -184,8 +199,33 @@ export function TurnCard({
           </View>
         )}
 
-        {/* ── Step progress dots ── */}
-        {totalSteps > 1 && (
+        {/* ── Route progress bar + speed ── */}
+        <View style={styles.footerRow}>
+          {/* Continuous progress bar */}
+          {progress != null && (
+            <View style={styles.progressBarTrack}>
+              <View
+                style={[
+                  styles.progressBarFill,
+                  { width: `${Math.round(progress * 100)}%`, backgroundColor: accentColor },
+                ]}
+              />
+            </View>
+          )}
+
+          {/* Speed chip */}
+          {speedKmh != null && speedKmh > 1 && (
+            <View style={[styles.speedChip, { borderColor: `${accentColor}40` }]}>
+              <Text style={[styles.speedNum, { color: accentColor }]}>
+                {Math.round(speedKmh)}
+              </Text>
+              <Text style={styles.speedUnit}>km/h</Text>
+            </View>
+          )}
+        </View>
+
+        {/* ── Step progress dots (compact) ── */}
+        {totalSteps > 1 && progress == null && (
           <View style={styles.progressRow}>
             {Array.from({ length: Math.min(totalSteps, 12) }).map((_, i) => (
               <View
@@ -316,5 +356,42 @@ const styles = StyleSheet.create({
     color: '#64748b',
     fontWeight: '600',
     marginLeft: 8,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 7,
+  },
+  progressBarTrack: {
+    flex: 1,
+    height: 3,
+    backgroundColor: '#1e293b',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: 3,
+    borderRadius: 2,
+  },
+  speedChip: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  speedNum: {
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+  },
+  speedUnit: {
+    fontSize: 9,
+    color: '#475569',
+    fontWeight: '700',
   },
 });
