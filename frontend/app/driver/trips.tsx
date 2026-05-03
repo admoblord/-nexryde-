@@ -15,6 +15,8 @@ import {
   StatusBar,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
+import { useTurnByTurnNav } from '@/src/navigation/useTurnByTurnNav';
+import { TurnCard } from '@/src/navigation/TurnCard';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
@@ -62,6 +64,8 @@ type LiveMapProps = {
   status: string;
   riderLat?: number | null;
   riderLng?: number | null;
+  pickupAddress?: string;
+  dropAddress?: string;
 };
 
 function calcDriverBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -143,12 +147,25 @@ function RiderDot() {
   );
 }
 
-const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat, pickupLng, dropLat, dropLng, status, riderLat, riderLng }: LiveMapProps) {
+const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat, pickupLng, dropLat, dropLng, status, riderLat, riderLng, pickupAddress, dropAddress }: LiveMapProps) {
   const [mapReady, setMapReady] = useState(false);
   const [userPanned, setUserPanned] = useState(false);
   const mapRef = useRef<any>(null);
   const bearingRef = useRef(0);
   const prevDriverRef = useRef<{ lat: number; lng: number } | null>(null);
+
+  // Turn-by-turn navigation — origin/dest switches based on trip status
+  const navOriginLat = status === 'ongoing' ? pickupLat : driverLat;
+  const navOriginLng = status === 'ongoing' ? pickupLng : driverLng;
+  const navDestLat = status === 'ongoing' ? dropLat : pickupLat;
+  const navDestLng = status === 'ongoing' ? dropLng : pickupLng;
+  const nav = useTurnByTurnNav(
+    driverLat, driverLng,
+    navOriginLat ?? null, navOriginLng ?? null,
+    navDestLat ?? null, navDestLng ?? null,
+    status,
+  );
+  const navActive = status === 'accepted' || status === 'arrived' || status === 'ongoing';
 
   // Stable initial region (only computed once — avoids map reload on re-render)
   const focalLat = driverLat ?? pickupLat ?? 6.5244;
@@ -197,14 +214,21 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
   const showDriver = driverLat != null && Number.isFinite(driverLat);
   const showRider = riderLat != null && Number.isFinite(riderLat!);
 
-  const polyline: { latitude: number; longitude: number }[] = [];
-  if (status === 'accepted' && showDriver && pickupLat != null) {
-    polyline.push({ latitude: driverLat!, longitude: driverLng! });
-    polyline.push({ latitude: pickupLat, longitude: pickupLng! });
-  } else if ((status === 'arrived' || status === 'ongoing') && pickupLat != null && dropLat != null) {
-    if (showDriver) polyline.push({ latitude: driverLat!, longitude: driverLng! });
-    if (pickupLat != null) polyline.push({ latitude: pickupLat, longitude: pickupLng! });
-    polyline.push({ latitude: dropLat, longitude: dropLng! });
+  // Use Google Directions overview polyline when available; fallback to straight line
+  let polyline: { latitude: number; longitude: number }[] = nav.overviewCoords.length > 0
+    ? nav.overviewCoords
+    : [];
+  if (polyline.length === 0) {
+    if (status === 'accepted' && showDriver && pickupLat != null) {
+      polyline = [
+        { latitude: driverLat!, longitude: driverLng! },
+        { latitude: pickupLat, longitude: pickupLng! },
+      ];
+    } else if ((status === 'arrived' || status === 'ongoing') && pickupLat != null && dropLat != null) {
+      if (showDriver) polyline.push({ latitude: driverLat!, longitude: driverLng! });
+      if (pickupLat != null) polyline.push({ latitude: pickupLat, longitude: pickupLng! });
+      polyline.push({ latitude: dropLat, longitude: dropLng! });
+    }
   }
 
   if (Platform.OS === 'web') {
@@ -327,13 +351,20 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
         )}
       </MapView>
 
-      {/* Status chip */}
-      <View style={[tripMapStyles.statusChip, { borderColor: `${statusColor}40` }]}>
-        <View style={[tripMapStyles.statusDot, { backgroundColor: statusColor }]} />
-        <Text style={[tripMapStyles.statusText, { color: statusColor }]}>{statusLabel}</Text>
-      </View>
+      {/* Voice navigation card — top overlay (replaces plain status chip) */}
+      <TurnCard
+        loading={nav.loading}
+        currentStep={nav.currentStep}
+        nextStep={nav.nextStep}
+        distToStep={nav.distToStep}
+        stepIndex={nav.stepIndex}
+        totalSteps={nav.totalSteps}
+        muted={nav.muted}
+        onToggleMute={nav.toggleMute}
+        active={navActive}
+      />
 
-      {/* ETA chip */}
+      {/* ETA chip — top-right */}
       {(etaMin != null || distanceKm != null) && (
         <View style={tripMapStyles.etaChip}>
           <Ionicons name="time-outline" size={11} color="#38bdf8" />
@@ -347,7 +378,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
         </View>
       )}
 
-      {/* Re-center button */}
+      {/* Re-center button — bottom-right */}
       {userPanned && showDriver && (
         <TouchableOpacity
           style={tripMapStyles.recenterBtn}
@@ -1154,6 +1185,8 @@ export default function DriverTripsScreen() {
               status={currentTrip.status}
               riderLat={(currentTrip as any)?.rider_current_lat ?? null}
               riderLng={(currentTrip as any)?.rider_current_lng ?? null}
+              pickupAddress={typeof currentTrip.pickup_location === 'object' ? (currentTrip.pickup_location as any)?.address : undefined}
+              dropAddress={typeof currentTrip.dropoff_location === 'object' ? (currentTrip.dropoff_location as any)?.address : undefined}
             />
           )}
           
