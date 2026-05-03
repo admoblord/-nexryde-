@@ -32,6 +32,13 @@ import {
   reportDriverSimSwapSignal,
   formatApiDetail,
 } from '@/src/services/api';
+
+// Guarantee claim helper
+const claimEarningsGuarantee = async (driverId: string, headers: Record<string, string>) =>
+  fetch(`${BACKEND_URL}/api/drivers/${driverId}/claim-guarantee`, {
+    method: 'POST',
+    headers,
+  }).then((r) => r.json());
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   driverTermsRouteParams,
@@ -131,6 +138,8 @@ export default function ModernDriverHome() {
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
   const [earningsGuarantee, setEarningsGuarantee] = useState<any>(null);
   const [guaranteeInfoOpen, setGuaranteeInfoOpen] = useState(false);
+  const [guaranteeClaiming, setGuaranteeClaiming] = useState(false);
+  const [guaranteeClaimResult, setGuaranteeClaimResult] = useState<any>(null);
   const guaranteeBarAnim = useRef(new Animated.Value(0)).current;
 
   // Load real earnings from backend
@@ -1030,73 +1039,82 @@ export default function ModernDriverHome() {
           </View>
         </View>
 
-        {/* ONLINE STATUS TOGGLE */}
-        <Animated.View
-          style={[
-            styles.statusCard,
-            { opacity: fadeAnim },
-            isOnline && styles.statusCardOnlineGlow,
-          ]}
-        >
-          {/* Status dot indicator */}
+        {/* ── ONLINE STATUS CARD ──────────────────────────────────────────── */}
+        <Animated.View style={[styles.statusCard, { opacity: fadeAnim }, isOnline && styles.statusCardOnlineGlow]}>
+          {/* Status indicator dot */}
           <View style={[styles.statusDot, isOnline && styles.statusDotOnline, !driverCanReceiveOffers && styles.statusDotLocked]}>
             {isOnline ? (
               <Ionicons name="radio-button-on" size={20} color="#22E180" />
             ) : !driverApproved ? (
               <Ionicons name="shield-half" size={20} color="#FBBF24" />
             ) : !trialReady ? (
-              <Ionicons name="alert-circle" size={20} color="#FBBF24" />
+              <Ionicons name="flash" size={20} color="#FBBF24" />
             ) : (
               <Ionicons name="power" size={20} color="rgba(255,255,255,0.5)" />
             )}
           </View>
 
           <View style={styles.statusLeft}>
-            <View style={styles.statusText}>
-              <Text style={styles.statusTitle}>
-                {isOnline
-                  ? t.driver.youAreOnline
-                  : !driverApproved
-                    ? 'Pending Verification'
-                    : !trialReady
-                      ? 'Activate Your Account'
-                      : t.driver.youAreOffline}
-              </Text>
-              <Text style={styles.statusSubtitle} numberOfLines={2}>
-                {isOnline
-                  ? (subscriptionStatus === 'trial'
-                      ? `Trial • ${trialTripsCompleted}/${trialTripsTarget} trips${trialExtended ? ' (extended)' : ''}`
-                      : t.driver.statusReceivingOffers)
-                  : !driverApproved
-                    ? 'Documents under review. Access unlocks after admin approval.'
-                    : !trialReady
-                      ? 'Tap "Activate" to start your free 20-trip trial.'
-                      : t.driver.statusGoOnlineHint}
-              </Text>
-            </View>
+            <Text style={styles.statusTitle}>
+              {isOnline
+                ? t.driver.youAreOnline
+                : !driverApproved
+                  ? 'Pending Verification'
+                  : !trialReady
+                    ? 'Activate Free Trial'
+                    : t.driver.youAreOffline}
+            </Text>
+            <Text style={styles.statusSubtitle} numberOfLines={2}>
+              {isOnline
+                ? (subscriptionStatus === 'trial'
+                    ? `Free trial • ${trialTripsCompleted}/${trialTripsTarget} trips done`
+                    : t.driver.statusReceivingOffers)
+                : !driverApproved
+                  ? 'Under review — access unlocks after admin approval.'
+                  : !trialReady
+                    ? 'Tap Activate for your free 20-trip trial.'
+                    : t.driver.statusGoOnlineHint}
+            </Text>
+
+            {/* Inline trial progress bar — visible whenever on trial */}
+            {subscriptionStatus === 'trial' && trialTripsTarget > 0 && (
+              <View style={{ marginTop: 8, gap: 4 }}>
+                <View style={styles.trialBarBg}>
+                  <View
+                    style={[
+                      styles.trialBarFill,
+                      {
+                        width: `${Math.min(100, (trialTripsCompleted / trialTripsTarget) * 100)}%` as any,
+                        backgroundColor: trialExtended ? '#F59E0B' : '#22E180',
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                  <Text style={{ fontSize: 10, color: isOnline ? 'rgba(255,255,255,0.6)' : '#9CA3AF' }}>
+                    {trialExtended ? '⚡ Extended' : 'Free trial'}
+                  </Text>
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: isOnline ? 'rgba(255,255,255,0.8)' : '#374151' }}>
+                    {trialTripsCompleted}/{trialTripsTarget} trips
+                  </Text>
+                </View>
+              </View>
+            )}
           </View>
 
-          {/* Action: either toggle or CTA button */}
+          {/* Action button */}
           {!driverApproved ? (
             <View style={styles.pendingBadge}>
               <Ionicons name="time-outline" size={14} color="#FBBF24" />
               <Text style={styles.pendingBadgeText}>Review</Text>
             </View>
           ) : !trialReady ? (
-            <TouchableOpacity
-              style={styles.activateBtn}
-              onPress={() => guardedPush('/driver/subscription')}
-              activeOpacity={0.88}
-            >
+            <TouchableOpacity style={styles.activateBtn} onPress={() => guardedPush('/driver/subscription')} activeOpacity={0.88}>
               <Text style={styles.activateBtnText}>Activate</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity
-              style={[
-                styles.toggleButton,
-                isOnline && styles.toggleButtonActive,
-                toggleSyncing && styles.toggleButtonDisabled,
-              ]}
+              style={[styles.toggleButton, isOnline && styles.toggleButtonActive, toggleSyncing && styles.toggleButtonDisabled]}
               onPress={handleToggleOnline}
               activeOpacity={0.8}
               disabled={toggleSyncing}
@@ -1398,24 +1416,76 @@ export default function ModernDriverHome() {
                   </View>
                 </View>
 
-                {/* Status line */}
-                <View style={styles.guaranteeStatusRow}>
-                  <Ionicons
-                    name={!isOnline ? 'power-outline' : aboveFloor ? 'checkmark-circle' : 'shield-half-outline'}
-                    size={14}
-                    color={!isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706'}
-                  />
-                  <Text style={[styles.guaranteeStatusText, {
-                    color: !isOnline ? '#6B7280' : aboveFloor ? '#15803D' : '#92400E',
-                  }]}>
-                    {!isOnline
-                      ? `Go online now to activate the ₦${floor.toLocaleString()}/hr earnings floor.`
-                      : aboveFloor
-                        ? "You've exceeded the guaranteed floor this hour — great work!"
-                        : `Nexryde will top up ₦${gap.toLocaleString()} if this hour ends below the floor.`}
-                  </Text>
-                </View>
+              {/* Status line */}
+              <View style={styles.guaranteeStatusRow}>
+                <Ionicons
+                  name={!isOnline ? 'power-outline' : aboveFloor ? 'checkmark-circle' : 'shield-half-outline'}
+                  size={14}
+                  color={!isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706'}
+                />
+                <Text style={[styles.guaranteeStatusText, {
+                  color: !isOnline ? '#6B7280' : aboveFloor ? '#15803D' : '#92400E',
+                }]}>
+                  {!isOnline
+                    ? `Go online now to earn. If you fall short of ₦${floor.toLocaleString()}/hr, Nexryde credits the gap to your wallet.`
+                    : aboveFloor
+                      ? "You've exceeded the floor this hour — great work!"
+                      : `Nexryde will credit ₦${gap.toLocaleString()} to your wallet if the hour ends below the floor.`}
+                </Text>
               </View>
+
+              {/* Claim button — shown when online and gap exists */}
+              {isOnline && gap > 200 && (
+                <TouchableOpacity
+                  style={[
+                    styles.guaranteeClaimBtn,
+                    guaranteeClaiming && { opacity: 0.6 },
+                    guaranteeClaimResult?.claimed && { backgroundColor: '#16A34A' },
+                  ]}
+                  onPress={async () => {
+                    if (guaranteeClaiming || guaranteeClaimResult?.claimed) return;
+                    setGuaranteeClaiming(true);
+                    try {
+                      const headers = await getAuthHeaders();
+                      if (!user?.id) return;
+                      const result = await claimEarningsGuarantee(user.id, headers as Record<string, string>);
+                      setGuaranteeClaimResult(result);
+                      if (result.claimed) {
+                        Alert.alert(
+                          '₦' + Number(result.amount_credited || 0).toLocaleString() + ' Credited!',
+                          `Nexryde topped up your wallet for the ${result.window || 'guarantee'} window.\n\nEarned this hour: ₦${Number(result.hour_earnings || 0).toLocaleString()}\nGuaranteed floor: ₦${Number(result.floor || 0).toLocaleString()}\nCredit: ₦${Number(result.amount_credited || 0).toLocaleString()}`,
+                          [{ text: 'View Wallet', onPress: () => guardedPush('/driver/bank') }, { text: 'OK' }]
+                        );
+                      } else {
+                        Alert.alert('Guarantee Status', result.reason || result.message || 'No gap to claim right now.');
+                      }
+                    } catch {
+                      Alert.alert('Error', 'Could not process claim. Try again.');
+                    } finally {
+                      setGuaranteeClaiming(false);
+                    }
+                  }}
+                  activeOpacity={0.82}
+                >
+                  {guaranteeClaiming ? (
+                    <ActivityIndicator size="small" color="#FFF" />
+                  ) : (
+                    <>
+                      <Ionicons
+                        name={guaranteeClaimResult?.claimed ? 'checkmark-circle' : 'wallet-outline'}
+                        size={15}
+                        color="#FFF"
+                      />
+                      <Text style={styles.guaranteeClaimBtnText}>
+                        {guaranteeClaimResult?.claimed
+                          ? `₦${Number(guaranteeClaimResult.amount_credited || 0).toLocaleString()} Claimed ✓`
+                          : `Claim ₦${gap.toLocaleString()} top-up`}
+                      </Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              )}
+            </View>
 
               {/* ── Guarantee Info Modal ─────────────────────────────── */}
               <Modal visible={guaranteeInfoOpen} transparent animationType="fade" onRequestClose={() => setGuaranteeInfoOpen(false)}>
@@ -1460,7 +1530,37 @@ export default function ModernDriverHome() {
             </>
           );
         })()}
-        {/* EARNINGS CARDS - PRIORITY */}
+        {/* ── TRIAL COMPLETE — Subscribe CTA ──────────────────────────── */}
+        {subscriptionStatus === 'pending_payment' && (
+          <TouchableOpacity
+            style={styles.trialCompleteBanner}
+            onPress={() => guardedPush('/driver/subscription')}
+            activeOpacity={0.88}
+          >
+            <LinearGradient
+              colors={['#1D4ED8', '#2563EB', '#3B82F6']}
+              style={styles.trialCompleteBannerGrad}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Ionicons name="trophy" size={22} color="#FFF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '800' }}>Trial Complete!</Text>
+                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>
+                    You completed all trial trips. Subscribe now to keep earning.
+                  </Text>
+                </View>
+                <View style={{ backgroundColor: '#FFF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
+                  <Text style={{ color: '#2563EB', fontWeight: '800', fontSize: 13 }}>Subscribe →</Text>
+                </View>
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+
+        {/* ── EARNINGS CARDS ──────────────────────────────────────────── */}
         <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
           <TouchableOpacity
             onPress={() => guardedPush('/(driver-tabs)/driver-earnings')}
@@ -1468,52 +1568,72 @@ export default function ModernDriverHome() {
             accessibilityRole="button"
             accessibilityLabel="Open driver earnings"
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
               <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
-              {earningsLoading && <ActivityIndicator size="small" color={COLORS.accentGreen} />}
-              {earningsError && !earningsLoading && (
-                <Text style={{ fontSize: 11, color: '#f87171' }}>Could not load</Text>
-              )}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                {earningsLoading && <ActivityIndicator size="small" color={COLORS.accentGreen} />}
+                {earningsError && !earningsLoading && (
+                  <Text style={{ fontSize: 11, color: '#f87171' }}>Tap to retry</Text>
+                )}
+                <Ionicons name="chevron-forward" size={16} color={COLORS.accentGreen} />
+              </View>
             </View>
             <LinearGradient
-            colors={['#022c22', '#064e3b', '#0f766e']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.earningsGradientWrap}
-          >
-            {earningsLoading ? (
-              <View style={{ alignItems: 'center', paddingVertical: 28 }}>
-                <ActivityIndicator size="large" color="#22E180" />
-                <Text style={{ color: '#86efac', fontSize: 13, marginTop: 8 }}>Loading earnings...</Text>
-              </View>
-            ) : (
-            <View style={styles.earningsGrid}>
-              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
-                  <Ionicons name="wallet" size={26} color="#FFF" />
+              colors={['#022c22', '#064e3b', '#0f766e']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.earningsGradientWrap}
+            >
+              {earningsLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 28 }}>
+                  <ActivityIndicator size="large" color="#22E180" />
+                  <Text style={{ color: '#86efac', fontSize: 13, marginTop: 8 }}>Loading earnings...</Text>
                 </View>
-                <Text style={styles.earningLabelLight}>Today</Text>
-                <Text style={styles.earningValueLight}>₦{earnings.today.toLocaleString()}</Text>
-              </View>
+              ) : (
+                <>
+                  <View style={styles.earningsGrid}>
+                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                      <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
+                        <Ionicons name="wallet" size={22} color="#FFF" />
+                      </View>
+                      <Text style={styles.earningLabelLight}>Today</Text>
+                      <Text style={styles.earningValueLight}>
+                        ₦{earnings.today >= 1000
+                          ? `${(earnings.today / 1000).toFixed(1)}k`
+                          : earnings.today.toLocaleString()}
+                      </Text>
+                    </View>
 
-              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                <View style={[styles.earningIcon, { backgroundColor: COLORS.accentGreen }]}>
-                  <Ionicons name="calendar" size={26} color="#FFF" />
-                </View>
-                <Text style={styles.earningLabelLight}>This Week</Text>
-                <Text style={styles.earningValueLight}>₦{earnings.week.toLocaleString()}</Text>
-              </View>
+                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                      <View style={[styles.earningIcon, { backgroundColor: '#16A34A' }]}>
+                        <Ionicons name="calendar" size={22} color="#FFF" />
+                      </View>
+                      <Text style={styles.earningLabelLight}>This Week</Text>
+                      <Text style={styles.earningValueLight}>
+                        ₦{earnings.week >= 1000
+                          ? `${(earnings.week / 1000).toFixed(1)}k`
+                          : earnings.week.toLocaleString()}
+                      </Text>
+                    </View>
 
-              <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                <View style={[styles.earningIcon, { backgroundColor: HOME_PALETTE.accentIndigo }]}>
-                  <Ionicons name="car" size={26} color="#FFF" />
-                </View>
-                <Text style={styles.earningLabelLight}>Total Trips</Text>
-                <Text style={styles.earningValueLight}>{earnings.trips}</Text>
-              </View>
-            </View>
-            )}
-          </LinearGradient>
+                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
+                      <View style={[styles.earningIcon, { backgroundColor: HOME_PALETTE.accentIndigo }]}>
+                        <Ionicons name="car" size={22} color="#FFF" />
+                      </View>
+                      <Text style={styles.earningLabelLight}>Total Trips</Text>
+                      <Text style={styles.earningValueLight}>{earnings.trips}</Text>
+                    </View>
+                  </View>
+                  {/* Keep 100% — reminder */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 8, paddingHorizontal: 4 }}>
+                    <Ionicons name="checkmark-circle" size={12} color="#86EFAC" />
+                    <Text style={{ color: '#86EFAC', fontSize: 11, fontWeight: '600' }}>
+                      You keep 100% of all earnings — riders pay you directly
+                    </Text>
+                  </View>
+                </>
+              )}
+            </LinearGradient>
           </TouchableOpacity>
         </Animated.View>
 
@@ -1772,6 +1892,17 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.lightTextSecondary,
+  },
+  // Trial progress bar inside status card
+  trialBarBg: {
+    height: 5,
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    borderRadius: 3,
+    overflow: 'hidden',
+  },
+  trialBarFill: {
+    height: 5,
+    borderRadius: 3,
   },
   toggleButton: {
     width: 72,
@@ -2148,6 +2279,29 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 15,
     fontWeight: '800',
+  },
+  guaranteeClaimBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    backgroundColor: '#D97706',
+    borderRadius: 12,
+    paddingVertical: 11,
+    paddingHorizontal: 16,
+  },
+  guaranteeClaimBtnText: {
+    color: '#FFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  trialCompleteBanner: {
+    marginTop: 16,
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  trialCompleteBannerGrad: {
+    padding: 16,
   },
   offlineSyncTitle: {
     fontSize: 15,

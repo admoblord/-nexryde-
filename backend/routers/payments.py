@@ -129,11 +129,14 @@ def calculate_distance_haversine(lat1, lon1, lat2, lon2):
 # Subscription config
 SUBSCRIPTION_CONFIG = {
     "monthly_fee": 18000,
-    # Activity-based trial: driver can operate free until they complete TRIAL_TRIPS_TARGET trips.
-    # NO time-based trial. Trial extends if < 10 trips after 7 days.
+    # Activity-based trial: driver operates free until they complete TRIAL_TRIPS_TARGET trips.
+    # If < TRIAL_EXTENSION_MIN_TRIPS after TRIAL_EXTENSION_DAYS days, the trial is extended by
+    # TRIAL_EXTENSION_BONUS_TRIPS additional trips (up to TRIAL_MAX_EXTENSIONS times).
     "trial_trips_target": 20,
-    "trial_extension_days": 7,
-    "trial_extension_min_trips": 10,
+    "trial_extension_days": 7,         # Days before first extension check
+    "trial_extension_min_trips": 10,   # Must have completed this many by extension check
+    "trial_extension_bonus_trips": 5,  # Extra trips added per extension
+    "trial_max_extensions": 2,         # Maximum number of extensions (total max = 20 + 2×5 = 30)
     "currency": "NGN",
     "bank_details": {
         "provider": "SquadCo",
@@ -212,6 +215,7 @@ class FareEstimateRequest(BaseModel):
     trip_type: Optional[str] = None
     pickup_address: Optional[str] = None
     dropoff_address: Optional[str] = None
+    rider_id: Optional[str] = None  # supplied by frontend to check first-ride discount
 
     class Config:
         extra = "ignore"
@@ -652,53 +656,121 @@ async def _ensure_auto_trial_for_verified_driver(driver_id: str) -> Optional[dic
 async def _evaluate_driver_trial(driver_id: str, subscription: dict) -> dict:
     """Enrich a trial subscription with live trip-count state.
 
-    Counts ONLY completed trips (not cancelled/accepted).
-    Persists status changes to DB when the trial is exhausted or extended.
-    Returns an enriched copy.
+    Counts ONLY completed trips. Persists status changes when:
+    - Trial is exhausted (completed >= target) → status = pending_payment
+    - Extension condition met (< min trips after N days) → bumps target by bonus_trips,
+      up to trial_max_extensions times, so drivers always get a fair chance.
+
+    Returns an enriched copy with all trial display fields.
     """
     now = datetime.utcnow()
-    target = subscription.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"]
+    target = int(subscription.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"])
+    extension_count = int(subscription.get("trial_extension_count") or 0)
     completed_trips = await db.trips.count_documents({"driver_id": driver_id, "status": "completed"})
 
     sub = dict(subscription)
     sub["trial_trips_completed"] = completed_trips
-    sub["trial_trips_remaining"] = max(0, target - completed_trips)
     sub["trial_trips_target"] = target
+    sub["trial_extension_count"] = extension_count
 
     if completed_trips >= target:
-        # Trial exhausted — require subscription.
+        # Trial exhausted — require subscription payment.
         if sub.get("status") == "trial":
             await db.subscriptions.update_one(
                 {"id": sub["id"]},
-                {"$set": {"status": "pending_payment", "trial_completed": True,
-                          "trial_active": False, "updated_at": now}},
+                {"$set": {
+                    "status": "pending_payment",
+                    "trial_completed": True,
+                    "trial_active": False,
+                    "updated_at": now,
+                }},
             )
         sub["status"] = "pending_payment"
         sub["trial_completed"] = True
         sub["trial_active"] = False
         sub["trial_trips_remaining"] = 0
         sub["days_remaining"] = 0
+        sub["trial_message"] = (
+            f"Congratulations! You completed all {target} trial trips. "
+            "Subscribe now to keep earning with Nexryde."
+        )
     else:
         sub["trial_active"] = True
         sub["days_remaining"] = 0
+        sub["trial_trips_remaining"] = max(0, target - completed_trips)
 
-        # Check whether to extend (7 days elapsed, < 10 trips).
+        # ── Extension logic ──────────────────────────────────────────────
         trial_start = sub.get("trial_start_date") or sub.get("start_date")
         if isinstance(trial_start, str):
             try:
                 trial_start = datetime.fromisoformat(trial_start.replace("Z", "+00:00")).replace(tzinfo=None)
             except Exception:
                 trial_start = None
+
         if trial_start:
             days_elapsed = (now - trial_start).days
             ext_days = SUBSCRIPTION_CONFIG["trial_extension_days"]
             ext_min = SUBSCRIPTION_CONFIG["trial_extension_min_trips"]
-            if days_elapsed >= ext_days and completed_trips < ext_min and not sub.get("trial_extended"):
-                await db.subscriptions.update_one(
-                    {"id": sub["id"]},
-                    {"$set": {"trial_extended": True, "updated_at": now}},
+            bonus = SUBSCRIPTION_CONFIG["trial_extension_bonus_trips"]
+            max_ext = SUBSCRIPTION_CONFIG["trial_max_extensions"]
+
+            # Each extension period is ext_days long. Check if we're in a new extension window.
+            # Window N starts at ext_days * (N+1) days from trial start (N=0 is first check).
+            for ext_n in range(max_ext):
+                window_start_day = ext_days * (ext_n + 1)
+                already_extended_n = extension_count > ext_n
+                if (days_elapsed >= window_start_day
+                        and completed_trips < ext_min
+                        and not already_extended_n):
+                    new_target = target + bonus
+                    new_count = extension_count + 1
+                    await db.subscriptions.update_one(
+                        {"id": sub["id"]},
+                        {"$set": {
+                            "trial_extended": True,
+                            "trial_extension_count": new_count,
+                            "trial_trips_target": new_target,
+                            "updated_at": now,
+                        }},
+                    )
+                    sub["trial_extended"] = True
+                    sub["trial_extension_count"] = new_count
+                    sub["trial_trips_target"] = new_target
+                    sub["trial_trips_remaining"] = max(0, new_target - completed_trips)
+                    target = new_target
+                    extension_count = new_count
+                    logger.info(
+                        f"Trial extended (ext #{new_count}) for driver={driver_id}: "
+                        f"target {target - bonus} → {new_target}"
+                    )
+                    break  # Only one extension per evaluation cycle
+
+        # Urgency messaging
+        remaining = max(0, target - completed_trips)
+        pct = round(completed_trips / target * 100) if target > 0 else 0
+        if pct >= 80:
+            sub["trial_urgency"] = "critical"
+            sub["trial_message"] = f"Almost there! {remaining} trip{'s' if remaining != 1 else ''} left in your free trial."
+        elif pct >= 50:
+            sub["trial_urgency"] = "warning"
+            sub["trial_message"] = f"{remaining} free trips remaining. Keep going!"
+        else:
+            sub["trial_urgency"] = "normal"
+            sub["trial_message"] = f"You have {remaining} free trips left. Earn while it lasts!"
+
+        if sub.get("trial_extended"):
+            ext_n = extension_count
+            max_e = SUBSCRIPTION_CONFIG["trial_max_extensions"]
+            if ext_n >= max_e:
+                sub["trial_message"] = (
+                    f"Final extension active — complete your last {remaining} trips. "
+                    "After this, a subscription is required."
                 )
-                sub["trial_extended"] = True
+            else:
+                sub["trial_message"] = (
+                    f"Trial extended! {bonus} bonus trips added. "
+                    f"{remaining} trips remaining."
+                )
 
     return sub
 
@@ -2585,19 +2657,32 @@ async def get_driver_subscription_status(request: Request):
         and upgrade_requirements["trips_met"]
     )
 
+    sub = subscription or {}
+    trial_trips_target = sub.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"]
+    trial_trips_completed = sub.get("trial_trips_completed", 0)
+    trial_trips_remaining = sub.get("trial_trips_remaining", trial_trips_target)
+    trial_progress_pct = round(trial_trips_completed / trial_trips_target * 100) if trial_trips_target > 0 else 0
+
     return {
         "driver_id": driver_id,
         "subscription_active": flag_state["subscription_active"],
         "subscription_expiry": flag_state["subscription_expiry"],
         "status": status,
         "tier": tier,
-        "amount_expected": (subscription or {}).get("amount"),
-        "trial_active": (subscription or {}).get("trial_active", status == "trial"),
-        "trial_trips_completed": (subscription or {}).get("trial_trips_completed", 0),
-        "trial_trips_remaining": (subscription or {}).get("trial_trips_remaining", SUBSCRIPTION_CONFIG["trial_trips_target"]),
-        "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
-        "trial_extended": (subscription or {}).get("trial_extended", False),
-        "trial_completed": (subscription or {}).get("trial_completed", False),
+        "amount_expected": sub.get("amount"),
+        "days_remaining": sub.get("days_remaining", 0),
+        # Trial fields
+        "trial_active": sub.get("trial_active", status == "trial"),
+        "trial_trips_completed": trial_trips_completed,
+        "trial_trips_remaining": trial_trips_remaining,
+        "trial_trips_target": trial_trips_target,
+        "trial_progress_pct": trial_progress_pct,
+        "trial_extended": sub.get("trial_extended", False),
+        "trial_extension_count": sub.get("trial_extension_count", 0),
+        "trial_completed": sub.get("trial_completed", False),
+        "trial_urgency": sub.get("trial_urgency", "normal"),
+        "trial_message": sub.get("trial_message", ""),
+        # Navigation
         "can_upgrade": can_upgrade,
         "upgrade_requirements": upgrade_requirements,
         "virtual_account": virtual_account,
@@ -3458,6 +3543,23 @@ async def estimate_fare(request: FareEstimateRequest):
     duration_min = max(5, duration_min)
     
     fare = calculate_fare(distance_km, duration_min, traffic_duration_min, svc, city)
+
+    # ── First-ride discount: 20% off total fare for riders with 0 completed trips ──
+    first_ride_discount_applied = False
+    original_total_fare = fare["total_fare"]
+    if request.rider_id:
+        try:
+            prior_completed = await db.trips.count_documents({
+                "rider_id": request.rider_id,
+                "status": "completed",
+            })
+            if prior_completed == 0:
+                discount_amount = round(fare["total_fare"] * 0.20)
+                fare = {**fare, "total_fare": max(300, fare["total_fare"] - discount_amount)}
+                first_ride_discount_applied = True
+        except Exception:
+            pass  # silently skip on DB error — never block a fare estimate
+
     base_price, min_price, max_price = smart_bounds_from_base_price(float(fare["total_fare"]))
     preview_coords = build_route_preview_coordinates(
         request.pickup_lat,
@@ -3514,6 +3616,8 @@ async def estimate_fare(request: FareEstimateRequest):
         "min_price": min_price,
         "max_price": max_price,
         "smart_pricing_note": "Rides at or above 95% of suggested price are prioritized for matching.",
+        "first_ride_discount_applied": first_ride_discount_applied,
+        "original_total_fare": original_total_fare if first_ride_discount_applied else None,
         "surge_multiplier": fare["surge_multiplier"],
         "is_peak": fare["is_peak"],
         "is_weekend": fare["is_weekend"],

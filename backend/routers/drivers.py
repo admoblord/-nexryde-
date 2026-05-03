@@ -2525,6 +2525,161 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
     return {"driver_id": driver_id, "period": period, "tier": {"name": tier_config["name"], "earning_potential": tier_config["earning_per_ride"], "monthly_fee": tier_config["monthly_fee"]}, "summary": {"total_earnings": total_earnings, "total_trips": total_trips, "total_distance_km": round(total_distance, 1), "total_time_mins": total_time, "traffic_compensation": traffic_compensation, "keep_percentage": 100}, "averages": {"per_trip": round(avg_per_trip, 2), "per_km": round(avg_per_km, 2), "hourly": round(total_earnings / (total_time / 60), 2) if total_time > 0 else 0}, "projections": {"daily": round(projected_daily, 2), "weekly": round(projected_daily * 6, 2), "monthly": round(projected_daily * 24, 2)}, "daily_breakdown": daily_breakdown, "guarantee": guarantee, "salary_mode": salary_mode, "commission_message": "You keep 100% of all earnings. Riders pay you directly."}
 
 
+@drivers_router.post("/drivers/{driver_id}/claim-guarantee")
+async def claim_earnings_guarantee(driver_id: str, http_request: Request):
+    """
+    Claim the anti-surge earnings guarantee top-up for the current or most recent guarantee hour.
+
+    How it works:
+    1. The app checks which guarantee window is active (or just ended within 30 min).
+    2. We count the driver's earnings for that hour from completed trips.
+    3. If earnings < guaranteed floor, we credit the difference to the driver's wallet.
+    4. Claims are idempotent per (driver_id, window_key, hour_iso) — no double-paying.
+
+    This is what "Nexryde covers the gap" means in practice.
+    """
+    verify_owner_strict(http_request, driver_id)
+
+    # Only verified, approved drivers with an active subscription/trial can claim
+    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
+    if profile.get("verification_status") != "approved":
+        raise HTTPException(status_code=403, detail="Only verified drivers can claim the earnings guarantee.")
+
+    sub = await db.subscriptions.find_one(
+        {"driver_id": driver_id, "status": {"$in": ["trial", "active", "grace_period"]}},
+        sort=[("created_at", -1)]
+    )
+    if not sub:
+        raise HTTPException(status_code=403, detail="An active subscription or trial is required to claim the guarantee.")
+
+    WAT_OFFSET = timedelta(hours=1)
+    now_utc = datetime.utcnow()
+    now_wat = now_utc + WAT_OFFSET
+    hour_utc = now_utc.replace(minute=0, second=0, microsecond=0)
+
+    # Determine which window we're in (or just ended — 30-minute grace window)
+    guarantee_window = _anti_surge_window(now_wat)
+    if not guarantee_window.get("active"):
+        # Check if we're within 30 min after an active window ended
+        prev_wat = now_wat - timedelta(minutes=30)
+        guarantee_window = _anti_surge_window(prev_wat)
+        if not guarantee_window.get("active"):
+            return {
+                "claimed": False,
+                "reason": "No active guarantee window right now. Claims are available during Morning Rush (6–10 AM), Evening Peak (5–9 PM), and Rain Cover (Noon–7 PM rainy months).",
+                "next_window": guarantee_window.get("next_window_label"),
+            }
+        # Adjust hour to the previous hour since window just ended
+        hour_utc = (now_utc - timedelta(minutes=30)).replace(minute=0, second=0, microsecond=0)
+
+    floor = float(guarantee_window["minimum_hourly_earnings"])
+    window_key = guarantee_window["window_key"]
+    hour_iso = hour_utc.strftime("%Y-%m-%dT%H:00:00")
+    claim_key = f"guarantee_{driver_id}_{window_key}_{hour_iso}"
+
+    # Idempotency check — prevent double-claiming
+    existing_claim = await db.guarantee_claims.find_one({"claim_key": claim_key})
+    if existing_claim:
+        return {
+            "claimed": False,
+            "duplicate": True,
+            "reason": f"Guarantee already claimed for this hour ({hour_iso}).",
+            "amount_credited": existing_claim.get("amount_credited", 0),
+        }
+
+    # Count earnings for this specific hour
+    hour_end_utc = hour_utc + timedelta(hours=1)
+    hour_trips = await db.trips.find({
+        "driver_id": driver_id,
+        "status": "completed",
+        "completed_at": {"$gte": hour_utc.isoformat(), "$lt": hour_end_utc.isoformat()},
+    }).to_list(100)
+    # Also try datetime objects in case stored as datetime
+    if not hour_trips:
+        hour_trips = await db.trips.find({
+            "driver_id": driver_id,
+            "status": "completed",
+            "completed_at": {"$gte": hour_utc, "$lt": hour_end_utc},
+        }).to_list(100)
+
+    hour_earnings = sum(float(t.get("fare", 0) or 0) for t in hour_trips)
+    gap = max(0.0, floor - hour_earnings)
+
+    # Minimum threshold to prevent tiny micro-credits
+    MIN_CLAIM = 200.0
+    if gap < MIN_CLAIM:
+        # Record as a no-gap claim so we don't recompute
+        await db.guarantee_claims.insert_one({
+            "claim_key": claim_key,
+            "driver_id": driver_id,
+            "window_key": window_key,
+            "hour_iso": hour_iso,
+            "hour_earnings": round(hour_earnings, 2),
+            "floor": floor,
+            "gap": round(gap, 2),
+            "amount_credited": 0.0,
+            "status": "no_gap",
+            "claimed_at": now_utc.isoformat(),
+        })
+        return {
+            "claimed": False,
+            "reason": (
+                f"You earned ₦{int(hour_earnings):,} this hour — above or within ₦{int(MIN_CLAIM):,} of the ₦{int(floor):,} floor. No top-up needed."
+                if gap == 0
+                else f"Gap of ₦{int(gap):,} is below the minimum claim threshold."
+            ),
+            "hour_earnings": round(hour_earnings, 2),
+            "floor": floor,
+            "gap": round(gap, 2),
+        }
+
+    # Credit the gap to the driver's wallet
+    await db.users.update_one(
+        {"id": driver_id},
+        {"$inc": {"wallet_balance": gap}},
+    )
+    now_iso = now_utc.isoformat()
+
+    # Record the claim
+    await db.guarantee_claims.insert_one({
+        "claim_key": claim_key,
+        "driver_id": driver_id,
+        "window_key": window_key,
+        "hour_iso": hour_iso,
+        "hour_earnings": round(hour_earnings, 2),
+        "floor": floor,
+        "gap": round(gap, 2),
+        "amount_credited": round(gap, 2),
+        "status": "credited",
+        "claimed_at": now_iso,
+    })
+
+    # Notify driver
+    await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
+        "user_id": driver_id,
+        "type": "guarantee_topup",
+        "title": f"₦{int(gap):,} Earnings Guarantee Credit",
+        "message": (
+            f"You earned ₦{int(hour_earnings):,} during the {guarantee_window['title'].lower()} "
+            f"(floor: ₦{int(floor):,}). Nexryde credited ₦{int(gap):,} to your wallet."
+        ),
+        "read": False,
+        "created_at": now_iso,
+        "data": {"amount": round(gap, 2), "window": window_key},
+    })
+
+    return {
+        "claimed": True,
+        "amount_credited": round(gap, 2),
+        "hour_earnings": round(hour_earnings, 2),
+        "floor": floor,
+        "gap": round(gap, 2),
+        "window": guarantee_window["title"],
+        "message": f"₦{int(gap):,} credited to your wallet from the {guarantee_window['title']} guarantee.",
+    }
+
+
 @drivers_router.post("/drivers/{driver_id}/bank-details")
 async def save_bank_details(driver_id: str, request: dict, http_request: Request):
     """Save driver bank details for direct rider payments."""

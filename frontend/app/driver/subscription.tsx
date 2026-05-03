@@ -58,8 +58,12 @@ interface SubscriptionStatus {
   trial_trips_completed?: number;
   trial_trips_remaining?: number;
   trial_trips_target?: number;
+  trial_progress_pct?: number;
   trial_extended?: boolean;
+  trial_extension_count?: number;
   trial_completed?: boolean;
+  trial_urgency?: 'normal' | 'warning' | 'critical';
+  trial_message?: string;
   days_remaining?: number;
   can_upgrade: boolean;
   upgrade_requirements?: {
@@ -264,8 +268,12 @@ export default function SubscriptionScreen() {
         trial_trips_completed: data.trial_trips_completed ?? 0,
         trial_trips_remaining: data.trial_trips_remaining,
         trial_trips_target: data.trial_trips_target ?? 20,
+        trial_progress_pct: data.trial_progress_pct ?? 0,
         trial_extended: data.trial_extended ?? false,
+        trial_extension_count: data.trial_extension_count ?? 0,
         trial_completed: data.trial_completed ?? false,
+        trial_urgency: data.trial_urgency ?? 'normal',
+        trial_message: data.trial_message ?? '',
         days_remaining: data.days_remaining,
         can_upgrade: data.can_upgrade ?? (data.status === 'active' || data.status === 'trial'),
         upgrade_requirements: data.upgrade_requirements,
@@ -567,36 +575,91 @@ export default function SubscriptionScreen() {
                   <Text style={styles.currentTierPrice}>
                     ₦{subscription.monthly_price.toLocaleString()}/month
                   </Text>
-                  {subscription.trial_active && (
-                    <View style={styles.trialProgressContainer}>
-                      <View style={styles.trialBadge}>
-                        <Ionicons name="flash" size={14} color="#FFFFFF" />
-                        <Text style={styles.trialBadgeText}>
-                          {subscription.trial_extended
-                            ? 'Trial extended — low activity'
-                            : 'Free until 20 trips'}
-                        </Text>
+                  {subscription.trial_active && (() => {
+                    const completed = subscription.trial_trips_completed ?? 0;
+                    const target = subscription.trial_trips_target ?? 20;
+                    const remaining = Math.max(0, target - completed);
+                    const pct = Math.min(100, target > 0 ? (completed / target) * 100 : 0);
+                    const urgency = (subscription as any).trial_urgency ?? 'normal';
+                    const barColor = urgency === 'critical' ? '#EF4444' : urgency === 'warning' ? '#F59E0B' : '#22C55E';
+                    const extCount = (subscription as any).trial_extension_count ?? 0;
+                    const maxExt = 2;
+
+                    // Milestone markers: 25%, 50%, 75%, 100%
+                    const milestones = [5, 10, 15, target];
+
+                    return (
+                      <View style={styles.trialProgressContainer}>
+                        {/* Badge row */}
+                        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                          <View style={styles.trialBadge}>
+                            <Ionicons name="flash" size={13} color="#FFFFFF" />
+                            <Text style={styles.trialBadgeText}>
+                              {subscription.trial_extended ? `Extended ×${extCount}` : 'Free Trial'}
+                            </Text>
+                          </View>
+                          {remaining <= 5 && remaining > 0 && (
+                            <View style={[styles.trialBadge, { backgroundColor: '#EF4444' }]}>
+                              <Ionicons name="alert-circle" size={13} color="#FFF" />
+                              <Text style={styles.trialBadgeText}>Almost done!</Text>
+                            </View>
+                          )}
+                          {subscription.trial_extended && extCount < maxExt && (
+                            <View style={[styles.trialBadge, { backgroundColor: 'rgba(245,158,11,0.8)' }]}>
+                              <Ionicons name="time-outline" size={13} color="#FFF" />
+                              <Text style={styles.trialBadgeText}>{maxExt - extCount} ext. left</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Progress numbers */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <Text style={styles.trialProgressLabel}>{completed} trips completed</Text>
+                          <Text style={[styles.trialProgressLabel, { fontWeight: '800' }]}>{remaining} left</Text>
+                        </View>
+
+                        {/* Progress bar with milestone ticks */}
+                        <View style={{ position: 'relative', marginBottom: 14 }}>
+                          <View style={styles.trialProgressBarBg}>
+                            <View style={[styles.trialProgressBarFill, { width: `${pct}%` as any, backgroundColor: barColor }]} />
+                          </View>
+                          {/* Milestone tick marks */}
+                          {milestones.filter(m => m < target).map((m) => {
+                            const tickPct = (m / target) * 100;
+                            return (
+                              <View
+                                key={m}
+                                style={{
+                                  position: 'absolute',
+                                  left: `${tickPct}%` as any,
+                                  top: -3,
+                                  width: 1,
+                                  height: 10,
+                                  backgroundColor: 'rgba(255,255,255,0.4)',
+                                }}
+                              />
+                            );
+                          })}
+                        </View>
+
+                        {/* Context message */}
+                        {(subscription as any).trial_message ? (
+                          <Text style={[styles.trialExtendedNote, { color: urgency === 'critical' ? '#FCA5A5' : 'rgba(255,255,255,0.75)' }]}>
+                            {(subscription as any).trial_message}
+                          </Text>
+                        ) : null}
+
+                        {/* What happens next */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 6 }}>
+                          <Ionicons name="information-circle-outline" size={13} color="rgba(255,255,255,0.55)" />
+                          <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', flex: 1 }}>
+                            After {target} trips, subscribe for ₦18,000/month to keep earning.
+                            {extCount < maxExt ? ` Low activity auto-extends trial (up to ${maxExt}×).` : ''}
+                          </Text>
+                        </View>
                       </View>
-                      <Text style={styles.trialProgressLabel}>
-                        Trips completed: {subscription.trial_trips_completed ?? 0} / {subscription.trial_trips_target ?? 20}
-                      </Text>
-                      <View style={styles.trialProgressBarBg}>
-                        <View
-                          style={[
-                            styles.trialProgressBarFill,
-                            {
-                              width: `${Math.min(100, ((subscription.trial_trips_completed ?? 0) / (subscription.trial_trips_target ?? 20)) * 100)}%` as any,
-                            },
-                          ]}
-                        />
-                      </View>
-                      {subscription.trial_extended && (
-                        <Text style={styles.trialExtendedNote}>
-                          Trial extended due to low ride activity
-                        </Text>
-                      )}
-                    </View>
-                  )}
+                    );
+                  })()}
                   {!subscription.trial_active && subscription.status === 'active' && subscription.days_remaining && (
                     <Text style={styles.daysRemainingText}>
                       {subscription.days_remaining} days remaining
