@@ -49,7 +49,15 @@ function extractReferralIdentifier(url: string): string | null {
     const codeParam = (parsed.queryParams?.code as string | undefined) || '';
     if (codeParam.trim()) return codeParam.trim().toUpperCase();
 
-    // /invite/{slug} → username (lowercase, human-readable)
+    // nexryde://invite/{slug} — expo-linking puts the host as `hostname`
+    // and the rest as `path`, so pathParts won't contain 'invite'.
+    // Handle this case explicitly before the generic path search.
+    if (parsed.scheme === 'nexryde' && parsed.hostname === 'invite') {
+      const slug = (parsed.path || '').split('/').filter(Boolean)[0];
+      if (slug) return slug.toLowerCase();
+    }
+
+    // https://nexryde.app/invite/{slug} — full path includes 'invite' segment
     const pathParts = (parsed.path || '').split('/').filter(Boolean);
     const idx = pathParts.indexOf('invite');
     if (idx !== -1 && pathParts[idx + 1]) {

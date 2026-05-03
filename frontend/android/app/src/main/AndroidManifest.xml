@@ -51,6 +51,13 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="nexryde" android:host="action"/>
       </intent-filter>
+      <!-- nexryde://invite/* — referral deep links from share sheet / QR codes -->
+      <intent-filter>
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="nexryde" android:host="invite"/>
+      </intent-filter>
       <!-- https://nexryde.app/invite/* — referral Universal Links -->
       <intent-filter android:autoVerify="true">
         <action android:name="android.intent.action.VIEW"/>

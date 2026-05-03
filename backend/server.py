@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect, Form, File, UploadFile, Body
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse as FJSONResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -112,6 +112,107 @@ async def service_root():
 async def service_health_liveness():
     """Liveness without Mongo — Cloud Run can probe before deferred startup completes."""
     return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+
+
+# ── Android App Links verification ────────────────────────────────────────────
+# Serves the Digital Asset Links file so Android can verify that
+# https://nexryde.app/invite/* links open Nexryde directly without a chooser.
+# SHA-256 fingerprint is fetched from EAS / Google Play App Signing.
+# Replace the placeholder below with the real cert fingerprint from:
+#   Google Play Console → Release → Setup → App signing → SHA-256 certificate fingerprint
+_ASSETLINKS_SHA256 = os.environ.get("ANDROID_SHA256_CERT", "")
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+async def assetlinks():
+    """Android App Links verification — required for autoVerify deep links."""
+    links = [
+        {
+            "relation": ["delegate_permission/common.handle_all_urls"],
+            "target": {
+                "namespace": "android_app",
+                "package_name": "com.nexryde.app",
+                "sha256_cert_fingerprints": [_ASSETLINKS_SHA256] if _ASSETLINKS_SHA256 else [],
+            },
+        }
+    ]
+    return FJSONResponse(content=links, headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ── Referral invite redirect page ─────────────────────────────────────────────
+# When someone taps a nexryde.app/invite/{slug} link:
+#   • If Nexryde is installed → Android intent URL opens the app directly.
+#   • If not installed → falls back to Play Store.
+# This page also stores the referral identifier in the URL so the app can
+# read it from Linking.getInitialURL() on cold-start.
+
+_INVITE_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Join Nexryde — Nigeria's Smartest Ride App</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#0D1420;color:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}}
+  .card{{background:#111827;border-radius:20px;padding:40px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.6)}}
+  .logo{{font-size:48px;margin-bottom:12px}}
+  h1{{font-size:24px;font-weight:800;margin-bottom:8px}}
+  .sub{{color:#94A3B8;font-size:15px;margin-bottom:28px;line-height:1.5}}
+  .reward{{background:linear-gradient(135deg,#7C3AED,#5B21B6);border-radius:12px;padding:16px;margin-bottom:28px}}
+  .reward-title{{font-size:13px;color:#C4B5FD;font-weight:600;text-transform:uppercase;letter-spacing:.5px}}
+  .reward-amount{{font-size:32px;font-weight:900;color:#fff;margin-top:4px}}
+  .btn{{display:block;background:#7C3AED;color:#fff;text-decoration:none;border-radius:14px;padding:16px;font-size:16px;font-weight:800;margin-bottom:12px}}
+  .btn-secondary{{background:#1e293b;color:#94A3B8;font-size:14px;padding:12px;margin-bottom:0}}
+  .note{{font-size:12px;color:#475569;margin-top:20px}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">🚗</div>
+  <h1>You've been invited to Nexryde!</h1>
+  <p class="sub">Your friend is inviting you to join Nigeria's smartest ride-hailing app.</p>
+  <div class="reward">
+    <div class="reward-title">New rider bonus</div>
+    <div class="reward-amount">₦500 FREE</div>
+  </div>
+  <a class="btn" id="openBtn" href="{intent_url}">Open Nexryde App</a>
+  <a class="btn btn-secondary" id="storeBtn" href="https://play.google.com/store/apps/details?id=com.nexryde.app">Download on Play Store</a>
+  <p class="note">Already installed? Tap "Open Nexryde App" above.</p>
+</div>
+<script>
+  (function(){{
+    var deeplink = "{deeplink_url}";
+    var intent   = "{intent_url}";
+    var store    = "https://play.google.com/store/apps/details?id=com.nexryde.app";
+    // Try deep-link immediately; if browser can't handle it, show the store after 2 s
+    setTimeout(function(){{
+      window.location = store;
+    }}, 2500);
+    window.location = deeplink;
+  }})();
+</script>
+</body>
+</html>"""
+
+@app.get("/invite/{identifier}", response_class=HTMLResponse, include_in_schema=False)
+async def invite_redirect(identifier: str):
+    """Smart invite landing page — opens the Nexryde app or redirects to Play Store."""
+    slug = identifier.strip()
+    deeplink_url = f"nexryde://invite/{slug}"
+    # Android Intent URL: opens app if installed, falls back to Play Store
+    intent_url = (
+        f"intent://invite/{slug}"
+        "#Intent;"
+        "scheme=nexryde;"
+        "package=com.nexryde.app;"
+        f"S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.nexryde.app;"
+        "end"
+    )
+    html = _INVITE_HTML.format(
+        deeplink_url=deeplink_url,
+        intent_url=intent_url,
+    )
+    return HTMLResponse(content=html)
 
 
 # Create a router with the /api prefix
