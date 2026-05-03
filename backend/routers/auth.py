@@ -1453,31 +1453,22 @@ async def register(request: RegisterRequest, http_request: Request):
     if request.role == "rider" and not request.nin:
         raise HTTPException(status_code=400, detail="Riders must provide National Identification Number")
     
-    # Validate referral code if provided (don't block registration if invalid — just ignore)
-    referred_by_code: Optional[str] = None
-    raw_referral = (request.referral_code or "").strip().upper()
-    if raw_referral:
-        referrer = await db.users.find_one({"referral_code": raw_referral}, {"_id": 0, "id": 1})
-        if referrer:
-            referred_by_code = raw_referral
-
     # Generate unique username from name
     from routers.incentives import generate_unique_username
-    tmp_id = str(uuid4())  # temp id for uniqueness check, replaced below
+    tmp_id = str(uuid4())  # temporary id for uniqueness check before insertion
     generated_username = await generate_unique_username(request.name, tmp_id)
 
     user = create_user_dict(
         phone=normalized_phone or "",
-        name=request.name, 
-        email=(request.email.strip().lower() if request.email else None), 
-        role=request.role, 
+        name=request.name,
+        email=(request.email.strip().lower() if request.email else None),
+        role=request.role,
         is_verified=True,
         google_id=request.google_id,
         profile_image=request.profile_image,
         nin=request.nin,
         terms_accepted=request.terms_accepted,
         terms_accepted_at=request.terms_accepted_at,
-        referred_by=referred_by_code,
         username=generated_username,
     )
     await db.users.insert_one(user)
