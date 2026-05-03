@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Dark glossy circle for the main bubble body -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#F0111827" />
+    <stroke
+        android:width="2dp"
+        android:color="#4000D46A" />
+</shape>

@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import { useTurnByTurnNav } from '@/src/navigation/useTurnByTurnNav';
 import { TurnCard } from '@/src/navigation/TurnCard';
 import * as Haptics from 'expo-haptics';
+import { useFloatingDriverBubble } from '@/src/hooks/useFloatingDriverBubble';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
@@ -495,6 +496,7 @@ const tripMapStyles = StyleSheet.create({
 export default function DriverTripsScreen() {
   const router = useRouter();
   const { user, currentLocation, currentTrip, setCurrentTrip } = useAppStore();
+  const { updateStatus: bubbleUpdate } = useFloatingDriverBubble();
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -568,6 +570,13 @@ export default function DriverTripsScreen() {
           : trip.status;
       if (['accepted', 'arrived', 'ongoing', 'pending_payment'].includes(normalizedStatus)) {
         setCurrentTrip({ ...trip, status: normalizedStatus });
+        // Keep floating bubble in sync with recovered trip status
+        if (normalizedStatus === 'accepted' || normalizedStatus === 'ongoing') {
+          const dest = trip.dropoff_address?.slice(0, 22) ?? 'On Trip';
+          bubbleUpdate('on_trip', dest);
+        } else if (normalizedStatus === 'arrived') {
+          bubbleUpdate('arrived', 'At pickup');
+        }
       }
     } catch {}
   };
@@ -681,6 +690,8 @@ export default function DriverTripsScreen() {
     try {
       const response = await acceptTrip(trip.id, user.id, trip.offer_id);
       setCurrentTrip(response.data);
+      const destLabel = (response.data?.dropoff_address ?? trip.dropoff_address ?? 'On Trip').slice(0, 22);
+      bubbleUpdate('on_trip', destLabel);
       Alert.alert('Trip Accepted', 'Navigate to pickup location to start the ride.');
       setTrips(trips.filter(t => t.id !== trip.id));
     } catch (error: any) {
@@ -736,6 +747,7 @@ export default function DriverTripsScreen() {
     try {
       const response = await arriveTrip(currentTrip.id, user.id);
       setCurrentTrip(response.data);
+      bubbleUpdate('arrived', 'At pickup');
       Alert.alert('Arrived at Pickup', 'Rider notified. Ask them to open NEXRYDE and show their pick-up code.');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to mark arrival');

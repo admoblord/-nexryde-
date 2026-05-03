@@ -56,6 +56,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { useFloatingDriverBubble } from '@/src/hooks/useFloatingDriverBubble';
 import { buildDriverPriorityFeatures, buildDriverToolFeatures } from '@/src/config/driverHomeFeatures';
 import DriverRideRequestModal from '@/src/components/DriverRideRequestModal';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
@@ -132,6 +133,9 @@ export default function ModernDriverHome() {
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(isOnline);
   isOnlineRef.current = isOnline;
+
+  const { enable: bubbleEnable, disable: bubbleDisable, updateStatus: bubbleUpdate } =
+    useFloatingDriverBubble();
 
   const priorityFeatures = useMemo(
     () => buildDriverPriorityFeatures(t),
@@ -898,8 +902,12 @@ export default function ModernDriverHome() {
       setIsOnline(nextStatus);
       if (nextStatus) {
         fetchIncomingRide();
+        // Enable floating bubble so driver sees status when app is minimised
+        bubbleEnable('online');
       } else {
         setIncomingRide(null);
+        // Disable floating bubble when driver goes offline
+        bubbleDisable();
       }
       // Persist so widget and smart-resume reflect the new status instantly
       if (user?.id) {

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nexryde floating driver bubble — draggable overlay shown above all apps -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:padding="6dp">
+
+    <!-- Drop-shadow layer (translucent, slightly larger) -->
+    <View
+        android:layout_width="76dp"
+        android:layout_height="76dp"
+        android:layout_gravity="center"
+        android:background="@drawable/nx_bubble_shadow" />
+
+    <!-- Main circle with icon + status label -->
+    <LinearLayout
+        android:layout_width="68dp"
+        android:layout_height="68dp"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:orientation="vertical"
+        android:background="@drawable/nx_bubble_bg">
+
+        <!-- Steering-wheel icon (Unicode emoji renders on all modern Android) -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="&#128690;"
+            android:textSize="27sp"
+            android:includeFontPadding="false"
+            android:lineSpacingExtra="0dp" />
+
+        <!-- Status text: "Online" / "On Trip" / etc. -->
+        <TextView
+            android:id="@+id/bubbleLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Online"
+            android:textSize="8.5sp"
+            android:textStyle="bold"
+            android:textColor="#00D46A"
+            android:letterSpacing="0.04"
+            android:includeFontPadding="false"
+            android:layout_marginTop="1dp" />
+
+    </LinearLayout>
+
+    <!-- Status indicator dot — top-right corner -->
+    <View
+        android:id="@+id/bubbleStatusDot"
+        android:layout_width="14dp"
+        android:layout_height="14dp"
+        android:layout_gravity="top|end"
+        android:layout_marginTop="5dp"
+        android:layout_marginEnd="5dp"
+        android:background="@drawable/nx_dot_green" />
+
+</FrameLayout>
