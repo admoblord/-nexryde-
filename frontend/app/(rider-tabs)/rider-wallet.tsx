@@ -359,25 +359,40 @@ export default function RiderWalletScreen() {
           pendingMeta?.ref ||
           (uid ? (await loadWalletCheckoutSession(uid))?.transaction_ref : undefined);
         if (!ref) {
-          if (!silent) setTopupState({ phase: 'failed', reason: 'No pending payment reference found.' });
+          if (!silent)
+            Alert.alert('No payment found', 'Start a new top-up or pull down to refresh your balance.');
           return;
         }
         if (!silent) setTopupState({ phase: 'verifying', reference: ref, startedAt: Date.now() });
 
+        // Poll up to 24× (72 seconds) — Squad sometimes takes up to 60s to settle a card payment.
         let terminal: Record<string, unknown> | null = null;
-        for (let i = 0; i < 20; i += 1) {
-          const res = await verifyPendingRiderWallet(ref);
-          const data = res.data as Record<string, unknown>;
-          if (data.verified && (data.credited || data.duplicate)) {
-            terminal = data;
-            break;
-          }
-          if (data.terminal || data.reason || data.detail === 'amount_mismatch') {
-            terminal = data;
-            break;
+        for (let i = 0; i < 24; i += 1) {
+          try {
+            const res = await verifyPendingRiderWallet(ref);
+            const data = res.data as Record<string, unknown>;
+
+            // Wallet successfully credited (or duplicate — already credited before)
+            if (data.verified && (data.credited || data.duplicate)) {
+              terminal = data;
+              break;
+            }
+            // Terminal failure — no point retrying
+            if (
+              data.terminal ||
+              data.detail === 'amount_mismatch' ||
+              String(data.status || '').toLowerCase() === 'cancelled'
+            ) {
+              terminal = data;
+              break;
+            }
+            // "squad_not_confirmed_yet" — keep polling silently
+          } catch {
+            // Network hiccup — keep polling
           }
           await new Promise((resolve) => setTimeout(resolve, 3000));
         }
+
         const data = terminal;
         if (data?.verified && (data.credited || data.duplicate)) {
           const amountForDisplay = pendingMeta?.amount ?? parsedAmount();
@@ -391,25 +406,37 @@ export default function RiderWalletScreen() {
             balanceNgn: typeof balAfter === 'number' ? balAfter : 0,
           });
           if (!silent) {
-            Alert.alert('Success', 'Confirmed by Squad and wallet updated.');
+            Alert.alert(
+              '✅ Wallet Funded!',
+              `₦${(amountForDisplay).toLocaleString()} has been added to your wallet.`,
+            );
           }
         } else {
-          const mismatch =
-            data?.detail === 'amount_mismatch'
-              ? 'Amount mismatch with bank. Contact support with your receipt if money left your account.'
-              : '';
-          const vr = data?.verify_result as Record<string, unknown> | undefined;
-          const reason =
-            mismatch ||
-            (typeof vr?.reason === 'string' ? vr.reason : '') ||
-            'Still confirming with Squad. We will auto-update once confirmed.';
-          if (String(data?.status || '').toLowerCase() === 'cancelled') {
+          const isCancelled = String(data?.status || '').toLowerCase() === 'cancelled';
+          const isMismatch = data?.detail === 'amount_mismatch';
+          const reason = isMismatch
+            ? 'Amount mismatch. If money left your bank, contact support with your receipt.'
+            : isCancelled
+              ? 'Payment was cancelled.'
+              : 'Payment not confirmed yet. Tap "Verify Payment" again in a few seconds, or pull down to refresh your balance.';
+
+          if (isCancelled) {
             setTopupState({ phase: 'cancelled', reference: ref });
           } else {
-            setTopupState({ phase: 'failed', reference: ref, reason });
+            // Keep phase as idle (not failed) so the UI stays usable and user can tap Verify again
+            setTopupState({ phase: 'idle' });
           }
           if (!silent) {
-            Alert.alert('Not yet', reason);
+            Alert.alert(
+              isCancelled ? 'Payment Cancelled' : isMismatch ? 'Amount Mismatch' : 'Not Confirmed Yet',
+              reason,
+              [
+                { text: 'OK' },
+                ...(!isCancelled && !isMismatch
+                  ? [{ text: 'Try Again', onPress: () => void verifyPending() }]
+                  : []),
+              ],
+            );
           }
         }
       } catch (e: unknown) {
@@ -417,9 +444,17 @@ export default function RiderWalletScreen() {
           const msg = axios.isAxiosError(e)
             ? formatApiDetail(e.response?.data?.detail) || messageFromAxiosError(e, '')
             : '';
+          // 404 most likely means Squad hasn't forwarded the event yet
+          const isNotFound = axios.isAxiosError(e) && e.response?.status === 404;
           Alert.alert(
-            'Verify',
-            msg || 'No pending checkout or payment not verified yet. Pull down to refresh your balance.',
+            isNotFound ? 'Payment Pending' : 'Verify',
+            isNotFound
+              ? 'Squad is still processing your payment. Tap "Verify Payment" again in a few seconds.'
+              : msg || 'Could not reach the server. Check your connection and try again.',
+            [
+              { text: 'OK' },
+              { text: 'Try Again', onPress: () => void verifyPending() },
+            ],
           );
         }
       } finally {
@@ -554,13 +589,35 @@ export default function RiderWalletScreen() {
           </TouchableOpacity>
         ) : null}
 
-        <TouchableOpacity style={styles.textLink} onPress={() => void verifyPending()} disabled={busy !== null}>
+        {topupState.phase === 'success' && (
+          <View style={styles.successBanner}>
+            <Ionicons name="checkmark-circle" size={22} color="#16A34A" />
+            <View style={{ flex: 1 }}>
+              <Text style={styles.successBannerTitle}>Wallet Funded Successfully</Text>
+              <Text style={styles.successBannerText}>
+                ₦{(topupState.amountNgn ?? 0).toLocaleString()} added · New balance: ₦{(topupState.balanceNgn ?? 0).toLocaleString()}
+              </Text>
+            </View>
+          </View>
+        )}
+
+        <TouchableOpacity
+          style={[styles.verifyBtn, busy === 'verify' && { opacity: 0.7 }]}
+          onPress={() => void verifyPending()}
+          disabled={busy !== null}
+        >
           {busy === 'verify' ? (
-            <ActivityIndicator color={COLORS.accentGreen} />
+            <ActivityIndicator color="#FFF" size="small" />
           ) : (
-            <Text style={styles.textLinkLabel}>Verify Payment</Text>
+            <>
+              <Ionicons name="checkmark-done-outline" size={18} color="#FFF" />
+              <Text style={styles.verifyBtnText}>Verify Payment</Text>
+            </>
           )}
         </TouchableOpacity>
+        <Text style={styles.verifyHint}>
+          Tap after completing payment in Squad. We'll check with Squad and credit your wallet instantly.
+        </Text>
 
         <Text style={styles.sectionTitle}>Rewards & Bonuses</Text>
         <Text style={styles.sectionHint}>
@@ -949,15 +1006,50 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: COLORS.primary,
   },
-  textLink: {
+  verifyBtn: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.md,
-    marginBottom: SPACING.lg,
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#0F766E',
+    paddingVertical: 16,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: 8,
   },
-  textLinkLabel: {
-    color: COLORS.accentGreen,
+  verifyBtnText: {
+    color: '#FFF',
+    fontSize: FONT_SIZE.md,
     fontWeight: '800',
+  },
+  verifyHint: {
+    color: '#64748B',
+    fontSize: FONT_SIZE.xs,
+    textAlign: 'center',
+    lineHeight: 18,
+    marginBottom: SPACING.lg,
+    paddingHorizontal: SPACING.sm,
+  },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    backgroundColor: '#F0FDF4',
+    borderRadius: BORDER_RADIUS.lg,
+    padding: SPACING.md,
+    marginBottom: SPACING.sm,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  successBannerTitle: {
     fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: '#166534',
+    marginBottom: 2,
+  },
+  successBannerText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: '#15803D',
   },
   rewardsCard: {
     backgroundColor: COLORS.white,

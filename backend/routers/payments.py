@@ -417,14 +417,29 @@ def _extract_paid_kobo_from_verify_result(verify_result: dict) -> Optional[int]:
 
 
 async def _expire_stale_wallet_payment_intents(user_id: Optional[str] = None) -> int:
-    cutoff = datetime.utcnow() - timedelta(minutes=30)
-    q: dict = {"status": "pending", "created_at": {"$lt": cutoff}}
+    now = datetime.utcnow()
+    expired_cutoff = now - timedelta(minutes=30)
+    stuck_cutoff = now - timedelta(minutes=5)
+
+    # Expire old pending intents
+    q_expire: dict = {"status": "pending", "created_at": {"$lt": expired_cutoff}}
     if user_id:
-        q["user_id"] = user_id
+        q_expire["user_id"] = user_id
     res = await db.wallet_payment_intents.update_many(
-        q,
-        {"$set": {"status": "expired", "updated_at": datetime.utcnow(), "failed_reason": "expired"}},
+        q_expire,
+        {"$set": {"status": "expired", "updated_at": now, "failed_reason": "expired"}},
     )
+
+    # Reset stuck "processing" intents back to "pending" so future verify calls can find them.
+    # Processing intents older than 5 min means the prior verify attempt failed (Squad not confirmed yet).
+    q_stuck: dict = {"status": "processing", "updated_at": {"$lt": stuck_cutoff}}
+    if user_id:
+        q_stuck["user_id"] = user_id
+    await db.wallet_payment_intents.update_many(
+        q_stuck,
+        {"$set": {"status": "pending", "updated_at": now, "_processing_reset_at": now.isoformat()}},
+    )
+
     return int(res.modified_count)
 
 
@@ -440,8 +455,10 @@ async def _credit_wallet_checkout_intent(
         return {"credited": False, "duplicate": False, "reason": "missing_intent_id"}
 
     if hasattr(db.wallet_payment_intents, "find_one_and_update"):
+        # Accept both "pending" and "processing" so stuck intents (Squad not confirmed on
+        # a prior verify attempt) are retried instead of raising intent_not_pending.
         fresh = await db.wallet_payment_intents.find_one_and_update(
-            {"id": intent_id, "status": "pending"},
+            {"id": intent_id, "status": {"$in": ["pending", "processing"]}},
             {"$set": {"status": "processing", "updated_at": datetime.utcnow()}},
             return_document=ReturnDocument.BEFORE,
         )
@@ -493,7 +510,13 @@ async def _credit_wallet_checkout_intent(
         return {"credited": False, "duplicate": False, "reason": "intent_expired"}
 
     if not verify_result or not verify_result.get("verified"):
-        return {"credited": False, "duplicate": False, "reason": "squad_verify_not_success"}
+        # Squad hasn't confirmed yet — reset intent from "processing" back to "pending"
+        # so the next verify attempt (user taps "Verify Payment" again) can find it.
+        await db.wallet_payment_intents.update_one(
+            {"id": intent_id, "status": "processing"},
+            {"$set": {"status": "pending", "updated_at": datetime.utcnow(), "_last_verify_failed_at": datetime.utcnow().isoformat()}},
+        )
+        return {"credited": False, "duplicate": False, "reason": "squad_not_confirmed_yet"}
 
     tx_ref = str(fresh.get("transaction_ref") or "")
     if tx_ref:
@@ -2475,8 +2498,9 @@ async def verify_pending_rider_wallet_checkout(
         candidates = _wallet_intent_ref_candidates(str(body.transaction_ref).strip())
         if not candidates:
             raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
+        # Search pending + processing (processing = a prior verify attempt started but Squad hadn't confirmed yet)
         intent = await db.wallet_payment_intents.find_one(
-            {"user_id": user_id, "status": "pending", "transaction_ref": {"$in": candidates}},
+            {"user_id": user_id, "status": {"$in": ["pending", "processing"]}, "transaction_ref": {"$in": candidates}},
         )
         if not intent:
             intent = await db.wallet_payment_intents.find_one(
@@ -2487,7 +2511,7 @@ async def verify_pending_rider_wallet_checkout(
             raise HTTPException(status_code=404, detail="No pending wallet checkout for that reference")
     else:
         intent = await db.wallet_payment_intents.find_one(
-            {"user_id": user_id, "status": "pending"},
+            {"user_id": user_id, "status": {"$in": ["pending", "processing"]}},
             sort=[("created_at", -1)],
         )
         if not intent:
