@@ -48,6 +48,7 @@ const DriverPrayerTimesScreen = () => {
     loading,
     saveSettings,
     fetchPrayerTimes,
+    findNearbyMosques,
   } = usePrayerTimes();
   
   const [refreshing, setRefreshing] = useState(false);
@@ -60,6 +61,7 @@ const DriverPrayerTimesScreen = () => {
   const handleRefresh = async () => {
     setRefreshing(true);
     await fetchPrayerTimes();
+    await findNearbyMosques();
     setRefreshing(false);
   };
   

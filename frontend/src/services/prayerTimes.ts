@@ -78,15 +78,24 @@ export function usePrayerTimes() {
     requestNotificationPermissions();
   }, []);
 
-  // Fetch prayer times when location changes
+  // Fetch prayer times when location changes; reschedule when lead-time changes
   useEffect(() => {
     if (location) {
       fetchPrayerTimes();
       if (settings.enabled) {
-        scheduleNotifications();
+        void scheduleNotifications();
       }
     }
-  }, [location, settings.enabled]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location, settings.enabled, settings.alertMinutesBefore]);
+
+  // Find nearby mosques once location is resolved
+  useEffect(() => {
+    if (location && settings.showMosqueLocations) {
+      void findNearbyMosques();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location]);
 
   const loadSettings = async () => {
     try {
@@ -272,16 +281,16 @@ export function usePrayerTimes() {
           id: place.id || place.place_id || place.name,
           name: place.name || place.displayName?.text || 'Mosque',
           address: place.vicinity || place.formattedAddress || '',
-          latitude: place.geometry?.location?.lat || place.location?.latitude || 0,
-          longitude: place.geometry?.location?.lng || place.location?.longitude || 0,
+          latitude: place.geometry?.location?.lat ?? place.location?.latitude ?? 0,
+          longitude: place.geometry?.location?.lng ?? place.location?.longitude ?? 0,
           hasWudu: Boolean(place.hasWudu),
           hasParking: Boolean(place.hasParking),
           capacity: typeof place.capacity === 'number' ? place.capacity : undefined,
           distance: calculateDistance(
             location.lat,
             location.lng,
-            place.geometry.location.lat,
-            place.geometry.location.lng
+            place.geometry?.location?.lat ?? place.location?.latitude ?? 0,
+            place.geometry?.location?.lng ?? place.location?.longitude ?? 0,
           ),
         }));
 

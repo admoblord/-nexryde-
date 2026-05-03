@@ -33,12 +33,7 @@ import {
   formatApiDetail,
 } from '@/src/services/api';
 
-// Guarantee claim helper
-const claimEarningsGuarantee = async (driverId: string, headers: Record<string, string>) =>
-  fetch(`${BACKEND_URL}/api/drivers/${driverId}/claim-guarantee`, {
-    method: 'POST',
-    headers,
-  }).then((r) => r.json());
+
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import {
   driverTermsRouteParams,
@@ -136,11 +131,7 @@ export default function ModernDriverHome() {
     [language, t.verification.vehicleVerified, t.verification.uploadDocuments, t.safety.safetyTips, t.driver.rating]
   );
   const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
-  const [earningsGuarantee, setEarningsGuarantee] = useState<any>(null);
-  const [guaranteeInfoOpen, setGuaranteeInfoOpen] = useState(false);
-  const [guaranteeClaiming, setGuaranteeClaiming] = useState(false);
-  const [guaranteeClaimResult, setGuaranteeClaimResult] = useState<any>(null);
-  const guaranteeBarAnim = useRef(new Animated.Value(0)).current;
+  const [surgePricing, setSurgePricing] = useState<any>(null);
 
   // Load real earnings from backend
   useEffect(() => {
@@ -173,17 +164,7 @@ export default function ModernDriverHome() {
             week: weekEarnings,
             trips: Number(user?.total_trips ?? todaySummary.total_trips ?? 0),
           });
-          const g = todayData.guarantee || null;
-          setEarningsGuarantee(g);
-          if (g?.active) {
-            // Animate progress bar from 0 → actual %
-            guaranteeBarAnim.setValue(0);
-            Animated.timing(guaranteeBarAnim, {
-              toValue: Math.min(100, Number(g.progress_pct || 0)),
-              duration: 900,
-              useNativeDriver: false,
-            }).start();
-          }
+          setSurgePricing(todayData.surge || null);
           setEarningsError(false);
         }
       } catch {
@@ -1312,222 +1293,43 @@ export default function ModernDriverHome() {
             </View>
           </View>
         )}
-        {/* ── EARNINGS GUARANTEE CARD ─────────────────────────────────── */}
-        {earningsGuarantee && (() => {
-          const g = earningsGuarantee;
-          const floor = Number(g.minimum_hourly_earnings || 0);
-          const earned = Number(g.current_hour_earnings || 0);
-          const gap = Number(g.top_up_gap || 0);
-          const aboveFloor = Boolean(g.above_floor) || earned >= floor;
-
-          // ── Standby mode: compact chip only ──────────────────────────
-          if (!g.active) {
-            return (
-              <TouchableOpacity style={styles.guaranteeChip} onPress={() => setGuaranteeInfoOpen(true)} activeOpacity={0.75}>
-                <Ionicons name="shield-checkmark-outline" size={13} color={COLORS.accentGreen} />
-                <Text style={styles.guaranteeChipText}>
-                  Earnings Guarantee · Next: {g.next_window_label || 'See schedule'}
-                </Text>
-                <Ionicons name="information-circle-outline" size={13} color="#15803D" />
-              </TouchableOpacity>
-            );
-          }
-
-          // ── Active window — full rich card ────────────────────────────
-          const accentColor = aboveFloor ? '#16A34A' : '#D97706';
-          const bgColor = aboveFloor ? '#F0FDF4' : '#FFFBEB';
-          const borderColor = aboveFloor ? '#86EFAC' : '#FCD34D';
-          const barFillColor = aboveFloor ? '#16A34A' : '#F59E0B';
-
-          // Animated bar width from guaranteed hook
-          const barWidth = guaranteeBarAnim.interpolate({
-            inputRange: [0, 100],
-            outputRange: ['0%', '100%'],
-          });
+        {/* ── SURGE PRICING CARD ───────────────────────────────────────── */}
+        {surgePricing && (() => {
+          const s = surgePricing;
+          const isSurge = Boolean(s.is_surge);
+          const pct = Number(s.pct_extra || 0);
+          const multiplier = Number(s.multiplier || 1);
+          const tierColor: string = s.tier_color || (isSurge ? '#F59E0B' : '#16A34A');
+          const bgColor = isSurge ? '#FFFBEB' : '#F0FDF4';
+          const borderColor = isSurge ? '#FCD34D' : '#86EFAC';
 
           return (
-            <>
-              <View style={[styles.guaranteeCard, { backgroundColor: bgColor, borderColor }]}>
-                {/* Header row */}
-                <View style={styles.guaranteeHeader}>
-                  <View style={[styles.guaranteeIconWrap, { backgroundColor: aboveFloor ? '#DCFCE7' : '#FEF3C7' }]}>
-                    <Ionicons
-                      name={(g.icon as any) || 'shield-checkmark-outline'}
-                      size={18}
-                      color={accentColor}
-                    />
-                  </View>
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={[styles.guaranteeTitle, { color: accentColor }]}>{g.title}</Text>
-                    <Text style={styles.guaranteeReason}>{g.reason}</Text>
-                  </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {g.window_ends_label ? (
-                      <View style={styles.guaranteeEndBadge}>
-                        <Text style={styles.guaranteeEndBadgeText}>Until {g.window_ends_label}</Text>
-                      </View>
-                    ) : null}
-                    <TouchableOpacity onPress={() => setGuaranteeInfoOpen(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Ionicons name="information-circle-outline" size={18} color={accentColor} />
-                    </TouchableOpacity>
-                  </View>
+            <View style={[styles.surgeCard, { backgroundColor: bgColor, borderColor }]}>
+              {/* Left: icon + info */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
+                <View style={[styles.surgeIconWrap, { backgroundColor: tierColor + '20' }]}>
+                  <Ionicons
+                    name={isSurge ? 'flash' : 'checkmark-circle-outline'}
+                    size={20}
+                    color={tierColor}
+                  />
                 </View>
-
-                {/* Animated progress bar */}
-                <View>
-                  <View style={styles.guaranteeBarBg}>
-                    <Animated.View style={[styles.guaranteeBarFill, { width: barWidth, backgroundColor: barFillColor }]} />
-                  </View>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 3 }}>
-                    <Text style={{ fontSize: 10, color: '#9CA3AF' }}>₦0</Text>
-                    <Text style={{ fontSize: 10, color: '#9CA3AF', fontWeight: '600' }}>
-                      Floor: ₦{floor.toLocaleString()}
-                    </Text>
-                  </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.surgeTitle, { color: tierColor }]}>
+                    {isSurge ? `⚡ ${s.tier_label || 'Surge active'} — ${multiplier}x` : 'Normal pricing'}
+                  </Text>
+                  <Text style={styles.surgeReason} numberOfLines={2}>
+                    {s.driver_message || (isSurge ? `Earn ${pct}% more per trip right now.` : 'Standard fares. Stay online for surge windows.')}
+                  </Text>
                 </View>
-
-                {/* Earnings row */}
-                <View style={styles.guaranteeEarningsRow}>
-                  <View style={styles.guaranteeEarningsItem}>
-                    <Text style={styles.guaranteeEarningsLabel}>
-                      {isOnline ? 'This hour' : 'If online'}
-                    </Text>
-                    <Text style={[styles.guaranteeEarningsValue, { color: isOnline ? accentColor : '#9CA3AF' }]}>
-                      {isOnline ? `₦${earned.toLocaleString()}` : '—'}
-                    </Text>
-                  </View>
-                  <View style={styles.guaranteeEarningsDivider} />
-                  <View style={styles.guaranteeEarningsItem}>
-                    <Text style={styles.guaranteeEarningsLabel}>Guaranteed floor</Text>
-                    <Text style={styles.guaranteeEarningsValue}>₦{floor.toLocaleString()}</Text>
-                  </View>
-                  <View style={styles.guaranteeEarningsDivider} />
-                  <View style={styles.guaranteeEarningsItem}>
-                    <Text style={styles.guaranteeEarningsLabel}>
-                      {!isOnline ? 'Go online' : aboveFloor ? 'Surplus ✓' : 'Nexryde covers'}
-                    </Text>
-                    <Text style={[styles.guaranteeEarningsValue, {
-                      color: !isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706',
-                    }]}>
-                      {!isOnline ? 'to earn' : aboveFloor
-                        ? `+₦${Math.max(0, earned - floor).toLocaleString()}`
-                        : `₦${gap.toLocaleString()}`}
-                    </Text>
-                  </View>
-                </View>
-
-              {/* Status line */}
-              <View style={styles.guaranteeStatusRow}>
-                <Ionicons
-                  name={!isOnline ? 'power-outline' : aboveFloor ? 'checkmark-circle' : 'shield-half-outline'}
-                  size={14}
-                  color={!isOnline ? '#6B7280' : aboveFloor ? '#16A34A' : '#D97706'}
-                />
-                <Text style={[styles.guaranteeStatusText, {
-                  color: !isOnline ? '#6B7280' : aboveFloor ? '#15803D' : '#92400E',
-                }]}>
-                  {!isOnline
-                    ? `Go online now to earn. If you fall short of ₦${floor.toLocaleString()}/hr, Nexryde credits the gap to your wallet.`
-                    : aboveFloor
-                      ? "You've exceeded the floor this hour — great work!"
-                      : `Nexryde will credit ₦${gap.toLocaleString()} to your wallet if the hour ends below the floor.`}
-                </Text>
               </View>
-
-              {/* Claim button — shown when online and gap exists */}
-              {isOnline && gap > 200 && (
-                <TouchableOpacity
-                  style={[
-                    styles.guaranteeClaimBtn,
-                    guaranteeClaiming && { opacity: 0.6 },
-                    guaranteeClaimResult?.claimed && { backgroundColor: '#16A34A' },
-                  ]}
-                  onPress={async () => {
-                    if (guaranteeClaiming || guaranteeClaimResult?.claimed) return;
-                    setGuaranteeClaiming(true);
-                    try {
-                      const headers = await getAuthHeaders();
-                      if (!user?.id) return;
-                      const result = await claimEarningsGuarantee(user.id, headers as Record<string, string>);
-                      setGuaranteeClaimResult(result);
-                      if (result.claimed) {
-                        Alert.alert(
-                          '₦' + Number(result.amount_credited || 0).toLocaleString() + ' Credited!',
-                          `Nexryde topped up your wallet for the ${result.window || 'guarantee'} window.\n\nEarned this hour: ₦${Number(result.hour_earnings || 0).toLocaleString()}\nGuaranteed floor: ₦${Number(result.floor || 0).toLocaleString()}\nCredit: ₦${Number(result.amount_credited || 0).toLocaleString()}`,
-                          [{ text: 'View Wallet', onPress: () => guardedPush('/driver/bank') }, { text: 'OK' }]
-                        );
-                      } else {
-                        Alert.alert('Guarantee Status', result.reason || result.message || 'No gap to claim right now.');
-                      }
-                    } catch {
-                      Alert.alert('Error', 'Could not process claim. Try again.');
-                    } finally {
-                      setGuaranteeClaiming(false);
-                    }
-                  }}
-                  activeOpacity={0.82}
-                >
-                  {guaranteeClaiming ? (
-                    <ActivityIndicator size="small" color="#FFF" />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name={guaranteeClaimResult?.claimed ? 'checkmark-circle' : 'wallet-outline'}
-                        size={15}
-                        color="#FFF"
-                      />
-                      <Text style={styles.guaranteeClaimBtnText}>
-                        {guaranteeClaimResult?.claimed
-                          ? `₦${Number(guaranteeClaimResult.amount_credited || 0).toLocaleString()} Claimed ✓`
-                          : `Claim ₦${gap.toLocaleString()} top-up`}
-                      </Text>
-                    </>
-                  )}
-                </TouchableOpacity>
+              {/* Right: multiplier badge */}
+              {isSurge && (
+                <View style={[styles.surgeBadge, { backgroundColor: tierColor }]}>
+                  <Text style={styles.surgeBadgeText}>+{pct}%</Text>
+                </View>
               )}
             </View>
-
-              {/* ── Guarantee Info Modal ─────────────────────────────── */}
-              <Modal visible={guaranteeInfoOpen} transparent animationType="fade" onRequestClose={() => setGuaranteeInfoOpen(false)}>
-                <TouchableOpacity style={styles.guaranteeModalOverlay} activeOpacity={1} onPress={() => setGuaranteeInfoOpen(false)}>
-                  <View style={styles.guaranteeModal}>
-                    <View style={styles.guaranteeModalHeader}>
-                      <View style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' }}>
-                        <Ionicons name="shield-checkmark" size={20} color="#16A34A" />
-                      </View>
-                      <View style={{ flex: 1, marginLeft: 12 }}>
-                        <Text style={styles.guaranteeModalTitle}>Earnings Guarantee</Text>
-                        <Text style={styles.guaranteeModalSubtitle}>How it works for you</Text>
-                      </View>
-                      <TouchableOpacity onPress={() => setGuaranteeInfoOpen(false)}>
-                        <Ionicons name="close-circle" size={24} color="#D1D5DB" />
-                      </TouchableOpacity>
-                    </View>
-
-                    {[
-                      { icon: 'trending-up-outline', color: '#16A34A', title: 'Guaranteed hourly floor', body: `During this window, Nexryde guarantees you earn at least ₦${floor.toLocaleString()} per hour while online.` },
-                      { icon: 'wallet-outline', color: '#2563EB', title: 'Nexryde covers the gap', body: 'If you earn less than the floor in an hour, Nexryde automatically tops up the difference directly to your wallet.' },
-                      { icon: 'people-outline', color: '#7C3AED', title: 'Riders pay fair prices', body: 'Because Nexryde absorbs peak costs, riders never see surge pricing. Prices stay stable and predictable — always.' },
-                      { icon: 'time-outline', color: '#D97706', title: 'Active windows', body: 'Morning Rush 6–10 AM · Evening Peak 5–9 PM · Rain Cover Noon–7 PM (rainy months). You must be online during the window.' },
-                    ].map((item, i) => (
-                      <View key={i} style={styles.guaranteeModalRow}>
-                        <View style={[styles.guaranteeModalIcon, { backgroundColor: item.color + '18' }]}>
-                          <Ionicons name={item.icon as any} size={16} color={item.color} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={styles.guaranteeModalRowTitle}>{item.title}</Text>
-                          <Text style={styles.guaranteeModalRowBody}>{item.body}</Text>
-                        </View>
-                      </View>
-                    ))}
-
-                    <TouchableOpacity style={styles.guaranteeModalBtn} onPress={() => setGuaranteeInfoOpen(false)}>
-                      <Text style={styles.guaranteeModalBtnText}>Got it</Text>
-                    </TouchableOpacity>
-                  </View>
-                </TouchableOpacity>
-              </Modal>
-            </>
           );
         })()}
         {/* ── TRIAL COMPLETE — Subscribe CTA ──────────────────────────── */}
@@ -2111,185 +1913,50 @@ const styles = StyleSheet.create({
   offlineSyncTextWrap: {
     flex: 1,
   },
-  // ── Earnings Guarantee Card ─────────────────────────────────────────
-  guaranteeCard: {
+  // ── Surge Pricing Card ──────────────────────────────────────────────
+  surgeCard: {
     marginTop: 16,
-    borderRadius: 18,
+    borderRadius: 16,
     borderWidth: 1.5,
-    padding: 16,
-    gap: 12,
-  },
-  guaranteeHeader: {
+    padding: 14,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
   },
-  guaranteeIconWrap: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  surgeIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
-  guaranteeTitle: {
+  surgeTitle: {
     fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 0.2,
+    letterSpacing: 0.1,
   },
-  guaranteeReason: {
+  surgeReason: {
     fontSize: 11,
     color: '#6B7280',
-    marginTop: 1,
+    marginTop: 2,
+    lineHeight: 15,
   },
-  guaranteeEndBadge: {
-    backgroundColor: 'rgba(0,0,0,0.06)',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  guaranteeEndBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#374151',
-  },
-  guaranteeBarBg: {
-    height: 6,
-    backgroundColor: 'rgba(0,0,0,0.07)',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  guaranteeBarFill: {
-    height: 6,
-    borderRadius: 3,
-  },
-  guaranteeEarningsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  guaranteeEarningsItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-  },
-  guaranteeEarningsDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: 'rgba(0,0,0,0.08)',
-  },
-  guaranteeEarningsLabel: {
-    fontSize: 10,
-    color: '#9CA3AF',
-    fontWeight: '500',
-  },
-  guaranteeEarningsValue: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#1F2937',
-  },
-  guaranteeStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-  },
-  guaranteeStatusText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '500',
-  },
-  // Compact standby chip (when not in an active window)
-  guaranteeChip: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    alignSelf: 'flex-start',
-    backgroundColor: '#ECFDF5',
-    borderRadius: 20,
-    paddingHorizontal: 10,
+  surgeBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 9,
     paddingVertical: 5,
-    borderWidth: 1,
-    borderColor: '#86EFAC',
-  },
-  guaranteeChipText: {
-    fontSize: 11,
-    color: '#15803D',
-    fontWeight: '600',
-  },
-  // ── Guarantee info modal ────────────────────────────────────────────
-  guaranteeModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    justifyContent: 'flex-end',
-  },
-  guaranteeModal: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    paddingBottom: 36,
-    gap: 16,
-  },
-  guaranteeModalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  guaranteeModalTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#111827',
-  },
-  guaranteeModalSubtitle: {
-    fontSize: 12,
-    color: '#6B7280',
-    marginTop: 1,
-  },
-  guaranteeModalRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  guaranteeModalIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 1,
+    flexShrink: 0,
   },
-  guaranteeModalRowTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#1F2937',
-    marginBottom: 2,
-  },
-  guaranteeModalRowBody: {
-    fontSize: 12,
-    color: '#6B7280',
-    lineHeight: 17,
-  },
-  guaranteeModalBtn: {
-    backgroundColor: '#16A34A',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  guaranteeModalBtnText: {
+  surgeBadgeText: {
     color: '#FFF',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 13,
+    fontWeight: '900',
+    letterSpacing: 0.5,
   },
-  guaranteeClaimBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    backgroundColor: '#D97706',
-    borderRadius: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 16,
-  },
+  // kept for any accidental refs — can be cleaned up later
   guaranteeClaimBtnText: {
     color: '#FFF',
     fontSize: 13,

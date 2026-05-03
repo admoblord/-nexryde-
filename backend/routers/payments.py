@@ -149,22 +149,27 @@ SUBSCRIPTION_CONFIG = {
 SURGE_CONFIG = {
     "enabled": True,
     "base_multiplier": 1.0,
-    "max_multiplier": 2.5,
+    # Moderate cap — drivers earn more during peak demand but increases stay fair for riders.
+    # All hours are Nigeria WAT (UTC+1).
+    "max_multiplier": 1.30,
     "peak_hours": {
-        "morning": {"start": 7, "end": 9, "multiplier": 1.2},
-        "evening": {"start": 17, "end": 20, "multiplier": 1.3},
+        # WAT hours. morning_rush 6-10 AM, evening_peak 5-9 PM.
+        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
+        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
     },
-    "high_demand_threshold": 0.7,
-    "very_high_demand_threshold": 0.85,
-    "critical_demand_threshold": 0.95,
+    # Demand-based tiers (applied on top of base/peak)
+    "high_demand_threshold": 0.70,        # 70% capacity => +1.20x
+    "very_high_demand_threshold": 0.85,   # 85% capacity => +1.25x
+    "critical_demand_threshold": 0.95,    # 95% capacity => 1.30x (hard cap)
     "surge_levels": {
-        "normal": 1.0,
-        "high": 1.3,
-        "very_high": 1.5,
-        "critical": 2.5,
+        "normal":    1.0,
+        "peak":      1.15,
+        "high":      1.20,
+        "very_high": 1.25,
+        "critical":  1.30,
     },
-    "rain_multiplier": 1.3,
-    "holiday_multiplier": 1.5,
+    # Weather multiplier (wet season Apr-Oct)
+    "rain_multiplier": 1.10,
 }
 
 fare_estimate_store = {}
@@ -3990,48 +3995,106 @@ async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Requ
 
 
 # ==================== SURGE PRICING ====================
-def calculate_surge_multiplier(lat: float, lng: float) -> dict:
-    """Calculate surge multiplier based on time, demand, and conditions"""
-    now = datetime.utcnow()
-    hour = now.hour
-    
-    base_multiplier = SURGE_CONFIG["base_multiplier"]
-    surge_reason = []
-    
-    # Check peak hours
-    for period, config in SURGE_CONFIG["peak_hours"].items():
-        if config["start"] <= hour < config["end"]:
-            base_multiplier = max(base_multiplier, config["multiplier"])
-            surge_reason.append(f"{period.title()} rush hour")
-    
-    # Demand-based surge thresholds:
-    # 70% busy => 1.3x, 85% => 1.5x, 95% => max.
-    # NOTE: demand ratio should come from real driver/rider load metrics;
-    # this endpoint currently defaults to normal demand until wired.
-    demand_ratio = 0.0
-    surge_levels = SURGE_CONFIG.get("surge_levels", {})
-    if demand_ratio >= SURGE_CONFIG.get("critical_demand_threshold", 0.95):
-        base_multiplier = max(base_multiplier, surge_levels.get("critical", SURGE_CONFIG["max_multiplier"]))
-        surge_reason.append("Critical demand in area")
-    elif demand_ratio >= SURGE_CONFIG.get("very_high_demand_threshold", 0.85):
-        base_multiplier = max(base_multiplier, surge_levels.get("very_high", 1.5))
-        surge_reason.append("Very high demand in area")
-    elif demand_ratio >= SURGE_CONFIG.get("high_demand_threshold", 0.7):
-        base_multiplier = max(base_multiplier, surge_levels.get("high", 1.3))
-        surge_reason.append("High demand in area")
-    
-    final_multiplier = min(base_multiplier, SURGE_CONFIG["max_multiplier"])
-    
+def calculate_surge_multiplier(lat: float = 0.0, lng: float = 0.0, demand_ratio: float = 0.0) -> dict:
+    """
+    Calculate surge pricing multiplier for the current time and demand.
+
+    - All time comparisons use Nigeria WAT (UTC+1).
+    - Max surge is capped at 1.30x — moderate, fair, never alarming.
+    - Returns full context for UI display (driver and rider views).
+    """
+    WAT_OFFSET = timedelta(hours=1)
+    now_wat = datetime.utcnow() + WAT_OFFSET
+    hour = now_wat.hour
+    month = now_wat.month
+
+    multiplier = SURGE_CONFIG["base_multiplier"]
+    reasons: list[str] = []
+    active_window: str | None = None
+    window_ends_label: str | None = None
+
+    # ── Time-based peak windows ──────────────────────────────────────────
+    for key, cfg in SURGE_CONFIG["peak_hours"].items():
+        if cfg["start"] <= hour < cfg["end"]:
+            if cfg["multiplier"] > multiplier:
+                multiplier = cfg["multiplier"]
+                active_window = cfg["label"]
+                # Compute window end label
+                end_h = cfg["end"]
+                suffix = "AM" if end_h < 12 else "PM"
+                display_h = end_h if end_h <= 12 else end_h - 12
+                window_ends_label = f"{display_h}:00 {suffix}"
+            reasons.append(cfg["label"])
+
+    # ── Wet season (rain) bonus ──────────────────────────────────────────
+    if month in {4, 5, 6, 7, 9, 10}:
+        rain_bonus = SURGE_CONFIG.get("rain_multiplier", 1.0) - 1.0
+        multiplier = min(multiplier + rain_bonus, SURGE_CONFIG["max_multiplier"])
+        reasons.append("Wet season")
+
+    # ── Demand-based tier (demand_ratio from real-time load) ─────────────
+    surge_levels = SURGE_CONFIG["surge_levels"]
+    if demand_ratio >= SURGE_CONFIG["critical_demand_threshold"]:
+        multiplier = max(multiplier, surge_levels["critical"])
+        reasons.append("Very high demand in your area")
+    elif demand_ratio >= SURGE_CONFIG["very_high_demand_threshold"]:
+        multiplier = max(multiplier, surge_levels["very_high"])
+        reasons.append("High demand in your area")
+    elif demand_ratio >= SURGE_CONFIG["high_demand_threshold"]:
+        multiplier = max(multiplier, surge_levels["high"])
+        reasons.append("Elevated demand nearby")
+
+    final = round(min(multiplier, SURGE_CONFIG["max_multiplier"]), 2)
+    is_surge = final > 1.0
+    pct_extra = round((final - 1.0) * 100)
+
+    # Determine tier label
+    if final >= 1.25:
+        tier = "high"
+        tier_label = "High surge"
+        tier_color = "#EF4444"
+    elif final >= 1.15:
+        tier = "moderate"
+        tier_label = "Moderate surge"
+        tier_color = "#F59E0B"
+    elif final > 1.0:
+        tier = "low"
+        tier_label = "Low surge"
+        tier_color = "#F59E0B"
+    else:
+        tier = "normal"
+        tier_label = "Normal pricing"
+        tier_color = "#16A34A"
+
     return {
-        "multiplier": round(final_multiplier, 2),
-        "is_surge": final_multiplier > 1.0,
-        "reasons": surge_reason if surge_reason else ["Normal pricing"],
-        "expires_in_minutes": 5
+        "multiplier": final,
+        "is_surge": is_surge,
+        "tier": tier,
+        "tier_label": tier_label,
+        "tier_color": tier_color,
+        "pct_extra": pct_extra,
+        "reasons": reasons if reasons else ["Normal pricing"],
+        "active_window": active_window,
+        "window_ends_label": window_ends_label,
+        # Driver message
+        "driver_message": (
+            f"+{pct_extra}% on every fare right now — {', '.join(reasons[:2])}."
+            if is_surge
+            else "Normal fares. Stay online — surge could activate anytime."
+        ),
+        # Rider message
+        "rider_message": (
+            f"Fares are {pct_extra}% higher due to {', '.join(reasons[:1]).lower()}."
+            if is_surge
+            else "Standard fare — no extra charges."
+        ),
+        "expires_in_minutes": 5,
     }
 
+
 @payments_router.get("/surge/check")
-async def check_surge_pricing(lat: float, lng: float):
-    """Check current surge pricing for a location"""
+async def check_surge_pricing(lat: float = 0.0, lng: float = 0.0):
+    """Check current surge pricing for a location."""
     return calculate_surge_multiplier(lat, lng)
 
 

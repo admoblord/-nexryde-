@@ -1817,22 +1817,35 @@ function BookInDriveStyle() {
                   <Text style={s.fareBtnText}>+</Text>
                 </TouchableOpacity>
               </Animated.View>
-              {/* Anti-surge guarantee badge — always visible once fare is ready */}
-              {currentFare > 0 && (
-                <TouchableOpacity
-                  style={s.noSurgeBadge}
-                  activeOpacity={0.75}
-                  onPress={() => Alert.alert(
-                    'No Surge Pricing — Ever',
-                    'Nexryde guarantees stable, fair prices for riders during peak demand. Instead of charging you more, Nexryde pays drivers a guaranteed hourly floor from its own earnings — so you never pay a surge premium.',
-                    [{ text: 'Got it', style: 'default' }]
-                  )}
-                >
-                  <Ionicons name="shield-checkmark" size={14} color="#10B981" />
-                  <Text style={s.noSurgeBadgeText}>No surge pricing — fare is fixed</Text>
-                  <Ionicons name="information-circle-outline" size={13} color="#6EE7B7" />
-                </TouchableOpacity>
-              )}
+              {/* Surge / pricing status badge */}
+              {currentFare > 0 && (() => {
+                const sm = Number(fareDetails?.surge_multiplier || 1);
+                const isSurge = sm > 1.0;
+                const pctExtra = Math.round((sm - 1) * 100);
+                return (
+                  <TouchableOpacity
+                    style={[s.noSurgeBadge, isSurge && { backgroundColor: '#FEF3C7', borderColor: '#FCD34D' }]}
+                    activeOpacity={0.75}
+                    onPress={() => Alert.alert(
+                      isSurge ? `⚡ Surge Pricing (${sm}x)` : 'Standard Pricing',
+                      isSurge
+                        ? `Demand is higher than usual right now, so fares are ${pctExtra}% above the base rate. Your quoted fare is already locked — you will not pay more than what is shown.`
+                        : 'Demand is normal. You are paying the standard base fare with no extra charges.',
+                      [{ text: 'Got it' }]
+                    )}
+                  >
+                    <Ionicons
+                      name={isSurge ? 'flash' : 'checkmark-circle-outline'}
+                      size={14}
+                      color={isSurge ? '#D97706' : '#10B981'}
+                    />
+                    <Text style={[s.noSurgeBadgeText, isSurge && { color: '#92400E' }]}>
+                      {isSurge ? `Surge pricing · ${sm}x — fare locked` : 'Standard fare — no extra charges'}
+                    </Text>
+                    <Ionicons name="information-circle-outline" size={13} color={isSurge ? '#D97706' : '#6EE7B7'} />
+                  </TouchableOpacity>
+                );
+              })()}
               <View>
                 <Text style={s.paySectionLabel}>Pay with</Text>
                 <View style={s.payRow}>

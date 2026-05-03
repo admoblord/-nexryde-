@@ -284,24 +284,26 @@ FARE_CONFIG = {
     }
 }
 
-# Surge Pricing Configuration
+# Surge Pricing Configuration — moderate caps, Nigeria WAT hours
 SURGE_CONFIG = {
-    "high_demand_threshold": 0.7,      # 70% of drivers busy = start surge
-    "very_high_demand_threshold": 0.85, # 85% = higher surge
-    "critical_demand_threshold": 0.95,  # 95% = max surge
+    "enabled": True,
+    "base_multiplier": 1.0,
+    "max_multiplier": 1.30,   # Hard cap: max 30% extra for drivers
+    "high_demand_threshold": 0.70,
+    "very_high_demand_threshold": 0.85,
+    "critical_demand_threshold": 0.95,
     "surge_levels": {
-        "normal": 1.0,
-        "high": 1.3,
-        "very_high": 1.8,
-        "critical": 2.5,
+        "normal":    1.0,
+        "peak":      1.15,
+        "high":      1.20,
+        "very_high": 1.25,
+        "critical":  1.30,
     },
     "peak_hours": {
-        "morning": {"start": 7, "end": 9, "multiplier": 1.2},   # 7-9 AM
-        "evening": {"start": 17, "end": 20, "multiplier": 1.3}, # 5-8 PM
+        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
+        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
     },
-    "weekend_multiplier": 1.1,  # 10% increase on weekends
-    "rain_multiplier": 1.4,     # 40% increase during rain
-    "holiday_multiplier": 1.5,  # 50% increase on holidays
+    "rain_multiplier": 1.10,   # Wet season bonus (WAT Apr-Oct)
 }
 
 # Driver Certification Levels
@@ -369,26 +371,27 @@ SUBSCRIPTION_CONFIG = {
 }
 
 # ==================== SURGE PRICING CONFIG ====================
+# Duplicate kept for compatibility with calculate_fare() in this file.
+# Single source of truth is routers/payments.py SURGE_CONFIG.
 SURGE_CONFIG = {
     "enabled": True,
     "base_multiplier": 1.0,
-    "max_multiplier": 2.5,
+    "max_multiplier": 1.30,
     "peak_hours": {
-        "morning": {"start": 7, "end": 9, "multiplier": 1.2},
-        "evening": {"start": 17, "end": 20, "multiplier": 1.3},
+        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
+        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
     },
-    "high_demand_threshold": 0.7,       # 70% drivers busy => 1.3x
-    "very_high_demand_threshold": 0.85, # 85% drivers busy => 1.5x
-    "critical_demand_threshold": 0.95,  # 95% drivers busy => max
+    "high_demand_threshold": 0.70,
+    "very_high_demand_threshold": 0.85,
+    "critical_demand_threshold": 0.95,
     "surge_levels": {
-        "normal": 1.0,
-        "high": 1.3,
-        "very_high": 1.5,
-        "critical": 2.5,
+        "normal":    1.0,
+        "peak":      1.15,
+        "high":      1.20,
+        "very_high": 1.25,
+        "critical":  1.30,
     },
-    "weekend_multiplier": 1.1,
-    "rain_multiplier": 1.3,
-    "holiday_multiplier": 1.5,
+    "rain_multiplier": 1.10,
 }
 
 # ==================== RIDE TYPES CONFIG ====================
@@ -1166,32 +1169,30 @@ def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: 
     # Step 4: Calculate subtotal before surge
     subtotal = base_fare + distance_fee + time_fee + traffic_fee + booking_fee
     
-    # Step 5: Calculate surge/dynamic pricing (min_fare removed per user request)
-    current_hour = datetime.utcnow().hour + 1  # Nigerian time (WAT = UTC+1)
+    # Step 5: Calculate surge/dynamic pricing — all hours in Nigeria WAT (UTC+1)
+    current_hour = datetime.utcnow().hour + 1  # WAT = UTC+1
+    if current_hour >= 24:
+        current_hour -= 24
     is_weekend = datetime.utcnow().weekday() >= 5
-    
-    # Peak hours: Morning rush (7-9 AM) and Evening rush (5-8 PM)
-    is_morning_peak = 7 <= current_hour <= 9
-    is_evening_peak = 17 <= current_hour <= 20
+
+    # Peak hours aligned with updated SURGE_CONFIG (WAT)
+    is_morning_peak = 6 <= current_hour < 10
+    is_evening_peak = 17 <= current_hour < 21
     is_peak = is_morning_peak or is_evening_peak
     
-    # Calculate dynamic multiplier
+    # Calculate dynamic multiplier using live surge config
     dynamic_multiplier = 1.0
     if is_surge and surge_multiplier > 1.0:
         dynamic_multiplier = min(surge_multiplier, max_multiplier)
     elif is_peak:
         peak_config = SURGE_CONFIG.get("peak_hours", {})
         if is_morning_peak:
-            dynamic_multiplier = peak_config.get("morning", {}).get("multiplier", 1.2)
+            dynamic_multiplier = peak_config.get("morning_rush", {}).get("multiplier", 1.15)
         elif is_evening_peak:
-            dynamic_multiplier = peak_config.get("evening", {}).get("multiplier", 1.3)
-    
-    # Add weekend multiplier
-    if is_weekend:
-        dynamic_multiplier *= SURGE_CONFIG.get("weekend_multiplier", 1.1)
-    
-    # Cap the multiplier
-    dynamic_multiplier = min(dynamic_multiplier, max_multiplier)
+            dynamic_multiplier = peak_config.get("evening_peak", {}).get("multiplier", 1.20)
+
+    # Cap to global max — never exceeds 1.3x
+    dynamic_multiplier = min(dynamic_multiplier, SURGE_CONFIG.get("max_multiplier", 1.30))
     
     # Step 7: Calculate final fare
     total_fare = round(subtotal * dynamic_multiplier, 2)
@@ -1213,9 +1214,10 @@ def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: 
         "total_fare": total_fare,
         "min_fare": min_fare,
         "cancellation_fee": cancellation_fee,
+        "is_surge": dynamic_multiplier > 1.0,
         "is_peak": is_peak,
         "is_weekend": is_weekend,
-        "peak_type": "morning" if is_morning_peak else ("evening" if is_evening_peak else None),
+        "peak_type": "morning_rush" if is_morning_peak else ("evening_peak" if is_evening_peak else None),
         "service_type": service_key,
         "city": city_key,
         "currency": "NGN",
