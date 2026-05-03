@@ -18,6 +18,7 @@ import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { getRecentLocations, cacheRecentLocation } from '@/src/services/offlineMode';
+import * as Haptics from 'expo-haptics';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -233,6 +234,7 @@ function BookInDriveStyle() {
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
   const [routeSafety, setRouteSafety] = useState<RouteSafetyResponse | null>(null);
   const [routeSafetyLoading, setRouteSafetyLoading] = useState(false);
+  const [routeSafetyFailed, setRouteSafetyFailed] = useState(false);
   const sheetSlide = useRef(new Animated.Value(28)).current;
   const fareReveal = useRef(new Animated.Value(0)).current;
   const [nearbyDrivers, setNearbyDrivers] = useState<Array<{
@@ -1057,9 +1059,11 @@ function BookInDriveStyle() {
     ) {
       setRouteSafety(null);
       setRouteSafetyLoading(false);
+      setRouteSafetyFailed(false);
       return;
     }
     let cancelled = false;
+    setRouteSafetyFailed(false);
     setRouteSafetyLoading(true);
     const timer = setTimeout(() => {
       void (async () => {
@@ -1070,7 +1074,9 @@ function BookInDriveStyle() {
             dropoff_lat: Number(dLat),
             dropoff_lng: Number(dLng),
           });
-          if (!cancelled) setRouteSafety(snap);
+          if (!cancelled) { setRouteSafety(snap ?? null); setRouteSafetyFailed(false); }
+        } catch {
+          if (!cancelled) setRouteSafetyFailed(true);
         } finally {
           if (!cancelled) setRouteSafetyLoading(false);
         }
@@ -1467,11 +1473,25 @@ function BookInDriveStyle() {
           </View>
         )}
 
+        {/* Route hint — shown when pickup set, no destination yet */}
         {pickupCoords && !destinationCoords ? (
           <View style={s.mapRouteHint} pointerEvents="none">
-            <Ionicons name="navigate-circle-outline" size={16} color={COLORS.lime} />
-            <Text style={s.mapRouteHintText}>Choose where you are going in the sheet</Text>
+            <Ionicons name="navigate-circle-outline" size={15} color={COLORS.lime} />
+            <Text style={s.mapRouteHintText}>Scroll down to choose your destination</Text>
           </View>
+        ) : null}
+
+        {/* GPS error banner */}
+        {gpsStatus === 'error' && !pickupCoords ? (
+          <TouchableOpacity
+            style={s.gpsErrorBanner}
+            onPress={openPickupEditor}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="warning-outline" size={14} color={COLORS.yellow} />
+            <Text style={s.gpsErrorText}>Location unavailable — tap to set pickup manually</Text>
+            <Ionicons name="chevron-forward" size={14} color={COLORS.yellow} />
+          </TouchableOpacity>
         ) : null}
 
         <View style={s.mapTopBar}>
@@ -1637,10 +1657,10 @@ function BookInDriveStyle() {
             </TouchableOpacity>
           </View>
 
-          {recentDestinations.length > 0 ? (
-            <View style={s.boltRecentBlock}>
-              <Text style={s.boltRecentHeading}>Recent</Text>
-              {recentDestinations.slice(0, 5).map((item, idx) => {
+          <View style={s.boltRecentBlock}>
+            <Text style={s.boltRecentHeading}>Recent</Text>
+            {recentDestinations.length > 0 ? (
+              recentDestinations.slice(0, 5).map((item, idx) => {
                 const title = String(item.address || item.description || '').trim();
                 if (!title) return null;
                 return (
@@ -1651,22 +1671,25 @@ function BookInDriveStyle() {
                     activeOpacity={0.88}
                   >
                     <View style={s.boltRecentIcon}>
-                      <Ionicons name="time-outline" size={20} color={COLORS.dim} />
+                      <Ionicons name="time-outline" size={18} color={COLORS.dim} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.boltRecentTitle} numberOfLines={2}>
-                        {title}
+                      <Text style={s.boltRecentTitle} numberOfLines={1}>{title}</Text>
+                      <Text style={s.boltRecentMeta}>
+                        {Number.isFinite(item.lat) && Number.isFinite(item.lng) ? 'Saved pin' : 'Recent place'}
                       </Text>
-                      {Number.isFinite(item.lat) && Number.isFinite(item.lng) ? (
-                        <Text style={s.boltRecentMeta}>Saved pin</Text>
-                      ) : null}
                     </View>
-                    <Ionicons name="chevron-forward" size={18} color={COLORS.dim} />
+                    <Ionicons name="chevron-forward" size={16} color={COLORS.dim} />
                   </TouchableOpacity>
                 );
-              })}
-            </View>
-          ) : null}
+              })
+            ) : (
+              <View style={s.recentEmptyRow}>
+                <Ionicons name="location-outline" size={18} color={COLORS.dim} />
+                <Text style={s.recentEmptyText}>Your recent destinations will appear here</Text>
+              </View>
+            )}
+          </View>
 
           {scheduledRides.length > 0 && (
             <View style={s.scheduledCard}>
@@ -1688,7 +1711,7 @@ function BookInDriveStyle() {
             </View>
           )}
 
-          {pickupCoords && destinationCoords && (routeSafetyLoading || routeSafety) ? (
+          {pickupCoords && destinationCoords && (routeSafetyLoading || routeSafety !== null || routeSafetyFailed) ? (
             <View
               style={[
                 s.routeSafetyCard,
@@ -1699,7 +1722,7 @@ function BookInDriveStyle() {
                 <Ionicons
                   name="shield-half-outline"
                   size={20}
-                  color={routeSafety?.route_risk_level === 'high' ? COLORS.yellow : COLORS.yellow}
+                  color={routeSafety?.route_risk_level === 'high' ? COLORS.red : COLORS.yellow}
                 />
                 <Text style={s.routeSafetyTitle}>
                   {routeSafety ? `Route safety · ${routeSafety.city}` : 'Route safety'}
@@ -1751,8 +1774,13 @@ function BookInDriveStyle() {
                     </Text>
                   ) : null}
                 </>
+              ) : routeSafetyFailed ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Ionicons name="cloud-offline-outline" size={14} color={COLORS.dim} />
+                  <Text style={s.routeSafetySub}>Could not check route safety — no network</Text>
+                </View>
               ) : (
-                <Text style={s.routeSafetySub}>Could not check route safety.</Text>
+                <Text style={s.routeSafetySub}>Checking route…</Text>
               )}
             </View>
           ) : null}
@@ -1783,6 +1811,7 @@ function BookInDriveStyle() {
                   key={v.id}
                   style={[s.inlineCatRow, isSelected && s.inlineCatRowActive, isSelected && { borderColor: v.color }]}
                   onPress={() => {
+                    Haptics.selectionAsync();
                     setSelectedVehicle(v.id);
                     if (price && price > 0) {
                       setCurrentFare(discPrice ?? price);
@@ -1936,13 +1965,22 @@ function BookInDriveStyle() {
                     <Text style={[s.payChipText, ridePaymentMethod === 'wallet' && s.payChipTextOn]}>Wallet</Text>
                   </TouchableOpacity>
                 </View>
-                <Text style={s.payHint}>
-                  {ridePaymentMethod === 'wallet'
-                    ? walletBalance != null
-                      ? `Balance ₦${walletBalance.toLocaleString()} — charged when you confirm after the trip`
-                      : 'Loading balance…'
-                    : 'Pay the driver in person'}
-                </Text>
+                {ridePaymentMethod === 'wallet' && walletBalance != null && currentFare > 0 && walletBalance < currentFare ? (
+                  <View style={s.walletWarnRow}>
+                    <Ionicons name="warning-outline" size={14} color={COLORS.yellow} />
+                    <Text style={s.walletWarnText}>
+                      Insufficient balance (₦{walletBalance.toLocaleString()}) — top up or pay cash
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={s.payHint}>
+                    {ridePaymentMethod === 'wallet'
+                      ? walletBalance != null
+                        ? `Balance ₦${walletBalance.toLocaleString()} · charged after trip`
+                        : 'Loading balance…'
+                      : 'Pay the driver in person'}
+                  </Text>
+                )}
               </View>
               <View>
                 <Text style={s.paySectionLabel}>Ride mood</Text>
@@ -2301,43 +2339,54 @@ function BookInDriveStyle() {
           <View style={s.searchBox}>
             {!driverFound ? (
               <>
-                <ActivityIndicator size="large" color={COLORS.green} style={{ marginBottom: 20 }} />
+                {/* Animated pulse ring around spinner */}
+                <View style={s.searchSpinnerWrap}>
+                  <View style={s.searchSpinnerRing} />
+                  <ActivityIndicator size="large" color={COLORS.green} />
+                </View>
                 <Text style={s.searchTitle}>
-                  {requestedDriverId ? `Requesting ${requestedDriverName || 'Your Driver'}...` : 'Finding Your Driver...'}
+                  {requestedDriverId ? `Requesting ${requestedDriverName || 'Your Driver'}…` : 'Finding Your Driver…'}
                 </Text>
                 <Text style={s.searchSub}>
                   {requestedDriverId
-                    ? `₦${currentFare.toLocaleString()} • Priority request sent`
+                    ? `₦${currentFare.toLocaleString()} · Priority request sent`
                     : `₦${currentFare.toLocaleString()} sent to nearby drivers`}
                 </Text>
                 {searchCountdown > 0 && (
-                  <View style={{ marginTop: 8, marginBottom: 4, alignItems: 'center' }}>
-                    <Text style={{ fontSize: 13, color: '#64748b' }}>
+                  <View style={s.searchCountdownRow}>
+                    <Ionicons name="time-outline" size={14} color={searchCountdown <= 15 ? COLORS.red : COLORS.muted} />
+                    <Text style={s.searchCountdownText}>
                       Offer expires in{' '}
-                      <Text style={{ fontWeight: '800', color: searchCountdown <= 15 ? COLORS.red : '#0f172a' }}>
+                      <Text style={{ fontWeight: '900', color: searchCountdown <= 15 ? COLORS.red : COLORS.white }}>
                         {searchCountdown}s
                       </Text>
                     </Text>
                   </View>
                 )}
                 <TouchableOpacity style={s.searchCancel} onPress={cancelSearch} accessibilityLabel="Cancel search" accessibilityRole="button">
-                  <Text style={{ color: COLORS.red, fontWeight: '800', fontSize: 16 }}>Cancel</Text>
+                  <Text style={{ color: COLORS.red, fontWeight: '800', fontSize: 15 }}>Cancel Search</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <>
-                <Ionicons name="checkmark-circle" size={64} color={COLORS.green} />
+                {/* Success checkmark */}
+                <View style={s.searchSuccessRing}>
+                  <Ionicons name="checkmark" size={36} color={COLORS.green} />
+                </View>
                 <Text style={s.searchTitle}>Driver Found!</Text>
+                <Text style={[s.searchSub, { marginBottom: 12 }]}>Your ride is confirmed — driver is on the way</Text>
                 <View style={s.driverCard}>
-                  <View style={s.driverAvatar}><Ionicons name="person" size={28} color={COLORS.blue} /></View>
+                  <View style={s.driverAvatar}>
+                    <Ionicons name="person" size={26} color={COLORS.green} />
+                  </View>
                   <View style={{ flex: 1 }}>
                     <Text style={s.driverName}>{driverFound.name}</Text>
                     <Text style={s.driverVeh}>{driverFound.vehicle}</Text>
-                    <Text style={s.driverPlate}>{driverFound.plate} - {driverFound.color}</Text>
+                    <Text style={s.driverPlate}>{driverFound.plate} · {driverFound.color}</Text>
                   </View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <Ionicons name="star" size={16} color="#F59E0B" />
-                    <Text style={{ fontSize: 15, fontWeight: '800', color: '#0F172A' }}>
+                  <View style={s.driverRatingBadge}>
+                    <Ionicons name="star" size={13} color="#F59E0B" />
+                    <Text style={s.driverRatingText}>
                       {Number(driverFound?.rating ?? 0).toFixed(1)}
                     </Text>
                   </View>
@@ -2349,15 +2398,12 @@ function BookInDriveStyle() {
                     setDriverFound(null);
                     router.replace({
                       pathname: '/rider/tracking',
-                      params: {
-                        tripId: tripId || '',
-                        pickup,
-                        destination,
-                      },
+                      params: { tripId: tripId || '', pickup, destination },
                     } as any);
                   }}
                 >
-                  <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 17 }}>Track Driver</Text>
+                  <Ionicons name="navigate" size={18} color="#fff" />
+                  <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 16, marginLeft: 8 }}>Track Driver</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -2375,21 +2421,37 @@ const s = StyleSheet.create({
   mapText: { fontSize: 14, color: COLORS.dim, marginTop: 10 },
   mapRouteHint: {
     position: 'absolute',
-    bottom: 100,
+    bottom: 12,
     left: 16,
     right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 10,
+    gap: 7,
+    paddingVertical: 9,
     paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: 'rgba(13,20,32,0.92)',
+    borderRadius: 20,
+    backgroundColor: 'rgba(13,20,32,0.88)',
     borderWidth: 1,
-    borderColor: 'rgba(184,241,27,0.35)',
+    borderColor: 'rgba(184,241,27,0.3)',
   },
-  mapRouteHintText: { color: COLORS.lime, fontSize: 13, fontWeight: '800' },
+  mapRouteHintText: { color: COLORS.lime, fontSize: 12, fontWeight: '700' },
+  gpsErrorBanner: {
+    position: 'absolute',
+    bottom: 12,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,184,0,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,184,0,0.3)',
+  },
+  gpsErrorText: { flex: 1, color: COLORS.yellow, fontSize: 12, fontWeight: '600' },
   mapTopBar: {
     position: 'absolute',
     top: 12,
@@ -2588,8 +2650,29 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  boltRecentTitle: { fontSize: 16, fontWeight: '800', color: COLORS.white, lineHeight: 22 },
-  boltRecentMeta: { fontSize: 12, fontWeight: '600', color: COLORS.dim, marginTop: 2 },
+  boltRecentTitle: { fontSize: 15, fontWeight: '700', color: COLORS.white, lineHeight: 20 },
+  boltRecentMeta: { fontSize: 12, fontWeight: '500', color: COLORS.dim, marginTop: 1 },
+  recentEmptyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 4,
+  },
+  recentEmptyText: { fontSize: 13, color: COLORS.dim, fontStyle: 'italic' },
+  walletWarnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,184,0,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,184,0,0.25)',
+  },
+  walletWarnText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FDE68A' },
   preferredBanner: { position: 'absolute', bottom: 16, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
   preferredText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
@@ -3035,17 +3118,78 @@ const s = StyleSheet.create({
   vehOptFare: { fontSize: 14, fontWeight: '900', color: COLORS.lime, marginRight: 8 },
   vehClose: { alignItems: 'center', paddingVertical: 14, marginTop: 8, borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.dim },
   vehCloseText: { fontSize: 16, fontWeight: '800', color: COLORS.muted },
-  searchBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center', padding: 24 },
-  searchBox: { backgroundColor: '#FFF', borderRadius: 24, padding: 32, width: '100%', alignItems: 'center' },
-  searchTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', marginTop: 12 },
-  searchSub: { fontSize: 14, color: '#64748B', marginTop: 8, textAlign: 'center' },
-  searchCancel: { marginTop: 24, paddingVertical: 12, paddingHorizontal: 32, borderRadius: 12, borderWidth: 2, borderColor: COLORS.red },
-  driverCard: { flexDirection: 'row', alignItems: 'center', width: '100%', backgroundColor: '#F8FAFC', borderRadius: 16, padding: 14, marginVertical: 16, gap: 12 },
-  driverAvatar: { width: 52, height: 52, borderRadius: 26, backgroundColor: '#E0F2FE', alignItems: 'center', justifyContent: 'center' },
-  driverName: { fontSize: 17, fontWeight: '800', color: '#0F172A' },
-  driverVeh: { fontSize: 13, color: '#64748B', marginTop: 2 },
-  driverPlate: { fontSize: 12, fontWeight: '700', color: '#94A3B8', marginTop: 2 },
-  doneBtn: { backgroundColor: COLORS.green, paddingVertical: 14, paddingHorizontal: 60, borderRadius: 16 },
+  searchBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  searchBox: {
+    backgroundColor: '#111827',
+    borderRadius: 28,
+    padding: 28,
+    width: '100%',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  searchSpinnerWrap: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  searchSpinnerRing: {
+    position: 'absolute',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: 'rgba(0,212,106,0.2)',
+  },
+  searchTitle: { fontSize: 20, fontWeight: '900', color: COLORS.white, marginTop: 8, textAlign: 'center' },
+  searchSub: { fontSize: 13, color: COLORS.muted, marginTop: 6, textAlign: 'center', lineHeight: 19 },
+  searchCountdownRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 10, marginBottom: 4 },
+  searchCountdownText: { fontSize: 13, color: COLORS.muted },
+  searchCancel: { marginTop: 20, paddingVertical: 11, paddingHorizontal: 32, borderRadius: 14, borderWidth: 1.5, borderColor: COLORS.red },
+  searchSuccessRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,212,106,0.12)',
+    borderWidth: 2,
+    borderColor: 'rgba(0,212,106,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
+  },
+  driverCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    width: '100%',
+    backgroundColor: '#1e293b',
+    borderRadius: 18,
+    padding: 14,
+    marginVertical: 14,
+    gap: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+  },
+  driverAvatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(0,212,106,0.12)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,212,106,0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  driverName: { fontSize: 16, fontWeight: '800', color: COLORS.white },
+  driverVeh: { fontSize: 13, color: COLORS.muted, marginTop: 2 },
+  driverPlate: { fontSize: 12, fontWeight: '700', color: COLORS.dim, marginTop: 2 },
+  driverRatingBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: 'rgba(245,158,11,0.12)', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  driverRatingText: { fontSize: 14, fontWeight: '800', color: '#F59E0B' },
+  doneBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.green,
+    paddingVertical: 14,
+    paddingHorizontal: 48,
+    borderRadius: 18,
+    width: '100%',
+  },
 });
 
 export default function BookInDriveStyleScreen() {
