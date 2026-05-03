@@ -96,31 +96,99 @@ function BookingRideMapNative(props: {
     vehicle?: string;
   }>;
 }) {
+  const mapRef = React.useRef<any>(null);
+
+  React.useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    const t = setTimeout(() => {
+      try {
+        if (props.destinationCoords) {
+          m.fitToCoordinates(
+            [
+              { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
+              { latitude: props.destinationCoords!.lat, longitude: props.destinationCoords!.lng },
+            ],
+            { edgePadding: { top: 60, right: 48, bottom: 80, left: 48 }, animated: true },
+          );
+        } else {
+          m.animateToRegion(
+            { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng, latitudeDelta: 0.04, longitudeDelta: 0.04 },
+            400,
+          );
+        }
+      } catch { /* silent */ }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [props.pickupCoords.lat, props.pickupCoords.lng, props.destinationCoords?.lat, props.destinationCoords?.lng]);
+
   try {
-    const RideMap = require('@/src/components/RideMap.native').default;
+    const { default: MapView, Marker, Polyline, PROVIDER_GOOGLE } = require('react-native-maps');
     const safeDrivers = (props.nearbyDrivers || []).filter(
-      (d) =>
-        d &&
-        Number.isFinite(Number(d.lat)) &&
-        Number.isFinite(Number(d.lng)) &&
-        Math.abs(Number(d.lat)) <= 90 &&
-        Math.abs(Number(d.lng)) <= 180,
+      (d) => d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng)),
     );
     return (
-      <RideMap
-        mapRef={null}
-        pickupCoords={props.pickupCoords}
-        destinationCoords={props.destinationCoords}
-        routePolyline={props.routePolyline}
-        pickup={props.pickup}
-        destination={props.destination}
-        nearbyDrivers={safeDrivers}
-      />
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFillObject}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={{
+          latitude: props.pickupCoords.lat,
+          longitude: props.pickupCoords.lng,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
+        }}
+        showsUserLocation
+        showsMyLocationButton={false}
+        loadingEnabled={false}
+        showsBuildings={false}
+        showsPointsOfInterest={false}
+        showsCompass={false}
+        showsIndoors={false}
+        toolbarEnabled={false}
+      >
+        {/* Pickup pin */}
+        <Marker
+          coordinate={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
+          title="Pickup"
+          description={props.pickup}
+          pinColor="#22C55E"
+          tracksViewChanges={false}
+        />
+        {/* Destination pin */}
+        {props.destinationCoords && (
+          <Marker
+            coordinate={{ latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng }}
+            title="Destination"
+            description={props.destination}
+            pinColor="#EF4444"
+            tracksViewChanges={false}
+          />
+        )}
+        {/* Route line */}
+        {props.routePolyline.length >= 2 && (
+          <>
+            <Polyline coordinates={props.routePolyline} strokeColor="rgba(0,212,106,0.2)" strokeWidth={10} />
+            <Polyline coordinates={props.routePolyline} strokeColor="#00D46A" strokeWidth={3} />
+          </>
+        )}
+        {/* Nearby driver dots */}
+        {safeDrivers.map((d) => (
+          <Marker
+            key={d.driver_id}
+            coordinate={{ latitude: Number(d.lat), longitude: Number(d.lng) }}
+            tracksViewChanges={false}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#00D46A', borderWidth: 2, borderColor: '#fff' }} />
+          </Marker>
+        ))}
+      </MapView>
     );
   } catch {
     return (
       <View style={[StyleSheet.absoluteFillObject, { backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center', padding: 24 }]}>
-        <Text style={{ color: COLORS.muted, textAlign: 'center' }}>Map could not load. You can still enter pickup and destination below.</Text>
+        <Text style={{ color: COLORS.muted, textAlign: 'center' }}>Map could not load. Enter pickup and destination below.</Text>
       </View>
     );
   }
@@ -1341,9 +1409,7 @@ function BookInDriveStyle() {
     });
   };
 
-  // Crash guard: Android production builds can hard-crash on native MapView init.
-  // Keep booking usable by using the lightweight map placeholder on Android.
-  const useNativeBookingMap = Platform.OS !== 'web' && Platform.OS !== 'android';
+  const useNativeBookingMap = Platform.OS !== 'web';
 
   return (
     <SafeAreaView style={s.container} edges={['top']}>
@@ -2304,7 +2370,7 @@ function BookInDriveStyle() {
 
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
-  mapArea: { height: '42%', position: 'relative' },
+  mapArea: { height: '42%', position: 'relative', backgroundColor: '#0D1420', overflow: 'hidden' },
   mapPlaceholder: { flex: 1, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center' },
   mapText: { fontSize: 14, color: COLORS.dim, marginTop: 10 },
   mapRouteHint: {

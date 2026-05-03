@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants/theme';
 
@@ -152,11 +152,12 @@ const NativeMap: React.FC<MapComponentProps> = ({
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        customMapStyle={DARK_STYLE}
+        provider="google"
         initialRegion={initialRegion}
         showsUserLocation={false}
         showsMyLocationButton={false}
-        loadingEnabled
+        loadingEnabled={false}
+        loadingBackgroundColor="#0D1420"
         showsTraffic={Boolean(showTraffic)}
         showsBuildings={false}
         showsPointsOfInterest={false}
