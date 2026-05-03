@@ -801,7 +801,37 @@ export default function ModernDriverHome() {
       );
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Status update failed', formatApiDetail(data?.detail) || 'Could not change online status.');
+        const detail: string = formatApiDetail(data?.detail) || 'Could not change online status.';
+        // Route driver to the right fix based on what the server says is missing
+        const lower = detail.toLowerCase();
+        if (lower.includes('subscription') || lower.includes('plan') || lower.includes('payment')) {
+          Alert.alert('Subscription Required', 'You need an active plan to go online.', [
+            { text: 'Later', style: 'cancel' },
+            { text: 'View Plans', onPress: () => guardedPush('/driver/subscription') },
+          ]);
+        } else if (lower.includes('bank') || lower.includes('account')) {
+          Alert.alert('Add Bank Details', 'Add your bank account so you can receive payouts.', [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Add Now', onPress: () => guardedPush('/driver/bank') },
+          ]);
+        } else if (lower.includes('expired') || lower.includes('document')) {
+          Alert.alert('Documents Expired', detail, [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Update Docs', onPress: () => guardedPush('/driver/documents') },
+          ]);
+        } else if (lower.includes('approval') || lower.includes('pending') || lower.includes('not yet approved')) {
+          Alert.alert(
+            'Verification Pending',
+            'Your documents are still being reviewed by the NEXRYDE team. You will be notified once approved.',
+          );
+        } else if (lower.includes('ghost') || lower.includes('lock')) {
+          Alert.alert('Account Locked', detail, [
+            { text: 'OK', style: 'cancel' },
+            { text: 'Unlock', onPress: () => guardedPush('/driver/safety-alerts') },
+          ]);
+        } else {
+          Alert.alert('Cannot Go Online', detail);
+        }
         return;
       }
       setIsOnline(nextStatus);
@@ -811,7 +841,7 @@ export default function ModernDriverHome() {
         setIncomingRide(null);
       }
     } catch {
-      Alert.alert('Network Error', 'Could not update online status.');
+      Alert.alert('Network Error', 'Could not update online status. Check your connection.');
     } finally {
       onlineToggleInFlightRef.current = false;
       setToggleSyncing(false);

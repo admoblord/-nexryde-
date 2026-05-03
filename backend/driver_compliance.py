@@ -75,10 +75,14 @@ async def check_driver_document_expiry(driver_id: str):
         elif days_remaining <= 30:
             expiring_soon.append({"document": doc_name, "type": doc_key, "expiry_date": doc_data["expiry_date"], "days_remaining": days_remaining})
 
+    # critically_expired = expired for more than 30 days (hard block)
+    # recently expired = expired < 30 days ago (soft warning, allow with nudge)
+    critically_expired = [d for d in expired if d.get("days_overdue", 0) > 30]
     return {
         "compliant": all_valid and len(expired) == 0,
         "expired": expired,
         "expiring_soon": expiring_soon,
+        "critically_expired": len(critically_expired) > 0,
     }
 
 

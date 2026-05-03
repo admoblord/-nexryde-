@@ -749,47 +749,56 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
         if not profile:
             raise HTTPException(status_code=403, detail="Complete your driver profile before going online")
 
-        missing = []
-        if not profile.get("profile_completed"):
-            missing.append("driver profile")
+        # ── CRITICAL gates: must be true to go online ─────────────────────────
+        critical_missing = []
         if not profile.get("documents_verified"):
-            missing.append("document verification")
+            critical_missing.append("document verification")
         if profile.get("verification_status") != "approved":
-            missing.append("driver approval")
-        if not profile.get("vehicle_model"):
-            missing.append("vehicle details")
-        if not profile.get("vehicle_plate") and not profile.get("vehicle_plate_number"):
-            missing.append("vehicle plate number")
-        if not profile.get("vehicle_type"):
-            missing.append("vehicle type")
-        if not profile.get("bank_name") or not profile.get("account_number"):
-            missing.append("bank account details")
-        if not profile.get("has_ac"):
-            missing.append("AC confirmation (vehicle must have working AC)")
-        if not profile.get("full_name") and not profile.get("name"):
-            missing.append("full name")
-        if not profile.get("address"):
-            missing.append("home address")
-        if not profile.get("guarantor"):
-            missing.append("guarantor information")
-        if profile.get("monthly_verification_complete") is False:
-            missing.append("monthly compliance verification")
-        try:
-            from driver_compliance import check_monthly_uploads, check_driver_document_expiry
-            monthly_status = await check_monthly_uploads(user_id)
-            docs_status = await check_driver_document_expiry(user_id)
-            if not monthly_status.get("compliant", False):
-                missing.append("monthly interior/selfie verification")
-            if not docs_status.get("compliant", False):
-                missing.append("valid (non-expired) vehicle/legal documents")
-        except Exception as compliance_error:
-            logger.warning(f"Compliance pre-check warning for {user_id}: {compliance_error}")
-
-        if missing:
+            critical_missing.append("admin approval (still pending review)")
+        if critical_missing:
             raise HTTPException(
                 status_code=403,
-                detail=f"Complete your registration first. Missing: {', '.join(missing)}"
+                detail=f"Account not yet approved. Missing: {', '.join(critical_missing)}"
             )
+
+        # ── SOFT gates: warn but allow newer verified drivers a grace period ──
+        # If the driver was approved within the last 30 days, skip compliance
+        # checks — their initial verification IS their compliance for this period.
+        approved_recently = False
+        try:
+            profile_completed_at_raw = profile.get("profile_completed_at") or profile.get("approved_at")
+            if profile_completed_at_raw:
+                approved_at_dt = datetime.fromisoformat(str(profile_completed_at_raw).replace("Z", "+00:00"))
+                if approved_at_dt.tzinfo is None:
+                    approved_at_dt = approved_at_dt.replace(tzinfo=timezone.utc)
+                approved_recently = (datetime.now(timezone.utc) - approved_at_dt).days < 30
+        except Exception:
+            approved_recently = True  # On parse error, give benefit of the doubt
+
+        # Monthly compliance: skip for brand-new drivers (< 30 days since approval)
+        if not approved_recently:
+            try:
+                from driver_compliance import check_monthly_uploads
+                monthly_status = await check_monthly_uploads(user_id)
+                if not monthly_status.get("compliant", False):
+                    # Soft: log but do not block — the driver gets a push notification reminder
+                    logger.info(f"Driver {user_id} going online without monthly compliance (will be notified)")
+            except Exception as compliance_error:
+                logger.warning(f"Compliance pre-check warning for {user_id}: {compliance_error}")
+
+        # Document expiry: only block if documents are critically expired (hard block)
+        try:
+            from driver_compliance import check_driver_document_expiry
+            docs_status = await check_driver_document_expiry(user_id)
+            if not docs_status.get("compliant", False) and docs_status.get("critically_expired"):
+                raise HTTPException(
+                    status_code=403,
+                    detail="One or more required documents have expired. Please renew them before going online."
+                )
+        except HTTPException:
+            raise
+        except Exception as compliance_error:
+            logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
 
         subscription = await db.subscriptions.find_one({"driver_id": user_id}, sort=[("created_at", -1)])
         if not subscription or subscription.get("status") not in {"active", "grace_period", "trial"}:
