@@ -868,9 +868,14 @@ export default function DriverTripsScreen() {
           <Text style={styles.title}>Driver Operations</Text>
           <Text style={styles.subtitle}>Handle your current trip and new requests from one clean hub.</Text>
         </View>
-        <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/driver/safety-alerts')}>
-          <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primary} />
-        </TouchableOpacity>
+        <View style={{ flexDirection: 'row', gap: 4 }}>
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/shield-disputes' as any)}>
+            <Ionicons name="shield-half-outline" size={22} color="#EAB308" />
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.headerIconBtn} onPress={() => router.push('/driver/safety-alerts')}>
+            <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.summaryRow}>
@@ -1087,6 +1092,15 @@ export default function DriverTripsScreen() {
                 style={styles.cancelButton}
               />
             )}
+            {['completed', 'cancelled'].includes(currentTrip.status) && (
+              <TouchableOpacity
+                style={styles.reportIssueBtn}
+                onPress={() => router.push({ pathname: '/shield-disputes', params: { tripId: currentTrip.id, mode: 'report' } } as any)}
+              >
+                <Ionicons name="shield-outline" size={16} color="#EF4444" />
+                <Text style={styles.reportIssueBtnText}>Report Issue with this Trip</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </Card>
       )}
@@ -1291,6 +1305,23 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     flex: 0.4,
+  },
+  reportIssueBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.sm,
+    marginTop: SPACING.xs,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
+  },
+  reportIssueBtnText: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '700',
+    color: '#EF4444',
   },
   pendingPaymentBadge: {
     flexDirection: 'row',

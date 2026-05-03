@@ -109,13 +109,22 @@ export default function RiderTripsScreen() {
         </View>
 
         {activeTab === 'completed' ? (
-          <TouchableOpacity
-            style={styles.receiptButton}
-            onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } })}
-          >
-            <Ionicons name="receipt-outline" size={18} color={COLORS.accentBlue} />
-            <Text style={styles.receiptButtonText}>View Receipt</Text>
-          </TouchableOpacity>
+          <View style={styles.tripActions}>
+            <TouchableOpacity
+              style={styles.receiptButton}
+              onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } })}
+            >
+              <Ionicons name="receipt-outline" size={16} color={COLORS.accentBlue} />
+              <Text style={styles.receiptButtonText}>Receipt</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.reportButton}
+              onPress={() => router.push({ pathname: '/shield-disputes', params: { tripId: trip.id, mode: 'report' } } as any)}
+            >
+              <Ionicons name="shield-outline" size={16} color={COLORS.error} />
+              <Text style={styles.reportButtonText}>Report Issue</Text>
+            </TouchableOpacity>
+          </View>
         ) : null}
       </View>
     );
@@ -128,7 +137,13 @@ export default function RiderTripsScreen() {
           <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>My Trips</Text>
-        <View style={{ width: 40 }} />
+        <TouchableOpacity
+          style={styles.shieldBtn}
+          onPress={() => router.push('/shield-disputes' as any)}
+          accessibilityLabel="Nexryde Shield"
+        >
+          <Ionicons name="shield-checkmark-outline" size={22} color={COLORS.primary} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.tabsContainer}>
@@ -236,8 +251,14 @@ const styles = StyleSheet.create({
   driverName: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: COLORS.gray600 },
   ratingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   ratingText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray700 },
-  receiptButton: {
+  shieldBtn: { padding: SPACING.xs },
+  tripActions: {
+    flexDirection: 'row',
+    gap: SPACING.xs,
     marginTop: SPACING.sm,
+  },
+  receiptButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -247,4 +268,17 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.accentBlueSoft,
   },
   receiptButtonText: { color: COLORS.accentBlue, fontWeight: '700', fontSize: FONT_SIZE.sm },
+  reportButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    paddingVertical: SPACING.sm,
+    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.2)',
+  },
+  reportButtonText: { color: COLORS.error, fontWeight: '700', fontSize: FONT_SIZE.sm },
 });

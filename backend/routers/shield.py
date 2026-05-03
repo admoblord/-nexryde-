@@ -86,9 +86,46 @@ def _invisible_shield_payload(trip: dict) -> dict:
     }
 
 
+VALID_ISSUE_TYPES = {
+    "driver_behavior": "Driver Behavior",
+    "wrong_fare": "Wrong Fare",
+    "route_issue": "Route Issue",
+    "safety_concern": "Safety Concern",
+    "other": "Other",
+}
+
+VALID_DECISIONS = {
+    "no_action", "warning", "refund_partial", "refund_full",
+    "account_restriction", "account_suspension",
+}
+
+
+def _build_trip_evidence(trip: dict) -> dict:
+    """Extract immutable trip data to attach as evidence — no manual editing."""
+    pl = trip.get("pickup_location") or {}
+    dl = trip.get("dropoff_location") or {}
+    return {
+        "fare": trip.get("fare") or trip.get("offered_fare"),
+        "distance_km": trip.get("distance_km"),
+        "duration_mins": trip.get("duration_mins"),
+        "service_type": trip.get("service_type"),
+        "payment_method": trip.get("payment_method"),
+        "trip_start_time": trip.get("accepted_at") or trip.get("started_at"),
+        "trip_end_time": trip.get("completed_at"),
+        "pickup_address": pl.get("address") if isinstance(pl, dict) else str(pl),
+        "dropoff_address": dl.get("address") if isinstance(dl, dict) else str(dl),
+        "pickup_lat": pl.get("lat") if isinstance(pl, dict) else None,
+        "pickup_lng": pl.get("lng") if isinstance(pl, dict) else None,
+        "dropoff_lat": dl.get("lat") if isinstance(dl, dict) else None,
+        "dropoff_lng": dl.get("lng") if isinstance(dl, dict) else None,
+        "surge_multiplier": trip.get("surge_multiplier"),
+        "trip_status_at_report": trip.get("status"),
+    }
+
+
 @shield_router.post("/disputes")
 async def shield_create_dispute(body: CreateDisputeRequest, request: Request):
-    """Open a dispute; other party may respond — no automatic bans."""
+    """Open a Shield case; other party notified and may respond — no automatic bans."""
     uid = require_authenticated(request)
     trip = await db.trips.find_one({"id": body.trip_id}, {"_id": 0})
     if not trip:
@@ -103,29 +140,56 @@ async def shield_create_dispute(body: CreateDisputeRequest, request: Request):
         {"_id": 0, "id": 1},
     )
     if existing:
-        raise HTTPException(status_code=400, detail="An open dispute already exists for this trip")
+        raise HTTPException(status_code=400, detail="An open Shield case already exists for this trip")
 
     role = "rider" if uid == trip.get("rider_id") else "driver"
     other = _other_party_id(trip, uid)
     now = datetime.now(timezone.utc).isoformat()
+
+    # Normalise category / issue type
+    raw_cat = (body.category or "other").strip().lower()
+    issue_type = raw_cat if raw_cat in VALID_ISSUE_TYPES else "other"
+
     doc = {
         "id": str(uuid.uuid4()),
         "trip_id": body.trip_id,
+        "rider_id": trip.get("rider_id"),
+        "driver_id": trip.get("driver_id"),
         "opened_by": uid,
         "opened_by_role": role,
+        "issue_type": issue_type,
+        "issue_type_label": VALID_ISSUE_TYPES[issue_type],
+        "rider_statement": body.statement.strip() if role == "rider" else None,
+        "driver_statement": body.statement.strip() if role == "driver" else None,
+        # Keep legacy field for backwards compat
         "complainant_statement": body.statement.strip(),
         "respondent_id": other,
         "respondent_statement": None,
-        "category": (body.category or "").strip() or None,
         "status": "awaiting_response" if other else "under_review",
+        "decision": None,
+        "decision_reason": None,
         "created_at": now,
         "updated_at": now,
         "resolved_at": None,
         "resolution_notes": None,
         "auto_enforcement": False,
+        # Auto-attached trip evidence — immutable
+        "trip_evidence": _build_trip_evidence(trip),
     }
     await db.shield_disputes.insert_one(doc)
     doc.pop("_id", None)
+
+    # Notify the other party
+    if other:
+        other_role = "driver" if role == "rider" else "rider"
+        await send_push_notification(
+            other,
+            "Nexryde Shield — Response Required",
+            f"A report was filed for your recent trip. Please respond within 24 hours.",
+            {"type": "shield_case_created", "dispute_id": doc["id"], "trip_id": body.trip_id},
+        )
+        logger.info(f"Shield case {doc['id']} created by {role} {uid}; notified {other_role} {other}")
+
     return {"success": True, "dispute": doc}
 
 
@@ -136,18 +200,131 @@ async def shield_respond_dispute(dispute_id: str, body: RespondDisputeRequest, r
     if not d:
         raise HTTPException(status_code=404, detail="Dispute not found")
     if d.get("status") in ("resolved", "dismissed"):
-        raise HTTPException(status_code=400, detail="Dispute is closed")
-    if uid != d.get("respondent_id"):
-        raise HTTPException(status_code=403, detail="Only the other party may submit their statement")
+        raise HTTPException(status_code=400, detail="This Shield case is already closed")
+    if uid not in {d.get("respondent_id"), d.get("rider_id"), d.get("driver_id")}:
+        raise HTTPException(status_code=403, detail="Not a participant on this case")
+    if uid == d.get("opened_by"):
+        raise HTTPException(status_code=400, detail="You opened this case — wait for the other party to respond")
     if d.get("respondent_statement"):
-        raise HTTPException(status_code=400, detail="Response already submitted")
+        raise HTTPException(status_code=400, detail="Your response has already been submitted")
+
+    # Determine which statement field to update
+    role = "rider" if uid == d.get("rider_id") else "driver"
+    stmt_field = "rider_statement" if role == "rider" else "driver_statement"
 
     now = datetime.now(timezone.utc).isoformat()
     await db.shield_disputes.update_one(
         {"id": dispute_id},
-        {"$set": {"respondent_statement": body.statement.strip(), "status": "under_review", "updated_at": now}},
+        {"$set": {
+            "respondent_statement": body.statement.strip(),
+            stmt_field: body.statement.strip(),
+            "status": "under_review",
+            "updated_at": now,
+        }},
     )
     updated = await db.shield_disputes.find_one({"id": dispute_id}, {"_id": 0})
+
+    # Notify the opener that the case moved to under_review
+    opener = d.get("opened_by")
+    if opener:
+        await send_push_notification(
+            opener,
+            "Nexryde Shield — Response Received",
+            "The other party has responded to your report. Our team will now review the case.",
+            {"type": "shield_case_responded", "dispute_id": dispute_id},
+        )
+
+    return {"success": True, "dispute": updated}
+
+
+# ─── Admin Shield endpoints ──────────────────────────────────────────────────
+
+class AdminShieldDecision(BaseModel):
+    decision: str = Field(..., description="One of: no_action, warning, refund_partial, refund_full, account_restriction, account_suspension")
+    decision_reason: str = Field(..., min_length=10, max_length=4000)
+
+
+@shield_router.get("/admin/disputes")
+async def admin_list_shield_disputes(
+    request: Request,
+    status: Optional[str] = None,
+    limit: int = 50,
+    skip: int = 0,
+):
+    """Admin: list all Shield cases, optionally filtered by status."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+    query: dict = {}
+    if status and status in ("awaiting_response", "under_review", "resolved", "dismissed"):
+        query["status"] = status
+    lim = max(1, min(limit, 200))
+    cursor = db.shield_disputes.find(query, {"_id": 0}).sort("created_at", -1).skip(skip).limit(lim)
+    items = await cursor.to_list(lim)
+    total = await db.shield_disputes.count_documents(query)
+    return {"disputes": items, "total": total, "skip": skip, "limit": lim}
+
+
+@shield_router.get("/admin/disputes/{dispute_id}")
+async def admin_get_shield_dispute(dispute_id: str, request: Request):
+    """Admin: get single Shield case with full trip evidence."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+    d = await db.shield_disputes.find_one({"id": dispute_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    # Enrich with rider/driver display names
+    rider_doc = await db.users.find_one({"id": d.get("rider_id")}, {"_id": 0, "name": 1, "phone": 1}) or {}
+    driver_doc = await db.users.find_one({"id": d.get("driver_id")}, {"_id": 0, "name": 1, "phone": 1}) or {}
+    d["rider_name"] = rider_doc.get("name") or d.get("rider_id", "")
+    d["driver_name"] = driver_doc.get("name") or d.get("driver_id", "")
+    return {"dispute": d}
+
+
+@shield_router.put("/admin/disputes/{dispute_id}/decision")
+async def admin_resolve_shield_dispute(
+    dispute_id: str,
+    body: AdminShieldDecision,
+    request: Request,
+):
+    """Admin: record decision and resolve a Shield case."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+
+    if body.decision not in VALID_DECISIONS:
+        raise HTTPException(status_code=400, detail=f"Invalid decision. Must be one of: {', '.join(sorted(VALID_DECISIONS))}")
+
+    d = await db.shield_disputes.find_one({"id": dispute_id}, {"_id": 0})
+    if not d:
+        raise HTTPException(status_code=404, detail="Case not found")
+    if d.get("status") == "resolved":
+        raise HTTPException(status_code=400, detail="Case is already resolved")
+
+    now = datetime.now(timezone.utc).isoformat()
+    await db.shield_disputes.update_one(
+        {"id": dispute_id},
+        {"$set": {
+            "status": "resolved",
+            "decision": body.decision,
+            "decision_reason": body.decision_reason.strip(),
+            "resolved_at": now,
+            "updated_at": now,
+            "resolution_notes": body.decision_reason.strip(),
+        }},
+    )
+    updated = await db.shield_disputes.find_one({"id": dispute_id}, {"_id": 0})
+
+    # Notify both parties
+    decision_label = body.decision.replace("_", " ").title()
+    for party_id in filter(None, {d.get("rider_id"), d.get("driver_id")}):
+        await send_push_notification(
+            party_id,
+            "Nexryde Shield — Case Resolved",
+            f"Your Shield case has been reviewed and resolved: {decision_label}.",
+            {"type": "shield_case_resolved", "dispute_id": dispute_id, "decision": body.decision},
+        )
+
+    logger.info(f"Shield case {dispute_id} resolved with decision '{body.decision}' by admin")
     return {"success": True, "dispute": updated}
 
 
