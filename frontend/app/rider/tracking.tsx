@@ -893,7 +893,11 @@ export default function TrackingScreen() {
                       name: driverInfo?.name,
                       vehicle: driverInfo?.vehicle,
                       plate: driverInfo?.plate,
+                      rating: driverInfo?.rating ?? driverInfo?.avg_rating ?? undefined,
+                      profileImage:
+                        driverInfo?.profile_image || driverInfo?.face_image || null,
                     }}
+                    tripStatus={tripStatus}
                   />
                 );
               })()

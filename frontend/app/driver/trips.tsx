@@ -63,27 +63,80 @@ type LiveMapProps = {
   riderLng?: number | null;
 };
 
+function calcDriverBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const φ1 = toRad(lat1), φ2 = toRad(lat2), Δλ = toRad(lng2 - lng1);
+  const y = Math.sin(Δλ) * Math.cos(φ2);
+  const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+  return ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
+}
+
+function haversineDriverKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function PulsingDriverDot() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  const ringPulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1.4, duration: 800, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+        Animated.timing(pulse, { toValue: 1, duration: 800, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+      ])
+    ).start();
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(ringPulse, { toValue: 1.8, duration: 1200, useNativeDriver: true }),
+        Animated.timing(ringPulse, { toValue: 1, duration: 600, useNativeDriver: true }),
+      ])
+    ).start();
+  }, [pulse, ringPulse]);
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: 48, height: 48 }}>
+      <Animated.View style={{
+        position: 'absolute', width: 44, height: 44, borderRadius: 22,
+        backgroundColor: 'rgba(59,130,246,0.15)', transform: [{ scale: ringPulse }],
+      }} />
+      <Animated.View style={{
+        position: 'absolute', width: 36, height: 36, borderRadius: 18,
+        backgroundColor: 'rgba(59,130,246,0.25)', transform: [{ scale: pulse }],
+      }} />
+      <LinearGradient colors={['#60a5fa', '#2563eb']} style={{
+        width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+        borderWidth: 2.5, borderColor: '#FFF', elevation: 8,
+      }}>
+        <Ionicons name="car" size={13} color="#FFF" />
+      </LinearGradient>
+    </View>
+  );
+}
+
+function RiderDot() {
   const pulse = useRef(new Animated.Value(1)).current;
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.5, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
+        Animated.timing(pulse, { toValue: 1.35, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1, duration: 900, useNativeDriver: true }),
       ])
     ).start();
   }, [pulse]);
   return (
-    <View style={{ alignItems: 'center', justifyContent: 'center', width: 40, height: 40 }}>
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: 32, height: 32 }}>
       <Animated.View style={{
-        position: 'absolute', width: 36, height: 36, borderRadius: 18,
-        backgroundColor: 'rgba(59,130,246,0.3)', transform: [{ scale: pulse }],
+        position: 'absolute', width: 28, height: 28, borderRadius: 14,
+        backgroundColor: 'rgba(168,85,247,0.25)', transform: [{ scale: pulse }],
       }} />
-      <LinearGradient colors={['#60a5fa', '#3b82f6']} style={{
-        width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center',
-        borderWidth: 2.5, borderColor: '#FFF',
+      <LinearGradient colors={['#c084fc', '#7c3aed']} style={{
+        width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+        borderWidth: 2, borderColor: '#FFF',
       }}>
-        <Ionicons name="car" size={12} color="#FFF" />
+        <Ionicons name="person" size={9} color="#FFF" />
       </LinearGradient>
     </View>
   );
@@ -91,7 +144,10 @@ function PulsingDriverDot() {
 
 const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat, pickupLng, dropLat, dropLng, status, riderLat, riderLng }: LiveMapProps) {
   const [mapReady, setMapReady] = useState(false);
+  const [userPanned, setUserPanned] = useState(false);
   const mapRef = useRef<any>(null);
+  const bearingRef = useRef(0);
+  const prevDriverRef = useRef<{ lat: number; lng: number } | null>(null);
 
   // Stable initial region (only computed once — avoids map reload)
   const focalLat = driverLat ?? pickupLat ?? 6.5244;
@@ -99,26 +155,44 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
   const initialRegion = useMemo(() => ({
     latitude: focalLat,
     longitude: focalLng,
-    latitudeDelta: 0.04,
-    longitudeDelta: 0.04,
+    latitudeDelta: 0.03,
+    longitudeDelta: 0.03,
   }), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Animate camera to driver position when it changes
+  // Bearing-aware camera follow
   useEffect(() => {
-    if (mapReady && mapRef.current && driverLat && driverLng) {
+    if (!mapReady || !mapRef.current || !driverLat || !driverLng) return;
+    const prev = prevDriverRef.current;
+    if (prev && (prev.lat !== driverLat || prev.lng !== driverLng)) {
+      bearingRef.current = calcDriverBearing(prev.lat, prev.lng, driverLat, driverLng);
+    }
+    prevDriverRef.current = { lat: driverLat, lng: driverLng };
+    if (!userPanned) {
       mapRef.current.animateCamera({
         center: { latitude: driverLat, longitude: driverLng },
-        zoom: 15,
-      }, { duration: 800 });
+        zoom: 16,
+        heading: bearingRef.current,
+        pitch: 25,
+      }, { duration: 900 });
     }
-  }, [driverLat, driverLng, mapReady]);
+  }, [driverLat, driverLng, mapReady, userPanned]);
+
+  // Compute ETA & distance
+  const { etaMin, distanceKm } = useMemo(() => {
+    if (!driverLat || !driverLng) return { etaMin: null, distanceKm: null };
+    const targetLat = status === 'ongoing' ? (dropLat ?? pickupLat) : (pickupLat ?? dropLat);
+    const targetLng = status === 'ongoing' ? (dropLng ?? pickupLng) : (pickupLng ?? dropLng);
+    if (!targetLat || !targetLng) return { etaMin: null, distanceKm: null };
+    const km = haversineDriverKm(driverLat, driverLng, targetLat, targetLng);
+    const min = Math.round((km / 28) * 60);
+    return { etaMin: min < 1 ? 1 : min > 90 ? null : min, distanceKm: km };
+  }, [driverLat, driverLng, status, pickupLat, pickupLng, dropLat, dropLng]);
 
   const showPickup = status !== 'ongoing' && pickupLat != null && Number.isFinite(pickupLat);
   const showDrop = dropLat != null && Number.isFinite(dropLat);
   const showDriver = driverLat != null && Number.isFinite(driverLat);
   const showRider = riderLat != null && Number.isFinite(riderLat!);
 
-  // polyline: driver → pickup (accepted) or pickup → drop (ongoing)
   const polyline: { latitude: number; longitude: number }[] = [];
   if (status === 'accepted' && showDriver && pickupLat != null) {
     polyline.push({ latitude: driverLat!, longitude: driverLng! });
@@ -138,9 +212,18 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
     );
   }
 
-  // Lazy-load MapView to avoid import issues on web
   const MapView = require('react-native-maps').default;
   const { Marker, Polyline, PROVIDER_GOOGLE } = require('react-native-maps');
+
+  const statusLabel =
+    status === 'accepted' ? 'En route to pickup' :
+    status === 'arrived' ? 'At pickup point' :
+    status === 'ongoing' ? 'Trip in progress' :
+    status.replace(/_/g, ' ');
+  const statusColor =
+    status === 'ongoing' ? '#22c55e' :
+    status === 'arrived' ? '#f59e0b' :
+    status === 'accepted' ? '#0ea5e9' : '#64748b';
 
   return (
     <View style={tripMapStyles.container}>
@@ -150,22 +233,28 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
         provider={PROVIDER_GOOGLE}
         customMapStyle={DARK_MAP_STYLE}
         initialRegion={initialRegion}
-        scrollEnabled={false}
-        zoomEnabled={false}
-        rotateEnabled={false}
+        scrollEnabled
+        zoomEnabled
+        rotateEnabled
         pitchEnabled={false}
         toolbarEnabled={false}
         showsPointsOfInterest={false}
         showsBuildings={false}
         showsCompass={false}
-        showsTraffic={false}
+        showsTraffic={status === 'ongoing'}
         onMapReady={() => setMapReady(true)}
+        onPanDrag={() => setUserPanned(true)}
       >
-        {/* Route polyline */}
+        {/* Route: glow + bright */}
         {polyline.length >= 2 && (
           <>
-            <Polyline coordinates={polyline} strokeColor="rgba(14,165,233,0.3)" strokeWidth={8} />
-            <Polyline coordinates={polyline} strokeColor="#0ea5e9" strokeWidth={3} lineDashPattern={status === 'accepted' ? [8, 5] : undefined} />
+            <Polyline coordinates={polyline} strokeColor="rgba(14,165,233,0.2)" strokeWidth={10} />
+            <Polyline
+              coordinates={polyline}
+              strokeColor={status === 'ongoing' ? '#22c55e' : '#0ea5e9'}
+              strokeWidth={3.5}
+              lineDashPattern={status === 'accepted' ? [8, 5] : undefined}
+            />
           </>
         )}
 
@@ -175,6 +264,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
             coordinate={{ latitude: driverLat!, longitude: driverLng! }}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={false}
+            zIndex={10}
           >
             <PulsingDriverDot />
           </Marker>
@@ -186,6 +276,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
             coordinate={{ latitude: pickupLat!, longitude: pickupLng! }}
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges={false}
+            zIndex={5}
           >
             <View style={tripMapStyles.markerWrap}>
               <LinearGradient colors={['#22c55e', '#16a34a']} style={tripMapStyles.markerCircle}>
@@ -205,6 +296,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
             coordinate={{ latitude: dropLat!, longitude: dropLng! }}
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges={false}
+            zIndex={5}
           >
             <View style={tripMapStyles.markerWrap}>
               <LinearGradient colors={['#ef4444', '#dc2626']} style={tripMapStyles.markerCircle}>
@@ -218,46 +310,69 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
           </Marker>
         )}
 
-        {/* Rider position (if available from backend) */}
+        {/* Rider position */}
         {showRider && (
           <Marker
             coordinate={{ latitude: riderLat!, longitude: riderLng! }}
             anchor={{ x: 0.5, y: 0.5 }}
             tracksViewChanges={false}
+            zIndex={6}
           >
-            <View style={tripMapStyles.riderDot}>
-              <Ionicons name="person" size={10} color="#FFF" />
-            </View>
+            <RiderDot />
           </Marker>
         )}
       </MapView>
 
       {/* Status chip */}
-      <View style={tripMapStyles.statusChip}>
-        <View style={[tripMapStyles.statusDot, {
-          backgroundColor:
-            status === 'ongoing' ? '#22c55e' :
-            status === 'arrived' ? '#f59e0b' :
-            status === 'accepted' ? '#0ea5e9' : '#64748b'
-        }]} />
-        <Text style={tripMapStyles.statusText}>
-          {status === 'accepted' ? 'En route to pickup' :
-           status === 'arrived' ? 'At pickup point' :
-           status === 'ongoing' ? 'Trip in progress' :
-           status.replace(/_/g, ' ')}
-        </Text>
+      <View style={[tripMapStyles.statusChip, { borderColor: `${statusColor}40` }]}>
+        <View style={[tripMapStyles.statusDot, { backgroundColor: statusColor }]} />
+        <Text style={[tripMapStyles.statusText, { color: statusColor }]}>{statusLabel}</Text>
       </View>
+
+      {/* ETA chip */}
+      {(etaMin != null || distanceKm != null) && (
+        <View style={tripMapStyles.etaChip}>
+          <Ionicons name="time-outline" size={11} color="#38bdf8" />
+          <Text style={tripMapStyles.etaText}>
+            {etaMin != null
+              ? `${etaMin} min`
+              : distanceKm! < 1
+              ? `${Math.round(distanceKm! * 1000)} m`
+              : `${distanceKm!.toFixed(1)} km`}
+          </Text>
+        </View>
+      )}
+
+      {/* Re-center button */}
+      {userPanned && showDriver && (
+        <TouchableOpacity
+          style={tripMapStyles.recenterBtn}
+          onPress={() => {
+            setUserPanned(false);
+            mapRef.current?.animateCamera({
+              center: { latitude: driverLat!, longitude: driverLng! },
+              zoom: 16,
+              heading: bearingRef.current,
+            }, { duration: 600 });
+          }}
+          activeOpacity={0.8}
+        >
+          <Ionicons name="locate" size={16} color="#FFF" />
+        </TouchableOpacity>
+      )}
     </View>
   );
 });
 
 const tripMapStyles = StyleSheet.create({
   container: {
-    height: 200,
-    borderRadius: 14,
+    height: 220,
+    borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 12,
     backgroundColor: '#0f172a',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   webFallback: {
     height: 80,
@@ -301,6 +416,38 @@ const tripMapStyles = StyleSheet.create({
     backgroundColor: '#f59e0b',
     alignItems: 'center', justifyContent: 'center',
     borderWidth: 2, borderColor: '#FFF',
+  },
+  etaChip: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    borderRadius: 20,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderWidth: 0.5,
+    borderColor: 'rgba(56,189,248,0.3)',
+  },
+  etaText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#38bdf8',
+  },
+  recenterBtn: {
+    position: 'absolute',
+    bottom: 10,
+    right: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0.5,
+    borderColor: 'rgba(255,255,255,0.15)',
   },
 });
 
