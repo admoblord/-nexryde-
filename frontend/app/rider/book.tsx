@@ -189,6 +189,7 @@ function BookInDriveStyle() {
     Array<{ address?: string; description?: string; lat?: number; lng?: number }>
   >([]);
   const [bookingPromoVisible, setBookingPromoVisible] = useState(false);
+  const [isFirstRider, setIsFirstRider] = useState(false);
 
   const availableVehicles = React.useMemo(() => {
     const base = [...VEHICLES];
@@ -322,6 +323,22 @@ function BookInDriveStyle() {
       cancelled = true;
     };
   }, []);
+
+  // Check if this rider has never taken a trip — show 20% first-ride discount banner
+  useEffect(() => {
+    if (!user?.id) return;
+    let cancelled = false;
+    void fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, {
+      headers: getAuthHeaders(),
+    })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!cancelled && d?.first_ride_completed === false) setIsFirstRider(true);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1643,11 +1660,25 @@ function BookInDriveStyle() {
             </View>
           ) : null}
 
+          {/* ── First-ride 20% discount banner ── */}
+          {isFirstRider && (
+            <View style={s.firstRideBanner}>
+              <View style={s.firstRideBannerIcon}>
+                <Ionicons name="gift-outline" size={18} color="#00D46A" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={s.firstRideBannerTitle}>Your first ride — 20% off! 🎉</Text>
+                <Text style={s.firstRideBannerSub}>Discount applied automatically at checkout. No code needed.</Text>
+              </View>
+            </View>
+          )}
+
           {/* ── Inline Ride Categories (all visible, no modal required) ── */}
           <View style={s.inlineCatSection}>
             <Text style={s.inlineCatTitle}>Choose your ride</Text>
             {availableVehicles.map((v) => {
               const price = fareMatrix[v.id];
+              const discPrice = isFirstRider && price > 0 ? Math.round(price * 0.80) : null;
               const isSelected = selectedVehicle === v.id;
               const loadingPrice = !!(pickup && destination && !price && isLoading);
               return (
@@ -1657,7 +1688,7 @@ function BookInDriveStyle() {
                   onPress={() => {
                     setSelectedVehicle(v.id);
                     if (price && price > 0) {
-                      setCurrentFare(price);
+                      setCurrentFare(discPrice ?? price);
                     } else if (pickup && destination) {
                       setCurrentFare(0);
                       setFareDetails(null);
@@ -1677,16 +1708,26 @@ function BookInDriveStyle() {
                     {loadingPrice ? (
                       <ActivityIndicator size="small" color={v.color} />
                     ) : price > 0 ? (
-                      <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
-                        ₦{price.toLocaleString()}
-                      </Text>
+                      <>
+                        <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
+                          ₦{(discPrice ?? price).toLocaleString()}
+                        </Text>
+                        {discPrice != null && (
+                          <Text style={s.inlineCatOrigPrice}>₦{price.toLocaleString()}</Text>
+                        )}
+                      </>
                     ) : (
                       <Text style={s.inlineCatPriceMuted}>
                         {pickup && destination ? '—' : 'Enter route'}
                       </Text>
                     )}
                   </View>
-                  {isSelected && (
+                  {isFirstRider && price > 0 && (
+                    <View style={s.firstRideBadge}>
+                      <Text style={s.firstRideBadgeText}>-20%</Text>
+                    </View>
+                  )}
+                  {isSelected && !isFirstRider && (
                     <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
                       <Ionicons name="checkmark" size={12} color="#FFF" />
                     </View>
@@ -1736,6 +1777,14 @@ function BookInDriveStyle() {
                     {priorityMatch && (
                       <View style={{ backgroundColor: '#1e3a1e', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
                         <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>⚡ Priority match</Text>
+                      </View>
+                    )}
+                    {fareDetails?.first_ride_discount_applied && (
+                      <View style={{ backgroundColor: 'rgba(0,212,106,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(0,212,106,0.35)' }}>
+                        <Ionicons name="gift-outline" size={12} color="#00D46A" />
+                        <Text style={{ color: '#00D46A', fontSize: 11, fontWeight: '800' }}>
+                          🎉 20% First Ride Discount Applied
+                        </Text>
                       </View>
                     )}
                   </View>
@@ -2438,6 +2487,58 @@ const s = StyleSheet.create({
     borderRadius: 10,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  inlineCatOrigPrice: {
+    fontSize: 11,
+    color: COLORS.dim,
+    fontWeight: '600',
+    textDecorationLine: 'line-through',
+    textAlign: 'right',
+  },
+  firstRideBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(0,212,106,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,106,0.3)',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  firstRideBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,212,106,0.18)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  firstRideBannerTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#00D46A',
+    marginBottom: 2,
+  },
+  firstRideBannerSub: {
+    fontSize: 11,
+    color: '#A7F3D0',
+    fontWeight: '500',
+    lineHeight: 16,
+  },
+  firstRideBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#00D46A',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  firstRideBadgeText: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#0D1420',
   },
   routeSafetyCard: {
     backgroundColor: '#1E293B',

@@ -1,4 +1,4 @@
-import React, { useMemo, useCallback, useRef } from 'react';
+import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Platform,
   KeyboardAvoidingView,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -215,6 +216,66 @@ export default function DriverRideRequestModal({
       ? selectedFare
       : riderOffer || baseFare;
 
+  // ── Smart Mode filter check ──────────────────────────────────────────────
+  const [smartEnabled, setSmartEnabled] = useState(false);
+  const [smartResult, setSmartResult] = useState<{
+    match: boolean;
+    reasons: string[];
+    warnings: string[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!visible) return;
+    void AsyncStorage.getItem('nexryde_smart_mode_settings').then((raw) => {
+      if (!raw) return;
+      try {
+        const s = JSON.parse(raw);
+        if (!s?.enabled) return;
+        setSmartEnabled(true);
+
+        const warnings: string[] = [];
+        const reasons: string[] = [];
+        let match = true;
+
+        // Distance check
+        if (distanceKm != null) {
+          if (distanceKm < (s.minDistance ?? 0)) {
+            match = false;
+            warnings.push(`Below min distance (${distanceKm.toFixed(1)} km < ${s.minDistance} km)`);
+          } else if (distanceKm > (s.maxDistance ?? 999)) {
+            match = false;
+            warnings.push(`Exceeds max distance (${distanceKm.toFixed(1)} km > ${s.maxDistance} km)`);
+          } else {
+            reasons.push(`${distanceKm.toFixed(1)} km — in range`);
+          }
+        }
+
+        // Rider rating check
+        const riderRating = Number(trip?.shield?.rider_reputation_avg ?? 0);
+        if (s.avoidLowRated && riderRating > 0) {
+          if (riderRating < (s.minRating ?? 0)) {
+            match = false;
+            warnings.push(`Rider rating ${riderRating.toFixed(1)} below your ${s.minRating.toFixed(1)} ★ filter`);
+          } else {
+            reasons.push(`${riderRating.toFixed(1)} ★ rider`);
+          }
+        }
+
+        // Surge check
+        if (s.acceptSurge && surgeMul > 1.05) {
+          if (surgeMul < (s.minSurgeMultiplier ?? 1)) {
+            match = false;
+            warnings.push(`Surge ${surgeMul.toFixed(1)}× below your ${s.minSurgeMultiplier.toFixed(1)}× minimum`);
+          } else {
+            reasons.push(`${surgeMul.toFixed(1)}× surge`);
+          }
+        }
+
+        setSmartResult({ match, reasons, warnings });
+      } catch { /* ignore */ }
+    });
+  }, [visible, distanceKm, surgeMul, trip?.shield?.rider_reputation_avg]);
+
   const progress = Math.max(0, Math.min(1, countdownSeconds / countdownTotal));
 
   const pickupLine =
@@ -289,6 +350,30 @@ export default function DriverRideRequestModal({
                   <Text style={styles.demandText}>
                     High demand area · {surgeMul.toFixed(1)}×
                   </Text>
+                </View>
+              )}
+
+              {/* ── Smart Mode indicator ── */}
+              {smartEnabled && smartResult && (
+                <View style={[
+                  styles.smartBanner,
+                  smartResult.match ? styles.smartBannerMatch : styles.smartBannerMiss,
+                ]}>
+                  <Ionicons
+                    name={smartResult.match ? 'flash' : 'flash-off'}
+                    size={15}
+                    color={smartResult.match ? '#00D46A' : '#F59E0B'}
+                  />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.smartBannerTitle, { color: smartResult.match ? '#00D46A' : '#F59E0B' }]}>
+                      {smartResult.match ? 'Smart Match ✓' : 'Outside Your Filters'}
+                    </Text>
+                    {(smartResult.match ? smartResult.reasons : smartResult.warnings).length > 0 && (
+                      <Text style={styles.smartBannerSub} numberOfLines={2}>
+                        {(smartResult.match ? smartResult.reasons : smartResult.warnings).join(' · ')}
+                      </Text>
+                    )}
+                  </View>
                 </View>
               )}
 
@@ -646,6 +731,35 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: C.surge,
     flex: 1,
+  },
+  smartBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: DS_SPACE.sm,
+    paddingVertical: 10,
+    borderRadius: DS_RADIUS.md,
+    marginBottom: DS_SPACE.sm,
+    marginHorizontal: DS_SPACE.xs,
+    borderWidth: 1,
+  },
+  smartBannerMatch: {
+    backgroundColor: 'rgba(0,212,106,0.1)',
+    borderColor: 'rgba(0,212,106,0.3)',
+  },
+  smartBannerMiss: {
+    backgroundColor: 'rgba(245,158,11,0.1)',
+    borderColor: 'rgba(245,158,11,0.3)',
+  },
+  smartBannerTitle: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  smartBannerSub: {
+    fontSize: 11,
+    color: '#94A3B8',
+    marginTop: 2,
+    lineHeight: 15,
   },
   priceHero: {
     backgroundColor: C.card,

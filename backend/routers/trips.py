@@ -1474,6 +1474,23 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         )
 
     final_fare = request.offered_fare if request.offered_fare is not None else fare["total_fare"]
+
+    # ── First-ride 20 % discount ─────────────────────────────────────────────
+    # Only applies when the system sets the fare (not when the rider makes an offer)
+    # and only on the rider's very first booking.
+    first_ride_discount_pct = 0.0
+    first_ride_discount_ngn = 0.0
+    if request.offered_fare is None:
+        prior_trips = await db.trips.count_documents(
+            {"rider_id": rider_id, "status": {"$in": ["completed", "pending", "accepted", "ongoing"]}}
+        )
+        if prior_trips == 0:
+            first_ride_discount_pct = 0.20
+            first_ride_discount_ngn = round(float(final_fare) * first_ride_discount_pct, 2)
+            final_fare = round(float(final_fare) * (1 - first_ride_discount_pct), 2)
+            # Keep final_fare within the allowed bounds
+            final_fare = max(float(min_price), final_fare)
+
     trip_status = "pending_driver_offers" if request.offered_fare is not None else "pending"
     smart_priority = rider_meets_priority_threshold(final_fare, base_price)
 
@@ -1492,6 +1509,9 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         "traffic_fee": fare["traffic_fee"],
         "fare": final_fare,
         "offered_fare": request.offered_fare,
+        "first_ride_discount_pct": first_ride_discount_pct,
+        "first_ride_discount_ngn": first_ride_discount_ngn,
+        "is_first_ride": first_ride_discount_pct > 0,
         "recommended_fare": float(base_price),
         "base_price": base_price,
         "min_price": min_price,

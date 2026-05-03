@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,9 +14,12 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
+
+const SMART_MODE_STORAGE_KEY = 'nexryde_smart_mode_settings';
 
 interface SmartModeSettings {
   enabled: boolean;
@@ -84,12 +87,31 @@ export default function SmartModeScreen() {
     status: 'inactive',
   });
 
+  const didMount = useRef(false);
+
   useEffect(() => {
-    loadSettings();
-    loadEarnings();
+    void loadSmartFilters();
+    void loadSalaryMode();
+    void loadEarnings();
   }, []);
 
-  const loadSettings = async () => {
+  // Auto-save smart filters to AsyncStorage whenever they change (after first mount)
+  useEffect(() => {
+    if (!didMount.current) { didMount.current = true; return; }
+    void AsyncStorage.setItem(SMART_MODE_STORAGE_KEY, JSON.stringify(settings)).catch(() => {});
+  }, [settings]);
+
+  const loadSmartFilters = async () => {
+    try {
+      const stored = await AsyncStorage.getItem(SMART_MODE_STORAGE_KEY);
+      if (stored) {
+        const parsed: Partial<SmartModeSettings> = JSON.parse(stored);
+        setSettings((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch { /* keep defaults */ }
+  };
+
+  const loadSalaryMode = async () => {
     if (!user?.id) return;
     try {
       const res = await getDriverSalaryMode(user.id);
@@ -98,6 +120,8 @@ export default function SmartModeScreen() {
       }
     } catch { /* keep defaults */ }
   };
+
+  const loadSettings = loadSalaryMode;
 
   const loadEarnings = async () => {
     if (!user?.id) return;
@@ -130,7 +154,7 @@ export default function SmartModeScreen() {
       if (res.data?.salary_mode) {
         setSalaryMode((prev) => ({ ...prev, ...res.data.salary_mode }));
       }
-      Alert.alert('Settings Saved!', 'Driver Salary Mode is active and now helps pace trips toward your monthly target.');
+      Alert.alert('Settings Saved!', 'Smart Mode filters and Salary Mode target have been saved to your device.');
     } catch (error) {
       Alert.alert('Error', 'Failed to save settings. Please try again.');
     }
@@ -443,8 +467,8 @@ export default function SmartModeScreen() {
           <View style={styles.settingCard}>
             <View style={styles.settingRow}>
               <View style={styles.settingRowLeft}>
-                <Text style={styles.settingLabel}>Prioritize Surge Rides</Text>
-                <Text style={styles.settingDesc}>Auto-accept rides with surge pricing</Text>
+                <Text style={styles.settingLabel}>Highlight Surge Rides</Text>
+                <Text style={styles.settingDesc}>Smart Mode flags surge rides so you can accept faster</Text>
               </View>
               <Switch
                 value={settings.acceptSurge}
@@ -480,12 +504,12 @@ export default function SmartModeScreen() {
           </View>
         </View>
 
-        {/* Auto-Accept Timing */}
+        {/* Evaluation Window */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⏱️ Auto-Accept Timing</Text>
+          <Text style={styles.sectionTitle}>⏱️ Evaluation Window</Text>
           <View style={styles.settingCard}>
             <View style={styles.settingHeader}>
-              <Text style={styles.settingLabel}>Wait Time Before Auto-Accept</Text>
+              <Text style={styles.settingLabel}>Seconds to review per ride</Text>
               <Text style={styles.settingValue}>{settings.maxWaitTime}s</Text>
             </View>
             <Slider
@@ -500,7 +524,7 @@ export default function SmartModeScreen() {
               thumbTintColor={COLORS.accentPurple}
             />
             <Text style={styles.settingHint}>
-              Smart Mode will wait {settings.maxWaitTime} seconds to evaluate before accepting
+              Smart Mode highlights whether this ride matches your filters — you still decide to accept
             </Text>
           </View>
         </View>
