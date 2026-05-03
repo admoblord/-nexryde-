@@ -339,9 +339,10 @@ async def get_referral_code(request: Request):
     code = await _generate_referral_code(user_id)
     username = await _ensure_username(user_id)
     invite_url = _build_invite_url(username, code)
+    handle = (username + "'s") if username else "my"
     share_message = (
-        f"🚗 Join Nexryde — Nigeria's smartest ride app!\n\n"
-        f"Use {username + \"'s\" if username else 'my'} invite link and we BOTH earn "
+        "🚗 Join Nexryde — Nigeria's smartest ride app!\n\n"
+        f"Use {handle} invite link and we BOTH earn "
         f"₦{REFERRAL_REWARD_INVITEE_NGN:,.0f} after your first ride:\n{invite_url}"
     )
     return {
