@@ -164,19 +164,110 @@ async def admin_overview():
     }
 
 @admin_router.get("/admin/riders")
-async def admin_get_riders(limit: int = 100, skip: int = 0):
-    """Get all riders with their details"""
-    riders = await db.users.find(
-        {"role": "rider"},
-        {"_id": 0}
-    ).sort("created_at", -1).skip(skip).limit(limit).to_list(limit)
-    
-    # Enrich with trip counts
-    for rider in riders:
-        rider["total_trips"] = await db.trips.count_documents({"rider_id": rider["id"]})
-        rider["blocked"] = rider.get("blocked", False)
-    
-    return {"riders": riders, "total": len(riders)}
+async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
+    """Get all riders — single aggregation pipeline, no N+1 trip counts."""
+    match_filter: dict = {"role": "rider"}
+    if search and search.strip():
+        pat = {"$regex": search.strip(), "$options": "i"}
+        match_filter["$or"] = [
+            {"name": pat}, {"phone": pat}, {"email": pat},
+            {"nin": pat}, {"username": pat}, {"referral_code": pat},
+        ]
+
+    total = await db.users.count_documents(match_filter)
+
+    pipeline = [
+        {"$match": match_filter},
+        {"$sort": {"created_at": -1}},
+        {"$skip": skip},
+        {"$limit": limit},
+        # Strip heavy base64 blobs from the list response
+        {"$project": {
+            "_id": 0, "face_image": 0, "profile_image": 0,
+        }},
+        # Single $lookup for trip counts — one round-trip instead of N
+        {"$lookup": {
+            "from": "trips",
+            "let": {"uid": "$id"},
+            "pipeline": [
+                {"$match": {"$expr": {"$eq": ["$rider_id", "$$uid"]}}},
+                {"$count": "n"},
+            ],
+            "as": "_tc",
+        }},
+        {"$addFields": {
+            "total_trips": {"$ifNull": [{"$arrayElemAt": ["$_tc.n", 0]}, 0]},
+        }},
+        {"$project": {"_tc": 0}},
+    ]
+
+    riders = await db.users.aggregate(pipeline).to_list(limit)
+    return {"riders": riders, "total": total, "skip": skip, "page_size": limit}
+
+
+@admin_router.get("/admin/riders/{rider_id}")
+async def admin_get_rider_profile(rider_id: str):
+    """Full rider profile for admin panel drawer — enriched with wallet + trip stats."""
+    rider = await db.users.find_one(
+        {"id": rider_id, "role": "rider"},
+        {"_id": 0, "face_image": 0, "profile_image": 0},
+    )
+    if not rider:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    # Wallet
+    wallet = await db.wallets.find_one({"user_id": rider_id}, {"_id": 0}) or {}
+    wallet_balance = wallet.get("balance", rider.get("wallet_balance", 0))
+
+    # Trip stats (aggregation: counts + total spend in one pass)
+    stats_pipeline = [
+        {"$match": {"rider_id": rider_id}},
+        {"$group": {
+            "_id": "$status",
+            "count": {"$sum": 1},
+            "spend": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, "$fare", 0]}},
+        }},
+    ]
+    stats_raw = await db.trips.aggregate(stats_pipeline).to_list(20)
+    total_trips = sum(s["count"] for s in stats_raw)
+    completed = next((s["count"] for s in stats_raw if s["_id"] == "completed"), 0)
+    cancelled = next((s["count"] for s in stats_raw if s["_id"] == "cancelled"), 0)
+    total_spend = sum(s["spend"] for s in stats_raw)
+
+    # Recent trips (last 5)
+    recent_trips = await db.trips.find(
+        {"rider_id": rider_id},
+        {"_id": 0, "id": 1, "status": 1, "fare": 1, "created_at": 1,
+         "pickup_location": 1, "dropoff_location": 1, "driver_info": 1},
+    ).sort("created_at", -1).limit(5).to_list(5)
+
+    # Flag if images exist (heavy — don't include data in this endpoint)
+    has_profile_image = bool(
+        await db.users.find_one(
+            {"id": rider_id, "profile_image": {"$exists": True, "$ne": None, "$ne": ""}},
+            {"_id": 0, "id": 1},
+        )
+    )
+    has_face_image = bool(
+        await db.users.find_one(
+            {"id": rider_id, "face_image": {"$exists": True, "$ne": None, "$ne": ""}},
+            {"_id": 0, "id": 1},
+        )
+    )
+
+    return {
+        "rider": rider,
+        "wallet_balance": wallet_balance,
+        "stats": {
+            "total_trips": total_trips,
+            "completed_trips": completed,
+            "cancelled_trips": cancelled,
+            "total_spend": round(total_spend, 2),
+        },
+        "recent_trips": recent_trips,
+        "has_profile_image": has_profile_image,
+        "has_face_image": has_face_image,
+    }
 
 @admin_router.get("/admin/drivers")
 async def admin_get_drivers(limit: int = 100, skip: int = 0):

@@ -371,10 +371,25 @@ tr:hover td{background:rgba(255,255,255,0.02);}
   transition:right .3s ease;overflow-y:auto;
 }
 #driverDrawer.open{right:0;}
+#riderDrawer{
+  position:fixed;right:-520px;top:0;bottom:0;width:500px;z-index:500;
+  background:var(--surface);border-left:1px solid var(--border2);
+  transition:right .3s ease;overflow-y:auto;
+}
+#riderDrawer.open{right:0;}
 .drawer-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:499;display:none;}
 .drawer-overlay.open{display:block;}
 .drawer-head{padding:20px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;}
 .drawer-body{padding:20px 24px;}
+.rd-section{background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin-bottom:12px;}
+.rd-section-title{font-size:10px;font-weight:800;color:var(--green);letter-spacing:1.2px;text-transform:uppercase;margin-bottom:10px;}
+.rd-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+.rd-cell{background:rgba(0,0,0,0.25);border-radius:8px;padding:8px 10px;}
+.rd-cell-label{font-size:9px;color:var(--dim);font-weight:700;text-transform:uppercase;margin-bottom:2px;letter-spacing:.5px;}
+.rd-cell-value{font-size:12px;font-weight:700;word-break:break-all;}
+.rd-nin{font-family:monospace;letter-spacing:1px;color:var(--green);}
+.rd-trip-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;}
+.rd-trip-row:last-child{border-bottom:none;}
 
 /* ── NOTIFICATION ITEMS ── */
 .notif-item{
@@ -602,16 +617,23 @@ tr:hover td{background:rgba(255,255,255,0.02);}
               <span class="badge green" id="riderCount">0 riders</span>
               <button class="btn btn-ghost" onclick="loadRiders()"><i class="ri-refresh-line"></i> Refresh</button>
             </div>
-            <div style="margin-bottom:14px;">
-              <div class="topbar-search" style="max-width:100%;">
+            <div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap;align-items:center;">
+              <div class="topbar-search" style="flex:1;min-width:200px;">
                 <i class="ri-search-line"></i>
-                <input type="text" id="riderSearch" placeholder="Search by name, phone, email…" oninput="filterRiders(this.value)">
+                <input type="text" id="riderSearch" placeholder="Search name, phone, email, NIN, referral…" oninput="onRiderSearch(this.value)">
               </div>
+              <select id="riderStatusFilter" class="inp" style="width:auto;padding:7px 12px;" onchange="loadRiders()">
+                <option value="">All Status</option>
+                <option value="active">Active</option>
+                <option value="blocked">Blocked</option>
+                <option value="verified">NIN Verified</option>
+              </select>
+              <div id="riderPagination" style="display:flex;gap:6px;align-items:center;"></div>
             </div>
             <div class="tbl-wrap">
               <table>
-                <thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Trips</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead>
-                <tbody id="ridersTable"><tr><td colspan="7"><div class="empty"><i class="ri-user-3-line"></i><p>Loading riders…</p></div></td></tr></tbody>
+                <thead><tr><th>Rider</th><th>Phone</th><th>NIN Status</th><th>Wallet</th><th>Trips</th><th>Rating</th><th>Joined</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody id="ridersTable"><tr><td colspan="9"><div class="empty"><i class="ri-user-3-line"></i><p>Loading riders…</p></div></td></tr></tbody>
               </table>
             </div>
           </div>
@@ -912,7 +934,7 @@ tr:hover td{background:rgba(255,255,255,0.02);}
 
 <!-- mobile toggle -->
 <button class="mob-toggle" id="mobToggle" onclick="toggleSidebar()"><i class="ri-menu-line"></i></button>
-<div class="drawer-overlay" id="drawerOverlay" onclick="closeDriverDrawer()"></div>
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDriverDrawer();closeRiderDrawer();"></div>
 
 <!-- ═══════════════════════════════════════
   DRIVER PROFILE DRAWER
@@ -928,6 +950,21 @@ tr:hover td{background:rgba(255,255,255,0.02);}
   </div>
   <div class="drawer-body" id="ddBody">
     <p style="color:var(--muted);">Loading…</p>
+  </div>
+</div>
+
+<!-- ═══ RIDER PROFILE DRAWER ═══ -->
+<div id="riderDrawer">
+  <div class="drawer-head">
+    <div id="rdAvatar" style="width:46px;height:46px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#0ea5e9);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900;color:#fff;flex-shrink:0;border:2px solid rgba(124,58,237,0.4);"></div>
+    <div style="flex:1;min-width:0;">
+      <div id="rdName" style="font-size:16px;font-weight:800;"></div>
+      <div id="rdMeta" style="font-size:12px;color:var(--muted);margin-top:2px;"></div>
+    </div>
+    <button class="modal-close" onclick="closeRiderDrawer()" style="font-size:24px;">&times;</button>
+  </div>
+  <div class="drawer-body" id="rdBody">
+    <p style="color:var(--muted);">Loading rider profile…</p>
   </div>
 </div>
 
@@ -1232,11 +1269,6 @@ function filterDrivers(q){
   const rows=document.querySelectorAll('#driversTable tr[data-id]');
   rows.forEach(r=>{r.style.display=r.dataset.search?.includes(q)?'':'none';});
 }
-function filterRiders(q){
-  q=q.toLowerCase();
-  const rows=document.querySelectorAll('#ridersTable tr[data-id]');
-  rows.forEach(r=>{r.style.display=r.dataset.search?.includes(q)?'':'none';});
-}
 
 // ─────────────────────────────────────
 //  OVERVIEW
@@ -1339,33 +1371,238 @@ function renderDriversTable(drivers){
 }
 
 // ─────────────────────────────────────
-//  RIDERS
+//  RIDERS  (enhanced)
 // ─────────────────────────────────────
+let riderSkip = 0;
+const RIDER_PAGE = 100;
+let riderTotal = 0;
+let riderSearchTimer = null;
+
+function onRiderSearch(q){
+  clearTimeout(riderSearchTimer);
+  riderSearchTimer = setTimeout(()=>{ riderSkip=0; loadRiders(); }, 350);
+}
+
 async function loadRiders(){
+  const search = (document.getElementById('riderSearch')?.value||'').trim();
+  const statusFilter = document.getElementById('riderStatusFilter')?.value||'';
+  const tb = document.getElementById('ridersTable');
+  tb.innerHTML = `<tr><td colspan="9"><div class="empty"><i class="ri-loader-4-line" style="animation:spin 1s linear infinite;"></i><p>Loading riders…</p></div></td></tr>`;
   try{
-    const r=await fetch(`${API}/admin/riders`,{headers:authHdr()});
-    const d=await r.json();
-    allRidersData=d.riders||[];
-    document.getElementById('riderCount').textContent=`${allRidersData.length} riders`;
-    renderRidersTable(allRidersData);
-  }catch(e){console.error('riders',e);}
+    let url = `${API}/admin/riders?limit=${RIDER_PAGE}&skip=${riderSkip}`;
+    if(search) url += `&search=${encodeURIComponent(search)}`;
+    const r = await fetch(url, {headers:authHdr()});
+    if(!r.ok){clearSession();return;}
+    const d = await r.json();
+    riderTotal = d.total || 0;
+    let riders = d.riders || [];
+    // Client-side status filter (fast, post-load)
+    if(statusFilter==='blocked') riders = riders.filter(r=>r.blocked);
+    else if(statusFilter==='active') riders = riders.filter(r=>!r.blocked);
+    else if(statusFilter==='verified') riders = riders.filter(r=>r.nin_verified||r.is_verified);
+    allRidersData = riders;
+    document.getElementById('riderCount').textContent = `${riderTotal.toLocaleString()} riders`;
+    renderRidersTable(riders);
+    renderRiderPagination();
+  }catch(e){
+    console.error('riders',e);
+    tb.innerHTML = `<tr><td colspan="9"><div class="empty" style="color:var(--red);"><i class="ri-error-warning-line"></i><p>Failed to load riders</p></div></td></tr>`;
+  }
+}
+
+function renderRiderPagination(){
+  const el = document.getElementById('riderPagination');
+  if(!el) return;
+  const totalPages = Math.ceil(riderTotal / RIDER_PAGE);
+  const page = Math.floor(riderSkip / RIDER_PAGE) + 1;
+  if(totalPages <= 1){el.innerHTML='';return;}
+  el.innerHTML = `
+    <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;" onclick="riderSkip=Math.max(0,riderSkip-${RIDER_PAGE});loadRiders();" ${riderSkip===0?'disabled':''}>‹ Prev</button>
+    <span style="font-size:12px;color:var(--muted);">Page ${page} / ${totalPages}</span>
+    <button class="btn btn-ghost" style="padding:5px 10px;font-size:12px;" onclick="riderSkip+=RIDER_PAGE;loadRiders();" ${riderSkip+RIDER_PAGE>=riderTotal?'disabled':''}>Next ›</button>
+  `;
 }
 
 function renderRidersTable(riders){
-  const tb=document.getElementById('ridersTable');
-  if(!riders.length){tb.innerHTML='<tr><td colspan="7"><div class="empty"><i class="ri-user-3-line"></i><p>No riders found</p></div></td></tr>';return;}
-  tb.innerHTML=riders.map(r=>{
-    const search=`${r.name||''} ${r.phone||''} ${r.email||''}`.toLowerCase();
+  const tb = document.getElementById('ridersTable');
+  if(!riders.length){
+    tb.innerHTML = `<tr><td colspan="9"><div class="empty"><i class="ri-user-3-line"></i><p>No riders found</p></div></td></tr>`;
+    return;
+  }
+  tb.innerHTML = riders.map(r=>{
+    const initials = (r.name||'?').split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2);
+    const ninBadge = r.nin_verified
+      ? `<span class="badge green" style="font-size:10px;">✓ Verified</span>`
+      : r.nin
+        ? `<span class="badge amber" style="font-size:10px;">Pending</span>`
+        : `<span class="badge gray" style="font-size:10px;">Not set</span>`;
+    const wallet = r.wallet_balance!=null ? `₦${fmtN(r.wallet_balance)}` : (r.promo_credit_balance ? `₦${fmtN(r.promo_credit_balance)} credit` : '₦0');
+    const rating = r.rating ? Number(r.rating).toFixed(1) : '5.0';
+    const search = `${r.name||''} ${r.phone||''} ${r.email||''} ${r.nin||''} ${r.username||''} ${r.referral_code||''}`.toLowerCase();
     return `<tr data-id="${H(r.id)}" data-search="${H(search)}">
-      <td><div style="font-weight:700;">${H(r.name||'N/A')}</div><div style="font-size:11px;color:var(--dim);">ID: ${H((r.id||'').slice(0,8))}…</div></td>
-      <td>${H(r.phone||'—')}</td>
-      <td style="font-size:12px;">${H(r.email||'—')}</td>
-      <td style="font-weight:700;color:var(--blue);">${fmtN(r.total_trips)}</td>
-      <td style="font-size:12px;">${fmtDateShort(r.created_at)}</td>
+      <td>
+        <div style="display:flex;align-items:center;gap:9px;">
+          <div style="width:33px;height:33px;border-radius:50%;background:linear-gradient(135deg,#7c3aed,#0ea5e9);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:900;color:#fff;flex-shrink:0;">${H(initials)}</div>
+          <div>
+            <div style="font-weight:700;font-size:13px;">${H(r.name||'N/A')}</div>
+            <div style="font-size:10px;color:var(--dim);">${H(r.username?'@'+r.username:'')} ${H(r.email||'')}</div>
+          </div>
+        </div>
+      </td>
+      <td style="font-family:monospace;font-size:12px;">${H(r.phone||'—')}</td>
+      <td>${ninBadge}</td>
+      <td style="font-weight:700;color:var(--green);font-size:12px;">${wallet}</td>
+      <td style="font-weight:700;color:var(--blue);text-align:center;">${fmtN(r.total_trips)}</td>
+      <td style="text-align:center;"><span style="font-size:12px;">⭐ ${H(rating)}</span></td>
+      <td style="font-size:11px;color:var(--muted);">${fmtDateShort(r.created_at)}</td>
       <td><span class="badge ${r.blocked?'red':'green'}">${r.blocked?'Blocked':'Active'}</span></td>
-      <td><button class="btn ${r.blocked?'btn-green':'btn-red'}" style="padding:5px 10px;font-size:11px;" onclick="toggleBlock('${H(r.id)}',${!r.blocked})">${r.blocked?'Unblock':'Block'}</button></td>
+      <td style="white-space:nowrap;">
+        <button class="btn btn-blue" style="padding:5px 10px;font-size:11px;" onclick="openRiderDrawer('${H(r.id)}')"><i class="ri-eye-line"></i> View</button>
+        <button class="btn ${r.blocked?'btn-green':'btn-red'}" style="padding:5px 10px;font-size:11px;margin-left:4px;" onclick="toggleBlock('${H(r.id)}',${!r.blocked})">${r.blocked?'Unblock':'Block'}</button>
+      </td>
     </tr>`;
   }).join('');
+}
+
+function filterRiders(q){
+  q = q.toLowerCase();
+  const rows = document.querySelectorAll('#ridersTable tr[data-id]');
+  rows.forEach(r=>{r.style.display = r.dataset.search?.includes(q) ? '' : 'none';});
+}
+
+// ── Rider Profile Drawer ──
+async function openRiderDrawer(riderId){
+  const drawer = document.getElementById('riderDrawer');
+  const overlay = document.getElementById('drawerOverlay');
+  drawer.classList.add('open');
+  overlay.classList.add('open');
+  document.getElementById('rdName').textContent = 'Loading…';
+  document.getElementById('rdMeta').textContent = '';
+  document.getElementById('rdBody').innerHTML = '<p style="color:var(--muted);">Fetching rider profile…</p>';
+  try{
+    const r = await fetch(`${API}/admin/riders/${riderId}`, {headers:authHdr()});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    const rider = d.rider || {};
+    const stats = d.stats || {};
+    const trips = d.recent_trips || [];
+    const name = rider.name || 'Unknown Rider';
+    const initials = name.split(' ').map(w=>w[0]).join('').toUpperCase().slice(0,2) || '?';
+    document.getElementById('rdAvatar').textContent = initials;
+    document.getElementById('rdName').textContent = name;
+    document.getElementById('rdMeta').textContent = `${rider.phone||'—'} · ${rider.blocked?'⛔ Blocked':'✅ Active'}${rider.nin_verified?' · NIN ✓':''}`;
+
+    const walletBal = d.wallet_balance != null ? `₦${fmtN(d.wallet_balance)}` : '₦0';
+    const ninDisplay = rider.nin
+      ? `<span class="rd-nin">${H(rider.nin)}</span> ${rider.nin_verified?'<span class="badge green" style="font-size:10px;">Verified</span>':'<span class="badge amber" style="font-size:10px;">Not Verified</span>'}`
+      : '<span style="color:var(--dim);">Not provided</span>';
+
+    document.getElementById('rdBody').innerHTML = `
+
+      <!-- Identity -->
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-shield-user-line"></i> Identity & Contact</div>
+        <div class="rd-grid">
+          ${rdCell('Full Name', name)}
+          ${rdCell('Phone', rider.phone||'—')}
+          ${rdCell('Email', rider.email||'—')}
+          ${rdCell('Username', rider.username?'@'+rider.username:'—')}
+          ${rdCell('Gender', rider.gender||'—')}
+          ${rdCell('Joined', fmtDate(rider.created_at))}
+        </div>
+      </div>
+
+      <!-- NIN / Verification -->
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-fingerprint-line"></i> Verification & Security</div>
+        <div style="margin-bottom:10px;">
+          <div class="rd-cell-label">National ID Number (NIN)</div>
+          <div style="font-size:13px;font-weight:700;margin-top:3px;">${ninDisplay}</div>
+        </div>
+        <div class="rd-grid">
+          ${rdCell('NIN Verified', rider.nin_verified?'✅ Yes':'❌ No')}
+          ${rdCell('Face Verified', rider.face_verified?'✅ Yes':'❌ No')}
+          ${rdCell('Profile Image', d.has_profile_image?'✅ On file':'❌ None')}
+          ${rdCell('Face Image', d.has_face_image?'✅ On file':'❌ None')}
+          ${rdCell('Is Verified', rider.is_verified?'✅ Yes':'❌ No')}
+          ${rdCell('Account Status', rider.blocked?'⛔ Blocked':'✅ Active')}
+        </div>
+      </div>
+
+      <!-- Wallet & Stats -->
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-wallet-3-line"></i> Wallet & Stats</div>
+        <div class="rd-grid">
+          ${rdCell('Wallet Balance', walletBal)}
+          ${rdCell('Promo Credits', rider.promo_credit_balance!=null?'₦'+fmtN(rider.promo_credit_balance):'₦0')}
+          ${rdCell('Total Trips', fmtN(stats.total_trips))}
+          ${rdCell('Completed', fmtN(stats.completed_trips))}
+          ${rdCell('Cancelled', fmtN(stats.cancelled_trips))}
+          ${rdCell('Total Spend', '₦'+fmtN(stats.total_spend))}
+          ${rdCell('Rating', (rider.rating||5.0).toFixed(1)+' ⭐')}
+          ${rdCell('Behavior Score', fmtN(rider.behavior_score||100))}
+          ${rdCell('Nexryde Score', fmtN(rider.nexryde_score||100))}
+          ${rdCell('Risk Score', fmtN(rider.rider_risk_score||15))}
+        </div>
+      </div>
+
+      <!-- Referral -->
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-links-line"></i> Referral & Rewards</div>
+        <div class="rd-grid">
+          ${rdCell('Referral Code', rider.referral_code||'—')}
+          ${rdCell('Referred By', rider.referred_by||'—')}
+          ${rdCell('Favorite Drivers', fmtN((rider.favorite_drivers||[]).length))}
+          ${rdCell('Women-Only Mode', rider.women_only_mode?'✅ On':'❌ Off')}
+        </div>
+      </div>
+
+      <!-- Emergency Contacts -->
+      ${(rider.emergency_contacts||[]).length ? `
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-first-aid-kit-line"></i> Emergency Contacts</div>
+        ${(rider.emergency_contacts||[]).map(c=>`
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:12px;">
+            <div><div style="font-weight:700;">${H(c.name||'—')}</div><div style="color:var(--dim);font-size:11px;">${H(c.relationship||'')}</div></div>
+            <a href="tel:${H(c.phone||'')}" style="color:var(--green);font-family:monospace;">${H(c.phone||'—')}</a>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- Recent Trips -->
+      ${trips.length ? `
+      <div class="rd-section">
+        <div class="rd-section-title"><i class="ri-road-map-line"></i> Recent Trips (last 5)</div>
+        ${trips.map(t=>`
+          <div class="rd-trip-row">
+            <div>
+              <div style="font-weight:600;">${H((t.pickup_location?.address||'—').slice(0,28))} → ${H((t.dropoff_location?.address||'—').slice(0,20))}</div>
+              <div style="font-size:10px;color:var(--dim);">${fmtDateShort(t.created_at)} · ${H(t.driver_info?.name||'Unassigned')}</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-weight:700;color:var(--green);">₦${fmtN(t.fare)}</div>
+              <span class="badge ${t.status==='completed'?'green':t.status==='cancelled'?'red':'amber'}" style="font-size:9px;">${H(t.status||'—')}</span>
+            </div>
+          </div>`).join('')}
+      </div>` : ''}
+
+      <!-- Actions -->
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px;">
+        <button class="btn btn-red" style="width:100%;justify-content:center;" onclick="toggleBlock('${H(riderId)}',${!rider.blocked});closeRiderDrawer();">
+          <i class="ri-close-circle-line"></i> ${rider.blocked?'Unblock Rider':'Block Rider'}
+        </button>
+      </div>`;
+  }catch(e){
+    document.getElementById('rdBody').innerHTML = `<p style="color:var(--red);">Failed to load rider: ${H(String(e))}</p>`;
+  }
+}
+
+function rdCell(label, value){
+  return `<div class="rd-cell"><div class="rd-cell-label">${H(label)}</div><div class="rd-cell-value">${H(String(value??'—'))}</div></div>`;
+}
+
+function closeRiderDrawer(){
+  document.getElementById('riderDrawer').classList.remove('open');
+  document.getElementById('drawerOverlay').classList.remove('open');
 }
 
 // ─────────────────────────────────────
