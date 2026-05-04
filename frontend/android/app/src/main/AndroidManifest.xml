@@ -13,7 +13,8 @@
   <!-- Floating driver bubble overlay -->
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+  <!-- Location foreground service — bubble shows live trip/navigation status while driving -->
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -72,9 +73,11 @@
     </activity>
 
     <!-- ── Floating driver bubble service ──────────────────────────────── -->
+    <!-- foregroundServiceType=location: service displays live trip/navigation
+         status overlay to drivers while they are actively navigating. -->
     <service
       android:name=".floating.FloatingDriverService"
-      android:foregroundServiceType="specialUse"
+      android:foregroundServiceType="location"
       android:exported="false" />
 
     <!-- ── Nexryde Driver Status home-screen widget ─────────────────────── -->
