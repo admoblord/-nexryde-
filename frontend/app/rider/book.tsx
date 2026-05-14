@@ -1,24 +1,81 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, Alert, ActivityIndicator,
-  ScrollView, Modal, TextInput, Platform, Animated, Easing, KeyboardAvoidingView,
-  Switch, StatusBar,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  TouchableWithoutFeedback,
+  Alert,
+  ActivityIndicator,
+  ScrollView,
+  Modal,
+  TextInput,
+  Platform,
+  Linking,
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Switch,
+  StatusBar,
+  type NativeSyntheticEvent,
+  type NativeScrollEvent,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
+import Constants from 'expo-constants';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders, getWalletMe, getRiderPreferences, updateRiderPreferences, getAvailableDrivers } from '@/src/services/api';
+import {
+  BACKEND_URL,
+  getAuthHeaders,
+  getWalletMe,
+  getRiderPreferences,
+  updateRiderPreferences,
+  getAvailableDrivers,
+  estimateFare,
+  type FareEstimateResponse,
+} from '@/src/services/api';
+import {
+  buildCompactSurgeChipText,
+  formatRouteKmMin,
+  humanizeFareBreakdownLine,
+  isShortTripFare,
+} from '@/src/utils/farePresentation';
+import {
+  inferFareCitySlugFromAddress,
+  pickFareCitySlugFromCoords,
+} from '@/src/constants/nigeriaFareCity';
+
+/** Lagos NEXRYDE distance×area×tier model (no legacy base + per-minute stack). */
+function isLagosRouteDistanceFare(fd: FareEstimateResponse | null | undefined): boolean {
+  if (!fd) return false;
+  if (fd.fare_rate_model === 'lagride_lagos_exact_v1') return true;
+  const city = String(fd.city || '').toLowerCase();
+  return city === 'lagos' && Number(fd.base_fare) === 0 && Number(fd.time_fee) === 0;
+}
 import { fetchRouteSafety, type RouteSafetyResponse } from '@/src/services/crimeSafetyData';
+import {
+  DIRECTIONS_ROUTE_MIN_POINTS,
+  fetchGoogleDrivingRoutes,
+  type GoogleDrivingRouteOverview,
+} from '@/src/navigation/navUtils';
+import { decodePolyline } from '@/src/utils/polylineDecoder';
+import { fetchDrivingRoute } from '@/src/services/drivingRouteApi';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
+import { isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
+import { RiderPostRequestOverlay, type RiderMatchedDriver } from '@/src/components/rider/RiderPostRequestOverlay';
 import { getRecentLocations, cacheRecentLocation } from '@/src/services/offlineMode';
 import * as Haptics from 'expo-haptics';
+import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
+import { useFlowLayout } from '@/src/constants/flowLayout';
+import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -29,6 +86,83 @@ function isRawLatLngLabel(s: string): boolean {
   return /^\s*-?\d+(?:\.\d+)?\s*,\s*-?\d+(?:\.\d+)?\s*$/.test(String(s || '').trim());
 }
 
+const ROUTE_FIT_MAX_POINTS = 48;
+
+function sampleCoordsForFit(
+  coords: Array<{ latitude: number; longitude: number }>,
+  max = ROUTE_FIT_MAX_POINTS,
+): Array<{ latitude: number; longitude: number }> {
+  if (coords.length <= max) return coords;
+  const out: Array<{ latitude: number; longitude: number }> = [];
+  const n = coords.length;
+  for (let i = 0; i < max; i++) {
+    const idx = Math.min(n - 1, Math.round((i / Math.max(1, max - 1)) * (n - 1)));
+    out.push(coords[idx]!);
+  }
+  return out;
+}
+
+function parseRoutePreviewToMapCoords(
+  raw: unknown,
+): Array<{ latitude: number; longitude: number }> {
+  if (!Array.isArray(raw) || raw.length < DIRECTIONS_ROUTE_MIN_POINTS) return [];
+  const out: Array<{ latitude: number; longitude: number }> = [];
+  for (const p of raw) {
+    if (!p || typeof p !== 'object') continue;
+    const o = p as Record<string, unknown>;
+    const lat = Number(o.lat ?? o.latitude);
+    const lng = Number(o.lng ?? o.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) out.push({ latitude: lat, longitude: lng });
+  }
+  return out.length >= DIRECTIONS_ROUTE_MIN_POINTS ? out : [];
+}
+
+function formatArriveByLabel(minutesFromNow: number): string {
+  const mins = Math.max(1, Math.round(minutesFromNow));
+  const t = Date.now() + mins * 60_000;
+  return new Date(t).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+}
+
+/** Parse lock deadline; naive ISO with `T` from the API is treated as UTC (legacy + Python naive UTC). */
+function parseFareLockDeadlineMs(raw: unknown): number {
+  if (typeof raw !== 'string' || !raw.trim()) return 0;
+  const s0 = raw.trim();
+  const hasExplicitZone =
+    /(\.\d+)?(Z|[+-]\d{2}:\d{2}(:\d{2})?)$/i.test(s0) || /[+-]\d{4}$/i.test(s0);
+  const s = hasExplicitZone || !s0.includes('T') ? s0 : `${s0}Z`;
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Ensure `estimate_id` / `price_valid_until` survive proxies or alternate JSON keys. */
+function normalizeFareEstimatePayload(data: unknown): FareEstimateResponse {
+  const o = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
+  const rawId = o.estimate_id ?? o.estimateId;
+  const estimate_id =
+    typeof rawId === 'string' && rawId.trim().length > 0
+      ? rawId.trim()
+      : typeof rawId === 'number' && Number.isFinite(rawId)
+        ? String(rawId)
+        : '';
+  const pvu = o.price_valid_until ?? o.priceValidUntil;
+  const price_valid_until =
+    typeof pvu === 'string' && pvu.length > 0
+      ? pvu
+      : new Date(Date.now() + 600_000).toISOString();
+  return { ...o, estimate_id, price_valid_until } as FareEstimateResponse;
+}
+
+/** Key for Directions REST (must match a GCP key with Directions API enabled). */
+function resolveGoogleDirectionsApiKey(): string {
+  const extra = Constants.expoConfig?.extra as Record<string, string> | undefined;
+  return (
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+    extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+    extra?.googleMapsDirectionsKey ||
+    ''
+  );
+}
+
 async function reverseGeocodeViaBackend(
   lat: number,
   lng: number,
@@ -36,20 +170,26 @@ async function reverseGeocodeViaBackend(
 ): Promise<string | null> {
   const origin = String(baseUrl || '').replace(/\/$/, '');
   if (!origin) return null;
-  const url = `${origin}/api/places/geocode?lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
+  const q = `lat=${encodeURIComponent(String(lat))}&lng=${encodeURIComponent(String(lng))}`;
+  const url = `${origin}/api/places/reverse-geocode?${q}`;
   const once = async () => {
     const res = await fetch(url);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) return null;
-    const raw = String(data?.address || data?.formatted_address || '').trim();
+    if (String(data?.status || '').toUpperCase() !== 'OK') return null;
+    const raw = String(
+      data?.short_label || data?.formatted_address || data?.address || '',
+    ).trim();
     if (!raw || isRawLatLngLabel(raw)) return null;
     return raw;
   };
   let out = await once();
   if (out) return out;
-  await new Promise((r) => setTimeout(r, 800));
+  await new Promise((r) => setTimeout(r, 220));
   out = await once();
-  return out || null;
+  if (out) return out;
+  await new Promise((r) => setTimeout(r, 550));
+  return (await once()) || null;
 }
 
 const COLORS = {
@@ -58,6 +198,7 @@ const COLORS = {
   cardLight: '#232F42',
   green: '#00D46A',
   blue: '#0EA5E9',
+  accentBlue: '#0EA5E9',
   lime: '#B8F11B',
   white: '#FFFFFF',
   muted: '#94A3B8',
@@ -81,13 +222,161 @@ const RIDE_PREFERENCE_OPTIONS = [
   { id: 'cold_ac', label: 'AC Must Be Cold', icon: 'snow' as const },
 ];
 
-/** Native map isolated so a bad require / native module error can be caught by ErrorBoundary. */
+/** Premium dark map — Nexryde night (depth + readable roads, minimal POI noise). */
+const BOOKING_MAP_DARK_STYLE = [
+  { elementType: 'geometry', stylers: [{ color: '#0c1220' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#8eaad4' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0c1220' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#162536' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0f172a' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#1e2d42' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2a3d55' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1b2738' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060b14' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+];
+
+const bookingMapStyles = StyleSheet.create({
+  pickupHalo: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(34,229,160,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    shadowColor: '#22E5A0',
+    shadowOpacity: 0.45,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  pickupCore: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#22E5A0',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  dropHalo: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(239,68,68,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    shadowColor: '#EF4444',
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
+  },
+  dropCore: {
+    width: 11,
+    height: 11,
+    borderRadius: 5.5,
+    backgroundColor: '#EF4444',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+  driverCar: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,212,106,0.65)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 },
+    elevation: 4,
+  },
+  driverCarSearch: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#0B0F14',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+  },
+  pickupHaloSearch: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(52,245,184,0.32)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2.5,
+    borderColor: 'rgba(255,255,255,0.5)',
+    shadowColor: '#34F5B8',
+    shadowOpacity: 0.6,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  pickupCoreSearch: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#34F5B8',
+    borderWidth: 2.5,
+    borderColor: '#fff',
+  },
+  pickupHaloLocked: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(34,229,160,0.38)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.5)',
+    shadowColor: '#22E5A0',
+    shadowOpacity: 0.65,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 12,
+  },
+  pickupCoreLocked: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#34F5B8',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
+});
+
+/** Native map — Google Directions polyline, premium blue route + dark cartography. */
 function BookingRideMapNative(props: {
   pickupCoords: { lat: number; lng: number };
   destinationCoords: { lat: number; lng: number } | null;
   routePolyline: { latitude: number; longitude: number }[];
   pickup: string;
   destination: string;
+  /** True while fetching road-snapped path (optional subtle indicator). */
+  routeLoading?: boolean;
+  /** Subtle breathing scale on dropoff halo until rider dismisses (e.g. scrolls sheet). */
+  pulseDropoffHalo?: boolean;
+  /** Full-screen “finding driver” — stronger pickup pulse, LIVE-style chrome, driver tags. */
+  searchMode?: boolean;
+  /** Driver accepted — mint “locked route” + celebration markers (pairs with RiderPostRequestOverlay matched). */
+  matchLocked?: boolean;
   nearbyDrivers: Array<{
     driver_id: string;
     name?: string;
@@ -98,37 +387,104 @@ function BookingRideMapNative(props: {
   }>;
 }) {
   const mapRef = React.useRef<any>(null);
+  const dropPulseScale = React.useRef(new Animated.Value(1)).current;
+  const routeLen = props.routePolyline.length;
+  const routeHead = props.routePolyline[0];
+  const routeTail = routeLen > 0 ? props.routePolyline[routeLen - 1] : null;
+
+  React.useEffect(() => {
+    const pulseOn = Boolean(props.pulseDropoffHalo && props.destinationCoords);
+    if (!pulseOn) {
+      dropPulseScale.stopAnimation();
+      dropPulseScale.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(dropPulseScale, {
+          toValue: 1.12,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(dropPulseScale, {
+          toValue: 1,
+          duration: 1000,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => {
+      loop.stop();
+      dropPulseScale.setValue(1);
+    };
+  }, [props.pulseDropoffHalo, props.destinationCoords?.lat, props.destinationCoords?.lng]);
 
   React.useEffect(() => {
     const m = mapRef.current;
     if (!m) return;
     const t = setTimeout(() => {
       try {
-        if (props.destinationCoords) {
+        const sm = Boolean(props.searchMode);
+        const locked = Boolean(sm && props.matchLocked);
+        const pad = sm
+          ? { top: 110, right: 18, bottom: locked ? 260 : 240, left: 18 }
+          : { top: 88, right: 20, bottom: 132, left: 20 };
+        if (props.destinationCoords && props.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+          const fit = sampleCoordsForFit(props.routePolyline);
+          m.fitToCoordinates(fit, {
+            edgePadding: pad,
+            animated: true,
+          });
+        } else if (props.destinationCoords) {
           m.fitToCoordinates(
             [
               { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
-              { latitude: props.destinationCoords!.lat, longitude: props.destinationCoords!.lng },
+              { latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng },
             ],
-            { edgePadding: { top: 60, right: 48, bottom: 80, left: 48 }, animated: true },
+            { edgePadding: pad, animated: true },
           );
         } else {
           m.animateToRegion(
-            { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng, latitudeDelta: 0.04, longitudeDelta: 0.04 },
+            {
+              latitude: props.pickupCoords.lat,
+              longitude: props.pickupCoords.lng,
+              latitudeDelta: 0.04,
+              longitudeDelta: 0.04,
+            },
             400,
           );
         }
-      } catch { /* silent */ }
+      } catch {
+        /* silent */
+      }
     }, 350);
     return () => clearTimeout(t);
-  }, [props.pickupCoords.lat, props.pickupCoords.lng, props.destinationCoords?.lat, props.destinationCoords?.lng]);
+  }, [
+    props.pickupCoords.lat,
+    props.pickupCoords.lng,
+    props.destinationCoords?.lat,
+    props.destinationCoords?.lng,
+    routeLen,
+    routeHead?.latitude,
+    routeHead?.longitude,
+    routeTail?.latitude,
+    routeTail?.longitude,
+    props.searchMode,
+    props.matchLocked,
+  ]);
 
   try {
-    const { default: MapView, Marker, Polyline, PROVIDER_GOOGLE } = require('react-native-maps');
+    const { default: MapView, Marker, Polyline, Circle, PROVIDER_GOOGLE } = require('react-native-maps');
     const safeDrivers = (props.nearbyDrivers || []).filter(
       (d) => d && Number.isFinite(Number(d.lat)) && Number.isFinite(Number(d.lng)),
     );
+    const sm = Boolean(props.searchMode);
+    const locked = Boolean(sm && props.matchLocked);
     return (
+      <View style={StyleSheet.absoluteFillObject}>
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
@@ -147,33 +503,161 @@ function BookingRideMapNative(props: {
         showsCompass={false}
         showsIndoors={false}
         toolbarEnabled={false}
+        customMapStyle={BOOKING_MAP_DARK_STYLE}
       >
-        {/* Pickup pin */}
+        {sm && !locked && (
+          <>
+            <Circle
+              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
+              radius={95}
+              fillColor="rgba(52,245,184,0.06)"
+              strokeColor="rgba(52,245,184,0.38)"
+              strokeWidth={1}
+            />
+            <Circle
+              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
+              radius={190}
+              fillColor="rgba(52,245,184,0.03)"
+              strokeColor="rgba(52,245,184,0.22)"
+              strokeWidth={1}
+            />
+            <Circle
+              center={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
+              radius={320}
+              fillColor="transparent"
+              strokeColor="rgba(52,245,184,0.12)"
+              strokeWidth={1}
+            />
+          </>
+        )}
+        {props.routePolyline.length >= DIRECTIONS_ROUTE_MIN_POINTS && (
+          <>
+            {locked ? (
+              <>
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(34,229,160,0.14)"
+                  strokeWidth={24}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(16,185,129,0.52)"
+                  strokeWidth={12}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="#ECFDF5"
+                  strokeWidth={4}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              </>
+            ) : sm ? (
+              <>
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(56,189,248,0.1)"
+                  strokeWidth={20}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(14,165,233,0.48)"
+                  strokeWidth={10}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="#BAE6FD"
+                  strokeWidth={3}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              </>
+            ) : (
+              <>
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(56,189,248,0.12)"
+                  strokeWidth={20}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="rgba(14,165,233,0.45)"
+                  strokeWidth={10}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+                <Polyline
+                  coordinates={props.routePolyline}
+                  strokeColor="#E0F2FE"
+                  strokeWidth={3}
+                  geodesic={false}
+                  lineCap="round"
+                  lineJoin="round"
+                />
+              </>
+            )}
+          </>
+        )}
         <Marker
           coordinate={{ latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng }}
           title="Pickup"
           description={props.pickup}
-          pinColor="#22C55E"
+          anchor={{ x: 0.5, y: sm ? 0.72 : 0.5 }}
           tracksViewChanges={false}
-        />
-        {/* Destination pin */}
+        >
+          <View style={{ alignItems: 'center' }}>
+            <View
+              style={
+                locked
+                  ? bookingMapStyles.pickupHaloLocked
+                  : sm
+                    ? bookingMapStyles.pickupHaloSearch
+                    : bookingMapStyles.pickupHalo
+              }
+            >
+              <View
+                style={
+                  locked
+                    ? bookingMapStyles.pickupCoreLocked
+                    : sm
+                      ? bookingMapStyles.pickupCoreSearch
+                      : bookingMapStyles.pickupCore
+                }
+              />
+            </View>
+          </View>
+        </Marker>
         {props.destinationCoords && (
           <Marker
             coordinate={{ latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng }}
             title="Destination"
             description={props.destination}
-            pinColor="#EF4444"
-            tracksViewChanges={false}
-          />
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={Boolean(props.pulseDropoffHalo)}
+          >
+            <Animated.View style={[bookingMapStyles.dropHalo, { transform: [{ scale: dropPulseScale }] }]}>
+              <View style={bookingMapStyles.dropCore} />
+            </Animated.View>
+          </Marker>
         )}
-        {/* Route line */}
-        {props.routePolyline.length >= 2 && (
-          <>
-            <Polyline coordinates={props.routePolyline} strokeColor="rgba(0,212,106,0.2)" strokeWidth={10} />
-            <Polyline coordinates={props.routePolyline} strokeColor="#00D46A" strokeWidth={3} />
-          </>
-        )}
-        {/* Nearby driver dots */}
         {safeDrivers.map((d) => (
           <Marker
             key={d.driver_id}
@@ -181,10 +665,55 @@ function BookingRideMapNative(props: {
             tracksViewChanges={false}
             anchor={{ x: 0.5, y: 0.5 }}
           >
-            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#00D46A', borderWidth: 2, borderColor: '#fff' }} />
+            <View style={{ alignItems: 'center' }}>
+              <View style={sm ? bookingMapStyles.driverCarSearch : bookingMapStyles.driverCar}>
+                <Ionicons name="car-sport" size={sm ? 14 : 11} color={sm ? '#FFFFFF' : '#4ADE80'} />
+              </View>
+            </View>
           </Marker>
         ))}
       </MapView>
+        {sm ? (
+          <>
+            <LinearGradient
+              pointerEvents="none"
+              colors={['rgba(2,6,23,0.5)', 'rgba(2,6,23,0.12)', 'transparent']}
+              locations={[0, 0.45, 1]}
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '32%' }}
+            />
+            <LinearGradient
+              pointerEvents="none"
+              colors={['transparent', 'rgba(2,6,23,0.22)', 'rgba(2,6,23,0.45)']}
+              locations={[0, 0.55, 1]}
+              style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '38%' }}
+            />
+          </>
+        ) : null}
+        {props.routeLoading ? (
+          <View
+            pointerEvents="none"
+            style={{
+              position: 'absolute',
+              top: 56,
+              right: 14,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              paddingVertical: 6,
+              paddingHorizontal: 11,
+              borderRadius: 999,
+              backgroundColor: 'rgba(15,23,42,0.9)',
+              borderWidth: 1,
+              borderColor: 'rgba(34,229,160,0.28)',
+            }}
+          >
+            <ActivityIndicator size="small" color="#22E5A0" />
+            <Text style={{ color: '#E2E8F0', fontSize: 11, fontWeight: '700', letterSpacing: 0.3 }}>
+              Routing…
+            </Text>
+          </View>
+        ) : null}
+      </View>
     );
   } catch {
     return (
@@ -197,11 +726,24 @@ function BookingRideMapNative(props: {
 
 function BookInDriveStyle() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ requestedDriverId?: string; driverName?: string }>();
+  const params = useLocalSearchParams<{
+    requestedDriverId?: string;
+    driverName?: string;
+    pickup?: string;
+    dropoff?: string;
+    destination?: string;
+    pickupLat?: string;
+    pickupLng?: string;
+    dropoffLat?: string;
+    dropoffLng?: string;
+    destLat?: string;
+    destLng?: string;
+  }>();
   const { user, token, setCurrentTrip } = useAppStore();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
 
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
@@ -212,8 +754,18 @@ function BookInDriveStyle() {
 
   const [selectedVehicle, setSelectedVehicle] = useState<string | null>(null);
   const [currentFare, setCurrentFare] = useState(0);
-  const [fareDetails, setFareDetails] = useState<any>(null);
+  const [fareDetails, setFareDetails] = useState<FareEstimateResponse | null>(null);
   const [fareMatrix, setFareMatrix] = useState<Record<string, number>>({});
+  /** Pre-discount totals when first-ride 20% is applied (for strikethrough on vehicle rows). */
+  const [fareMatrixOriginal, setFareMatrixOriginal] = useState<Record<string, number>>({});
+  /** Google driving route for map (decoded polyline or Directions overview). */
+  const [bookingRouteCoords, setBookingRouteCoords] = useState<Array<{ latitude: number; longitude: number }>>([]);
+  /** ETA minutes for overlays (from Directions or fare estimate). */
+  const [bookingRouteEtaMin, setBookingRouteEtaMin] = useState<number | null>(null);
+  const [bookingRouteLoading, setBookingRouteLoading] = useState(false);
+  /** After rider scrolls the booking sheet, dropoff halo pulse stops. */
+  const [bookingSheetScrolled, setBookingSheetScrolled] = useState(false);
+  const bookingSheetScrolledRef = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const [showLocationModal, setShowLocationModal] = useState(false);
@@ -229,6 +781,17 @@ function BookInDriveStyle() {
   const calculateInFlightRef = useRef(false);
   const offerInFlightRef = useRef(false);
   const navigationInFlightRef = useRef(false);
+  /** Geo + time snapshot when a fare estimate was computed (for locked quote + drift checks). */
+  const fareLockSnapshotRef = useRef<{
+    at: number;
+    pickup: { lat: number; lng: number };
+    drop: { lat: number; lng: number };
+  } | null>(null);
+  const ROUTE_DRIFT_KM = 1.0;
+
+  const [fareExplainModal, setFareExplainModal] = useState<
+    'surge' | 'short' | 'breakdown' | 'positioning' | null
+  >(null);
   const [ridePaymentMethod, setRidePaymentMethod] = useState<'cash' | 'wallet'>('cash');
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
@@ -264,6 +827,11 @@ function BookInDriveStyle() {
   >([]);
   const [bookingPromoVisible, setBookingPromoVisible] = useState(false);
   const [isFirstRider, setIsFirstRider] = useState(false);
+  const [bookSuspended, setBookSuspended] = useState(false);
+  const [bookSuspendedSeconds, setBookSuspendedSeconds] = useState(0);
+  const bookSuspendIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** Avoid re-applying router params for destination on every render. */
+  const appliedBookingDestRef = useRef<string>('');
 
   const availableVehicles = React.useMemo(() => {
     const base = [...VEHICLES];
@@ -279,6 +847,44 @@ function BookInDriveStyle() {
     }
     return base;
   }, [user?.gender]);
+
+  /** Only real road geometry — never a pickup→drop straight segment. */
+  const routeForMapDisplay = useMemo(() => {
+    if (bookingRouteCoords.length >= DIRECTIONS_ROUTE_MIN_POINTS) return bookingRouteCoords;
+    return [];
+  }, [bookingRouteCoords]);
+
+  const arriveByClockLabel = useMemo(() => {
+    if (bookingRouteEtaMin == null || !destinationCoords) return null;
+    return formatArriveByLabel(bookingRouteEtaMin);
+  }, [bookingRouteEtaMin, destinationCoords]);
+
+  const routeDistanceLabel = useMemo(() => {
+    const km = Number(fareDetails?.distance_km);
+    if (!Number.isFinite(km) || km <= 0) return null;
+    return km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
+  }, [fareDetails?.distance_km]);
+
+  const routeQualityLabel = useMemo(() => {
+    const src = String(fareDetails?.route_metrics_source || '').toLowerCase();
+    if (src.includes('google') || src.includes('client_google')) return 'Live traffic & roads';
+    if (bookingRouteCoords.length > 14) return 'Turn-by-turn roads';
+    return null;
+  }, [fareDetails?.route_metrics_source, bookingRouteCoords.length]);
+
+  useEffect(() => {
+    bookingSheetScrolledRef.current = false;
+    setBookingSheetScrolled(false);
+  }, [destinationCoords?.lat, destinationCoords?.lng]);
+
+  const onBookingSheetScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (bookingSheetScrolledRef.current) return;
+    const y = e.nativeEvent.contentOffset.y;
+    if (y > 16) {
+      bookingSheetScrolledRef.current = true;
+      setBookingSheetScrolled(true);
+    }
+  }, []);
 
   const clearDriverPoll = useCallback(() => {
     if (driverPollRef.current) {
@@ -393,6 +999,68 @@ function BookInDriveStyle() {
     })();
   }, [user?.id]);
 
+  // Check if rider is currently booking-suspended (1h cooldown after 7 cancellations in 24h)
+  useEffect(() => {
+    if (!user?.id) return;
+    void (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/enforcement/book-status/${user.id}`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        if (!data.can_book && data.reason === 'booking_blocked' && data.seconds_remaining > 0) {
+          setBookSuspended(true);
+          setBookSuspendedSeconds(data.seconds_remaining);
+        }
+      } catch {}
+    })();
+  }, [user?.id]);
+
+  // Countdown ticker for booking suspension
+  useEffect(() => {
+    if (!bookSuspended) {
+      if (bookSuspendIntervalRef.current) {
+        clearInterval(bookSuspendIntervalRef.current);
+        bookSuspendIntervalRef.current = null;
+      }
+      return;
+    }
+    bookSuspendIntervalRef.current = setInterval(() => {
+      setBookSuspendedSeconds((prev) => {
+        if (prev <= 1) {
+          setBookSuspended(false);
+          if (bookSuspendIntervalRef.current) clearInterval(bookSuspendIntervalRef.current);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => {
+      if (bookSuspendIntervalRef.current) clearInterval(bookSuspendIntervalRef.current);
+    };
+  }, [bookSuspended]);
+
+  // Pre-load rider's saved mood preferences as default chip selection
+  useEffect(() => {
+    if (!user?.id) return;
+    void (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/preferences`, {
+          headers: getAuthHeaders(),
+        });
+        const data = await res.json();
+        const m = data?.ride_mood;
+        if (!m) return;
+        const chips: string[] = [];
+        if (m.conversation === 'quiet') chips.push('quiet_ride');
+        if (m.conversation === 'chatty') chips.push('chatty_driver');
+        if (m.music === 'on') chips.push('music_on');
+        if (m.temperature === 'cold') chips.push('cold_ac');
+        if (chips.length > 0) setRidePreferences(chips);
+      } catch {}
+    })();
+  }, [user?.id]);
+
   useEffect(() => {
     if (!BOOKING_PROMO_ENABLED) return;
     let cancelled = false;
@@ -413,7 +1081,7 @@ function BookInDriveStyle() {
     })
       .then((r) => r.json())
       .then((d) => {
-        if (!cancelled && d?.first_ride_completed === false) setIsFirstRider(true);
+        if (!cancelled) setIsFirstRider(d?.first_ride_completed === false);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -537,7 +1205,13 @@ function BookInDriveStyle() {
                 address: destination,
               },
         distance_km: Number(t?.distance_km ?? fareDetails?.distance_km ?? 0),
-        duration_mins: Number(t?.duration_mins ?? fareDetails?.duration_mins ?? 0),
+        duration_mins: Number(
+          t?.duration_mins ??
+            fareDetails?.duration_mins ??
+            fareDetails?.duration_min ??
+            fareDetails?.estimated_time_minutes ??
+            0,
+        ),
         fare: Number(t?.fare ?? t?.offered_fare ?? currentFare ?? 0),
         surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
         status: norm as 'accepted' | 'arrived' | 'ongoing',
@@ -574,51 +1248,23 @@ function BookInDriveStyle() {
     ]
   );
 
-  const inferCity = (pickupText: string, destinationText: string): string => {
-    const combined = `${pickupText || ''} ${destinationText || ''}`.toLowerCase();
-    if (combined.includes('abuja') || combined.includes('fct')) return 'abuja';
-    if (
-      combined.includes('port harcourt') ||
-      combined.includes('port-harcourt') ||
-      combined.includes('rivers')
-    ) {
-      return 'port_harcourt';
-    }
-    if (combined.includes('lagos')) return 'lagos';
-    return 'lagos';
-  };
-
   const inferCityFromCoords = (lat?: number, lng?: number) => {
-    if (!lat || !lng) return null;
-    const targets = [
-      { key: 'lagos', lat: 6.5244, lng: 3.3792, radiusKm: 120 },
-      { key: 'abuja', lat: 9.0765, lng: 7.3986, radiusKm: 120 },
-      { key: 'port_harcourt', lat: 4.8156, lng: 7.0498, radiusKm: 120 },
-    ];
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const haversineKm = (aLat: number, aLng: number, bLat: number, bLng: number) => {
-      const R = 6371;
-      const dLat = toRad(bLat - aLat);
-      const dLng = toRad(bLng - aLng);
-      const aa =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos(toRad(aLat)) * Math.cos(toRad(bLat)) * Math.sin(dLng / 2) ** 2;
-      return R * 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
-    };
-    let nearest: { key: string; distance: number; radiusKm: number } | null = null;
-    for (const t of targets) {
-      const distance = haversineKm(lat, lng, t.lat, t.lng);
-      if (!nearest || distance < nearest.distance) {
-        nearest = { key: t.key, distance, radiusKm: t.radiusKm };
-      }
-    }
-    if (nearest && nearest.distance <= nearest.radiusKm) return nearest.key;
-    return null;
+    const la = Number(lat);
+    const ln = Number(lng);
+    if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+    return pickFareCitySlugFromCoords(la, ln, 140);
   };
 
-  // GPS: show rider on map immediately (coords first), then replace label with reverse-geocoded address.
+  const inferCity = (pickupText: string, destinationText: string) =>
+    inferFareCitySlugFromAddress(pickupText, destinationText);
+
+  // GPS: parallel fresh + cached fix, start reverse-geocode immediately (no serial GPS wait).
   useEffect(() => {
     let mounted = true;
+    const presetPickupTxt = typeof params.pickup === 'string' ? params.pickup.trim() : '';
+    const presetPLat = Number(params.pickupLat);
+    const presetPLng = Number(params.pickupLng);
+
     const detectGPS = async () => {
       try {
         const Location = require('expo-location');
@@ -628,29 +1274,76 @@ function BookInDriveStyle() {
           return;
         }
 
+        /* Deep link / "Book again": fixed pickup overrides device GPS when coords or geocoded address provided */
+        if (presetPickupTxt && Number.isFinite(presetPLat) && Number.isFinite(presetPLng)) {
+          const lat0 = presetPLat;
+          const lng0 = presetPLng;
+          const addrPromise = reverseGeocodeViaBackend(lat0, lng0, BACKEND_URL);
+          if (!mounted) return;
+          setPickupCoords({ lat: lat0, lng: lng0 });
+          setCurrentLocation({ lat: lat0, lng: lng0, address: presetPickupTxt });
+          setPickup(presetPickupTxt);
+          setGpsStatus('locked');
+          try {
+            const resolved = await addrPromise;
+            if (!mounted) return;
+            if (resolved) {
+              setPickup(resolved);
+              setCurrentLocation({ lat: lat0, lng: lng0, address: resolved });
+            }
+          } catch {
+            /* keep presetPickupTxt */
+          }
+          return;
+        }
+        if (presetPickupTxt) {
+          const g = await geocodeAddressForRider(presetPickupTxt);
+          if (g && mounted) {
+            setPickupCoords({ lat: g.lat, lng: g.lng });
+            setCurrentLocation({ lat: g.lat, lng: g.lng, address: g.address });
+            setPickup(g.address);
+            setGpsStatus('locked');
+            return;
+          }
+        }
+
+        const [lastRes, curRes] = await Promise.allSettled([
+          Location.getLastKnownPositionAsync({
+            maxAge: 120000,
+            requiredAccuracy: 900,
+          }),
+          Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Lowest,
+          }),
+        ]);
+
         let latN: number | undefined;
         let lngN: number | undefined;
 
-        try {
-          const last = await Location.getLastKnownPositionAsync({
-            maxAge: 180000,
-            requiredAccuracy: 500,
-          });
-          if (last?.coords) {
-            latN = Number(last.coords.latitude);
-            lngN = Number(last.coords.longitude);
-          }
-        } catch {
-          /* ignore */
+        if (curRes.status === 'fulfilled' && curRes.value?.coords) {
+          latN = Number(curRes.value.coords.latitude);
+          lngN = Number(curRes.value.coords.longitude);
+        }
+        if (
+          (!Number.isFinite(latN) || !Number.isFinite(lngN)) &&
+          lastRes.status === 'fulfilled' &&
+          lastRes.value?.coords
+        ) {
+          latN = Number(lastRes.value.coords.latitude);
+          lngN = Number(lastRes.value.coords.longitude);
         }
 
         if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
-          const loc = await Location.getCurrentPositionAsync({
-            accuracy: Location.Accuracy.Lowest,
-          });
-          if (!mounted) return;
-          latN = Number(loc.coords.latitude);
-          lngN = Number(loc.coords.longitude);
+          try {
+            const loc = await Location.getCurrentPositionAsync({
+              accuracy: Location.Accuracy.Balanced,
+            });
+            latN = Number(loc.coords.latitude);
+            lngN = Number(loc.coords.longitude);
+          } catch {
+            if (mounted) setGpsStatus('error');
+            return;
+          }
         }
 
         if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
@@ -662,33 +1355,34 @@ function BookInDriveStyle() {
         const lng0 = lngN as number;
 
         if (!mounted) return;
+
+        const addrPromise = reverseGeocodeViaBackend(lat0, lng0, BACKEND_URL);
+
         setPickupCoords({ lat: lat0, lng: lng0 });
         setCurrentLocation({ lat: lat0, lng: lng0, address: '' });
         setPickup('Finding address…');
         setGpsStatus('locked');
 
-        void (async () => {
-          try {
-            const resolved = await reverseGeocodeViaBackend(lat0, lng0, BACKEND_URL);
-            if (!mounted) return;
-            if (resolved) {
-              setPickup(resolved);
-              setCurrentLocation({ lat: lat0, lng: lng0, address: resolved });
-            } else {
-              const fallback = `${lat0.toFixed(4)}, ${lng0.toFixed(4)}`;
-              setPickup(fallback);
-              setCurrentLocation({ lat: lat0, lng: lng0, address: fallback });
-            }
-          } catch {
-            if (!mounted) return;
+        try {
+          const resolved = await addrPromise;
+          if (!mounted) return;
+          if (resolved) {
+            setPickup(resolved);
+            setCurrentLocation({ lat: lat0, lng: lng0, address: resolved });
+          } else {
             const fallback = `${lat0.toFixed(4)}, ${lng0.toFixed(4)}`;
             setPickup(fallback);
             setCurrentLocation({ lat: lat0, lng: lng0, address: fallback });
           }
-        })();
+        } catch {
+          if (!mounted) return;
+          const fallback = `${lat0.toFixed(4)}, ${lng0.toFixed(4)}`;
+          setPickup(fallback);
+          setCurrentLocation({ lat: lat0, lng: lng0, address: fallback });
+        }
 
         void Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
-          .then((loc: { coords: { latitude: number; longitude: number } }) => {
+          .then(async (loc: { coords: { latitude: number; longitude: number } }) => {
             if (!mounted) return;
             const nlat = Number(loc.coords.latitude);
             const nlng = Number(loc.coords.longitude);
@@ -696,10 +1390,12 @@ function BookInDriveStyle() {
             setPickupCoords({ lat: nlat, lng: nlng });
             setCurrentLocation(
               (prev: { lat: number; lng: number; address?: string } | null) =>
-                prev
-                  ? { ...prev, lat: nlat, lng: nlng }
-                  : { lat: nlat, lng: nlng, address: '' },
+                prev ? { ...prev, lat: nlat, lng: nlng } : { lat: nlat, lng: nlng, address: '' },
             );
+            const addr = await reverseGeocodeViaBackend(nlat, nlng, BACKEND_URL);
+            if (!mounted || !addr) return;
+            setPickup(addr);
+            setCurrentLocation({ lat: nlat, lng: nlng, address: addr });
           })
           .catch(() => {});
       } catch {
@@ -710,7 +1406,12 @@ function BookInDriveStyle() {
     return () => {
       mounted = false;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- preset pickup intentionally tracks URL keys only once per open
+  }, [
+    params.pickup,
+    params.pickupLat,
+    params.pickupLng,
+  ]);
 
   // If pickup is still raw coordinates after lock, retry reverse geocode (cold start / rate limit).
   useEffect(() => {
@@ -732,12 +1433,36 @@ function BookInDriveStyle() {
           /* ignore */
         }
       })();
-    }, 600);
+    }, 220);
     return () => {
       cancelled = true;
       clearTimeout(t);
     };
   }, [gpsStatus, pickupCoords?.lat, pickupCoords?.lng, pickup]);
+
+  // Opening pickup search — resolve coords / “Finding address…” to a real label when modal opens or coords jump.
+  useEffect(() => {
+    if (!showLocationModal || editingField !== 'pickup' || !pickupCoords) return;
+    const needsResolve =
+      isRawLatLngLabel(pickup) || pickup === 'Finding address…';
+    if (!needsResolve) return;
+    let cancelled = false;
+    void (async () => {
+      const addr = await reverseGeocodeViaBackend(pickupCoords.lat, pickupCoords.lng, BACKEND_URL);
+      if (cancelled || !addr) return;
+      setPickup(addr);
+      setCurrentLocation((prev: { lat: number; lng: number; address: string } | null) =>
+        prev &&
+        Number(prev.lat) === pickupCoords.lat &&
+        Number(prev.lng) === pickupCoords.lng
+          ? { ...prev, address: addr }
+          : prev,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showLocationModal, editingField, pickupCoords?.lat, pickupCoords?.lng, pickup]);
 
   const fetchPlaceDetails = async (placeId: string) => {
     const id = String(placeId || '').trim();
@@ -772,6 +1497,44 @@ function BookInDriveStyle() {
     return null;
   };
 
+  // Destination from deep link (saved place, Book again, external) — geocode if needed
+  useEffect(() => {
+    const rawDest =
+      typeof params.dropoff === 'string'
+        ? params.dropoff.trim()
+        : typeof params.destination === 'string'
+          ? params.destination.trim()
+          : '';
+    const dLat = Number(params.dropoffLat ?? params.destLat);
+    const dLng = Number(params.dropoffLng ?? params.destLng);
+    const sig = `${rawDest}|${dLat}|${dLng}`;
+    if (!rawDest && !(Number.isFinite(dLat) && Number.isFinite(dLng))) return;
+    if (appliedBookingDestRef.current === sig) return;
+    appliedBookingDestRef.current = sig;
+
+    let cancelled = false;
+    void (async () => {
+      if (Number.isFinite(dLat) && Number.isFinite(dLng) && rawDest) {
+        if (cancelled) return;
+        setDestination(rawDest);
+        setDestinationCoords({ lat: dLat, lng: dLng });
+        return;
+      }
+      if (!rawDest) return;
+      const g = await resolveAddressToCoords(rawDest);
+      if (cancelled) return;
+      if (g) {
+        setDestination(g.address);
+        setDestinationCoords({ lat: g.lat, lng: g.lng });
+      } else {
+        setDestination(rawDest);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [params.dropoff, params.destination, params.dropoffLat, params.dropoffLng, params.destLat, params.destLng]);
+
   const toStr = (v: any, fallback = 'Something went wrong'): string => {
     if (v === null || v === undefined) return fallback;
     if (typeof v === 'string') return v || fallback;
@@ -792,6 +1555,54 @@ function BookInDriveStyle() {
     return String(v);
   };
 
+  const haversineKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const toRad = (d: number) => (d * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }, []);
+
+  const syncFareLockSnapshot = useCallback((pLat: number, pLng: number, dLat: number, dLng: number) => {
+    fareLockSnapshotRef.current = {
+      at: Date.now(),
+      pickup: { lat: pLat, lng: pLng },
+      drop: { lat: dLat, lng: dLng },
+    };
+  }, []);
+
+  const lockedFareEstimateId = useCallback(
+    (fd: FareEstimateResponse | null, pLat: number, pLng: number, dLat: number, dLng: number): string | undefined => {
+      if (!fd) return undefined;
+      const raw = fd as unknown as Record<string, unknown>;
+      const eid =
+        (typeof fd.estimate_id === 'string' && fd.estimate_id.trim()) ||
+        (typeof raw.estimateId === 'string' && String(raw.estimateId).trim()) ||
+        '';
+      if (!eid) return undefined;
+      const untilRaw = fd.price_valid_until ?? raw.priceValidUntil;
+      const until = parseFareLockDeadlineMs(untilRaw);
+      const CLOCK_SKEW_LEEWAY_MS = 45_000;
+      if (!until || Date.now() >= until + CLOCK_SKEW_LEEWAY_MS) return undefined;
+      const snap = fareLockSnapshotRef.current;
+      // When we have a geo snapshot, require pickup/drop to match (same rule as server drift).
+      // When snapshot is missing (race / restore), still send lock id if TTL valid — server validates coords.
+      if (snap) {
+        if (
+          haversineKm(snap.pickup.lat, snap.pickup.lng, pLat, pLng) > ROUTE_DRIFT_KM ||
+          haversineKm(snap.drop.lat, snap.drop.lng, dLat, dLng) > ROUTE_DRIFT_KM
+        ) {
+          return undefined;
+        }
+      }
+      return eid;
+    },
+    [haversineKm],
+  );
+
   const requestFareEstimate = async (payload: {
     pickup_lat: number;
     pickup_lng: number;
@@ -801,18 +1612,187 @@ function BookInDriveStyle() {
     city: string;
     pickup_address?: string;
     dropoff_address?: string;
-  }) => {
-    const res = await fetch(`${BACKEND_URL}/api/fare/estimate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(toStr(data?.detail, 'Could not calculate fare'));
+    rider_id?: string;
+    preferred_driver_id?: string;
+  }): Promise<FareEstimateResponse> => {
+    const mapsKey = resolveGoogleDirectionsApiKey();
+    let googleDm: number | undefined;
+    let googleDs: number | undefined;
+
+    const serverRoute = await fetchDrivingRoute(
+      payload.pickup_lat,
+      payload.pickup_lng,
+      payload.dropoff_lat,
+      payload.dropoff_lng,
+    );
+    if (serverRoute) {
+      googleDm = serverRoute.distanceMeters;
+      const trafficSec =
+        typeof serverRoute.durationInTrafficSeconds === 'number' &&
+        serverRoute.durationInTrafficSeconds > 0
+          ? serverRoute.durationInTrafficSeconds
+          : serverRoute.durationSeconds;
+      googleDs = Math.max(serverRoute.durationSeconds, trafficSec);
     }
-    return data;
+
+    if (mapsKey && (googleDm == null || googleDs == null)) {
+      try {
+        const gr = await fetchGoogleDrivingRoutes(
+          payload.pickup_lat,
+          payload.pickup_lng,
+          payload.dropoff_lat,
+          payload.dropoff_lng,
+          mapsKey,
+        );
+        const leg = gr?.routes?.[0];
+        if (leg && leg.distanceM >= 80 && leg.durationSec >= 10) {
+          googleDm = leg.distanceM;
+          const trafficSec =
+            typeof leg.durationInTrafficSec === 'number' && leg.durationInTrafficSec > 0
+              ? leg.durationInTrafficSec
+              : leg.durationSec;
+          googleDs = Math.max(leg.durationSec, trafficSec);
+        }
+      } catch {
+        /* optional client hint */
+      }
+    }
+    try {
+      const { data } = await estimateFare({
+        pickup_lat: payload.pickup_lat,
+        pickup_lng: payload.pickup_lng,
+        dropoff_lat: payload.dropoff_lat,
+        dropoff_lng: payload.dropoff_lng,
+        service_type: payload.service_type,
+        city: payload.city,
+        pickup_address: payload.pickup_address,
+        dropoff_address: payload.dropoff_address,
+        rider_id: payload.rider_id ?? (user?.id ? String(user.id) : undefined),
+        ...(payload.preferred_driver_id
+          ? { preferred_driver_id: payload.preferred_driver_id }
+          : {}),
+        ...(googleDm != null && googleDs != null
+          ? { google_route_distance_meters: googleDm, google_route_duration_seconds: googleDs }
+          : {}),
+      });
+      return normalizeFareEstimatePayload(data);
+    } catch (e: any) {
+      const d = e?.response?.data;
+      throw new Error(toStr(d?.detail, 'Could not calculate fare'));
+    }
   };
+
+  // Google Directions on device — curved road line + ETA as soon as pickup & dropoff are set.
+  useEffect(() => {
+    let cancelled = false;
+    const pLat = pickupCoords?.lat;
+    const pLng = pickupCoords?.lng;
+    const dLat = destinationCoords?.lat;
+    const dLng = destinationCoords?.lng;
+    if (
+      !Number.isFinite(Number(pLat)) ||
+      !Number.isFinite(Number(pLng)) ||
+      !Number.isFinite(Number(dLat)) ||
+      !Number.isFinite(Number(dLng))
+    ) {
+      setBookingRouteCoords([]);
+      setBookingRouteEtaMin(null);
+      setBookingRouteLoading(false);
+      return undefined;
+    }
+
+    const mapsKey = resolveGoogleDirectionsApiKey();
+
+    setBookingRouteLoading(true);
+    void (async () => {
+      try {
+        let leg: GoogleDrivingRouteOverview | null = null;
+        if (mapsKey) {
+          const gr = await fetchGoogleDrivingRoutes(
+            Number(pLat),
+            Number(pLng),
+            Number(dLat),
+            Number(dLng),
+            mapsKey,
+          );
+          leg = gr?.routes?.[0] ?? null;
+        }
+        if (!cancelled && leg?.overview && leg.overview.length >= 2) {
+          setBookingRouteCoords(leg.overview);
+          const trafficSec =
+            typeof leg.durationInTrafficSec === 'number' && leg.durationInTrafficSec > 0
+              ? leg.durationInTrafficSec
+              : leg.durationSec;
+          const sec = Math.max(leg.durationSec || 0, trafficSec || 0);
+          setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
+          return;
+        }
+        const srv = await fetchDrivingRoute(Number(pLat), Number(pLng), Number(dLat), Number(dLng));
+        if (cancelled || !srv?.overviewMapCoords?.length || srv.overviewMapCoords.length < 2) return;
+        setBookingRouteCoords(srv.overviewMapCoords);
+        const sec = Math.max(
+          srv.durationSeconds,
+          typeof srv.durationInTrafficSeconds === 'number' && srv.durationInTrafficSeconds > 0
+            ? srv.durationInTrafficSeconds
+            : srv.durationSeconds,
+        );
+        setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
+      } catch {
+        /* wait for fare polyline */
+      } finally {
+        if (!cancelled) setBookingRouteLoading(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng]);
+
+  // When estimate returns encoded polyline, use it so the drawn path matches server / fare distance.
+  useEffect(() => {
+    const fd = fareDetails;
+    if (!fd) return;
+
+    const etaCandidate = Number(
+      fd.pricing_route_minutes ??
+        fd.traffic_duration_min ??
+        fd.duration_min ??
+        fd.estimated_time_minutes ??
+        fd.duration_mins ??
+        0,
+    );
+    if (Number.isFinite(etaCandidate) && etaCandidate > 0) {
+      setBookingRouteEtaMin(Math.round(etaCandidate));
+    }
+
+    if (typeof fd.polyline === 'string' && fd.polyline.length > 8) {
+      try {
+        const dec = decodePolyline(fd.polyline);
+        // Do not replace a real road path with a 2-point “preview” line.
+        if (dec.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+          setBookingRouteCoords(dec.map((c) => ({ latitude: c.lat, longitude: c.lng })));
+          return;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+
+    const preview = parseRoutePreviewToMapCoords(fd.route_preview_coordinates);
+    if (preview.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+      setBookingRouteCoords(preview);
+    }
+  }, [
+    fareDetails?.estimate_id,
+    fareDetails?.polyline,
+    fareDetails?.route_preview_coordinates,
+    fareDetails?.pricing_route_minutes,
+    fareDetails?.traffic_duration_min,
+    fareDetails?.duration_min,
+    fareDetails?.estimated_time_minutes,
+    fareDetails?.duration_mins,
+  ]);
 
   const calculateAllVehiclePrices = async () => {
     try {
@@ -843,7 +1823,7 @@ function BookInDriveStyle() {
         inferCityFromCoords(pLat, pLng) ||
         inferCityFromCoords(dLat, dLng) ||
         inferCity(pickup, destination) ||
-        'lagos';
+        'default';
 
       const results = await Promise.all(
         availableVehicles.map(async (vehicle) => {
@@ -857,6 +1837,7 @@ function BookInDriveStyle() {
               city,
               pickup_address: pickup?.trim() || undefined,
               dropoff_address: destination?.trim() || undefined,
+              preferred_driver_id: requestedDriverId || undefined,
             });
             const price = Number(data?.total_fare ?? data?.fare ?? data?.total ?? 0);
             return [vehicle.id, Math.round(price), data] as const;
@@ -867,7 +1848,20 @@ function BookInDriveStyle() {
       );
 
       const nextMatrix = Object.fromEntries(results.map(([id, price]) => [id, price]));
+      const nextOrig: Record<string, number> = {};
+      for (const [id, price, data] of results) {
+        const d = data as FareEstimateResponse | null;
+        if (
+          d?.first_ride_discount_applied &&
+          d.original_total_fare != null &&
+          Number.isFinite(Number(d.original_total_fare))
+        ) {
+          const o = Math.round(Number(d.original_total_fare));
+          if (o > price) nextOrig[id] = o;
+        }
+      }
       setFareMatrix(nextMatrix);
+      setFareMatrixOriginal(nextOrig);
 
       let veh = selectedVehicle;
       if (!veh && (nextMatrix['economy'] ?? 0) > 0) {
@@ -881,6 +1875,7 @@ function BookInDriveStyle() {
       const vehPrice = Number(nextMatrix[veh] ?? 0);
       if (detail) {
         setFareDetails(detail);
+        syncFareLockSnapshot(pLat!, pLng!, dLat!, dLng!);
         const minP = Math.round(Number(detail.min_price ?? 0));
         const maxP = Math.round(Number(detail.max_price ?? 1e15));
         const sug = Math.round(Number(detail.base_price ?? detail.total_fare ?? row?.[1] ?? 0));
@@ -889,6 +1884,7 @@ function BookInDriveStyle() {
           return Math.max(minP, sug || vehPrice || 0);
         });
       } else if (vehPrice > 0) {
+        syncFareLockSnapshot(pLat!, pLng!, dLat!, dLng!);
         setCurrentFare(vehPrice);
       }
     } catch {
@@ -949,7 +1945,7 @@ function BookInDriveStyle() {
         inferCityFromCoords(pLat, pLng) ||
         inferCityFromCoords(dLat, dLng) ||
         inferCity(pickup, destination) ||
-        'lagos';
+        'default';
       const basePayload = {
         pickup_lat: pLat,
         pickup_lng: pLng,
@@ -959,6 +1955,7 @@ function BookInDriveStyle() {
         city: inferredCity,
         pickup_address: pickup?.trim() || undefined,
         dropoff_address: destination?.trim() || undefined,
+        preferred_driver_id: requestedDriverId || undefined,
       };
 
       let data;
@@ -969,7 +1966,7 @@ function BookInDriveStyle() {
         const retryPayload = {
           ...basePayload,
           service_type: serviceType || 'economy',
-          city: inferredCity || 'lagos',
+          city: inferredCity || 'default',
         };
         data = await requestFareEstimate(retryPayload);
       }
@@ -981,8 +1978,13 @@ function BookInDriveStyle() {
         0
       );
       if (Number.isFinite(computedFare) && computedFare > 0) {
-        setCurrentFare(Math.round(computedFare));
+        const rounded = Math.round(computedFare);
+        const lo = data.min_price != null ? Math.max(100, Math.round(Number(data.min_price))) : 100;
+        const hi = data.max_price != null ? Math.round(Number(data.max_price)) : rounded;
+        const clamped = Math.min(Math.max(rounded, lo), Math.max(lo, hi));
+        setCurrentFare(clamped);
         setFareDetails({ ...data, service_type: serviceType, city: inferredCity });
+        syncFareLockSnapshot(pLat, pLng, dLat, dLng);
         let routes: TrafficRoute[] = [];
         try {
           routes = await TrafficAI.getOptimizedRoutes(
@@ -996,7 +1998,14 @@ function BookInDriveStyle() {
         const first = routes[0];
         setOptimizedRoute(first ? TrafficAI.normalizeTrafficRoute(first) : null);
       } else {
-        Alert.alert('Fare Error', toStr(data?.detail || data?.message, 'Could not calculate fare. Please try again.'));
+        Alert.alert(
+          'Fare Error',
+          toStr(
+            (data as { detail?: unknown; message?: unknown })?.detail ||
+              (data as { message?: unknown })?.message,
+            'Could not calculate fare. Please try again.',
+          ),
+        );
       }
     } catch (error: any) {
       Alert.alert('Connection Error', toStr(error, 'Network error. Check your connection and try again.'));
@@ -1009,6 +2018,7 @@ function BookInDriveStyle() {
   useEffect(() => {
     if (!pickupCoords?.lat || !pickupCoords?.lng || !destinationCoords?.lat || !destinationCoords?.lng) {
       setFareMatrix({});
+      setFareMatrixOriginal({});
       setOptimizedRoute(null);
       return;
     }
@@ -1023,7 +2033,19 @@ function BookInDriveStyle() {
     return () => {
       clearTimeout(timer);
     };
-  }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng, selectedVehicle, availableVehicles]);
+  }, [
+    pickupCoords?.lat,
+    pickupCoords?.lng,
+    destinationCoords?.lat,
+    destinationCoords?.lng,
+    selectedVehicle,
+    availableVehicles,
+    // Re-run when on-device Directions finishes so client leg metrics reach /fare/estimate.
+    bookingRouteLoading,
+    bookingRouteEtaMin,
+    user?.id,
+    requestedDriverId,
+  ]);
 
   useEffect(() => {
     Animated.timing(sheetSlide, {
@@ -1099,23 +2121,92 @@ function BookInDriveStyle() {
     if (offerInFlightRef.current) return;
     if (!user?.id) { Alert.alert('Login', 'Please login to request a ride.'); return; }
     if (!selectedVehicle) { Alert.alert('Select Vehicle', 'Please select a vehicle type first.'); setShowVehicleModal(true); return; }
-    const MIN_FARE = 100;
-    const smartMin = fareDetails?.min_price != null ? Math.round(Number(fareDetails.min_price)) : 0;
-    const floor = Math.max(MIN_FARE, smartMin || 0);
-    if (!Number.isFinite(currentFare) || currentFare < floor) {
-      Alert.alert(
-        'Minimum fare',
-        smartMin
-          ? `Minimum fare for this trip is ₦${smartMin.toLocaleString()}`
-          : `Use at least ₦${floor.toLocaleString()}. Tap Calculate Fare or adjust with +/−.`,
-      );
-      return;
-    }
     if (!pickup?.trim() || !destination?.trim()) {
       Alert.alert('Locations', 'Choose pickup and destination.');
       return;
     }
     const payMethod = tripPaymentMethod();
+    const pLatEarly = pickupCoords?.lat || currentLocation?.lat || 0;
+    const pLngEarly = pickupCoords?.lng || currentLocation?.lng || 0;
+    const dLatEarly = destinationCoords?.lat || 0;
+    const dLngEarly = destinationCoords?.lng || 0;
+    if (!pLatEarly || !pLngEarly || !dLatEarly || !dLngEarly) {
+      Alert.alert('Pin locations', 'Pick addresses from search suggestions or use GPS so we have coordinates for drivers.');
+      return;
+    }
+
+    const cityEarly =
+      inferCityFromCoords(pLatEarly, pLngEarly) ||
+      inferCityFromCoords(dLatEarly, dLngEarly) ||
+      inferCity(pickup, destination) ||
+      'default';
+    const normalizedServiceEarly = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
+
+    let fareForBid: FareEstimateResponse | null = fareDetails ? normalizeFareEstimatePayload(fareDetails) : null;
+    let lockIdEarly = lockedFareEstimateId(fareForBid, pLatEarly, pLngEarly, dLatEarly, dLngEarly);
+
+    if (!lockIdEarly) {
+      try {
+        const fresh = await requestFareEstimate({
+          pickup_lat: pLatEarly,
+          pickup_lng: pLngEarly,
+          dropoff_lat: dLatEarly,
+          dropoff_lng: dLngEarly,
+          service_type: normalizedServiceEarly,
+          city: cityEarly,
+          pickup_address: pickup?.trim() || undefined,
+          dropoff_address: destination?.trim() || undefined,
+          rider_id: user?.id ? String(user.id) : undefined,
+          preferred_driver_id: requestedDriverId || undefined,
+        });
+        fareForBid = fresh;
+        setFareDetails(fresh);
+        syncFareLockSnapshot(pLatEarly, pLngEarly, dLatEarly, dLngEarly);
+        lockIdEarly = lockedFareEstimateId(fresh, pLatEarly, pLngEarly, dLatEarly, dLngEarly);
+      } catch {
+        /* fall through to messaging below */
+      }
+    }
+
+    if (!lockIdEarly) {
+      const fd = fareForBid;
+      const fdRaw = fd as unknown as Record<string, unknown>;
+      const hinted =
+        fd &&
+        ((typeof fd.estimate_id === 'string' && fd.estimate_id.trim().length > 0) ||
+          (typeof fdRaw.estimateId === 'string' &&
+            String(fdRaw.estimateId).trim().length > 0));
+      Alert.alert(
+        hinted ? 'Refresh your fare' : 'Fare quote',
+        hinted
+          ? 'This quote is no longer locked (expired or pickup/destination shifted). Tap “Refresh estimate”, then request again.'
+          : 'We could not lock a price for this route. Check your connection and tap “Refresh estimate”.',
+      );
+      return;
+    }
+
+    const MIN_FARE = 100;
+    const smartMin = fareForBid?.min_price != null ? Math.round(Number(fareForBid.min_price)) : 0;
+    const floor = Math.max(MIN_FARE, smartMin || 0);
+    const bid = Math.round(Number(currentFare));
+    if (!Number.isFinite(bid) || bid < floor) {
+      Alert.alert(
+        'Minimum fare',
+        smartMin
+          ? `Your bid must be at least ₦${floor.toLocaleString()} for this route (matches drivers’ minimum).`
+          : `Use at least ₦${floor.toLocaleString()}. Tap Calculate Fare or adjust with +/−.`,
+      );
+      return;
+    }
+    const smartMax = fareForBid?.max_price != null ? Math.round(Number(fareForBid.max_price)) : null;
+    if (smartMax != null && smartMax > 0 && bid > smartMax) {
+      Alert.alert(
+        'Maximum fare',
+        `Your bid cannot exceed ₦${smartMax.toLocaleString()} for this route. Tap − or Refresh estimate.`,
+      );
+      return;
+    }
+
     if (payMethod === 'wallet') {
       let bal = walletBalance ?? 0;
       try {
@@ -1125,10 +2216,10 @@ function BookInDriveStyle() {
       } catch {
         /* use cached balance */
       }
-      if (bal + 1e-6 < currentFare) {
+      if (bal + 1e-6 < bid) {
         Alert.alert(
           'Insufficient balance',
-          `You need at least ₦${currentFare.toLocaleString()} in your wallet. Top up in Wallet or pay with cash.`,
+          `You need at least ₦${bid.toLocaleString()} in your wallet. Top up in Wallet or pay with cash.`,
         );
         return;
       }
@@ -1136,20 +2227,16 @@ function BookInDriveStyle() {
     offerInFlightRef.current = true;
     setIsLoading(true);
     try {
-      const pLat = pickupCoords?.lat || currentLocation?.lat || 0;
-      const pLng = pickupCoords?.lng || currentLocation?.lng || 0;
-      const dLat = destinationCoords?.lat || 0;
-      const dLng = destinationCoords?.lng || 0;
-      if (!pLat || !pLng || !dLat || !dLng) {
-        Alert.alert('Pin locations', 'Pick addresses from search suggestions or use GPS so we have coordinates for drivers.');
-        setIsLoading(false);
-        return;
-      }
+      const pLat = pLatEarly;
+      const pLng = pLngEarly;
+      const dLat = dLatEarly;
+      const dLng = dLngEarly;
+      const lockId = lockIdEarly;
       const city =
         inferCityFromCoords(pLat, pLng) ||
         inferCityFromCoords(dLat, dLng) ||
         inferCity(pickup, destination) ||
-        'lagos';
+        'default';
       const normalizedService = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
 
       const res = await fetch(`${BACKEND_URL}/api/trips/request?rider_id=${user.id}`, {
@@ -1165,10 +2252,14 @@ function BookInDriveStyle() {
           service_type: normalizedService,
           city,
           payment_method: payMethod,
-          offered_fare: currentFare,
+          offered_fare: bid,
           recommended_fare:
-            Number(fareDetails?.base_price || fareDetails?.total_fare || 0) || undefined,
-          fare_estimate_id: fareDetails?.estimate_id || undefined,
+            Number(fareForBid?.base_price || fareForBid?.total_fare || 0) || undefined,
+          fare_estimate_id: lockId,
+          ...(fareForBid?.demand_ratio != null && Number.isFinite(Number(fareForBid.demand_ratio))
+            ? { demand_ratio: Number(fareForBid.demand_ratio) }
+            : {}),
+          ...(fareForBid?.rain_applied === true ? { rain: true } : {}),
           trip_type: 'intra',
           preferred_driver_id: requestedDriverId || undefined,
           ride_preferences: ridePreferences,
@@ -1261,7 +2352,7 @@ function BookInDriveStyle() {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
-        if (data.success && ['accepted', 'arrived', 'ongoing'].includes(data.status) && data.driver_info) {
+        if (data.success && isRiderMapLiveTripStatus(String(data.status || '')) && data.driver_info) {
           clearDriverPoll();
           setCurrentTrip({
             id,
@@ -1278,7 +2369,12 @@ function BookInDriveStyle() {
               address: destination,
             },
             distance_km: Number(fareDetails?.distance_km || 0),
-            duration_mins: Number(fareDetails?.duration_mins || 0),
+            duration_mins: Number(
+              fareDetails?.duration_mins ||
+                fareDetails?.duration_min ||
+                fareDetails?.estimated_time_minutes ||
+                0,
+            ),
             fare: Number(currentFare || 0),
             surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
             status: data.status === 'arrived' ? 'arrived' : data.status === 'ongoing' ? 'ongoing' : 'accepted',
@@ -1301,7 +2397,7 @@ function BookInDriveStyle() {
             headers: getAuthHeaders(),
           });
           const finalData = await finalRes.json();
-          if (finalData?.success && ['accepted', 'arrived', 'ongoing'].includes(finalData.status) && finalData.driver_info) {
+          if (finalData?.success && isRiderMapLiveTripStatus(String(finalData.status || '')) && finalData.driver_info) {
             setCurrentTrip({
               id,
               rider_id: user?.id || '',
@@ -1317,7 +2413,12 @@ function BookInDriveStyle() {
                 address: destination,
               },
               distance_km: Number(fareDetails?.distance_km || 0),
-              duration_mins: Number(fareDetails?.duration_mins || 0),
+              duration_mins: Number(
+              fareDetails?.duration_mins ||
+                fareDetails?.duration_min ||
+                fareDetails?.estimated_time_minutes ||
+                0,
+            ),
               fare: Number(currentFare || 0),
               surge_multiplier: Number(fareDetails?.surge_multiplier || 1),
               status: finalData.status === 'arrived' ? 'arrived' : finalData.status === 'ongoing' ? 'ongoing' : 'accepted',
@@ -1367,7 +2468,7 @@ function BookInDriveStyle() {
         router.replace({ pathname: '/rider/trip-receipt', params: { tripId: id } } as any);
         return;
       }
-      if (['accepted', 'arrived', 'ongoing'].includes(st) && t.driver_id) {
+      if (isRiderMapLiveTripStatus(String(st || '')) && t.driver_id) {
         applyAcceptedFromRealtime(id, t, st);
       }
     },
@@ -1401,8 +2502,107 @@ function BookInDriveStyle() {
       : fareDetails?.total_fare != null
         ? Math.round(Number(fareDetails.total_fare))
         : null;
-  const priorityMatch =
-    smartBaseUi != null && smartBaseUi > 0 && currentFare >= smartBaseUi * 0.95;
+  /** Tap target: post-discount total clamped to server min/max (matches drivers’ “suggested” band). */
+  const suggestedBidUi = useMemo(() => {
+    const fd = fareDetails;
+    if (!fd) return null;
+    const t = fd.total_fare != null ? Math.round(Number(fd.total_fare)) : 0;
+    const b = fd.base_price != null ? Math.round(Number(fd.base_price)) : 0;
+    const anchor = t > 0 ? t : b;
+    if (!anchor) return null;
+    const lo = fd.min_price != null ? Math.max(100, Math.round(Number(fd.min_price))) : 100;
+    const hi = fd.max_price != null ? Math.round(Number(fd.max_price)) : anchor;
+    return Math.min(Math.max(anchor, lo), Math.max(lo, hi));
+  }, [fareDetails]);
+  const fareInsightChips = useMemo(() => {
+    const fd = fareDetails;
+    if (!fd) {
+      return {
+        routeLabel: null as string | null,
+        surgeCompact: null as string | null,
+        shortTrip: false,
+        cityLabel: null as string | null,
+      };
+    }
+    const routeLabel = formatRouteKmMin(
+      fd.distance_km,
+      fd.duration_min ?? fd.estimated_time_minutes,
+    );
+    const surgeCompact = buildCompactSurgeChipText({
+      surge_multiplier: fd.surge_multiplier,
+      multiplier: fd.multiplier,
+      is_peak: fd.is_peak,
+      peak_type: fd.peak_type ?? null,
+      surge_factors: fd.surge_factors,
+    });
+    const shortTrip = isShortTripFare(fd.fare_bucket, fd.distance_km);
+    const rawCity = fd.city != null ? String(fd.city).trim() : '';
+    const cityPretty =
+      rawCity.length > 0 ? rawCity.charAt(0).toUpperCase() + rawCity.slice(1).replace(/_/g, ' ') : null;
+    const hideCity =
+      isLagosRouteDistanceFare(fd) || String(rawCity).toLowerCase() === 'lagos';
+    const cityLabel = cityPretty && !hideCity ? cityPretty : null;
+    return { routeLabel, surgeCompact, shortTrip, cityLabel };
+  }, [fareDetails]);
+
+  const winH = flow.height;
+  const searchRouteKmLabel = useMemo(() => {
+    const km = fareDetails?.distance_km;
+    if (km == null || !Number.isFinite(Number(km))) return null;
+    return `${Number(km).toFixed(1)} km`;
+  }, [fareDetails?.distance_km]);
+  const searchRouteMinLabel = useMemo(() => {
+    if (bookingRouteEtaMin != null && Number.isFinite(bookingRouteEtaMin)) {
+      return `~${Math.round(bookingRouteEtaMin)} min trip`;
+    }
+    const fd = fareDetails;
+    if (!fd) return null;
+    const raw =
+      fd.duration_min ??
+      (fd as { duration_mins?: number }).duration_mins ??
+      (fd as { estimated_time_minutes?: number }).estimated_time_minutes ??
+      (fd as { estimated_time_mins?: number }).estimated_time_mins;
+    if (raw != null && Number.isFinite(Number(raw))) return `~${Math.round(Number(raw))} min trip`;
+    return null;
+  }, [bookingRouteEtaMin, fareDetails]);
+  const matchedDriverForOverlay = useMemo((): RiderMatchedDriver | null => {
+    if (!driverFound) return null;
+    const df = driverFound as Record<string, unknown>;
+    const trips = df.total_trips ?? df.completed_trips;
+    const face =
+      typeof df.face_image === 'string' && df.face_image.length > 0
+        ? df.face_image
+        : null;
+    const profile =
+      typeof df.profile_image === 'string' && df.profile_image.length > 0
+        ? df.profile_image
+        : typeof df.photo === 'string' && df.photo.length > 0
+          ? df.photo
+          : null;
+    const phoneRaw =
+      typeof df.phone === 'string' && df.phone.length > 0
+        ? df.phone
+        : typeof df.phone_number === 'string' && df.phone_number.length > 0
+          ? (df.phone_number as string)
+          : null;
+    return {
+      name: String(df.name || 'Driver'),
+      vehicle: typeof df.vehicle === 'string' ? df.vehicle : undefined,
+      plate: typeof df.plate === 'string' ? df.plate : undefined,
+      color: typeof df.color === 'string' ? df.color : undefined,
+      rating:
+        typeof df.rating === 'number'
+          ? df.rating
+          : typeof df.avg_rating === 'number'
+            ? (df.avg_rating as number)
+            : undefined,
+      trip_count: typeof trips === 'number' && trips > 0 ? trips : undefined,
+      face_image: face,
+      profile_image: profile,
+      phone: phoneRaw,
+    };
+  }, [driverFound]);
+
   const formatScheduledTime = (iso: string) => {
     const dt = new Date(iso);
     if (Number.isNaN(dt.getTime())) return 'Scheduled ride';
@@ -1417,11 +2617,103 @@ function BookInDriveStyle() {
 
   const useNativeBookingMap = Platform.OS !== 'web';
 
+  if (bookSuspended && bookSuspendedSeconds > 0) {
+    const mins = Math.floor(bookSuspendedSeconds / 60);
+    const secs = bookSuspendedSeconds % 60;
+    const progress = bookSuspendedSeconds / 3600; // 1 hour total
+    const circumference = 2 * Math.PI * 54;
+    const strokeDashoffset = circumference * (1 - progress);
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0D1420' }}>
+        <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
+        <LinearGradient colors={['#0D1420', '#1A0A0A']} style={StyleSheet.absoluteFill} />
+        <SafeAreaView
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingVertical: 28,
+            paddingHorizontal: flow.padH,
+          }}
+        >
+          {/* Icon */}
+          <View style={{ width: 88, height: 88, borderRadius: 44, backgroundColor: 'rgba(239,68,68,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 28, borderWidth: 1.5, borderColor: 'rgba(239,68,68,0.3)' }}>
+            <Ionicons name="ban" size={40} color="#EF4444" />
+          </View>
+
+          <Text style={{ color: '#F1F5F9', fontSize: 22, fontWeight: '800', textAlign: 'center', marginBottom: 8 }}>
+            Booking Suspended
+          </Text>
+          <Text style={{ color: '#94A3B8', fontSize: 14, textAlign: 'center', lineHeight: 22, marginBottom: 36 }}>
+            You've reached 7 ride cancellations in 24 hours.{'\n'}Booking will resume automatically when the timer ends.
+          </Text>
+
+          {/* Countdown ring */}
+          <View style={{ alignItems: 'center', justifyContent: 'center', marginBottom: 36 }}>
+            <View style={{ width: 130, height: 130, alignItems: 'center', justifyContent: 'center' }}>
+              {/* Background ring */}
+              <View style={{ position: 'absolute', width: 120, height: 120, borderRadius: 60, borderWidth: 6, borderColor: 'rgba(239,68,68,0.15)' }} />
+              {/* Time */}
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ color: '#EF4444', fontSize: 32, fontWeight: '900', letterSpacing: -1 }}>
+                  {`${mins}:${String(secs).padStart(2, '0')}`}
+                </Text>
+                <Text style={{ color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 2 }}>REMAINING</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Warning count info */}
+          <View
+            style={{
+              backgroundColor: 'rgba(239,68,68,0.08)',
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: 'rgba(239,68,68,0.2)',
+              padding: 16,
+              width: '100%',
+              maxWidth: flow.maxContentWidth,
+              marginBottom: 24,
+            }}
+          >
+            <View style={{ flexDirection: 'row', gap: 10, alignItems: 'flex-start' }}>
+              <Ionicons name="information-circle" size={18} color="#EF4444" style={{ marginTop: 1 }} />
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: '#F87171', fontSize: 13, fontWeight: '800', marginBottom: 4 }}>Why am I suspended?</Text>
+                <Text style={{ color: '#94A3B8', fontSize: 12, lineHeight: 19 }}>
+                  You reached 7 cancellations in 24 hours. Cancelling affects drivers who are on their way to you — it wastes their time and fuel.
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Policy note — cancellation path is 1h booking pause only at 7/24h */}
+          <Text style={{ color: '#475569', fontSize: 12, textAlign: 'center', lineHeight: 18 }}>
+            This pause is one hour. Other serious policy violations may be handled separately under our terms.
+          </Text>
+
+          <TouchableOpacity onPress={() => router.back()} style={{ marginTop: 28, paddingVertical: 12, paddingHorizontal: 32, borderRadius: 12, borderWidth: 1, borderColor: '#1E2D45' }}>
+            <Text style={{ color: '#94A3B8', fontSize: 14, fontWeight: '700' }}>Go Back</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={s.container} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
       {/* MAP SECTION */}
-      <View style={s.mapArea}>
+      <View
+        style={[
+          s.mapArea,
+          searchingForDriver && {
+            height: Math.min(winH * 0.52, winH * 0.56),
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: 'rgba(34,229,160,0.28)',
+          },
+        ]}
+      >
         {pickupCoords ? (
           !useNativeBookingMap ? (
             <MapComponent
@@ -1441,11 +2733,8 @@ function BookInDriveStyle() {
                   : undefined
               }
               routeCoordinates={
-                destinationCoords
-                  ? [
-                      { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
-                      { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
-                    ]
+                routeForMapDisplay.length >= 1
+                  ? routeForMapDisplay
                   : [{ latitude: pickupCoords.lat, longitude: pickupCoords.lng }]
               }
             />
@@ -1453,16 +2742,13 @@ function BookInDriveStyle() {
             <BookingRideMapNative
               pickupCoords={pickupCoords}
               destinationCoords={destinationCoords}
-              routePolyline={
-                destinationCoords
-                  ? [
-                      { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
-                      { latitude: destinationCoords.lat, longitude: destinationCoords.lng },
-                    ]
-                  : []
-              }
+              routePolyline={routeForMapDisplay}
               pickup={pickup}
               destination={destination}
+              routeLoading={bookingRouteLoading}
+              pulseDropoffHalo={Boolean(destinationCoords && !bookingSheetScrolled)}
+              searchMode={searchingForDriver}
+              matchLocked={Boolean(searchingForDriver && driverFound)}
               nearbyDrivers={nearbyDrivers}
             />
           )
@@ -1473,9 +2759,55 @@ function BookInDriveStyle() {
           </View>
         )}
 
+        {destinationCoords &&
+        routeForMapDisplay.length >= DIRECTIONS_ROUTE_MIN_POINTS &&
+        bookingRouteEtaMin != null &&
+        arriveByClockLabel &&
+        !searchingForDriver ? (
+          <View pointerEvents="none" style={[s.routeSummaryBarOuter, { left: flow.padH, right: flow.padH }]}>
+            <BlurView
+              intensity={Platform.OS === 'ios' ? 52 : 40}
+              tint="dark"
+              style={StyleSheet.absoluteFillObject}
+            />
+            <LinearGradient
+              colors={['rgba(15,23,42,0.15)', 'rgba(15,23,42,0.72)']}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={s.routeSummaryGradient}
+            >
+              <View style={s.routeSummaryRow}>
+                <View style={s.routeSummaryBlock}>
+                  <Text style={s.routeSummaryKicker}>Trip time</Text>
+                  <Text style={s.routeSummaryHero}>{Math.round(bookingRouteEtaMin)} min</Text>
+                </View>
+                <View style={s.routeSummaryVsep} />
+                <View style={s.routeSummaryMid}>
+                  <Text style={s.routeSummaryKicker}>Arrive</Text>
+                  <Text style={s.routeSummaryArrive}>{arriveByClockLabel}</Text>
+                  {routeQualityLabel ? (
+                    <Text style={s.routeSummaryMeta} numberOfLines={1}>
+                      {routeQualityLabel}
+                    </Text>
+                  ) : null}
+                </View>
+                {routeDistanceLabel ? (
+                  <>
+                    <View style={s.routeSummaryVsep} />
+                    <View style={s.routeSummaryBlockRight}>
+                      <Text style={s.routeSummaryKicker}>Distance</Text>
+                      <Text style={s.routeSummaryDist}>{routeDistanceLabel}</Text>
+                    </View>
+                  </>
+                ) : null}
+              </View>
+            </LinearGradient>
+          </View>
+        ) : null}
+
         {/* Route hint — shown when pickup set, no destination yet */}
         {pickupCoords && !destinationCoords ? (
-          <View style={s.mapRouteHint} pointerEvents="none">
+          <View style={[s.mapRouteHint, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
             <Ionicons name="navigate-circle-outline" size={15} color={COLORS.lime} />
             <Text style={s.mapRouteHintText}>Scroll down to choose your destination</Text>
           </View>
@@ -1484,7 +2816,7 @@ function BookInDriveStyle() {
         {/* GPS error banner */}
         {gpsStatus === 'error' && !pickupCoords ? (
           <TouchableOpacity
-            style={s.gpsErrorBanner}
+            style={[s.gpsErrorBanner, { left: flow.padH, right: flow.padH }]}
             onPress={openPickupEditor}
             activeOpacity={0.85}
           >
@@ -1494,7 +2826,8 @@ function BookInDriveStyle() {
           </TouchableOpacity>
         ) : null}
 
-        <View style={s.mapTopBar}>
+        {!searchingForDriver ? (
+        <View style={[s.mapTopBar, { left: flow.padH, right: flow.padH }]}>
           <TouchableOpacity style={s.backBtnCircle} onPress={() => router.back()} accessibilityLabel="Go back" accessibilityRole="button">
             <Ionicons name="arrow-back" size={22} color={COLORS.white} />
           </TouchableOpacity>
@@ -1522,29 +2855,73 @@ function BookInDriveStyle() {
             </View>
           </TouchableOpacity>
         </View>
+        ) : null}
+
+        {pickupCoords && destinationCoords && !searchingForDriver ? (
+          <View style={[s.mapBidRouteCard, { left: flow.padH, right: flow.padH }]} pointerEvents="none">
+            <LinearGradient
+              colors={['rgba(11,18,32,0.97)', 'rgba(11,18,32,0.9)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={[s.mapBidRouteInner, { paddingHorizontal: flow.cardPad }]}
+            >
+              <View style={s.mapBidRow}>
+                <View style={[s.mapBidDot, { backgroundColor: COLORS.green }]} />
+                <Text style={s.mapBidTxt} numberOfLines={1}>
+                  {pickup?.trim() || 'Pickup'}
+                </Text>
+              </View>
+              <View style={s.mapBidLine} />
+              <View style={s.mapBidRow}>
+                <View style={[s.mapBidDot, { backgroundColor: '#F87171' }]} />
+                <Text style={s.mapBidTxt} numberOfLines={1}>
+                  {destination?.trim() || 'Destination'}
+                </Text>
+              </View>
+            </LinearGradient>
+          </View>
+        ) : null}
 
         {/* Preferred driver banner */}
-        {requestedDriverId && (
-          <View style={s.preferredBanner}>
+        {requestedDriverId && !searchingForDriver ? (
+          <View style={[s.preferredBanner, { left: flow.padH, right: flow.padH, bottom: flow.sectionGap }]}>
             <Ionicons name="heart" size={16} color="#EF4444" />
-            <Text style={s.preferredText}>
-              Requesting {requestedDriverName || 'your favorite driver'}
-            </Text>
+            <View style={{ flex: 1 }}>
+              <Text style={s.preferredText}>
+                Priority match: {requestedDriverName || 'this driver'}
+              </Text>
+              <Text style={s.preferredSub}>
+                About 5% off the trip fare when they accept — only if they are saved in My Favourite Drivers.
+              </Text>
+            </View>
             <TouchableOpacity onPress={() => router.setParams({ requestedDriverId: '', driverName: '' })}>
               <Ionicons name="close-circle" size={18} color={COLORS.muted} />
             </TouchableOpacity>
           </View>
-        )}
+        ) : null}
 
       </View>
 
       {/* BOTTOM SHEET */}
-      <Animated.View style={[s.sheet, { transform: [{ translateY: sheetSlide }] }]}>
+      <Animated.View
+        style={[s.sheet, { transform: [{ translateY: sheetSlide }], opacity: searchingForDriver ? 0 : 1 }]}
+        pointerEvents={searchingForDriver ? 'none' : 'auto'}
+      >
         <ScrollView
-          contentContainerStyle={[s.sheetContent, { paddingBottom: Math.max(insets.bottom + 16, 56) }]}
+          contentContainerStyle={[
+            s.sheetContent,
+            {
+              paddingHorizontal: flow.padH,
+              paddingTop: Math.round(flow.sectionGap * 0.4),
+              paddingBottom: Math.max(insets.bottom + 16, 56),
+              gap: Math.round(flow.sectionGap * 0.42),
+            },
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
+          onScroll={onBookingSheetScroll}
+          scrollEventThrottle={16}
         >
           <View style={s.sheetHandle} accessibilityRole="none" />
 
@@ -1803,7 +3180,7 @@ function BookInDriveStyle() {
             <Text style={s.inlineCatTitle}>Choose your ride</Text>
             {availableVehicles.map((v) => {
               const price = fareMatrix[v.id];
-              const discPrice = isFirstRider && price > 0 ? Math.round(price * 0.80) : null;
+              const listOrig = fareMatrixOriginal[v.id];
               const isSelected = selectedVehicle === v.id;
               const loadingPrice = !!(pickup && destination && !price && isLoading);
               return (
@@ -1814,8 +3191,11 @@ function BookInDriveStyle() {
                     Haptics.selectionAsync();
                     setSelectedVehicle(v.id);
                     if (price && price > 0) {
-                      setCurrentFare(discPrice ?? price);
-                    } else if (pickup && destination) {
+                      setCurrentFare(price);
+                    }
+                    // Always re-fetch from backend when selecting a ride type so
+                    // price cards cannot stay stale after server-side fare updates.
+                    if (pickup && destination) {
                       setCurrentFare(0);
                       setFareDetails(null);
                       handleCalculateFare(v.id);
@@ -1836,11 +3216,11 @@ function BookInDriveStyle() {
                     ) : price > 0 ? (
                       <>
                         <Text style={[s.inlineCatPrice, isSelected && { color: v.color }]}>
-                          ₦{(discPrice ?? price).toLocaleString()}
+                          ₦{price.toLocaleString()}
                         </Text>
-                        {discPrice != null && (
-                          <Text style={s.inlineCatOrigPrice}>₦{price.toLocaleString()}</Text>
-                        )}
+                        {listOrig != null && listOrig > price ? (
+                          <Text style={s.inlineCatOrigPrice}>₦{listOrig.toLocaleString()}</Text>
+                        ) : null}
                       </>
                     ) : (
                       <Text style={s.inlineCatPriceMuted}>
@@ -1848,16 +3228,15 @@ function BookInDriveStyle() {
                       </Text>
                     )}
                   </View>
-                  {isFirstRider && price > 0 && (
+                  {isFirstRider && price > 0 && listOrig != null && listOrig > price ? (
                     <View style={s.firstRideBadge}>
                       <Text style={s.firstRideBadgeText}>-20%</Text>
                     </View>
-                  )}
-                  {isSelected && !isFirstRider && (
+                  ) : isSelected ? (
                     <View style={[s.inlineCatCheck, { backgroundColor: v.color }]}>
                       <Ionicons name="checkmark" size={12} color="#FFF" />
                     </View>
-                  )}
+                  ) : null}
                 </TouchableOpacity>
               );
             })}
@@ -1886,36 +3265,105 @@ function BookInDriveStyle() {
                   </Text>
                 </View>
               ) : null}
-              {smartBaseUi != null && smartBaseUi > 0 && (
-                <View style={{ marginBottom: 10, gap: 6 }}>
-                  {/* Compact fare range pill */}
+              {(smartBaseUi != null && smartBaseUi > 0) || (suggestedBidUi != null && suggestedBidUi > 0) ? (
+                <View style={{ marginBottom: 10, gap: 8 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
                     <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                       <Ionicons name="cash-outline" size={13} color="#22d3ee" />
                       <Text style={{ color: '#e2e8f0', fontSize: 12, fontWeight: '700' }}>
-                        ₦{(smartMinUi ?? smartBaseUi).toLocaleString()} – ₦{(smartMaxUi ?? Math.round(smartBaseUi * 1.3)).toLocaleString()}
+                        ₦{(smartMinUi ?? smartBaseUi ?? 0).toLocaleString()} – ₦{(smartMaxUi ?? Math.round((smartBaseUi ?? 0) * 1.3)).toLocaleString()}
                       </Text>
                     </View>
-                    <View style={{ backgroundColor: '#0f2d18', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <TouchableOpacity
+                      activeOpacity={0.85}
+                      onPress={() => {
+                        if (suggestedBidUi != null && suggestedBidUi > 0) {
+                          Haptics.selectionAsync();
+                          setCurrentFare(suggestedBidUi);
+                        }
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Apply suggested fare"
+                      disabled={!suggestedBidUi}
+                      style={{ backgroundColor: '#0f2d18', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                    >
                       <Ionicons name="star" size={12} color="#fbbf24" />
-                      <Text style={{ color: '#86efac', fontSize: 12, fontWeight: '700' }}>Suggested ₦{smartBaseUi.toLocaleString()}</Text>
-                    </View>
-                    {priorityMatch && (
-                      <View style={{ backgroundColor: '#1e3a1e', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4 }}>
-                        <Text style={{ color: COLORS.lime, fontSize: 11, fontWeight: '800' }}>⚡ Priority match</Text>
-                      </View>
-                    )}
+                      <Text style={{ color: '#86efac', fontSize: 12, fontWeight: '700' }}>
+                        Suggested ₦{(suggestedBidUi ?? smartBaseUi ?? 0).toLocaleString()}
+                      </Text>
+                    </TouchableOpacity>
                     {fareDetails?.first_ride_discount_applied && (
                       <View style={{ backgroundColor: 'rgba(0,212,106,0.18)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(0,212,106,0.35)' }}>
                         <Ionicons name="gift-outline" size={12} color="#00D46A" />
-                        <Text style={{ color: '#00D46A', fontSize: 11, fontWeight: '800' }}>
-                          🎉 20% First Ride Discount Applied
-                        </Text>
+                        <Text style={{ color: '#00D46A', fontSize: 11, fontWeight: '800' }}>First ride −20%</Text>
                       </View>
                     )}
                   </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }}>
+                    {fareInsightChips.routeLabel ? (
+                      <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="navigate-outline" size={12} color="#94a3b8" />
+                        <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>{fareInsightChips.routeLabel}</Text>
+                      </View>
+                    ) : null}
+                    {fareInsightChips.cityLabel ? (
+                      <View style={{ backgroundColor: '#1e293b', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Ionicons name="location-outline" size={12} color="#94a3b8" />
+                        <Text style={{ color: '#cbd5e1', fontSize: 11, fontWeight: '700' }}>{fareInsightChips.cityLabel}</Text>
+                      </View>
+                    ) : null}
+                    {fareInsightChips.surgeCompact ? (
+                      <View style={{ backgroundColor: 'rgba(245,158,11,0.14)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(245,158,11,0.4)' }}>
+                        <Ionicons name="flash" size={12} color="#f59e0b" />
+                        <Text style={{ color: '#fbbf24', fontSize: 11, fontWeight: '800' }}>{fareInsightChips.surgeCompact}</Text>
+                      </View>
+                    ) : null}
+                    {fareInsightChips.shortTrip ? (
+                      <View style={{ backgroundColor: 'rgba(14,165,233,0.15)', borderRadius: 20, paddingHorizontal: 10, paddingVertical: 4, flexDirection: 'row', alignItems: 'center', gap: 4, borderWidth: 1, borderColor: 'rgba(14,165,233,0.35)' }}>
+                        <Ionicons name="map-outline" size={12} color={COLORS.blue} />
+                        <Text style={{ color: COLORS.blue, fontSize: 11, fontWeight: '800' }}>
+                          {`Short trip · under ${fareDetails?.short_trip_threshold_km ?? 5} km`}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 12, marginTop: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync();
+                        handleCalculateFare();
+                      }}
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      accessibilityLabel="Refresh fare estimate"
+                      accessibilityRole="button"
+                    >
+                      <Ionicons name="refresh" size={15} color={COLORS.blue} />
+                      <Text style={{ color: COLORS.blue, fontSize: 12, fontWeight: '700' }}>Refresh estimate</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity onPress={() => setFareExplainModal('surge')} accessibilityLabel="About surge pricing" accessibilityRole="button">
+                      <Ionicons name="information-circle-outline" size={20} color="#94a3b8" />
+                    </TouchableOpacity>
+                    {fareDetails?.competitive_positioning_summary ||
+                    (fareDetails?.competitive_positioning_bullets?.length ?? 0) > 0 ? (
+                      <TouchableOpacity
+                        onPress={() => setFareExplainModal('positioning')}
+                        accessibilityLabel="Why Nexryde pricing"
+                        accessibilityRole="button"
+                      >
+                        <Ionicons name="rocket-outline" size={20} color="#a78bfa" />
+                      </TouchableOpacity>
+                    ) : null}
+                    {!isLagosRouteDistanceFare(fareDetails) ? (
+                      <TouchableOpacity onPress={() => setFareExplainModal('short')} accessibilityLabel="About short trip rates" accessibilityRole="button">
+                        <Ionicons name="map-outline" size={20} color="#94a3b8" />
+                      </TouchableOpacity>
+                    ) : null}
+                    <TouchableOpacity onPress={() => setFareExplainModal('breakdown')} accessibilityLabel="Fare breakdown" accessibilityRole="button">
+                      <Ionicons name="list-outline" size={20} color="#94a3b8" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              )}
+              ) : null}
               <Animated.View style={[s.fareRow, { opacity: fareReveal }]}>
                 <TouchableOpacity
                   style={s.fareBtn}
@@ -2008,6 +3456,14 @@ function BookInDriveStyle() {
                     );
                   })}
                 </View>
+                <TouchableOpacity
+                  onPress={() => router.push('/rider/mood-preferences')}
+                  style={{ marginTop: 8, alignSelf: 'flex-end' }}
+                >
+                  <Text style={{ color: COLORS.accentBlue, fontSize: 12, fontWeight: '700' }}>
+                    Manage preferences →
+                  </Text>
+                </TouchableOpacity>
               </View>
               {/* ── Estate Gate Code ─────────────────────────────────── */}
               <View>
@@ -2131,7 +3587,10 @@ function BookInDriveStyle() {
                 </View>
               )}
               <TouchableOpacity style={[s.findBtn, isLoading && { opacity: 0.7 }]} onPress={findOffers} disabled={isLoading} accessibilityLabel="Find ride offers" accessibilityRole="button">
-                <LinearGradient colors={isLoading ? ['#64748b', '#475569'] : [COLORS.green, '#00B455']} style={[s.btnGrad, { paddingVertical: 18 }]}>
+                <LinearGradient
+                  colors={isLoading ? ['#64748b', '#475569'] : [...RIDER_PRIMARY_CTA_GRADIENT]}
+                  style={[s.btnGrad, { paddingVertical: 18 }]}
+                >
                   {isLoading ? (
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <ActivityIndicator color="#fff" size="small" />
@@ -2155,7 +3614,7 @@ function BookInDriveStyle() {
               accessibilityRole="button"
             >
               <LinearGradient
-                colors={pickup && destination && selectedVehicle ? [COLORS.green, '#009E3F'] : ['#334155', '#475569']}
+                colors={pickup && destination && selectedVehicle ? [...RIDER_PRIMARY_CTA_GRADIENT] : ['#334155', '#475569']}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
                 style={[s.calcBtnGrad, { paddingVertical: 18 }]}
@@ -2178,6 +3637,99 @@ function BookInDriveStyle() {
           )}
         </ScrollView>
       </Animated.View>
+
+      <Modal
+        visible={fareExplainModal != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setFareExplainModal(null)}
+      >
+        <TouchableWithoutFeedback onPress={() => setFareExplainModal(null)}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'center', padding: 20 }}>
+            <TouchableWithoutFeedback>
+              <View style={{ backgroundColor: COLORS.card, borderRadius: 16, padding: 18, maxHeight: '75%' }}>
+                <Text style={{ color: COLORS.white, fontSize: 17, fontWeight: '800', marginBottom: 10 }}>
+                  {fareExplainModal === 'surge' && 'Surge pricing'}
+                  {fareExplainModal === 'short' && 'Short trips'}
+                  {fareExplainModal === 'breakdown' && 'Fare breakdown'}
+                  {fareExplainModal === 'positioning' && 'Why Nexryde'}
+                </Text>
+                <ScrollView style={{ maxHeight: 360 }} keyboardShouldPersistTaps="handled">
+                  {fareExplainModal === 'surge' ? (
+                    <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
+                      {(fareDetails?.surge_details as { rider_message?: string } | undefined)?.rider_message ||
+                        'Surge uses the highest active factor: normal pricing (1×), high demand near you (up to 1.3× when the area ratio crosses the threshold), rain (1.4× when flagged), or morning/evening peak windows in WAT (1.5×). Your ride type caps the final multiplier.'}
+                      {'\n\n'}
+                      Demand ratio (this estimate):{' '}
+                      {fareDetails?.demand_ratio != null ? Number(fareDetails.demand_ratio).toFixed(2) : '—'} (
+                      {fareDetails?.demand_ratio_source || '—'}
+                      ).
+                      {fareDetails?.rain_applied ? `\n\nRain / weather factor: ${fareDetails.rain_multiplier ?? '—'}× applied.` : '\n\nNo rain surcharge on this estimate.'}
+                    </Text>
+                  ) : null}
+                  {fareExplainModal === 'positioning' ? (
+                    <View style={{ gap: 12 }}>
+                      {fareDetails?.competitive_positioning_summary ? (
+                        <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
+                          {fareDetails.competitive_positioning_summary}
+                        </Text>
+                      ) : null}
+                      {(fareDetails?.competitive_positioning_bullets ?? []).map((line, i) => (
+                        <Text
+                          key={`cp-${i}-${line.slice(0, 32)}`}
+                          style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}
+                        >
+                          {'\u2022 '}
+                          {line}
+                        </Text>
+                      ))}
+                      <Text style={{ color: '#94a3b8', fontSize: 13, lineHeight: 20, fontStyle: 'italic' }}>
+                        Surge on estimates follows the same max-of-active-factors rule as above (capped for your
+                        service tier).
+                      </Text>
+                      {fareDetails?.driver_payout_policy_note ? (
+                        <Text style={{ color: '#64748b', fontSize: 13, lineHeight: 20 }}>
+                          {fareDetails.driver_payout_policy_note}
+                        </Text>
+                      ) : null}
+                    </View>
+                  ) : null}
+                  {fareExplainModal === 'short' ? (
+                    <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
+                      {isLagosRouteDistanceFare(fareDetails)
+                        ? 'In Lagos, your estimate uses the driving distance on the route. Vehicle tier adjusts the rate, and demand, peak windows, or rain can apply a surge multiplier. Open the fare breakdown for the line-item view.'
+                        : `Trips under about ${fareDetails?.short_trip_threshold_km ?? 5} km use the short-trip rate card (base, per km, and per minute). Booking fee, minimum fare, surge cap, and cancellation fee still follow your city and service tier.`}
+                    </Text>
+                  ) : null}
+                  {fareExplainModal === 'breakdown' ? (
+                    <Text style={{ color: COLORS.muted, fontSize: 14, lineHeight: 22 }}>
+                      {fareDetails?.lagride_profile?.rider_value_summary
+                        ? `${String(fareDetails.lagride_profile.rider_value_summary)}\n\n`
+                        : ''}
+                      {fareDetails?.price_breakdown
+                        ? `${humanizeFareBreakdownLine(String(fareDetails.price_breakdown))}\n\n`
+                        : ''}
+                      {fareDetails
+                        ? isLagosRouteDistanceFare(fareDetails)
+                          ? `Lagos route fare · Distance line ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} (area and vehicle tier before surge) · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
+                          : `Base ₦${Number(fareDetails.base_fare ?? 0).toLocaleString()} · Distance ₦${Number(fareDetails.distance_fee ?? 0).toLocaleString()} · Time ₦${Number(fareDetails.time_fee ?? 0).toLocaleString()} · Traffic ₦${Number(fareDetails.traffic_fee ?? 0).toLocaleString()} · Booking ₦${Number(fareDetails.booking_fee ?? 0).toLocaleString()}\nSubtotal ₦${Number(fareDetails.subtotal ?? 0).toLocaleString()} · Surge ${fareDetails.surge_multiplier ?? 1}×\nTotal ₦${Number(fareDetails.total_fare ?? 0).toLocaleString()}`
+                        : 'Get a fare estimate to see the breakdown.'}
+                    </Text>
+                  ) : null}
+                </ScrollView>
+                <TouchableOpacity
+                  onPress={() => setFareExplainModal(null)}
+                  style={{ marginTop: 14, alignSelf: 'flex-end', paddingVertical: 8, paddingHorizontal: 12 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close"
+                >
+                  <Text style={{ color: COLORS.green, fontWeight: '800' }}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
 
       {/* LOCATION MODAL */}
       <Modal visible={showLocationModal} animationType="slide" onRequestClose={() => setShowLocationModal(false)}>
@@ -2271,6 +3823,9 @@ function BookInDriveStyle() {
                   Alert.alert('Location', 'Could not load that place. Try another suggestion or type the address again.');
                 }
               }}
+              biasLat={pickupCoords?.lat ?? currentLocation?.lat}
+              biasLng={pickupCoords?.lng ?? currentLocation?.lng}
+              biasRadiusM={42000}
               apiKey={process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || ''}
               placeholderTextColor="#64748B"
             />
@@ -2333,83 +3888,49 @@ function BookInDriveStyle() {
         </View>
       </Modal>
 
-      {/* SEARCHING MODAL */}
-      <Modal visible={searchingForDriver} animationType="fade" transparent onRequestClose={cancelSearch}>
-        <View style={s.searchBg}>
-          <View style={s.searchBox}>
-            {!driverFound ? (
-              <>
-                {/* Animated pulse ring around spinner */}
-                <View style={s.searchSpinnerWrap}>
-                  <View style={s.searchSpinnerRing} />
-                  <ActivityIndicator size="large" color={COLORS.green} />
-                </View>
-                <Text style={s.searchTitle}>
-                  {requestedDriverId ? `Requesting ${requestedDriverName || 'Your Driver'}…` : 'Finding Your Driver…'}
-                </Text>
-                <Text style={s.searchSub}>
-                  {requestedDriverId
-                    ? `₦${currentFare.toLocaleString()} · Priority request sent`
-                    : `₦${currentFare.toLocaleString()} sent to nearby drivers`}
-                </Text>
-                {searchCountdown > 0 && (
-                  <View style={s.searchCountdownRow}>
-                    <Ionicons name="time-outline" size={14} color={searchCountdown <= 15 ? COLORS.red : COLORS.muted} />
-                    <Text style={s.searchCountdownText}>
-                      Offer expires in{' '}
-                      <Text style={{ fontWeight: '900', color: searchCountdown <= 15 ? COLORS.red : COLORS.white }}>
-                        {searchCountdown}s
-                      </Text>
-                    </Text>
-                  </View>
-                )}
-                <TouchableOpacity style={s.searchCancel} onPress={cancelSearch} accessibilityLabel="Cancel search" accessibilityRole="button">
-                  <Text style={{ color: COLORS.red, fontWeight: '800', fontSize: 15 }}>Cancel Search</Text>
-                </TouchableOpacity>
-              </>
-            ) : (
-              <>
-                {/* Success checkmark */}
-                <View style={s.searchSuccessRing}>
-                  <Ionicons name="checkmark" size={36} color={COLORS.green} />
-                </View>
-                <Text style={s.searchTitle}>Driver Found!</Text>
-                <Text style={[s.searchSub, { marginBottom: 12 }]}>Your ride is confirmed — driver is on the way</Text>
-                <View style={s.driverCard}>
-                  <View style={s.driverAvatar}>
-                    <Ionicons name="person" size={26} color={COLORS.green} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.driverName}>{driverFound.name}</Text>
-                    <Text style={s.driverVeh}>{driverFound.vehicle}</Text>
-                    <Text style={s.driverPlate}>{driverFound.plate} · {driverFound.color}</Text>
-                  </View>
-                  <View style={s.driverRatingBadge}>
-                    <Ionicons name="star" size={13} color="#F59E0B" />
-                    <Text style={s.driverRatingText}>
-                      {Number(driverFound?.rating ?? 0).toFixed(1)}
-                    </Text>
-                  </View>
-                </View>
-                <TouchableOpacity
-                  style={s.doneBtn}
-                  onPress={() => {
-                    setSearchingForDriver(false);
-                    setDriverFound(null);
-                    router.replace({
-                      pathname: '/rider/tracking',
-                      params: { tripId: tripId || '', pickup, destination },
-                    } as any);
-                  }}
-                >
-                  <Ionicons name="navigate" size={18} color="#fff" />
-                  <Text style={{ color: '#FFF', fontWeight: '900', fontSize: 16, marginLeft: 8 }}>Track Driver</Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </View>
-        </View>
-      </Modal>
+      <RiderPostRequestOverlay
+        visible={searchingForDriver}
+        phase={driverFound ? 'matched' : 'searching'}
+        topInset={insets.top}
+        bottomInset={insets.bottom}
+        requestedDriverId={requestedDriverId}
+        requestedDriverName={requestedDriverName}
+        bidNgn={currentFare}
+        routeKmLabel={searchRouteKmLabel}
+        routeMinLabel={searchRouteMinLabel}
+        searchCountdown={searchCountdown}
+        driverMatched={matchedDriverForOverlay}
+        onMenuPress={() => {
+          if (Platform.OS !== 'web') void Haptics.selectionAsync();
+          router.back();
+        }}
+        onCancelSearch={() => void cancelSearch()}
+        onTrackDriver={() => {
+          setSearchingForDriver(false);
+          setDriverFound(null);
+          router.replace({
+            pathname: '/rider/tracking',
+            params: { tripId: tripId || '', pickup, destination },
+          } as any);
+        }}
+        onCallDriver={() => {
+          const raw = matchedDriverForOverlay?.phone?.trim();
+          if (!raw) {
+            Alert.alert('Call unavailable', 'Driver phone will appear here once the line is connected.');
+            return;
+          }
+          const digits = raw.replace(/[^\d+]/g, '');
+          const href = digits.startsWith('+') ? `tel:${digits}` : `tel:${raw.replace(/\s/g, '')}`;
+          void Linking.openURL(href);
+        }}
+        onChatDriver={() => {
+          if (!tripId) {
+            Alert.alert('Chat unavailable', 'Trip is still being set up. Try again in a moment.');
+            return;
+          }
+          router.push({ pathname: '/chat', params: { tripId } } as any);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -2417,30 +3938,109 @@ function BookInDriveStyle() {
 const s = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.bg },
   mapArea: { height: '42%', position: 'relative', backgroundColor: '#0D1420', overflow: 'hidden' },
+  mapBidRouteCard: {
+    position: 'absolute',
+    top: 68,
+    zIndex: 4,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 10,
+  },
+  mapBidRouteInner: { paddingVertical: 12 },
+  mapBidRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  mapBidDot: { width: 9, height: 9, borderRadius: 5 },
+  mapBidLine: {
+    width: 2,
+    height: 12,
+    backgroundColor: 'rgba(148,163,184,0.35)',
+    marginLeft: 3,
+    marginVertical: 4,
+    borderRadius: 2,
+  },
+  mapBidTxt: { flex: 1, color: '#F1F5F9', fontSize: 13, fontWeight: '700', lineHeight: 18 },
   mapPlaceholder: { flex: 1, backgroundColor: COLORS.card, alignItems: 'center', justifyContent: 'center' },
   mapText: { fontSize: 14, color: COLORS.dim, marginTop: 10 },
   mapRouteHint: {
     position: 'absolute',
     bottom: 12,
-    left: 16,
-    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
-    borderRadius: 20,
-    backgroundColor: 'rgba(13,20,32,0.88)',
+    gap: 8,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 22,
+    backgroundColor: 'rgba(11,18,32,0.92)',
     borderWidth: 1,
-    borderColor: 'rgba(184,241,27,0.3)',
+    borderColor: 'rgba(148,163,184,0.18)',
+    zIndex: 3,
   },
-  mapRouteHintText: { color: COLORS.lime, fontSize: 12, fontWeight: '700' },
+  mapRouteHintText: { color: COLORS.lime, fontSize: 12, fontWeight: '800', letterSpacing: 0.2 },
+  routeSummaryBarOuter: {
+    position: 'absolute',
+    bottom: 10,
+    zIndex: 4,
+    borderRadius: 18,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  routeSummaryGradient: { paddingVertical: 13, paddingHorizontal: 14 },
+  routeSummaryRow: { flexDirection: 'row', alignItems: 'stretch' },
+  routeSummaryBlock: { minWidth: 76, justifyContent: 'center' },
+  routeSummaryBlockRight: { minWidth: 72, justifyContent: 'center', alignItems: 'flex-end' },
+  routeSummaryMid: { flex: 1, paddingHorizontal: 10, justifyContent: 'center' },
+  routeSummaryKicker: {
+    color: 'rgba(148,163,184,0.95)',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
+  routeSummaryHero: {
+    color: '#F8FAFC',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+  },
+  routeSummaryArrive: {
+    color: '#F1F5F9',
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  routeSummaryMeta: {
+    marginTop: 3,
+    color: 'rgba(56,189,248,0.95)',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  routeSummaryDist: {
+    color: '#E2E8F0',
+    fontSize: 16,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+  routeSummaryVsep: {
+    width: 1,
+    backgroundColor: 'rgba(148,163,184,0.22)',
+    marginVertical: 2,
+  },
   gpsErrorBanner: {
     position: 'absolute',
     bottom: 12,
-    left: 16,
-    right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -2454,33 +4054,43 @@ const s = StyleSheet.create({
   gpsErrorText: { flex: 1, color: COLORS.yellow, fontSize: 12, fontWeight: '600' },
   mapTopBar: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
+    top: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    zIndex: 4,
+    zIndex: 5,
   },
   backBtnCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(26,35,50,0.94)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15,23,42,0.88)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 6,
   },
   pickupChip: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(26,35,50,0.94)',
+    backgroundColor: 'rgba(15,23,42,0.88)',
     borderRadius: 22,
     paddingVertical: 11,
     paddingHorizontal: 14,
     borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.22)',
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 5,
   },
   pickupDot: { width: 10, height: 10, borderRadius: 5 },
   pickupChipLabel: { flex: 1, fontSize: 13, fontWeight: '700', color: COLORS.white },
@@ -2673,10 +4283,22 @@ const s = StyleSheet.create({
     borderColor: 'rgba(255,184,0,0.25)',
   },
   walletWarnText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FDE68A' },
-  preferredBanner: { position: 'absolute', bottom: 16, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' },
-  preferredText: { flex: 1, fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
+  preferredBanner: {
+    position: 'absolute',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(239,68,68,0.15)',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  preferredText: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
+  preferredSub: { marginTop: 3, fontSize: 11, fontWeight: '600', color: 'rgba(252,211,231,0.85)', lineHeight: 15 },
   sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
-  sheetContent: { paddingHorizontal: 20, paddingTop: 8 },
+  sheetContent: { flexGrow: 1 },
   scheduledCard: {
     backgroundColor: '#10213A',
     borderRadius: 16,
@@ -3097,7 +4719,7 @@ const s = StyleSheet.create({
   modalKb: { flex: 1 },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
   modalTitle: { fontSize: 18, fontWeight: '800', color: COLORS.white },
-  modalBody: { flex: 1, padding: 16 },
+  modalBody: { flex: 1, padding: 16, overflow: 'visible' },
   useGpsBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, backgroundColor: COLORS.card, borderRadius: 14, marginTop: 16 },
   useGpsText: { fontSize: 15, fontWeight: '700', color: COLORS.green },
   vehModalBg: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

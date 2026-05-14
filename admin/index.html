@@ -313,6 +313,63 @@
             margin-bottom: 16px;
         }
         
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeSlideIn { from { opacity:0;transform:translateY(8px); } to { opacity:1;transform:translateY(0); } }
+        @keyframes ninRevealPulse { 0%,100%{box-shadow:0 0 0 0 rgba(34,197,94,.3);} 50%{box-shadow:0 0 0 8px rgba(34,197,94,0);} }
+
+        /* Rider security stat cards */
+        .rider-stat-card {
+            background:#0A1628;border:1px solid #1E293B;border-radius:14px;padding:14px 16px;
+            display:flex;align-items:center;gap:12px;transition:transform .2s,box-shadow .2s;
+        }
+        .rider-stat-card:hover { transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.4); }
+
+        /* Filter chips */
+        .rchip {
+            background:#0F172A;border:1px solid #1E293B;color:#94A3B8;padding:5px 12px;border-radius:20px;
+            font-size:12px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap;
+            display:flex;align-items:center;gap:4px;
+        }
+        .rchip:hover { border-color:#6366F1;color:#A5B4FC; }
+        .rchip.active { background:rgba(99,102,241,.15);border-color:#6366F1;color:#818CF8; }
+
+        /* Rider modal tabs */
+        .rmodal-tab {
+            background:none;border:none;color:#64748B;padding:10px 16px;cursor:pointer;font-size:13px;
+            font-weight:600;border-bottom:2px solid transparent;transition:all .2s;display:flex;align-items:center;gap:6px;
+            margin-bottom:-1px;
+        }
+        .rmodal-tab:hover { color:#94A3B8; }
+        .rmodal-tab.active { color:#818CF8;border-bottom-color:#6366F1; }
+
+        /* Rider table row */
+        #ridersTable tr { animation: fadeSlideIn .25s ease; }
+        #ridersTable td { vertical-align:middle; }
+
+        /* Skeleton loader */
+        .skel {
+            background:linear-gradient(90deg,#0F172A 25%,#1E293B 50%,#0F172A 75%);
+            background-size:200% 100%;animation:skelShimmer 1.4s infinite;border-radius:6px;
+        }
+        @keyframes skelShimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+        /* NIN box */
+        .nin-reveal-box {
+            background:#0A1F14;border:1px solid #1A3D2A;border-radius:12px;padding:14px 16px;
+            display:flex;align-items:center;gap:12px;transition:box-shadow .3s;
+        }
+        .nin-reveal-box.revealed { animation:ninRevealPulse 1s ease; border-color:#22C55E66; }
+
+        /* Info rows in modal */
+        .info-row { display:flex;align-items:flex-start;padding:10px 0;border-bottom:1px solid #0D1D2E; }
+        .info-row:last-child { border-bottom:none; }
+        .info-label { color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;width:120px;flex-shrink:0;padding-top:1px; }
+        .info-value { color:#CBD5E1;font-size:13px;font-weight:500;flex:1;word-break:break-word; }
+
+        /* Trip item */
+        .trip-item { padding:12px 0;border-bottom:1px solid #0D1D2E;display:flex;justify-content:space-between;align-items:flex-start; }
+        .trip-item:last-child { border-bottom:none; }
+
         /* Modal */
         .modal-overlay {
             position: fixed;
@@ -511,24 +568,71 @@
 
             <!-- Riders Page -->
             <div class="page-section" id="page-riders">
+
+                <!-- Security stats bar -->
+                <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px;" id="riderSecurityStats">
+                    <div class="rider-stat-card" style="border-color:#6366F133;">
+                        <i class="ri-group-line" style="color:#6366F1;font-size:20px;"></i>
+                        <div><p id="rsc_total" style="font-size:22px;font-weight:800;color:#F1F5F9;">–</p><p style="color:#64748B;font-size:11px;font-weight:600;">Total Riders</p></div>
+                    </div>
+                    <div class="rider-stat-card" style="border-color:#22C55E33;">
+                        <i class="ri-shield-check-line" style="color:#22C55E;font-size:20px;"></i>
+                        <div><p id="rsc_verified" style="font-size:22px;font-weight:800;color:#22C55E;">–</p><p style="color:#64748B;font-size:11px;font-weight:600;">Face Verified</p></div>
+                    </div>
+                    <div class="rider-stat-card" style="border-color:#6366F133;">
+                        <i class="ri-id-card-line" style="color:#818CF8;font-size:20px;"></i>
+                        <div><p id="rsc_nin" style="font-size:22px;font-weight:800;color:#818CF8;">–</p><p style="color:#64748B;font-size:11px;font-weight:600;">NIN Submitted</p></div>
+                    </div>
+                    <div class="rider-stat-card" style="border-color:#F59E0B33;">
+                        <i class="ri-time-line" style="color:#F59E0B;font-size:20px;"></i>
+                        <div><p id="rsc_suspended" style="font-size:22px;font-weight:800;color:#F59E0B;">–</p><p style="color:#64748B;font-size:11px;font-weight:600;">Suspended</p></div>
+                    </div>
+                    <div class="rider-stat-card" style="border-color:#EF444433;">
+                        <i class="ri-forbid-line" style="color:#EF4444;font-size:20px;"></i>
+                        <div><p id="rsc_blocked" style="font-size:22px;font-weight:800;color:#EF4444;">–</p><p style="color:#64748B;font-size:11px;font-weight:600;">Blocked</p></div>
+                    </div>
+                </div>
+
                 <div class="card">
-                    <div class="card-header">
-                        <h3>All Riders</h3>
-                        <span class="badge blue" id="riderCount">0 riders</span>
+                    <div class="card-header" style="flex-wrap:wrap;gap:12px;">
+                        <div style="display:flex;align-items:center;gap:12px;">
+                            <h3>All Riders</h3>
+                            <span class="badge blue" id="riderCount">0 riders</span>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                            <!-- Search -->
+                            <div style="position:relative;">
+                                <i class="ri-search-line" style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:#64748B;font-size:14px;pointer-events:none;"></i>
+                                <input id="riderSearchInput" type="text" placeholder="Search name, phone, email…"
+                                    style="background:#0F172A;border:1px solid #1E293B;border-radius:10px;color:#E2E8F0;padding:8px 12px 8px 32px;font-size:13px;width:220px;outline:none;transition:border .2s;"
+                                    oninput="filterRidersTable()" onfocus="this.style.borderColor='#6366F1'" onblur="this.style.borderColor='#1E293B'">
+                            </div>
+                            <!-- Filter chips -->
+                            <div style="display:flex;gap:6px;" id="riderFilterChips">
+                                <button class="rchip active" data-filter="all" onclick="setRiderFilter('all',this)">All</button>
+                                <button class="rchip" data-filter="no_nin" onclick="setRiderFilter('no_nin',this)"><i class="ri-shield-cross-line"></i> No NIN</button>
+                                <button class="rchip" data-filter="no_face" onclick="setRiderFilter('no_face',this)"><i class="ri-user-unfollow-line"></i> Unverified</button>
+                                <button class="rchip" data-filter="blocked" onclick="setRiderFilter('blocked',this)"><i class="ri-forbid-line"></i> Blocked</button>
+                                <button class="rchip" data-filter="suspended" onclick="setRiderFilter('suspended',this)"><i class="ri-time-line"></i> Suspended</button>
+                            </div>
+                        </div>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Name</th>
+                                <th style="width:36px;"></th>
+                                <th>Rider</th>
                                 <th>Phone</th>
-                                <th>Email</th>
                                 <th>Trips</th>
+                                <th>NIN</th>
+                                <th>Face ID</th>
                                 <th>Status</th>
+                                <th>Joined</th>
                                 <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="ridersTable">
-                            <tr><td colspan="6" class="empty-state"><i class="ri-user-line"></i><p>No riders yet</p></td></tr>
+                            <tr><td colspan="9" class="empty-state"><i class="ri-user-line"></i><p>No riders yet</p></td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -924,6 +1028,55 @@
         </main>
     </div>
 
+    <!-- ── Rider Identity Modal ─────────────────────────────────────────── -->
+    <div id="riderModal" onclick="if(event.target===this)closeRiderModal()"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:10000;align-items:flex-end;justify-content:center;padding:0;">
+        <div id="riderModalSheet"
+            style="background:#08111E;border:1px solid #1A2740;border-radius:24px 24px 0 0;width:100%;max-width:980px;max-height:94vh;overflow:hidden;position:relative;
+                   box-shadow:0 -12px 60px rgba(0,0,0,.9);transform:translateY(100%);transition:transform .35s cubic-bezier(.32,.72,0,1);display:flex;flex-direction:column;">
+
+            <!-- Drag handle -->
+            <div style="display:flex;justify-content:center;padding:10px 0 0;">
+                <div style="width:36px;height:4px;background:#1E2D42;border-radius:4px;"></div>
+            </div>
+
+            <!-- Sticky Header -->
+            <div id="riderModalHeader" style="padding:16px 24px 0;flex-shrink:0;">
+                <!-- skeleton shown while loading -->
+                <div id="riderModalHeaderInner" style="display:flex;align-items:center;gap:16px;">
+                    <div id="riderModalAvatar" style="width:52px;height:52px;border-radius:50%;background:#1E2D42;flex-shrink:0;overflow:hidden;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800;color:#fff;border:2px solid #334155;"></div>
+                    <div style="flex:1;min-width:0;">
+                        <p id="riderModalName" style="font-size:18px;font-weight:800;color:#F1F5F9;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">—</p>
+                        <p id="riderModalSub" style="color:#64748B;font-size:12px;margin:0;">Loading…</p>
+                    </div>
+                    <div id="riderModalStatusBadge"></div>
+                    <button onclick="closeRiderModal()"
+                        style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.07);border:none;color:#94A3B8;font-size:22px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;">&times;</button>
+                </div>
+
+                <!-- Tab bar -->
+                <div style="display:flex;gap:0;margin-top:16px;border-bottom:1px solid #1A2740;">
+                    <button class="rmodal-tab active" data-tab="overview" onclick="switchRiderTab('overview',this)"><i class="ri-user-line"></i> Overview</button>
+                    <button class="rmodal-tab" data-tab="identity" onclick="switchRiderTab('identity',this)"><i class="ri-shield-user-line"></i> Identity & Security</button>
+                    <button class="rmodal-tab" data-tab="trips" onclick="switchRiderTab('trips',this)"><i class="ri-map-pin-line"></i> Trips</button>
+                    <button class="rmodal-tab" data-tab="actions" onclick="switchRiderTab('actions',this)"><i class="ri-settings-4-line"></i> Actions</button>
+                </div>
+            </div>
+
+            <!-- Scrollable body -->
+            <div id="riderModalBody" style="flex:1;overflow-y:auto;padding:24px;"></div>
+        </div>
+    </div>
+
+    <!-- Face photo lightbox -->
+    <div id="faceLightbox" onclick="document.getElementById('faceLightbox').style.display='none'"
+        style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:11000;align-items:center;justify-content:center;cursor:zoom-out;">
+        <img id="faceLightboxImg" style="max-width:90vw;max-height:90vh;border-radius:16px;box-shadow:0 0 80px rgba(0,0,0,.8);object-fit:contain;" src="" alt="Face ID">
+        <button onclick="document.getElementById('faceLightbox').style.display='none'"
+            style="position:absolute;top:20px;right:20px;background:rgba(255,255,255,.1);border:none;color:#fff;font-size:28px;cursor:pointer;border-radius:50%;width:44px;height:44px;">&times;</button>
+    </div>
+    <!-- ──────────────────────────────────────────────────────────────────── -->
+
     <!-- Shield Case Detail Modal -->
     <div class="modal-overlay" id="shieldModal" style="display:none;z-index:9999;">
         <div class="modal-content" style="max-width:700px;max-height:92vh;overflow-y:auto;padding:0;">
@@ -1063,10 +1216,50 @@
         const API_URL = '/api';
         let adminToken = localStorage.getItem('adminToken');
 
-        // Check if logged in
-        if (adminToken) {
-            showDashboard();
+        // ── Central fetch wrapper — auto-handles 401 session expiry ─────────
+        async function adminFetch(url, options = {}) {
+            const headers = {
+                ...(options.headers || {}),
+                'x-admin-token': adminToken || '',
+            };
+            const res = await fetch(url, { ...options, headers });
+            if (res.status === 401) {
+                // Session expired — clear token and redirect to login
+                localStorage.removeItem('adminToken');
+                adminToken = null;
+                document.getElementById('dashboard').style.display = 'none';
+                document.getElementById('loginPage').style.display = 'flex';
+                const errEl = document.getElementById('loginError');
+                errEl.style.display = 'block';
+                errEl.textContent = 'Your session expired — please log in again.';
+                throw new Error('Session expired');
+            }
+            return res;
         }
+        // ────────────────────────────────────────────────────────────────────
+
+        // Validate token on every page load — never silently stay with an expired session
+        async function validateAndShow() {
+            if (!adminToken) return; // not logged in, stay on login page
+            try {
+                const r = await fetch(`${API_URL}/admin/overview`, {
+                    headers: { 'x-admin-token': adminToken }
+                });
+                if (r.status === 401) {
+                    localStorage.removeItem('adminToken');
+                    adminToken = null;
+                    const errEl = document.getElementById('loginError');
+                    errEl.style.display = 'block';
+                    errEl.textContent = 'Your session expired — please log in again.';
+                    return;
+                }
+                showDashboard();
+            } catch {
+                // Network error — still try to show dashboard
+                showDashboard();
+            }
+        }
+        validateAndShow();
 
         // Login Form
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
@@ -1143,7 +1336,7 @@
         // API Calls
         async function loadOverview() {
             try {
-                const res = await fetch(`${API_URL}/admin/overview`);
+                const res = await adminFetch(`${API_URL}/admin/overview`);
                 const data = await res.json();
                 
                 document.getElementById('totalRiders').textContent = data.total_riders || 0;
@@ -1155,37 +1348,160 @@
             }
         }
 
+        // ── Rider list ──────────────────────────────────────────────────────
+        let _allRiders = [];
+        let _riderFilter = 'all';
+
         async function loadRiders() {
+            // Show skeleton
+            document.getElementById('ridersTable').innerHTML =
+                Array(5).fill(0).map(() => `
+                    <tr>
+                        <td><div class="skel" style="width:32px;height:32px;border-radius:50%;"></div></td>
+                        <td><div class="skel" style="width:130px;height:14px;border-radius:6px;"></div><div class="skel" style="width:100px;height:11px;border-radius:6px;margin-top:5px;"></div></td>
+                        <td><div class="skel" style="width:90px;height:13px;border-radius:6px;"></div></td>
+                        <td><div class="skel" style="width:30px;height:13px;border-radius:6px;"></div></td>
+                        <td><div class="skel" style="width:50px;height:20px;border-radius:10px;"></div></td>
+                        <td><div class="skel" style="width:50px;height:20px;border-radius:10px;"></div></td>
+                        <td><div class="skel" style="width:55px;height:20px;border-radius:10px;"></div></td>
+                        <td><div class="skel" style="width:60px;height:11px;border-radius:6px;"></div></td>
+                        <td><div class="skel" style="width:80px;height:28px;border-radius:8px;"></div></td>
+                    </tr>
+                `).join('');
+
             try {
-                const res = await fetch(`${API_URL}/admin/riders`);
+                const res = await adminFetch(`${API_URL}/admin/riders?limit=500`);
                 const data = await res.json();
-                
-                document.getElementById('riderCount').textContent = `${data.riders?.length || 0} riders`;
-                
-                if (data.riders && data.riders.length > 0) {
-                    document.getElementById('ridersTable').innerHTML = data.riders.map(r => `
-                        <tr>
-                            <td>${r.name || 'N/A'}</td>
-                            <td>${r.phone || 'N/A'}</td>
-                            <td>${r.email || 'N/A'}</td>
-                            <td>${r.total_trips || 0}</td>
-                            <td><span class="badge ${r.blocked ? 'red' : 'green'}">${r.blocked ? 'Blocked' : 'Active'}</span></td>
-                            <td>
-                                <button class="action-btn ${r.blocked ? 'approve' : 'block'}" onclick="toggleUserBlock('${r.id}', ${!r.blocked})">
-                                    ${r.blocked ? 'Unblock' : 'Block'}
-                                </button>
-                            </td>
-                        </tr>
-                    `).join('');
-                }
+                _allRiders = data.riders || [];
+
+                // Update security stats
+                const total     = _allRiders.length;
+                const verified  = _allRiders.filter(r => r.face_verified).length;
+                const hasNin    = _allRiders.filter(r => r.has_nin).length;
+                const suspended = _allRiders.filter(r => r.suspended_until && new Date(r.suspended_until) > new Date()).length;
+                const blocked   = _allRiders.filter(r => r.blocked).length;
+
+                _animCount('rsc_total',     total);
+                _animCount('rsc_verified',  verified);
+                _animCount('rsc_nin',       hasNin);
+                _animCount('rsc_suspended', suspended);
+                _animCount('rsc_blocked',   blocked);
+
+                document.getElementById('riderCount').textContent = `${total} riders`;
+                _renderRidersTable();
             } catch (err) {
                 console.error('Load riders error:', err);
+                document.getElementById('ridersTable').innerHTML =
+                    `<tr><td colspan="9" class="empty-state"><i class="ri-error-warning-line" style="color:#EF4444;"></i><p style="color:#EF4444;">Failed to load riders</p></td></tr>`;
             }
+        }
+
+        function _animCount(id, target) {
+            const el = document.getElementById(id);
+            if (!el) return;
+            let cur = 0;
+            const step = Math.max(1, Math.ceil(target / 30));
+            const t = setInterval(() => {
+                cur = Math.min(cur + step, target);
+                el.textContent = cur;
+                if (cur >= target) clearInterval(t);
+            }, 30);
+        }
+
+        function setRiderFilter(filter, btn) {
+            _riderFilter = filter;
+            document.querySelectorAll('.rchip').forEach(c => c.classList.remove('active'));
+            btn.classList.add('active');
+            _renderRidersTable();
+        }
+
+        function filterRidersTable() { _renderRidersTable(); }
+
+        function _renderRidersTable() {
+            const q = (document.getElementById('riderSearchInput')?.value || '').toLowerCase().trim();
+            let riders = _allRiders;
+
+            // Filter chip
+            if (_riderFilter === 'no_nin')    riders = riders.filter(r => !r.has_nin);
+            if (_riderFilter === 'no_face')   riders = riders.filter(r => !r.face_verified);
+            if (_riderFilter === 'blocked')   riders = riders.filter(r => r.blocked);
+            if (_riderFilter === 'suspended') riders = riders.filter(r => r.suspended_until && new Date(r.suspended_until) > new Date());
+
+            // Search
+            if (q) riders = riders.filter(r =>
+                (r.name||'').toLowerCase().includes(q) ||
+                (r.phone||'').toLowerCase().includes(q) ||
+                (r.email||'').toLowerCase().includes(q) ||
+                (r.nin||'').toLowerCase().includes(q)
+            );
+
+            document.getElementById('riderCount').textContent = `${riders.length} riders`;
+
+            if (!riders.length) {
+                document.getElementById('ridersTable').innerHTML =
+                    `<tr><td colspan="9" class="empty-state"><i class="ri-user-search-line"></i><p>No riders match your filter</p></td></tr>`;
+                return;
+            }
+
+            document.getElementById('ridersTable').innerHTML = riders.map(r => {
+                const initials = (r.name || 'R').split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
+                const avatarBg = _strColor(r.id || r.name || '');
+                const joinDate = r.created_at ? new Date(r.created_at).toLocaleDateString('en-NG', {day:'numeric',month:'short',year:'numeric'}) : '—';
+                const isSuspended = r.suspended_until && new Date(r.suspended_until) > new Date();
+                const statusHtml = r.blocked
+                    ? `<span style="background:#3D1A1A;color:#EF4444;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-forbid-line"></i> Blocked</span>`
+                    : isSuspended
+                    ? `<span style="background:#2D1A00;color:#F59E0B;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-time-line"></i> Suspended</span>`
+                    : `<span style="background:#0F3D2B;color:#22C55E;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-checkbox-circle-line"></i> Active</span>`;
+
+                return `
+                    <tr style="cursor:pointer;" onclick="viewRider('${r.id}')" onmouseenter="this.style.background='rgba(99,102,241,.04)'" onmouseleave="this.style.background=''">
+                        <td onclick="event.stopPropagation()"></td>
+                        <td>
+                            <div style="display:flex;align-items:center;gap:10px;">
+                                <div style="width:34px;height:34px;border-radius:50%;background:${avatarBg};flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#fff;">${initials}</div>
+                                <div>
+                                    <p style="font-weight:700;color:#E2E8F0;font-size:13px;margin:0;">${r.name || 'Unknown'}</p>
+                                    <p style="color:#475569;font-size:11px;margin:0;">${r.email || '—'}</p>
+                                </div>
+                            </div>
+                        </td>
+                        <td style="color:#94A3B8;font-size:13px;">${r.phone || '—'}</td>
+                        <td style="font-weight:700;color:#E2E8F0;text-align:center;">${r.total_trips || 0}</td>
+                        <td>
+                            ${r.has_nin
+                                ? `<span style="background:#0F3D2B;color:#22C55E;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-shield-check-line"></i> Yes</span>`
+                                : `<span style="background:#3D1A1A;color:#EF4444;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-shield-cross-line"></i> No</span>`
+                            }
+                        </td>
+                        <td>
+                            ${r.face_verified
+                                ? `<span style="background:#0F3D2B;color:#22C55E;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-user-smile-line"></i> ✓ Done</span>`
+                                : `<span style="background:#2D1A00;color:#F59E0B;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-user-line"></i> Pending</span>`
+                            }
+                        </td>
+                        <td>${statusHtml}</td>
+                        <td style="color:#475569;font-size:12px;">${joinDate}</td>
+                        <td onclick="event.stopPropagation()" style="white-space:nowrap;">
+                            <button class="action-btn view" onclick="viewRider('${r.id}')" style="padding:5px 10px;font-size:12px;">
+                                <i class="ri-eye-line"></i> View
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function _strColor(str) {
+            let h = 0;
+            for (let i = 0; i < str.length; i++) h = str.charCodeAt(i) + ((h << 5) - h);
+            const colors = ['#6366F1','#8B5CF6','#EC4899','#F59E0B','#10B981','#3B82F6','#EF4444','#14B8A6'];
+            return colors[Math.abs(h) % colors.length];
         }
 
         async function loadDrivers() {
             try {
-                const res = await fetch(`${API_URL}/admin/drivers`);
+                const res = await adminFetch(`${API_URL}/admin/drivers`);
                 const data = await res.json();
                 
                 document.getElementById('driverCount').textContent = `${data.drivers?.length || 0} drivers`;
@@ -1211,7 +1527,7 @@
 
         async function loadTrips() {
             try {
-                const res = await fetch(`${API_URL}/admin/trips`);
+                const res = await adminFetch(`${API_URL}/admin/trips`);
                 const data = await res.json();
                 
                 document.getElementById('tripCount').textContent = `${data.trips?.length || 0} trips`;
@@ -1235,7 +1551,7 @@
 
         async function loadPayments() {
             try {
-                const res = await fetch(`${API_URL}/admin/payments`);
+                const res = await adminFetch(`${API_URL}/admin/payments`);
                 const data = await res.json();
                 
                 // Store payments for modal display
@@ -1272,7 +1588,7 @@
         async function approvePayment(subscriptionId) {
             if (!confirm('Approve this subscription payment?')) return;
             try {
-                await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/approve`, { method: 'POST' });
+                await adminFetch(`${API_URL}/admin/subscriptions/${subscriptionId}/approve`, { method: 'POST' });
                 loadPayments();
                 alert('Subscription approved successfully!');
             } catch (err) {
@@ -1285,7 +1601,7 @@
             const reason = prompt('Enter rejection reason:', 'Payment verification failed');
             if (!reason) return;
             try {
-                await fetch(`${API_URL}/admin/subscriptions/${subscriptionId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                await adminFetch(`${API_URL}/admin/subscriptions/${subscriptionId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
                 loadPayments();
                 alert('Subscription rejected');
             } catch (err) {
@@ -1296,7 +1612,7 @@
 
         async function loadVerifications() {
             try {
-                const res = await fetch(`${API_URL}/admin/verifications`);
+                const res = await adminFetch(`${API_URL}/admin/verifications`);
                 const data = await res.json();
                 
                 const pendingCount = data.verifications?.filter(v => v.status === 'pending').length || 0;
@@ -1332,7 +1648,7 @@
 
         async function loadPromos() {
             try {
-                const res = await fetch(`${API_URL}/admin/promos`);
+                const res = await adminFetch(`${API_URL}/admin/promos`);
                 const data = await res.json();
                 
                 if (data.promos && data.promos.length > 0) {
@@ -1375,7 +1691,7 @@
         async function approveVerification(driverId) {
             if (!confirm('Approve this driver verification?')) return;
             try {
-                await fetch(`${API_URL}/admin/verifications/${driverId}/approve`, { method: 'POST' });
+                await adminFetch(`${API_URL}/admin/verifications/${driverId}/approve`, { method: 'POST' });
                 loadVerifications();
                 alert('Driver verification approved successfully!');
             } catch (err) {
@@ -1388,7 +1704,7 @@
             const reason = prompt('Enter rejection reason:', 'Documents incomplete or invalid');
             if (!reason) return;
             try {
-                await fetch(`${API_URL}/admin/verifications/${driverId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
+                await adminFetch(`${API_URL}/admin/verifications/${driverId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'POST' });
                 loadVerifications();
                 alert('Driver verification rejected');
             } catch (err) {
@@ -1399,7 +1715,7 @@
 
         async function toggleUserBlock(userId, block) {
             try {
-                await fetch(`${API_URL}/admin/users/${userId}/block?block=${block}`, { method: 'POST' });
+                await adminFetch(`${API_URL}/admin/users/${userId}/block?block=${block}`, { method: 'POST' });
                 loadRiders();
                 loadDrivers();
             } catch (err) {
@@ -1422,7 +1738,7 @@
             const maxUses = parseInt(document.getElementById('promoMaxUses').value);
             
             try {
-                await fetch(`${API_URL}/admin/promo/create?code=${code}&discount_percent=${discount}&max_uses=${maxUses}`, {
+                await adminFetch(`${API_URL}/admin/promo/create?code=${code}&discount_percent=${discount}&max_uses=${maxUses}`, {
                     method: 'POST'
                 });
                 closePromoModal();
@@ -1501,7 +1817,7 @@
         // NEW ADVANCED FEATURES
         async function loadFraudAlerts() {
             try {
-                const res = await fetch(`${API_URL}/admin/fraud/dashboard`);
+                const res = await adminFetch(`${API_URL}/admin/fraud/dashboard`);
                 const data = await res.json();
                 
                 document.getElementById('criticalAlerts').textContent = data.critical_count || 0;
@@ -1533,7 +1849,7 @@
 
         async function investigateUser(userId) {
             try {
-                const res = await fetch(`${API_URL}/admin/fraud/investigate/${userId}`, { method: 'POST' });
+                const res = await adminFetch(`${API_URL}/admin/fraud/investigate/${userId}`, { method: 'POST' });
                 const data = await res.json();
                 
                 const actions = [
@@ -1549,7 +1865,7 @@
                     const selectedAction = actions[parseInt(action) - 1];
                     const reason = prompt(`Reason for ${selectedAction.label}:`, 'Fraud investigation');
                     if (reason) {
-                        await fetch(`${API_URL}/admin/fraud/action/${userId}`, {
+                        await adminFetch(`${API_URL}/admin/fraud/action/${userId}`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ action: selectedAction.id, reason })
@@ -1566,7 +1882,7 @@
 
         async function loadAnalytics(period = 'today') {
             try {
-                const res = await fetch(`${API_URL}/admin/trips/analytics?period=${period}`);
+                const res = await adminFetch(`${API_URL}/admin/trips/analytics?period=${period}`);
                 const data = await res.json();
                 
                 document.getElementById('analyticsTrips').textContent = data.total_trips || 0;
@@ -1588,7 +1904,7 @@
 
         async function loadLiveTrips() {
             try {
-                const res = await fetch(`${API_URL}/admin/trips/live`);
+                const res = await adminFetch(`${API_URL}/admin/trips/live`);
                 const data = await res.json();
                 
                 document.getElementById('activeTripsCount').textContent = `${data.count || 0} active`;
@@ -1793,7 +2109,7 @@
 
             try {
                 // Load all cases to compute stats, then filter for display
-                const allRes = await fetch(`${API_URL}/shield/admin/disputes`, { headers: { 'x-admin-token': adminToken } });
+                const allRes = await adminFetch(`${API_URL}/shield/admin/disputes`);
                 const allData = await allRes.json();
                 const allCases = allData.disputes || [];
 
@@ -1860,9 +2176,7 @@
             document.getElementById('shieldEvidenceGrid').innerHTML = '';
 
             try {
-                const res = await fetch(`${API_URL}/shield/admin/disputes/${caseId}`, {
-                    headers: { 'x-admin-token': adminToken }
-                });
+                const res = await adminFetch(`${API_URL}/shield/admin/disputes/${caseId}`);
                 const data = await res.json();
                 const c = data.dispute;
                 if (!c) { alert('Case not found'); return; }
@@ -1985,9 +2299,9 @@
             btn.textContent = 'Submitting…';
 
             try {
-                const res = await fetch(`${API_URL}/shield/admin/disputes/${caseId}/decision`, {
+                const res = await adminFetch(`${API_URL}/shield/admin/disputes/${caseId}/decision`, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'x-admin-token': adminToken },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ decision, decision_reason: reason }),
                 });
                 const data = await res.json();
@@ -2005,6 +2319,478 @@
                 btn.innerHTML = '<i class="ri-shield-check-line"></i> Submit Decision';
             }
         }
+        // ─────────────────────────────────────────────────────────────────────
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  RIDER IDENTITY MODAL — Tabbed, Animated, Banking UI
+        // ══════════════════════════════════════════════════════════════════════
+        let _riderModalData  = {};   // cached per rider
+        let _activeRiderTab  = 'overview';
+        let _ninRevealed     = {};
+        let _ninTimer        = {};
+
+        async function viewRider(riderId) {
+            // Open modal with slide-up animation
+            const modal  = document.getElementById('riderModal');
+            const sheet  = document.getElementById('riderModalSheet');
+            modal.style.display = 'flex';
+            requestAnimationFrame(() => { sheet.style.transform = 'translateY(0)'; });
+
+            // Reset tabs
+            _activeRiderTab = 'overview';
+            document.querySelectorAll('.rmodal-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'overview'));
+
+            // Show skeleton header
+            document.getElementById('riderModalName').textContent = '—';
+            document.getElementById('riderModalSub').textContent = 'Loading…';
+            document.getElementById('riderModalAvatar').textContent = '';
+            document.getElementById('riderModalAvatar').style.background = '#1E2D42';
+            document.getElementById('riderModalStatusBadge').innerHTML = '';
+            document.getElementById('riderModalBody').innerHTML = _skelBody();
+
+            try {
+                const [profileRes, identityRes] = await Promise.all([
+                    adminFetch(`${API_URL}/admin/riders/${riderId}`),
+                    adminFetch(`${API_URL}/admin/riders/${riderId}/identity`),
+                ]);
+                const profileData  = await profileRes.json();
+                const identityData = await identityRes.json();
+
+                _riderModalData[riderId] = { profileData, identityData, riderId };
+                _renderRiderModalTab(riderId, 'overview');
+            } catch (err) {
+                document.getElementById('riderModalBody').innerHTML = `
+                    <div style="text-align:center;padding:60px 24px;">
+                        <i class="ri-error-warning-line" style="font-size:48px;color:#EF4444;"></i>
+                        <p style="color:#EF4444;margin-top:12px;font-weight:600;">Failed to load rider</p>
+                        <p style="color:#475569;font-size:12px;margin-top:6px;">${err.message}</p>
+                    </div>`;
+            }
+        }
+
+        function _skelBody() {
+            return `<div style="animation:fadeSlideIn .3s ease;">
+                ${Array(4).fill(0).map(() => `
+                    <div style="display:flex;gap:12px;margin-bottom:16px;">
+                        <div class="skel" style="width:80px;height:14px;border-radius:6px;"></div>
+                        <div class="skel" style="flex:1;height:14px;border-radius:6px;"></div>
+                    </div>
+                `).join('')}
+                <div class="skel" style="width:100%;height:120px;border-radius:14px;margin-top:20px;"></div>
+            </div>`;
+        }
+
+        function switchRiderTab(tab, btn) {
+            _activeRiderTab = tab;
+            document.querySelectorAll('.rmodal-tab').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            const riderId = Object.keys(_riderModalData).slice(-1)[0];
+            if (riderId) _renderRiderModalTab(riderId, tab);
+        }
+
+        function _renderRiderModalTab(riderId, tab) {
+            const cache = _riderModalData[riderId];
+            if (!cache) return;
+            const { profileData, identityData } = cache;
+            const r     = profileData.rider  || {};
+            const id    = identityData       || {};
+            const stats = profileData.stats  || {};
+            const trips = profileData.recent_trips || [];
+
+            // Update header
+            const initials  = (r.name || 'R').split(' ').map(w => w[0]).join('').substring(0,2).toUpperCase();
+            const avatarBg  = _strColor(riderId);
+            const isSusp    = r.suspended_until && new Date(r.suspended_until) > new Date();
+            const statusCol = r.blocked ? '#EF4444' : isSusp ? '#F59E0B' : '#22C55E';
+            const statusLbl = r.blocked ? 'BLOCKED' : isSusp ? 'SUSPENDED' : 'ACTIVE';
+
+            const avatarEl = document.getElementById('riderModalAvatar');
+            if (id.profile_image || id.face_image) {
+                avatarEl.innerHTML = `<img src="${id.profile_image || id.face_image}" style="width:100%;height:100%;object-fit:cover;" alt="">`;
+                avatarEl.style.background = 'none';
+            } else {
+                avatarEl.textContent = initials;
+                avatarEl.style.background = avatarBg;
+            }
+            document.getElementById('riderModalName').textContent = r.name || 'Unknown Rider';
+            document.getElementById('riderModalSub').textContent  = (r.email || '') + (r.phone ? '  ·  ' + r.phone : '');
+            document.getElementById('riderModalStatusBadge').innerHTML =
+                `<span style="background:${statusCol}22;color:${statusCol};padding:4px 14px;border-radius:20px;font-size:11px;font-weight:800;border:1px solid ${statusCol}55;">${statusLbl}</span>`;
+
+            const body = document.getElementById('riderModalBody');
+            body.style.animation = 'none';
+            body.offsetHeight; // reflow
+            body.style.animation = 'fadeSlideIn .25s ease';
+
+            if (tab === 'overview')  body.innerHTML = _tabOverview(r, id, stats, riderId);
+            if (tab === 'identity')  body.innerHTML = _tabIdentity(r, id, riderId);
+            if (tab === 'trips')     body.innerHTML = _tabTrips(trips, stats);
+            if (tab === 'actions')   body.innerHTML = _tabActions(r, id, riderId, isSusp);
+        }
+
+        // ── TAB: Overview ─────────────────────────────────────────────────────
+        function _tabOverview(r, id, stats, riderId) {
+            const joinDate = r.created_at ? new Date(r.created_at).toLocaleDateString('en-NG',{day:'numeric',month:'long',year:'numeric'}) : '—';
+            const isSusp   = r.suspended_until && new Date(r.suspended_until) > new Date();
+            return `
+            <div style="animation:fadeSlideIn .25s ease;">
+                <!-- 4 stat tiles -->
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px;">
+                    ${[
+                        ['ri-map-pin-2-line','#6366F1', stats.total_trips||0, 'Total Trips'],
+                        ['ri-checkbox-circle-line','#22C55E', stats.completed_trips||0, 'Completed'],
+                        ['ri-close-circle-line','#EF4444', stats.cancelled_trips||0, 'Cancelled'],
+                        ['ri-money-dollar-circle-line','#F59E0B', '₦'+(stats.total_spend||0).toLocaleString(), 'Total Spent'],
+                    ].map(([icon,color,val,lbl]) => `
+                        <div style="background:#0C1624;border:1px solid #1A2740;border-radius:14px;padding:14px;text-align:center;">
+                            <i class="${icon}" style="color:${color};font-size:22px;"></i>
+                            <p style="font-size:20px;font-weight:800;color:#F1F5F9;margin:4px 0 2px;">${val}</p>
+                            <p style="color:#475569;font-size:11px;font-weight:600;">${lbl}</p>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <!-- Info rows -->
+                <div style="background:#0C1624;border:1px solid #1A2740;border-radius:16px;padding:0 20px;margin-bottom:16px;">
+                    ${[
+                        ['Full Name',    r.name || '—'],
+                        ['Phone',        r.phone || '—'],
+                        ['Email',        r.email || '—'],
+                        ['Gender',       r.gender || id.gender || '—'],
+                        ['Address',      r.address || id.address || '—'],
+                        ['Referral Code',`<code style="font-family:monospace;background:#0F172A;padding:2px 8px;border-radius:5px;color:#818CF8;">${r.referral_code || '—'}</code>`],
+                        ['Username',     r.username || id.username ? `@${r.username||id.username}` : '—'],
+                        ['Joined',       joinDate],
+                    ].map(([k,v]) => `
+                        <div class="info-row">
+                            <span class="info-label">${k}</span>
+                            <span class="info-value">${v}</span>
+                        </div>
+                    `).join('')}
+                </div>
+
+                ${isSusp ? `
+                    <div style="background:#1A0F00;border:1px solid #78350F44;border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
+                        <i class="ri-time-line" style="color:#F59E0B;font-size:20px;flex-shrink:0;"></i>
+                        <div>
+                            <p style="color:#F59E0B;font-size:13px;font-weight:700;margin:0;">Account Suspended</p>
+                            <p style="color:#92400E;font-size:12px;margin:0;">Until ${new Date(r.suspended_until).toLocaleString()}</p>
+                        </div>
+                    </div>
+                ` : ''}
+            </div>`;
+        }
+
+        // ── TAB: Identity & Security ───────────────────────────────────────────
+        function _tabIdentity(r, id, riderId) {
+            const faceImgSrc = id.face_image || id.profile_image || null;
+            return `
+            <div style="animation:fadeSlideIn .25s ease;display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+
+                <!-- Face ID card -->
+                <div style="background:#0C1624;border:1px solid #1A2740;border-radius:16px;padding:20px;">
+                    <p style="color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;">
+                        <i class="ri-scan-line" style="color:#6366F1;"></i>&nbsp; Face ID Capture
+                    </p>
+
+                    <div style="text-align:center;">
+                        <div onclick="${faceImgSrc ? `openFaceLightbox('${encodeURIComponent(faceImgSrc)}')` : ''}"
+                            style="width:120px;height:120px;border-radius:50%;margin:0 auto 12px;
+                                   border:3px solid ${id.face_verified ? '#22C55E' : '#334155'};
+                                   overflow:hidden;display:flex;align-items:center;justify-content:center;
+                                   background:#0F172A;${faceImgSrc ? 'cursor:zoom-in;' : ''}
+                                   box-shadow:${id.face_verified ? '0 0 0 6px rgba(34,197,94,.12)' : 'none'};">
+                            ${faceImgSrc
+                                ? `<img src="${faceImgSrc}" style="width:100%;height:100%;object-fit:cover;" alt="Face ID">`
+                                : `<i class="ri-user-3-line" style="font-size:44px;color:#334155;"></i>`
+                            }
+                        </div>
+                        ${faceImgSrc ? `<p style="color:#6366F1;font-size:11px;margin-bottom:8px;"><i class="ri-zoom-in-line"></i> Click to enlarge</p>` : ''}
+
+                        <div style="display:flex;justify-content:center;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+                            ${_verBadge(id.face_verified, 'Face ID')}
+                            ${_verBadge(id.nin_verified,  'NIN')}
+                        </div>
+
+                        ${faceImgSrc ? `
+                            <a href="${faceImgSrc}" download="rider_face_${riderId}.jpg"
+                                style="display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#6366F1;text-decoration:none;
+                                       background:rgba(99,102,241,.1);padding:6px 14px;border-radius:8px;border:1px solid rgba(99,102,241,.2);">
+                                <i class="ri-download-2-line"></i> Download Photo
+                            </a>
+                        ` : `<p style="color:#334155;font-size:12px;">No face capture on file</p>`}
+                    </div>
+                </div>
+
+                <!-- NIN card -->
+                <div style="background:#060E18;border:1px solid #0F2D1A;border-radius:16px;padding:20px;">
+                    <p style="color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;">
+                        <i class="ri-id-card-line" style="color:#22C55E;"></i>&nbsp; National ID Number
+                    </p>
+
+                    ${id.has_nin ? `
+                        <div class="nin-reveal-box" id="ninBox_${riderId}">
+                            <i class="ri-lock-2-line" style="color:#22C55E;font-size:22px;flex-shrink:0;"></i>
+                            <div style="flex:1;min-width:0;">
+                                <p style="color:#475569;font-size:10px;font-weight:700;text-transform:uppercase;margin-bottom:4px;">NIN</p>
+                                <p id="ninDisplay_${riderId}" style="color:#E2E8F0;font-size:24px;font-weight:800;letter-spacing:4px;font-family:monospace;margin:0;">${id.nin_masked}</p>
+                                <p id="ninTimer_${riderId}" style="color:#475569;font-size:10px;margin:4px 0 0;"></p>
+                            </div>
+                        </div>
+
+                        <div style="display:flex;gap:8px;margin-top:12px;">
+                            <button id="ninRevealBtn_${riderId}" onclick="toggleNIN('${riderId}','${id.nin}','${id.nin_masked}')"
+                                style="flex:1;padding:9px;border-radius:10px;border:1px solid rgba(99,102,241,.3);background:rgba(99,102,241,.1);
+                                       color:#818CF8;font-size:12px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;">
+                                <i class="ri-eye-line"></i> Reveal
+                            </button>
+                            <button onclick="copyNIN('${riderId}','${id.nin}')"
+                                style="padding:9px 14px;border-radius:10px;border:1px solid #1A2740;background:#0C1624;
+                                       color:#64748B;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px;">
+                                <i class="ri-file-copy-line"></i>
+                            </button>
+                        </div>
+
+                        <div style="margin-top:14px;padding-top:14px;border-top:1px solid #0F2D1A;">
+                            <p style="color:#475569;font-size:11px;margin:0;line-height:1.6;">
+                                <i class="ri-shield-keyhole-line" style="color:#22C55E;"></i>
+                                NIN is encrypted at rest. Access is audit-logged.
+                                Auto-hides after 10 seconds for security.
+                            </p>
+                        </div>
+                    ` : `
+                        <div style="text-align:center;padding:24px 0;">
+                            <div style="width:56px;height:56px;background:#1A0F00;border-radius:50%;margin:0 auto 12px;display:flex;align-items:center;justify-content:center;">
+                                <i class="ri-error-warning-line" style="color:#F59E0B;font-size:24px;"></i>
+                            </div>
+                            <p style="color:#F59E0B;font-size:13px;font-weight:700;margin-bottom:4px;">No NIN submitted</p>
+                            <p style="color:#334155;font-size:12px;">Rider has not completed identity verification</p>
+                        </div>
+                    `}
+                </div>
+
+                <!-- Verification checklist (full width) -->
+                <div style="grid-column:1/-1;background:#0C1624;border:1px solid #1A2740;border-radius:16px;padding:20px;">
+                    <p style="color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;">
+                        <i class="ri-list-check-3" style="color:#6366F1;"></i>&nbsp; Verification Checklist
+                    </p>
+                    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;">
+                        ${[
+                            ['Face ID Photo',      id.face_verified,   'ri-scan-line'],
+                            ['NIN Submitted',      id.has_nin,         'ri-id-card-line'],
+                            ['NIN Verified',       id.nin_verified,    'ri-shield-check-line'],
+                            ['Profile Completed',  id.is_verified,     'ri-user-check-line'],
+                            ['Phone Linked',       !!r.phone,          'ri-phone-line'],
+                            ['Email Linked',       !!r.email,          'ri-mail-line'],
+                        ].map(([lbl, ok, icon]) => `
+                            <div style="background:${ok ? '#0A1F14' : '#0F172A'};border:1px solid ${ok ? '#1A3D2A' : '#1E293B'};
+                                        border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:8px;">
+                                <i class="${icon}" style="color:${ok ? '#22C55E' : '#334155'};font-size:16px;"></i>
+                                <span style="color:${ok ? '#CBD5E1' : '#475569'};font-size:12px;font-weight:600;">${lbl}</span>
+                                <i class="ri-${ok ? 'checkbox-circle-fill' : 'close-circle-line'}" 
+                                   style="color:${ok ? '#22C55E' : '#EF4444'};font-size:14px;margin-left:auto;"></i>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+
+            </div>`;
+        }
+
+        // ── TAB: Trips ────────────────────────────────────────────────────────
+        function _tabTrips(trips, stats) {
+            return `
+            <div style="animation:fadeSlideIn .25s ease;">
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:20px;">
+                    ${[
+                        ['Completed', stats.completed_trips||0, '#22C55E'],
+                        ['Cancelled', stats.cancelled_trips||0, '#EF4444'],
+                        ['Total Spend', '₦'+(stats.total_spend||0).toLocaleString(), '#6366F1'],
+                    ].map(([l,v,c]) => `
+                        <div style="background:#0C1624;border:1px solid #1A2740;border-radius:12px;padding:14px;text-align:center;">
+                            <p style="font-size:20px;font-weight:800;color:${c};margin-bottom:2px;">${v}</p>
+                            <p style="color:#475569;font-size:11px;font-weight:600;">${l}</p>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div style="background:#0C1624;border:1px solid #1A2740;border-radius:16px;padding:0 20px;">
+                    <p style="color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;padding:16px 0 12px;">
+                        <i class="ri-history-line" style="color:#6366F1;"></i>&nbsp; Recent Trips
+                    </p>
+                    ${trips.length === 0
+                        ? `<div style="text-align:center;padding:40px 0;"><i class="ri-map-pin-line" style="font-size:36px;color:#1E2D42;"></i><p style="color:#334155;margin-top:8px;">No trips yet</p></div>`
+                        : trips.map(t => {
+                            const sc = t.status==='completed' ? '#22C55E' : t.status==='cancelled' ? '#EF4444' : '#94A3B8';
+                            return `
+                            <div class="trip-item">
+                                <div style="flex:1;min-width:0;margin-right:12px;">
+                                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+                                        <div style="width:6px;height:6px;border-radius:50%;background:#22C55E;flex-shrink:0;"></div>
+                                        <p style="color:#CBD5E1;font-size:12px;font-weight:600;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(t.pickup_location?.address||'—').substring(0,40)}</p>
+                                    </div>
+                                    <div style="display:flex;align-items:center;gap:6px;">
+                                        <div style="width:6px;height:6px;border-radius:3px;background:#6366F1;flex-shrink:0;"></div>
+                                        <p style="color:#64748B;font-size:11px;margin:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${(t.dropoff_location?.address||'—').substring(0,40)}</p>
+                                    </div>
+                                    <p style="color:#334155;font-size:10px;margin-top:4px;">${t.created_at ? new Date(t.created_at).toLocaleDateString('en-NG',{day:'numeric',month:'short',year:'numeric'}) : ''}</p>
+                                </div>
+                                <div style="text-align:right;flex-shrink:0;">
+                                    <p style="color:#22C55E;font-weight:800;font-size:14px;margin-bottom:4px;">₦${(t.fare||0).toLocaleString()}</p>
+                                    <span style="background:${sc}22;color:${sc};padding:2px 9px;border-radius:20px;font-size:10px;font-weight:700;">${t.status||'—'}</span>
+                                </div>
+                            </div>`;
+                        }).join('')
+                    }
+                </div>
+            </div>`;
+        }
+
+        // ── TAB: Actions ──────────────────────────────────────────────────────
+        function _tabActions(r, id, riderId, isSusp) {
+            return `
+            <div style="animation:fadeSlideIn .25s ease;">
+                <div style="background:#0C1624;border:1px solid #1A2740;border-radius:16px;padding:20px;margin-bottom:16px;">
+                    <p style="color:#475569;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;margin-bottom:16px;">
+                        <i class="ri-settings-4-line" style="color:#6366F1;"></i>&nbsp; Account Controls
+                    </p>
+                    <div style="display:flex;flex-direction:column;gap:10px;">
+
+                        <button onclick="toggleUserBlock('${riderId}', ${!r.blocked}); closeRiderModal(); loadRiders();"
+                            style="padding:14px 20px;border-radius:12px;border:1px solid ${r.blocked ? '#1A3D2A' : '#3D1A1A'};
+                                   background:${r.blocked ? '#0A1F14' : '#1A0A0A'};
+                                   color:${r.blocked ? '#22C55E' : '#EF4444'};
+                                   font-weight:700;font-size:14px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:12px;">
+                            <i class="ri-${r.blocked ? 'lock-unlock-line' : 'forbid-line'}" style="font-size:20px;"></i>
+                            <div>
+                                <p style="margin:0;font-size:14px;">${r.blocked ? 'Unblock Rider' : 'Block Rider'}</p>
+                                <p style="margin:0;font-size:11px;opacity:.7;font-weight:500;">${r.blocked ? 'Restore full access to app' : 'Immediately prevent app access'}</p>
+                            </div>
+                        </button>
+
+                        ${isSusp ? `
+                            <button onclick="unsuspendRider('${riderId}')"
+                                style="padding:14px 20px;border-radius:12px;border:1px solid #78350F44;background:#1A0F00;
+                                       color:#F59E0B;font-weight:700;font-size:14px;cursor:pointer;text-align:left;display:flex;align-items:center;gap:12px;">
+                                <i class="ri-arrow-go-back-line" style="font-size:20px;"></i>
+                                <div>
+                                    <p style="margin:0;">Clear Suspension</p>
+                                    <p style="margin:0;font-size:11px;opacity:.7;font-weight:500;">Remove all violations and allow booking</p>
+                                </div>
+                            </button>
+                        ` : ''}
+
+                    </div>
+                </div>
+
+                <div style="background:#080D18;border:1px solid #1A2740;border-radius:14px;padding:14px 16px;">
+                    <p style="color:#334155;font-size:11px;line-height:1.7;margin:0;">
+                        <i class="ri-information-line" style="color:#475569;"></i>
+                        All admin actions are logged with your identity and timestamp for compliance.
+                        Actions are irreversible via the panel — contact engineering to undo destructive changes.
+                    </p>
+                </div>
+            </div>`;
+        }
+
+        function _verBadge(ok, label) {
+            return ok
+                ? `<span style="background:#0F3D2B;color:#22C55E;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${label} ✓</span>`
+                : `<span style="background:#3D1A1A;color:#EF4444;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;">${label} ✗</span>`;
+        }
+
+        function openFaceLightbox(encoded) {
+            const src = decodeURIComponent(encoded);
+            document.getElementById('faceLightboxImg').src = src;
+            document.getElementById('faceLightbox').style.display = 'flex';
+        }
+
+        function closeRiderModal() {
+            const sheet = document.getElementById('riderModalSheet');
+            sheet.style.transform = 'translateY(100%)';
+            setTimeout(() => { document.getElementById('riderModal').style.display = 'none'; }, 350);
+        }
+
+        function toggleNIN(riderId, fullNin, maskedNin) {
+            const el    = document.getElementById('ninDisplay_'  + riderId);
+            const timerEl = document.getElementById('ninTimer_'  + riderId);
+            const btnEl = document.getElementById('ninRevealBtn_'+ riderId);
+            const box   = document.getElementById('ninBox_'      + riderId);
+            if (!el) return;
+
+            if (_ninRevealed[riderId]) {
+                // Hide
+                el.textContent   = maskedNin;
+                timerEl.textContent = '';
+                btnEl.innerHTML  = '<i class="ri-eye-line"></i> Reveal';
+                box.classList.remove('revealed');
+                _ninRevealed[riderId] = false;
+                clearInterval(_ninTimer[riderId]);
+            } else {
+                // Reveal
+                el.textContent   = fullNin;
+                btnEl.innerHTML  = '<i class="ri-eye-off-line"></i> Hide';
+                box.classList.add('revealed');
+                _ninRevealed[riderId] = true;
+
+                let secs = 10;
+                timerEl.textContent = `Auto-hiding in ${secs}s`;
+                clearInterval(_ninTimer[riderId]);
+                _ninTimer[riderId] = setInterval(() => {
+                    secs--;
+                    if (secs <= 0) {
+                        clearInterval(_ninTimer[riderId]);
+                        el.textContent      = maskedNin;
+                        timerEl.textContent = '';
+                        btnEl.innerHTML     = '<i class="ri-eye-line"></i> Reveal';
+                        box.classList.remove('revealed');
+                        _ninRevealed[riderId] = false;
+                    } else {
+                        timerEl.textContent = `Auto-hiding in ${secs}s`;
+                    }
+                }, 1000);
+            }
+        }
+
+        function copyNIN(riderId, fullNin) {
+            if (!_ninRevealed[riderId]) { showNotification('Reveal NIN first to copy.','warning'); return; }
+            navigator.clipboard.writeText(fullNin).then(() => {
+                showNotification('NIN copied to clipboard.', 'success');
+            }).catch(() => {
+                showNotification('Copy failed — use manual selection.', 'warning');
+            });
+        }
+
+        async function unsuspendRider(riderId) {
+            if (!confirm('Clear this rider\'s suspension and all violations?')) return;
+            try {
+                const res = await adminFetch(`${API_URL}/admin/users/${riderId}/unsuspend`, {
+                    method: 'POST',
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showNotification('Rider suspension cleared.', 'success');
+                    closeRiderModal();
+                    loadRiders();
+                } else {
+                    alert('Error: ' + (data.detail || 'Could not unsuspend'));
+                }
+            } catch (err) {
+                alert('Network error: ' + err.message);
+            }
+        }
+        // ══════════════════════════════════════════════════════════════════════
+
+        // ── Global keyboard shortcuts ─────────────────────────────────────────
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                if (document.getElementById('faceLightbox').style.display === 'flex') {
+                    document.getElementById('faceLightbox').style.display = 'none';
+                } else if (document.getElementById('riderModal').style.display === 'flex') {
+                    closeRiderModal();
+                }
+            }
+        });
         // ─────────────────────────────────────────────────────────────────────
 
     </script>

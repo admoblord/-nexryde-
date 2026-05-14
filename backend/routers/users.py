@@ -2,8 +2,8 @@
 from fastapi import APIRouter, HTTPException, Request
 
 from auth_guard import require_authenticated, verify_owner, verify_owner_strict
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Optional, List
 from datetime import datetime, timezone
 import logging
 import base64
@@ -55,11 +55,27 @@ class BlockRiderRequest(BaseModel):
     rider_id: str
 
 class PushTokenRequest(BaseModel):
+    """Register Expo or native FCM token; optional metadata for multi-device + analytics."""
+
     push_token: str
+    platform: Optional[str] = None  # ios | android
+    provider: Optional[str] = None  # expo | fcm — inferred from token if omitted
+    device_id: Optional[str] = None
+
+
+class NotificationOpenedRequest(BaseModel):
+    notification_id: Optional[str] = Field(None, description="Legacy row id or same as nid")
+    nid: Optional[str] = Field(None, description="Correlation id from push payload data.nid (preferred)")
 
 class ProfilePictureUpload(BaseModel):
     image: str
 
+
+class RideMoodPreferences(BaseModel):
+    conversation: str = "any"    # "quiet" | "chatty" | "any"
+    music: str = "any"           # "on" | "off" | "any"
+    temperature: str = "any"     # "cold" | "moderate" | "any"
+    driving_style: str = "any"   # "smooth" | "fast" | "any"
 
 class UserPreferencesUpdate(BaseModel):
     theme: Optional[str] = None
@@ -67,6 +83,7 @@ class UserPreferencesUpdate(BaseModel):
     notifications_enabled: Optional[bool] = None
     notification_channels: Optional[dict] = None
     notification_types: Optional[dict] = None
+    ride_mood: Optional[RideMoodPreferences] = None
 
 
 class RiderVerificationUpdate(BaseModel):
@@ -127,14 +144,85 @@ async def get_user_by_phone(phone: str, request: Request):
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+def _is_expo_push_token(token: str) -> bool:
+    t = (token or "").strip()
+    return t.startswith("ExponentPushToken[") or t.startswith("ExpoPushToken")
+
+
 @users_router.post("/users/{user_id}/push-token")
 async def register_push_token(user_id: str, request: Request, body: PushTokenRequest):
     verify_owner_strict(request, user_id)
+    token = (body.push_token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="push_token required")
+
+    prov = (body.provider or "").strip().lower()
+    if not prov:
+        prov = "expo" if _is_expo_push_token(token) else "fcm"
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    user = await db.users.find_one({"id": user_id}, {"push_devices": 1})
+    devices: List[dict] = []
+    for d in (user or {}).get("push_devices") or []:
+        if not isinstance(d, dict):
+            continue
+        if d.get("token") == token:
+            continue
+        if body.device_id and d.get("device_id") == body.device_id:
+            continue
+        devices.append(d)
+
+    entry = {
+        "token": token,
+        "provider": prov,
+        "platform": (body.platform or "").strip().lower() or None,
+        "device_id": (body.device_id or "").strip() or None,
+        "updated_at": now_iso,
+    }
+    devices.append(entry)
+    # Cap stored devices per user (most recent wins implicitly at end)
+    if len(devices) > 8:
+        devices = devices[-8:]
+
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"push_token": body.push_token}}
+        {"$set": {"push_token": token, "push_devices": devices, "push_last_registered_at": now_iso}},
     )
-    return {"message": "Push token registered"}
+    return {"message": "Push token registered", "provider": prov}
+
+
+@users_router.post("/users/{user_id}/notification-opened")
+async def notification_opened(user_id: str, request: Request, body: NotificationOpenedRequest):
+    verify_owner_strict(request, user_id)
+    from notification_service import record_notification_open
+
+    nid = body.nid or body.notification_id
+    await record_notification_open(user_id, nid)
+    return {"ok": True}
+
+
+@users_router.get("/users/{user_id}/experiments/variant")
+async def get_experiment_variant(user_id: str, request: Request, key: str):
+    """Deterministic A/B variant for the authenticated user (mirrors admin-configured experiments)."""
+    verify_owner_strict(request, user_id)
+    from notification_service import assign_ab_variant
+
+    exp = await db.ab_experiments.find_one({"key": key, "active": True}, {"_id": 0})
+    variants = (exp or {}).get("variants") or ["control", "treatment"]
+    if isinstance(variants, list) and variants:
+        vkeys = [str(x) for x in variants]
+    else:
+        vkeys = ["control", "treatment"]
+    variant = assign_ab_variant(str(user_id), key, vkeys)
+    try:
+        await db.ab_assignments.update_one(
+            {"user_id": str(user_id), "experiment_key": key},
+            {"$set": {"variant": variant, "assigned_at": datetime.now(timezone.utc).isoformat()}},
+            upsert=True,
+        )
+    except Exception:
+        pass
+    return {"experiment_key": key, "variant": variant}
 
 @users_router.put("/users/{user_id}")
 async def update_user(user_id: str, request: Request, body: UpdateProfileRequest):
@@ -530,12 +618,14 @@ async def get_preferences(user_id: str, request: Request):
     user = await db.users.find_one({"id": user_id})
     if not user:
         return {"theme": "auto", "language": "en"}
+    default_mood = {"conversation": "any", "music": "any", "temperature": "any", "driving_style": "any"}
     return {
         "theme": user.get("theme_preference", "auto"),
         "language": user.get("preferred_language", "en"),
         "notifications_enabled": user.get("notifications_enabled", True),
         "notification_channels": user.get("notification_channels", {}),
         "notification_types": user.get("notification_types", {}),
+        "ride_mood": user.get("ride_mood_preferences", default_mood),
     }
 
 
@@ -556,6 +646,25 @@ async def update_preferences(user_id: str, request: Request, body: UserPreferenc
         update_data["notification_channels"] = body.notification_channels
     if body.notification_types is not None:
         update_data["notification_types"] = body.notification_types
+    if body.ride_mood is not None:
+        valid_conv = {"quiet", "chatty", "any"}
+        valid_music = {"on", "off", "any"}
+        valid_temp = {"cold", "moderate", "any"}
+        valid_style = {"smooth", "fast", "any"}
+        if body.ride_mood.conversation not in valid_conv:
+            raise HTTPException(status_code=400, detail="Invalid conversation preference")
+        if body.ride_mood.music not in valid_music:
+            raise HTTPException(status_code=400, detail="Invalid music preference")
+        if body.ride_mood.temperature not in valid_temp:
+            raise HTTPException(status_code=400, detail="Invalid temperature preference")
+        if body.ride_mood.driving_style not in valid_style:
+            raise HTTPException(status_code=400, detail="Invalid driving style preference")
+        update_data["ride_mood_preferences"] = {
+            "conversation": body.ride_mood.conversation,
+            "music": body.ride_mood.music,
+            "temperature": body.ride_mood.temperature,
+            "driving_style": body.ride_mood.driving_style,
+        }
 
     if not update_data:
         return {"success": True, "message": "No changes provided"}

@@ -3,16 +3,34 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-// Configure notification behavior
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
+/** Android 8+: remote pushes reference channelId — register before first marketing/ride notification. */
+export async function ensureAndroidPushChannels(): Promise<void> {
+  if (Platform.OS !== 'android') return;
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'NEXRYDE Notifications',
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#FFD700',
+  });
+  await Notifications.setNotificationChannelAsync('rides', {
+    name: 'Ride Updates',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 500, 250, 500],
+    lightColor: '#00D26A',
+  });
+  await Notifications.setNotificationChannelAsync('earnings', {
+    name: 'Earnings Updates',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lightColor: '#FFD700',
+  });
+  await Notifications.setNotificationChannelAsync('marketing', {
+    name: 'Tips & offers',
+    importance: Notifications.AndroidImportance.DEFAULT,
+    lightColor: '#A78BFA',
+  });
+}
+
+// Foreground presentation + sound tiers: see `useNotifications` (root layout).
 
 export interface PushNotificationData {
   type:
@@ -28,7 +46,9 @@ export interface PushNotificationData {
     | 'geo_fence_explained'
     | 'speed_spike_alert'
     | 'safe_arrival_checkin'
-    | 'feature_update';
+    | 'feature_update'
+    | 'route_updated'
+    | 'rider_route_updated';
   title: string;
   body: string;
   data?: Record<string, any>;
@@ -57,36 +77,15 @@ class NotificationService {
         return null;
       }
 
-      // Get Expo push token
+      // Get Expo push token — projectId from app.json extra.eas.projectId
       const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-project-id', // This would come from app.json
+        projectId: '342aff56-5e09-4363-b8b6-12ab1cdec11f',
       });
       
       this.expoPushToken = tokenData.data;
       await AsyncStorage.setItem('pushToken', this.expoPushToken);
 
-      // Configure for Android
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync('default', {
-          name: 'NEXRYDE Notifications',
-          importance: Notifications.AndroidImportance.MAX,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#FFD700',
-        });
-
-        await Notifications.setNotificationChannelAsync('rides', {
-          name: 'Ride Updates',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 500, 250, 500],
-          lightColor: '#00D26A',
-        });
-
-        await Notifications.setNotificationChannelAsync('earnings', {
-          name: 'Earnings Updates',
-          importance: Notifications.AndroidImportance.DEFAULT,
-          lightColor: '#FFD700',
-        });
-      }
+      await ensureAndroidPushChannels();
 
       return this.expoPushToken;
     } catch (error) {

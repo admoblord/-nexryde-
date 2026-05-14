@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+  <string name="app_name">Nexryde</string>
+
   <!-- App Shortcuts (long-press app icon) -->
   <string name="shortcut_go_online_short">Go Online</string>
   <string name="shortcut_go_online_long">Go Online – Start Earning</string>

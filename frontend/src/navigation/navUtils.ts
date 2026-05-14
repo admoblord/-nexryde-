@@ -21,10 +21,13 @@ export interface DirectionsResult {
   overviewCoords: Array<{ latitude: number; longitude: number }>;
   totalDistanceM: number;
   totalDurationSec: number;
+  /** Present when `departure_time=now` returns traffic-aware leg duration (Google billing dependent). */
+  totalDurationInTrafficSec?: number;
 }
 
 // ── Google polyline decoder ────────────────────────────────────────────────
 export function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
+  if (!encoded || typeof encoded !== 'string') return [];
   const coords: Array<{ lat: number; lng: number }> = [];
   let idx = 0, lat = 0, lng = 0;
   while (idx < encoded.length) {
@@ -37,6 +40,40 @@ export function decodePolyline(encoded: string): Array<{ lat: number; lng: numbe
     coords.push({ lat: lat / 1e5, lng: lng / 1e5 });
   }
   return coords;
+}
+
+/** Minimum points to treat as a road path (Google never returns 2 for a real drive; 2 = chord). */
+export const DIRECTIONS_ROUTE_MIN_POINTS = 3;
+
+/**
+ * Prefer merging per-step polylines (full road geometry); fall back to overview_polyline.
+ */
+export function directionsRouteToMapCoordinates(route: {
+  legs?: Array<{ steps?: Array<{ polyline?: { points?: string } }> }>;
+  overview_polyline?: { points?: string };
+}): Array<{ latitude: number; longitude: number }> {
+  const leg = route.legs?.[0];
+  const merged: Array<{ lat: number; lng: number }> = [];
+  if (leg?.steps && Array.isArray(leg.steps)) {
+    for (const step of leg.steps) {
+      const enc = step.polyline?.points;
+      if (!enc) continue;
+      const chunk = decodePolyline(enc);
+      for (const c of chunk) {
+        const prev = merged[merged.length - 1];
+        if (!prev || prev.lat !== c.lat || prev.lng !== c.lng) merged.push(c);
+      }
+    }
+  }
+  if (merged.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+    return merged.map((c) => ({ latitude: c.lat, longitude: c.lng }));
+  }
+  const ov = route.overview_polyline?.points;
+  if (ov) {
+    const pts = decodePolyline(ov).map((c) => ({ latitude: c.lat, longitude: c.lng }));
+    if (pts.length >= DIRECTIONS_ROUTE_MIN_POINTS) return pts;
+  }
+  return [];
 }
 
 // ── HTML instruction cleaner ───────────────────────────────────────────────
@@ -170,46 +207,140 @@ export async function fetchDirections(
   apiKey: string,
 ): Promise<DirectionsResult | null> {
   try {
-    const url =
+    const base =
       `https://maps.googleapis.com/maps/api/directions/json` +
       `?origin=${originLat},${originLng}` +
       `&destination=${destLat},${destLng}` +
       `&mode=driving` +
       `&key=${apiKey}`;
 
-    const res = await fetch(url);
-    const data = await res.json();
+    const parse = (data: any): DirectionsResult | null => {
+      if (data.status !== 'OK' || !data.routes?.[0]) return null;
+      const route = data.routes[0];
+      const leg = route.legs[0];
 
-    if (data.status !== 'OK' || !data.routes?.[0]) return null;
+      const steps: NavStep[] = leg.steps.map((s: any) => ({
+        instruction: toVoiceText(stripHtml(s.html_instructions)),
+        maneuver: s.maneuver ?? 'straight',
+        distanceM: s.distance?.value ?? 0,
+        durationSec: s.duration?.value ?? 0,
+        endLat: s.end_location.lat,
+        endLng: s.end_location.lng,
+        stepCoords: s.polyline?.points
+          ? decodePolyline(s.polyline.points)
+          : [
+              { lat: s.start_location.lat, lng: s.start_location.lng },
+              { lat: s.end_location.lat, lng: s.end_location.lng },
+            ],
+      }));
 
-    const route = data.routes[0];
-    const leg = route.legs[0];
+      const overviewCoords = decodePolyline(route.overview_polyline.points).map(
+        (c) => ({ latitude: c.lat, longitude: c.lng }),
+      );
 
-    const steps: NavStep[] = leg.steps.map((s: any) => ({
-      instruction: toVoiceText(stripHtml(s.html_instructions)),
-      maneuver: s.maneuver ?? 'straight',
-      distanceM: s.distance?.value ?? 0,
-      durationSec: s.duration?.value ?? 0,
-      endLat: s.end_location.lat,
-      endLng: s.end_location.lng,
-      stepCoords: s.polyline?.points
-        ? decodePolyline(s.polyline.points)
-        : [
-            { lat: s.start_location.lat, lng: s.start_location.lng },
-            { lat: s.end_location.lat, lng: s.end_location.lng },
-          ],
-    }));
-
-    const overviewCoords = decodePolyline(route.overview_polyline.points).map(
-      (c) => ({ latitude: c.lat, longitude: c.lng }),
-    );
-
-    return {
-      steps,
-      overviewCoords,
-      totalDistanceM: leg.distance?.value ?? 0,
-      totalDurationSec: leg.duration?.value ?? 0,
+      const dit = leg.duration_in_traffic?.value;
+      return {
+        steps,
+        overviewCoords,
+        totalDistanceM: leg.distance?.value ?? 0,
+        totalDurationSec: leg.duration?.value ?? 0,
+        ...(typeof dit === 'number' && dit > 0 ? { totalDurationInTrafficSec: dit } : {}),
+      };
     };
+
+    let res = await fetch(`${base}&departure_time=now`);
+    let data = await res.json();
+    let out = parse(data);
+    if (!out && data?.status && data.status !== 'OK') {
+      res = await fetch(base);
+      data = await res.json();
+      out = parse(data);
+    }
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+/** One overview polyline per returned route (primary + alternatives when requested). */
+export type GoogleDrivingRouteOverview = {
+  overview: Array<{ latitude: number; longitude: number }>;
+  distanceM: number;
+  /** Best-effort driving time from Directions (static duration). */
+  durationSec: number;
+  /** Present when `departure_time=now` returns traffic-aware leg duration. */
+  durationInTrafficSec?: number;
+};
+
+/**
+ * Google Directions API — returns road-snapped overview polylines.
+ * Use `alternatives: true` for alternate paths (when supported).
+ */
+export async function fetchGoogleDrivingRoutes(
+  originLat: number,
+  originLng: number,
+  destLat: number,
+  destLng: number,
+  apiKey: string,
+  options?: { alternatives?: boolean },
+): Promise<{ routes: GoogleDrivingRouteOverview[] } | null> {
+  if (!apiKey) return null;
+
+  const alt = options?.alternatives ? '&alternatives=true' : '';
+  const base =
+    `https://maps.googleapis.com/maps/api/directions/json` +
+    `?origin=${originLat},${originLng}` +
+    `&destination=${destLat},${destLng}` +
+    `&mode=driving` +
+    alt +
+    `&key=${apiKey}`;
+
+  const parse = (data: any): GoogleDrivingRouteOverview[] | null => {
+    if (data.status !== 'OK' || !Array.isArray(data.routes) || data.routes.length === 0) {
+      return null;
+    }
+    const routes: GoogleDrivingRouteOverview[] = data.routes.map((route: any) => {
+      const leg = route.legs?.[0];
+      const pts = directionsRouteToMapCoordinates(route);
+      const dur = leg?.duration?.value ?? 0;
+      const dit = leg?.duration_in_traffic?.value;
+      return {
+        overview: pts,
+        distanceM: leg?.distance?.value ?? 0,
+        durationSec: dur,
+        ...(typeof dit === 'number' && dit > 0 ? { durationInTrafficSec: dit } : {}),
+      };
+    });
+    return routes.filter((r) => r.overview.length >= 2);
+  };
+
+  try {
+    // Prefer traffic-aware ETA when the key/billing supports it.
+    let res = await fetch(`${base}&departure_time=now`);
+    let data = await res.json();
+    let parsed = parse(data);
+
+    // Some keys reject departure_time=now (billing/restrictions) — retry without it; geometry is unchanged.
+    if (!parsed && data?.status && data.status !== 'OK') {
+      res = await fetch(base);
+      data = await res.json();
+      parsed = parse(data);
+    }
+
+    if (!parsed || parsed.length === 0) return null;
+    const viable = parsed.filter((r) => r.overview.length >= DIRECTIONS_ROUTE_MIN_POINTS);
+    if (viable.length > 0) return { routes: viable };
+    // Sparse overview polyline still has valid leg distance/duration — needed for fare API.
+    const r0 = parsed[0];
+    if (
+      typeof r0.distanceM === 'number' &&
+      r0.distanceM >= 80 &&
+      typeof r0.durationSec === 'number' &&
+      r0.durationSec >= 10
+    ) {
+      return { routes: [r0] };
+    }
+    return null;
   } catch {
     return null;
   }

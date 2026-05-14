@@ -21,6 +21,17 @@ import { SkeletonBlock } from '@/src/components/ui/SkeletonBlock';
 
 export type PreviewCoord = { lat: number; lng: number };
 
+/** Bearing in degrees (0 = North, clockwise) from (lat1,lng1) → (lat2,lng2) */
+function computeBearing(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLng = toRad(lng2 - lng1);
+  const φ1 = toRad(lat1);
+  const φ2 = toRad(lat2);
+  const x = Math.sin(dLng) * Math.cos(φ2);
+  const y = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(dLng);
+  return ((Math.atan2(x, y) * 180) / Math.PI + 360) % 360;
+}
+
 type MapRegion = {
   latitude: number;
   longitude: number;
@@ -210,6 +221,19 @@ export default function DriverOfferRoutePreview({
   const hasPoly = lineCoords.length >= 2;
   const isStraightLine = hasPoly && (routePreviewCoordinates == null || routePreviewCoordinates.length < 2);
 
+  // Bearing from driver → pickup (shown as a direction arrow on the map)
+  const bearingDeg = useMemo(() => {
+    if (
+      driverLat != null && driverLng != null &&
+      pickupLat != null && pickupLng != null &&
+      Number.isFinite(driverLat!) && Number.isFinite(driverLng!) &&
+      Number.isFinite(pickupLat) && Number.isFinite(pickupLng)
+    ) {
+      return computeBearing(driverLat!, driverLng!, pickupLat, pickupLng);
+    }
+    return null;
+  }, [driverLat, driverLng, pickupLat, pickupLng]);
+
   if (Platform.OS === 'web') {
     return (
       <View style={[styles.webFallback, { height: mapHeight }]}>
@@ -252,17 +276,15 @@ export default function DriverOfferRoutePreview({
             {/* Glow shadow line */}
             <Polyline
               coordinates={lineCoords}
-              strokeColor="rgba(14,165,233,0.25)"
+              strokeColor={`rgba(14,165,233,${0.25 * routeOpacity})`}
               strokeWidth={10}
-              strokeOpacity={routeOpacity}
               lineDashPattern={isStraightLine ? [8, 6] : undefined}
             />
             {/* Main route line */}
             <Polyline
               coordinates={lineCoords}
-              strokeColor="#0ea5e9"
+              strokeColor={`rgba(14,165,233,${routeOpacity})`}
               strokeWidth={4}
-              strokeOpacity={routeOpacity}
               lineDashPattern={isStraightLine ? [8, 6] : undefined}
               geodesic
             />
@@ -303,15 +325,22 @@ export default function DriverOfferRoutePreview({
         )}
       </MapView>
 
-      {/* Top-left: distance to pickup chip */}
-      {distToPickupKm != null && (
+      {/* Top-left: bearing arrow + distance to pickup chip */}
+      {(distToPickupKm != null || bearingDeg != null) && (
         <Animated.View style={[styles.chipTopLeft, { opacity: chipFadeAnim }]}>
+          {bearingDeg != null && (
+            <View style={[styles.bearingArrow, { transform: [{ rotate: `${Math.round(bearingDeg)}deg` }] }]}>
+              <Ionicons name="arrow-up" size={13} color="#22c55e" />
+            </View>
+          )}
           <Ionicons name="navigate" size={12} color="#0ea5e9" />
-          <Text style={styles.chipText}>
-            {distToPickupKm < 1
-              ? `${Math.round(distToPickupKm * 1000)}m to pickup`
-              : `${distToPickupKm.toFixed(1)}km to pickup`}
-          </Text>
+          {distToPickupKm != null && (
+            <Text style={styles.chipText}>
+              {distToPickupKm < 1
+                ? `${Math.round(distToPickupKm * 1000)}m to pickup`
+                : `${distToPickupKm.toFixed(1)}km to pickup`}
+            </Text>
+          )}
           {etaToPickupMin != null && (
             <Text style={styles.chipTextMuted}> · ~{etaToPickupMin}min</Text>
           )}
@@ -452,6 +481,12 @@ const styles = StyleSheet.create({
   },
   chipText: { fontSize: 11, fontWeight: '800', color: '#e2e8f0' },
   chipTextMuted: { fontSize: 11, fontWeight: '600', color: '#64748b' },
+  bearingArrow: {
+    width: 22, height: 22, borderRadius: 11,
+    backgroundColor: 'rgba(34,197,94,0.2)',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.5)',
+  },
 
   // Address strip at bottom of map
   addressStrip: {

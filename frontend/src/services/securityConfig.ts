@@ -8,6 +8,26 @@
  * This module provides runtime validation as an additional layer.
  */
 
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
+
+/** App + build label for support and backend diagnostics (kept in sync with native builds). */
+function clientVersionLabel(): string {
+  const v =
+    Constants.nativeAppVersion ||
+    Constants.expoConfig?.version ||
+    (Constants as { manifest?: { version?: string } }).manifest?.version ||
+    'unknown';
+  const build =
+    Constants.nativeBuildVersion ||
+    Constants.expoConfig?.ios?.buildNumber ||
+    (Constants.expoConfig?.android as { versionCode?: string } | undefined)?.versionCode;
+  if (build != null && String(build).trim()) {
+    return `${v} (${String(build).trim()})`;
+  }
+  return v;
+}
+
 /** Known production API hosts (Cloud Run may show either URL shape). */
 const ALLOWED_BACKEND_HOSTS = new Set([
   'nexryde-backend-993913300770.us-central1.run.app',
@@ -45,5 +65,6 @@ export function validateApiUrl(url: string): boolean {
  */
 export const SECURITY_HEADERS = {
   'X-Requested-With': 'NEXRYDE-App',
-  'X-App-Version': '1.1.6',
+  'X-App-Version': clientVersionLabel(),
+  'X-App-Platform': Platform.OS,
 };

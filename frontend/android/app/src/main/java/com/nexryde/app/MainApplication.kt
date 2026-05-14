@@ -5,7 +5,6 @@ import android.content.res.Configuration
 
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
-import com.nexryde.app.floating.FloatingDriverPackage
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
 import com.facebook.react.ReactNativeHost
 import com.facebook.react.ReactPackage
@@ -23,9 +22,7 @@ class MainApplication : Application(), ReactApplication {
       this,
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages.apply {
-              add(FloatingDriverPackage())
-            }
+            PackageList(this).packages
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 

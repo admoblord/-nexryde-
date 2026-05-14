@@ -55,6 +55,10 @@ interface LocationAutocompleteProps {
   /** @deprecated Unused — autocomplete uses BACKEND_URL /api/places. Kept for call-site compatibility. */
   apiKey?: string;
   countryCode?: string;
+  /** Bias suggestions toward rider GPS / pickup (Places API `location` + `radius`). Max radius 50km. */
+  biasLat?: number;
+  biasLng?: number;
+  biasRadiusM?: number;
   style?: any;
   inputStyle?: any;
   placeholderTextColor?: string;
@@ -67,6 +71,9 @@ export default function LocationAutocomplete({
   placeholder = 'Enter location',
   apiKey: _apiKey,
   countryCode = 'ng',
+  biasLat,
+  biasLng,
+  biasRadiusM = 45000,
   style,
   inputStyle,
   placeholderTextColor = '#A0A0A0',
@@ -94,7 +101,7 @@ export default function LocationAutocomplete({
     if (value.length >= 2) {
       debounceTimeout.current = setTimeout(() => {
         fetchPredictions(value);
-      }, 300);
+      }, 140);
     } else {
       setPredictions([]);
       setShowSuggestions(false);
@@ -105,17 +112,25 @@ export default function LocationAutocomplete({
         clearTimeout(debounceTimeout.current);
       }
     };
-  }, [value]);
+  }, [value, biasLat, biasLng, biasRadiusM, countryCode]);
 
   const fetchPredictions = async (input: string) => {
     const requestId = activeRequestIdRef.current + 1;
     activeRequestIdRef.current = requestId;
     setIsLoading(true);
     try {
-      // Use backend proxy to avoid CORS issues
-      const url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
-        input
+      let url = `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(
+        input,
       )}&components=country:${countryCode}`;
+      if (
+        typeof biasLat === 'number' &&
+        typeof biasLng === 'number' &&
+        Number.isFinite(biasLat) &&
+        Number.isFinite(biasLng)
+      ) {
+        const r = Math.min(Math.max(5000, Math.round(biasRadiusM ?? 45000)), 50000);
+        url += `&location_bias=${encodeURIComponent(`${biasLat},${biasLng}`)}&radius=${r}`;
+      }
 
       const response = await fetch(url);
       let data: any = {};

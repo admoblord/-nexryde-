@@ -20,6 +20,8 @@ import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 function formatEarnings(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
@@ -138,6 +140,7 @@ export default function DriverTripsTab() {
   const insets = useSafeAreaInsets();
   const { user, currentTrip } = useAppStore();
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
 
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -200,7 +203,12 @@ export default function DriverTripsTab() {
 
     return (
       <TouchableOpacity
-        style={[styles.tripCard, active && styles.tripCardActive, index === 0 && { marginTop: 0 }]}
+        style={[
+          styles.tripCard,
+          active && styles.tripCardActive,
+          index === 0 && { marginTop: 0 },
+          { padding: flow.cardPad },
+        ]}
         onPress={() => {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           if (active) {
@@ -326,7 +334,7 @@ export default function DriverTripsTab() {
           onPress={() => router.push('/driver/trips' as any)}
           activeOpacity={0.9}
         >
-          <LinearGradient colors={['#1E3A5F', '#2563EB']} style={styles.activeTripGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+          <LinearGradient colors={['#1E3A5F', '#2563EB']} style={[styles.activeTripGrad, { padding: flow.cardPad }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
             <PulsingLiveDot />
             <View style={{ flex: 1, marginLeft: SPACING.sm }}>
               <Text style={styles.activeTripTitle}>Active Trip in Progress</Text>
@@ -342,7 +350,7 @@ export default function DriverTripsTab() {
       )}
 
       {/* Stats strip */}
-      <View style={styles.statsStrip}>
+      <View style={[styles.statsStrip, { padding: flow.cardPad }]}>
         <View style={styles.statItem}>
           <Text style={styles.statValue}>{stats.total}</Text>
           <Text style={styles.statLabel}>Total Trips</Text>
@@ -426,8 +434,9 @@ export default function DriverTripsTab() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <TabBrandStrip role="driver" />
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <View>
           <Text style={styles.headerTitle}>My Trips</Text>
           <Text style={styles.headerSubtitle}>
@@ -445,7 +454,7 @@ export default function DriverTripsTab() {
       </View>
 
       {loadError && (
-        <View style={styles.errorBanner}>
+        <View style={[styles.errorBanner, { paddingHorizontal: flow.padH }]}>
           <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
           <Text style={styles.errorText}>Could not load trips.</Text>
           <TouchableOpacity onPress={() => { setLoading(true); void loadTrips(); }}>
@@ -455,7 +464,7 @@ export default function DriverTripsTab() {
       )}
 
       {loading && !refreshing ? (
-        <View style={{ paddingHorizontal: SPACING.lg, paddingTop: SPACING.lg }}>
+        <View style={{ paddingHorizontal: flow.padH, paddingTop: flow.sectionGap }}>
           {[0, 1, 2, 3].map(i => <TripCardSkeleton key={i} />)}
         </View>
       ) : (
@@ -465,7 +474,10 @@ export default function DriverTripsTab() {
           keyExtractor={item => item.id || item._id || Math.random().toString()}
           ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
-          contentContainerStyle={[styles.listContent, { paddingBottom: tabPad }]}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingHorizontal: flow.padH, paddingTop: flow.sectionGap, paddingBottom: tabPad },
+          ]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -475,7 +487,7 @@ export default function DriverTripsTab() {
               colors={['#2563EB']}
             />
           }
-          ItemSeparatorComponent={() => <View style={{ height: SPACING.sm }} />}
+          ItemSeparatorComponent={() => <View style={{ height: Math.max(10, Math.round(flow.sectionGap * 0.5)) }} />}
         />
       )}
     </SafeAreaView>
@@ -488,7 +500,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
@@ -517,7 +528,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: SPACING.sm,
     backgroundColor: '#FEF2F2',
-    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.sm,
     borderBottomWidth: 1,
     borderBottomColor: '#FECACA',
@@ -526,7 +536,7 @@ const styles = StyleSheet.create({
   retryText: { fontSize: FONT_SIZE.sm, color: '#2563EB', fontWeight: '700' },
   loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: SPACING.md },
   loadingText: { fontSize: FONT_SIZE.sm, color: '#94A3B8' },
-  listContent: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.lg },
+  listContent: { flexGrow: 1 },
   // Active trip banner
   activeTripBanner: {
     marginBottom: SPACING.md,

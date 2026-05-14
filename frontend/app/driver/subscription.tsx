@@ -9,7 +9,6 @@ import {
   Alert,
   ActivityIndicator,
   Animated,
-  Dimensions,
   Platform,
   Linking,
   AppState,
@@ -31,11 +30,10 @@ import {
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import axios from 'axios';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 /** AsyncStorage key for persisting the pending checkout reference across app restarts. */
 const PENDING_SUB_REF_KEY = '@nexryde_pending_sub_checkout_ref';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface PricingData {
   city_rider: {
@@ -86,6 +84,7 @@ interface VirtualAccountDetails {
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user } = useAppStore();
+  const flow = useFlowLayout();
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState<PricingData | null>(null);
   const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
@@ -534,7 +533,15 @@ export default function SubscriptionScreen() {
 
         <ScrollView 
           showsVerticalScrollIndicator={false} 
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingHorizontal: flow.padH,
+              paddingTop: Math.round(flow.sectionGap * 0.35),
+              paddingBottom: 40,
+              gap: Math.round(flow.sectionGap * 0.3),
+            },
+          ]}
         >
           {subscriptionIsPending && (
             <View style={[styles.flowBanner, styles.pendingFlowBanner]}>
@@ -1091,8 +1098,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+    flexGrow: 1,
   },
   flowBanner: {
     flexDirection: 'row',

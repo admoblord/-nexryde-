@@ -13,12 +13,12 @@ import {
   Easing,
   Platform,
   StatusBar,
+  Dimensions,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { useTurnByTurnNav } from '@/src/navigation/useTurnByTurnNav';
 import { TurnCard } from '@/src/navigation/TurnCard';
 import * as Haptics from 'expo-haptics';
-import { useFloatingDriverBubble } from '@/src/hooks/useFloatingDriverBubble';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
@@ -39,6 +39,39 @@ function _matchPolice(region: string): string {
   const found = _POLICE.find((c) => c.state.toLowerCase() === q || c.aliases.some((a) => a === q || q.includes(a)));
   return found ? `tel:${found.phone}` : 'tel:+2349055390070'; // Lagos fallback
 }
+
+/** Same navigation targets as driver-home live map (pickup vs dropoff by status). */
+function openGoogleNavigation(lat: number | null, lng: number | null, addressFallback?: string) {
+  if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+    const url =
+      Platform.select({
+        ios: `maps:0,0?q=${lat},${lng}`,
+        android: `google.navigation:q=${lat},${lng}`,
+      }) || `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+    });
+  } else if (addressFallback) {
+    Linking.openURL(
+      `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(addressFallback)}`
+    );
+  }
+}
+
+function openNavigationForTrip(trip: Trip | null) {
+  if (!trip?.status) return;
+  const st = trip.status;
+  const pick = trip.pickup_location as { lat?: number; lng?: number; address?: string } | undefined;
+  const drop = trip.dropoff_location as { lat?: number; lng?: number; address?: string } | undefined;
+  if ((st === 'accepted' || st === 'arrived') && pick) {
+    openGoogleNavigation(Number(pick.lat), Number(pick.lng), pick.address);
+  } else if (st === 'ongoing' && drop) {
+    openGoogleNavigation(Number(drop.lat), Number(drop.lng), drop.address);
+  }
+}
+
+const SCREEN_H = Dimensions.get('window').height;
+const ACTIVE_TRIP_MAP_HEIGHT = Math.min(380, Math.round(SCREEN_H * 0.38));
 
 /* ─── Dark map style ─── */
 const DARK_MAP_STYLE = [
@@ -408,7 +441,7 @@ const TripLiveMap = memo(function TripLiveMap({ driverLat, driverLng, pickupLat,
 
 const tripMapStyles = StyleSheet.create({
   container: {
-    height: 220,
+    height: ACTIVE_TRIP_MAP_HEIGHT,
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 12,
@@ -496,13 +529,35 @@ const tripMapStyles = StyleSheet.create({
 export default function DriverTripsScreen() {
   const router = useRouter();
   const { user, currentLocation, currentTrip, setCurrentTrip } = useAppStore();
-  const { updateStatus: bubbleUpdate } = useFloatingDriverBubble();
   const [trips, setTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const hasActiveTrip = Boolean(currentTrip?.id);
   const tabPad = useTabBottomPad(8);
+
+  const riderPhoneForTrip = useMemo(() => {
+    if (!currentTrip) return '';
+    const raw = (currentTrip as unknown as Record<string, unknown>).rider_phone;
+    return typeof raw === 'string' ? raw.replace(/\s+/g, ' ').trim() : '';
+  }, [currentTrip]);
+
+  const handleTripNavigatePress = useCallback(() => openNavigationForTrip(currentTrip), [currentTrip]);
+  const handleTripCallPress = useCallback(() => {
+    if (!riderPhoneForTrip) {
+      Alert.alert(
+        'Call unavailable',
+        'Rider phone appears here once the trip is synced. Pull to refresh or use the live map on Driver Home.'
+      );
+      return;
+    }
+    Linking.openURL(`tel:${riderPhoneForTrip.replace(/\s+/g, '')}`);
+  }, [riderPhoneForTrip]);
+
+  const handleTripMessagePress = useCallback(() => {
+    if (!currentTrip?.id) return;
+    router.push(`/chat?tripId=${encodeURIComponent(currentTrip.id)}` as any);
+  }, [currentTrip?.id, router]);
   const [lastSpeedSpikeAlertAt, setLastSpeedSpikeAlertAt] = useState<string | null>(null);
   const [busyActionKey, setBusyActionKey] = useState<string | null>(null);
   const [gateSecs, setGateSecs] = useState<number | null>(null);
@@ -573,9 +628,7 @@ export default function DriverTripsScreen() {
         // Keep floating bubble in sync with recovered trip status
         if (normalizedStatus === 'accepted' || normalizedStatus === 'ongoing') {
           const dest = trip.dropoff_address?.slice(0, 22) ?? 'On Trip';
-          bubbleUpdate('on_trip', dest);
         } else if (normalizedStatus === 'arrived') {
-          bubbleUpdate('arrived', 'At pickup');
         }
       }
     } catch {}
@@ -691,7 +744,6 @@ export default function DriverTripsScreen() {
       const response = await acceptTrip(trip.id, user.id, trip.offer_id);
       setCurrentTrip(response.data);
       const destLabel = (response.data?.dropoff_address ?? trip.dropoff_address ?? 'On Trip').slice(0, 22);
-      bubbleUpdate('on_trip', destLabel);
       Alert.alert('Trip Accepted', 'Navigate to pickup location to start the ride.');
       setTrips(trips.filter(t => t.id !== trip.id));
     } catch (error: any) {
@@ -747,7 +799,6 @@ export default function DriverTripsScreen() {
     try {
       const response = await arriveTrip(currentTrip.id, user.id);
       setCurrentTrip(response.data);
-      bubbleUpdate('arrived', 'At pickup');
       Alert.alert('Arrived at Pickup', 'Rider notified. Ask them to open NEXRYDE and show their pick-up code.');
     } catch (error: any) {
       Alert.alert('Error', error.response?.data?.detail || 'Failed to mark arrival');
@@ -1182,7 +1233,7 @@ export default function DriverTripsScreen() {
 
       {/* Current Trip */}
       {currentTrip && (
-        <Card style={styles.currentTripCard}>
+        <Card variant="dark" style={styles.currentTripCard}>
           <View style={styles.currentTripHeader}>
             <Badge 
               text={currentTrip.status.toUpperCase()} 
@@ -1206,6 +1257,43 @@ export default function DriverTripsScreen() {
               pickupAddress={typeof currentTrip.pickup_location === 'object' ? (currentTrip.pickup_location as any)?.address : undefined}
               dropAddress={typeof currentTrip.dropoff_location === 'object' ? (currentTrip.dropoff_location as any)?.address : undefined}
             />
+          )}
+
+          {['accepted', 'arrived', 'ongoing'].includes(currentTrip.status) && (
+            <View style={styles.tripQuickActions}>
+              <TouchableOpacity
+                style={styles.tripQuickPill}
+                onPress={handleTripNavigatePress}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Open navigation"
+              >
+                <Ionicons name="navigate" size={17} color="#38BDF8" />
+                <Text style={styles.tripQuickPillText}>Navigate</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.tripQuickPill, !riderPhoneForTrip && styles.tripQuickPillMuted]}
+                onPress={handleTripCallPress}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Call rider"
+              >
+                <Ionicons name="call" size={17} color={riderPhoneForTrip ? '#34D399' : '#64748B'} />
+                <Text style={[styles.tripQuickPillText, !riderPhoneForTrip && styles.tripQuickPillTextMuted]}>
+                  Call
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.tripQuickPill}
+                onPress={handleTripMessagePress}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Message rider"
+              >
+                <Ionicons name="chatbubble-ellipses" size={17} color="#A78BFA" />
+                <Text style={styles.tripQuickPillText}>Message</Text>
+              </TouchableOpacity>
+            </View>
           )}
           
           <View style={styles.tripRoute}>
@@ -1564,28 +1652,29 @@ const styles = StyleSheet.create({
   },
   summaryCard: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surfaceLight,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     borderWidth: 1,
-    borderColor: COLORS.gray200,
+    borderColor: 'rgba(148,163,184,0.22)',
     ...SHADOWS.sm,
   },
   summaryCardPrimary: {
-    borderColor: COLORS.primary + '55',
+    borderColor: `${COLORS.accentGreen}66`,
+    backgroundColor: 'rgba(0,212,106,0.10)',
   },
   summaryLabel: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '800',
     textTransform: 'uppercase',
     letterSpacing: 0.6,
-    color: COLORS.textSecondary,
+    color: COLORS.textMuted,
   },
   summaryValue: {
     marginTop: 6,
     fontSize: FONT_SIZE.xl,
     fontWeight: '900',
-    color: COLORS.textPrimary,
+    color: COLORS.white,
   },
   summarySubtext: {
     marginTop: 4,
@@ -1597,9 +1686,39 @@ const styles = StyleSheet.create({
   currentTripCard: {
     margin: SPACING.md,
     marginTop: 0,
-    backgroundColor: COLORS.primary + '10',
-    borderWidth: 2,
-    borderColor: COLORS.primary,
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,106,0.5)',
+    backgroundColor: 'rgba(26,35,50,0.98)',
+  },
+  tripQuickActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: SPACING.md,
+  },
+  tripQuickPill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 11,
+    paddingHorizontal: 6,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  tripQuickPillMuted: {
+    opacity: 0.72,
+  },
+  tripQuickPillText: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '800',
+    color: '#F1F5F9',
+  },
+  tripQuickPillTextMuted: {
+    color: '#94A3B8',
   },
   currentTripHeader: {
     flexDirection: 'row',
@@ -1610,7 +1729,7 @@ const styles = StyleSheet.create({
   currentTripFare: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '700',
-    color: COLORS.primary,
+    color: COLORS.accentGreenLight,
   },
   gateCodeCard: {
     marginTop: SPACING.md,
@@ -1896,18 +2015,18 @@ const styles = StyleSheet.create({
   },
   routeLabel: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.textSecondary,
+    color: COLORS.textMuted,
     marginBottom: 2,
   },
   routeAddress: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.textPrimary,
+    color: COLORS.white,
     fontWeight: '500',
   },
   routeLine: {
     width: 2,
     height: 20,
-    backgroundColor: COLORS.gray200,
+    backgroundColor: 'rgba(148,163,184,0.35)',
     marginLeft: 5,
     marginVertical: SPACING.xs,
   },

@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>NEXRYDE</string>
+    <string>Nexryde</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -19,7 +19,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.2</string>
+    <string>1.3.20</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -33,13 +33,19 @@
       </dict>
     </array>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>40</string>
     <key>GMSApiKey</key>
-    <string>GOOGLE_MAPS_KEY_REDACTED</string>
+    <string>AIzaSyCg8_VB5ikbOzQHTJ1wVg1zGMdjTwCBSYs</string>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>LSApplicationQueriesSchemes</key>
     <array>
       <string>tel</string>
       <string>telprompt</string>
+      <string>maps</string>
+      <string>comgooglemaps</string>
+      <string>uber</string>
+      <string>whatsapp</string>
     </array>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
@@ -53,31 +59,43 @@
       <true/>
     </dict>
     <key>NSCameraUsageDescription</key>
-    <string>NEXRYDE needs camera access for document verification</string>
+    <string>NEXRYDE uses the camera for driver document verification, profile photos, and biometric withdrawal confirmation.</string>
     <key>NSContactsUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your contacts</string>
+    <string>NEXRYDE reads your contacts so you can quickly book a ride for someone else.</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>Allow NEXRYDE to use Face ID for secure login</string>
+    <string>Allow NEXRYDE to use Face ID for secure login and biometric withdrawals.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>NexRyde uses your location to detect your pickup point and match you with nearby drivers.</string>
+    <string>NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your location</string>
+    <string>NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
-    <string>NexRyde uses your location to detect your pickup point and match you with nearby drivers.</string>
+    <string>NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Allow NEXRYDE to use microphone for voice booking.</string>
     <key>NSMotionUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your device motion</string>
+    <string>NEXRYDE uses device motion sensors for the emergency shake-to-alert safety feature.</string>
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>NEXRYDE may save trip receipts or screenshots to your photo library.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your photos</string>
+    <string>NEXRYDE needs access to your photos to let you upload a profile picture or driver documents.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>Allow NEXRYDE to recognize speech for voice booking.</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>
     </array>
+    <key>NSUserTrackingUsageDescription</key>
+    <string>NEXRYDE uses limited data to improve the app experience and show relevant offers. You can opt out at any time in Settings.</string>
     <key>RCTNewArchEnabled</key>
     <true/>
+    <key>RCTRootViewBackgroundColor</key>
+    <integer>4279047200</integer>
+    <key>UIBackgroundModes</key>
+    <array>
+      <string>location</string>
+      <string>fetch</string>
+      <string>remote-notification</string>
+    </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>
@@ -87,21 +105,14 @@
     <key>UIRequiresFullScreen</key>
     <false/>
     <key>UIStatusBarStyle</key>
-    <string>UIStatusBarStyleDefault</string>
+    <string>UIStatusBarStyleLightContent</string>
     <key>UISupportedInterfaceOrientations</key>
     <array>
       <string>UIInterfaceOrientationPortrait</string>
       <string>UIInterfaceOrientationPortraitUpsideDown</string>
     </array>
-    <key>UISupportedInterfaceOrientations~ipad</key>
-    <array>
-      <string>UIInterfaceOrientationPortrait</string>
-      <string>UIInterfaceOrientationPortraitUpsideDown</string>
-      <string>UIInterfaceOrientationLandscapeLeft</string>
-      <string>UIInterfaceOrientationLandscapeRight</string>
-    </array>
     <key>UIUserInterfaceStyle</key>
-    <string>Automatic</string>
+    <string>Dark</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
   </dict>

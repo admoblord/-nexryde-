@@ -112,9 +112,27 @@ class TestRiderFullFlow:
     """Test complete rider flow: Create trip → Accept → Start → Complete → Rate → Receipt"""
 
     def test_01_create_trip_with_offered_fare(self):
-        """POST /api/trips/request?rider_id=X - Create trip with offered fare"""
+        """POST /api/trips/request?rider_id=X - Create trip with offered fare (fare lock required)."""
         global created_trip_id
         assert TEST_RIDER_TOKEN, "Rider JWT required"
+
+        est_payload = {
+            "pickup_lat": PICKUP_LAT,
+            "pickup_lng": PICKUP_LNG,
+            "dropoff_lat": DROPOFF_LAT,
+            "dropoff_lng": DROPOFF_LNG,
+            "service_type": "economy",
+            "city": "lagos",
+            "pickup_address": "Victoria Island, Lagos",
+            "dropoff_address": "Lekki Phase 1, Lagos",
+            "rider_id": TEST_RIDER_ID,
+        }
+        er = requests.post(f"{BASE_URL}/api/fare/estimate", json=est_payload, timeout=90)
+        assert er.status_code == 200, f"Fare estimate failed: {er.status_code} - {er.text}"
+        fe = er.json()
+        eid = fe["estimate_id"]
+        min_p = float(fe.get("min_price") or 0)
+        offer = max(3500.0, min_p)
 
         payload = {
             "pickup_lat": PICKUP_LAT,
@@ -124,8 +142,9 @@ class TestRiderFullFlow:
             "dropoff_lng": DROPOFF_LNG,
             "dropoff_address": "Lekki Phase 1, Lagos",
             "service_type": "economy",
-            "offered_fare": 3500.0,
-            "recommended_fare": 4000.0
+            "fare_estimate_id": eid,
+            "offered_fare": offer,
+            "recommended_fare": float(fe.get("base_price") or fe.get("total_fare") or offer),
         }
 
         response = requests.post(
@@ -143,8 +162,8 @@ class TestRiderFullFlow:
         created_trip_id = trip["id"]
         
         # Verify offered fare is used
-        assert trip.get("offered_fare") == 3500.0, "Offered fare should be stored"
-        print(f"PASS: Created trip {created_trip_id} with offered fare ₦3500")
+        assert trip.get("offered_fare") == offer, "Offered fare should match locked bid"
+        print(f"PASS: Created trip {created_trip_id} with offered fare ₦{offer:,.0f}")
 
     def test_02_get_trip_status(self):
         """GET /api/trips/{trip_id} - Verify trip details"""

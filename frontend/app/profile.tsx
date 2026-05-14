@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { COLORS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function ProfileRedirectScreen() {
@@ -20,7 +21,7 @@ export default function ProfileRedirectScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#22E180" />
+        <ActivityIndicator size="large" color={COLORS.accentGreen} />
       </View>
     </SafeAreaView>
   );
@@ -29,7 +30,7 @@ export default function ProfileRedirectScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A',
+    backgroundColor: COLORS.background,
   },
   loader: {
     flex: 1,

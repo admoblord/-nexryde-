@@ -1,33 +1,44 @@
-import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
+/**
+ * DriverRideRequestModal — Nexryde 2030 Edition
+ *
+ * Full-screen Uber-style layout:
+ *   • Map fills the whole screen — A→B route clearly visible
+ *   • Rider avatar (human-head) at pickup A
+ *   • Flag marker at destination B
+ *   • Auto-zoom fitToCoordinates with bottom-card padding
+ *   • Floating timer + request header at top
+ *   • Bottom sheet with fare, rider info, routes, Accept / Ignore
+ *   • Expandable counter-bid section
+ */
+
+import React, {
+  useMemo, useCallback, useRef, useState, useEffect,
+} from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  Modal,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  useWindowDimensions,
-  Platform,
-  KeyboardAvoidingView,
+  View, Text, StyleSheet, Modal, TouchableOpacity,
+  TextInput, ScrollView, Platform, KeyboardAvoidingView,
+  Image, Animated, Easing,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import DriverOfferRoutePreview from '@/src/components/DriverOfferRoutePreview';
-import { DS_COLOR, DS_RADIUS, DS_SPACE, DS_TYPE } from '@/src/design/designSystem';
+import { StatusBar } from 'expo-status-bar';
+import { DS_COLOR, DS_SPACE } from '@/src/design/designSystem';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import * as Haptics from 'expo-haptics';
+import RideRequestMap from '@/src/components/RideRequestMap';
+import Constants from 'expo-constants';
+import { fetchGoogleDrivingRoutes, DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
+import { isShortTripFare } from '@/src/utils/farePresentation';
 
 const C = DS_COLOR;
 
+/* ─────────────────────── helpers ─────────────────────── */
 export type FairTier = 'good' | 'fair' | 'low';
 
 export function computeFairTier(
-  baseFare: number,
-  riderOffer: number,
-  minPrice?: number | null
+  baseFare: number, riderOffer: number, minPrice?: number | null
 ): FairTier {
   if (baseFare <= 0) return 'fair';
   if (minPrice != null && minPrice > 0 && riderOffer < minPrice - 0.5) return 'low';
@@ -37,10 +48,7 @@ export function computeFairTier(
   return 'low';
 }
 
-function roundFare(n: number) {
-  return Math.max(0, Math.round(n / 50) * 50);
-}
-
+function roundFare(n: number) { return Math.max(0, Math.round(n / 50) * 50); }
 function parseFareInput(s: string) {
   const n = Number(String(s).replace(/,/g, '').trim());
   return Number.isFinite(n) ? n : NaN;
@@ -58,16 +66,27 @@ type Props = {
   accepting: boolean;
   onAccept: () => void;
   onIgnore: () => void;
-  /** Driver's current GPS position for the map dot */
   driverLat?: number | null;
   driverLng?: number | null;
 };
 
 const CHIP_PRESETS = [
-  { label: '+5%', pct: 0.05 },
-  { label: '+10%', pct: 0.1 },
+  { label: '+5%',  pct: 0.05 },
+  { label: '+10%', pct: 0.10 },
   { label: '+15%', pct: 0.15 },
 ] as const;
+
+/** Robust lat/lng from pickup/drop payload variants */
+function readLatLng(loc: unknown): { lat: number | null; lng: number | null } {
+  if (loc == null) return { lat: null, lng: null };
+  if (typeof loc === 'object') {
+    const o = loc as Record<string, unknown>;
+    const lat = Number(o.lat ?? o.latitude);
+    const lng = Number(o.lng ?? o.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) return { lat, lng };
+  }
+  return { lat: null, lng: null };
+}
 
 const RIDE_PREFERENCE_LABELS: Record<string, string> = {
   quiet_ride: 'Quiet Ride',
@@ -76,6 +95,31 @@ const RIDE_PREFERENCE_LABELS: Record<string, string> = {
   cold_ac: 'AC Must Be Cold',
 };
 
+/* ─────────────────────── Animated timer arc ─────────────────────── */
+function TimerBar({
+  progress, urgent,
+}: { progress: number; urgent: boolean }) {
+  const w = `${Math.max(0, progress * 100)}%` as `${number}%`;
+  return (
+    <View style={tb.track}>
+      <View style={[tb.fillClip, { width: w }]}>
+        <LinearGradient
+          colors={urgent ? ['#fb7185', '#ef4444', '#b91c1c'] : ['#34F5B8', '#22E5A0', '#0D9F6E']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={tb.fillGrad}
+        />
+      </View>
+    </View>
+  );
+}
+const tb = StyleSheet.create({
+  track: { height: 4, backgroundColor: 'rgba(255,255,255,0.1)', overflow: 'hidden', borderRadius: 2 },
+  fillClip: { height: 4, overflow: 'hidden', borderRadius: 2 },
+  fillGrad: { flex: 1, height: 4 },
+});
+
+/* ─────────────────────── Main modal ─────────────────────── */
 export default function DriverRideRequestModal({
   visible,
   trip,
@@ -89,96 +133,206 @@ export default function DriverRideRequestModal({
   driverLat,
   driverLng,
 }: Props) {
-  const { height: windowH } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const fareInputRef = useRef<TextInput>(null);
+  const [imgError, setImgError]   = useState(false);
+  const [counterMode, setCounterMode] = useState(false);
+  const [expanded, setExpanded]   = useState(false);
+  const [googleTripRoutes, setGoogleTripRoutes] = useState<
+    Array<{
+      overview: Array<{ latitude: number; longitude: number }>;
+      distanceM: number;
+      durationSec: number;
+    }>
+  >([]);
 
-  const mapHeight = useMemo(() => {
-    const h = Math.round(windowH * 0.28);
-    return Math.min(220, Math.max(152, h));
-  }, [windowH]);
+  // Sheet slide animation
+  const sheetAnim = useRef(new Animated.Value(0)).current;
+  const SHEET_COLLAPSED = 260;
+  const SHEET_EXPANDED  = 540;
 
-  const baseFare = Math.round(
-    Number(trip?.base_price ?? trip?.recommended_fare ?? trip?.base_fare ?? 0)
-  );
+  useEffect(() => {
+    Animated.spring(sheetAnim, {
+      toValue: expanded ? SHEET_EXPANDED : SHEET_COLLAPSED,
+      tension: 55, friction: 11, useNativeDriver: false,
+    }).start();
+  }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset on close / new offer
+  useEffect(() => {
+    if (!visible) {
+      setCounterMode(false);
+      setImgError(false);
+      setExpanded(false);
+    }
+  }, [visible, trip?.id]);
+
+  /* ── Fare math ── */
+  const baseFare   = Math.round(Number(trip?.base_price ?? trip?.recommended_fare ?? trip?.base_fare ?? 0));
   const riderOffer = Math.round(Number(trip?.offered_fare ?? trip?.fare ?? 0));
-  const maxFare = trip?.max_price != null ? Math.round(Number(trip.max_price)) : null;
-  const minFare = trip?.min_price != null ? Math.round(Number(trip.min_price)) : null;
-  const distanceKm = trip?.distance_km != null ? Number(trip.distance_km) : null;
+  const maxFare    = trip?.max_price  != null ? Math.round(Number(trip.max_price))  : null;
+  const minFare    = trip?.min_price  != null ? Math.round(Number(trip.min_price))  : null;
+  const distanceKm = trip?.distance_km   != null ? Number(trip.distance_km)   : null;
   const durationMins = trip?.duration_mins != null ? Number(trip.duration_mins) : null;
-  const surgeMul = trip?.surge_multiplier != null ? Number(trip.surge_multiplier) : 1;
+  const surgeMul   = trip?.surge_multiplier != null ? Number(trip.surge_multiplier) : 1;
   const highDemand = surgeMul > 1.04;
+  const shortTripRate = isShortTripFare(trip?.fare_bucket, distanceKm);
 
-  const pricePerKm =
-    distanceKm && distanceKm > 0 && riderOffer > 0
-      ? Math.round(riderOffer / distanceKm)
-      : null;
-
-  const fairTier = useMemo(
-    () => computeFairTier(baseFare || riderOffer, riderOffer, minFare),
-    [baseFare, riderOffer, minFare]
-  );
-
+  const fairTier = useMemo(() => computeFairTier(baseFare || riderOffer, riderOffer, minFare), [baseFare, riderOffer, minFare]);
   const fairConfig = {
-    good: { label: 'Strong offer', sub: 'At or above suggested fare', color: C.success, icon: 'trending-up' as const },
-    fair: { label: 'Fair', sub: 'Within typical range', color: '#EAB308', icon: 'remove-outline' as const },
-    low: { label: 'Below suggested', sub: 'Rider is under system guidance', color: C.danger, icon: 'alert-circle-outline' as const },
+    good: { label: 'Strong offer', color: C.success,  icon: 'trending-up'          as const },
+    fair: { label: 'Fair offer',   color: '#EAB308',  icon: 'remove-outline'        as const },
+    low:  { label: 'Low offer',    color: C.danger,   icon: 'alert-circle-outline'  as const },
   }[fairTier];
 
-  const riderName =
-    (trip?.shield?.rider_display_name as string)?.trim() || 'Rider';
-  const initial = riderName.charAt(0).toUpperCase() || 'R';
-  const rating =
-    trip?.shield?.rider_reputation_avg != null
-      ? Number(trip.shield.rider_reputation_avg).toFixed(1)
-      : null;
+  /* ── Rider info ── */
+  const riderName  = trip?.rider_name || trip?.rider?.name || (trip?.shield?.rider_display_name as string)?.trim() || 'Rider';
+  const riderPhoto = trip?.rider_photo || trip?.rider?.profile_image || null;
+  const initial    = riderName.charAt(0).toUpperCase() || 'R';
+  const rating     = trip?.shield?.rider_reputation_avg != null ? Number(trip.shield.rider_reputation_avg).toFixed(1) : null;
   const ratingCount = trip?.shield?.rider_reputation_trip_count ?? null;
-  const riderRiskScore =
-    trip?.shield?.rider_risk_score != null ? Number(trip.shield.rider_risk_score) : null;
   const riderRiskBand = String(trip?.shield?.rider_risk_band || '').toLowerCase();
   const riderRiskConfig =
-    riderRiskBand === 'green'
-      ? { label: 'Green', color: C.success, hint: 'Low safety risk' }
-      : riderRiskBand === 'yellow'
-        ? { label: 'Yellow', color: '#EAB308', hint: 'Moderate caution' }
-        : riderRiskBand === 'red'
-          ? { label: 'Red', color: C.danger, hint: 'High caution' }
-          : null;
+    riderRiskBand === 'green'  ? { label: 'Safe',    color: C.success, icon: 'shield-checkmark' as const } :
+    riderRiskBand === 'yellow' ? { label: 'Caution', color: '#EAB308', icon: 'shield-half'       as const } :
+    riderRiskBand === 'red'    ? { label: 'Risk',    color: C.danger,  icon: 'shield-outline'    as const } :
+    null;
+  const riskColor = riderRiskConfig?.color ?? C.success;
 
+  /* ── Locations ── */
+  const pl = trip?.pickup_location;
+  const dl = trip?.dropoff_location;
+  let { lat: pLat, lng: pLng } = readLatLng(pl);
+  let { lat: dLat, lng: dLng } = readLatLng(dl);
+  const rawTrip = trip as Record<string, unknown> | undefined;
+  if (pLat == null || pLng == null) {
+    const fb = readLatLng(rawTrip?.pickup_coordinates);
+    if (fb.lat != null && fb.lng != null) {
+      pLat = fb.lat;
+      pLng = fb.lng;
+    }
+  }
+  if (dLat == null || dLng == null) {
+    const fb = readLatLng(rawTrip?.destination_coordinates ?? rawTrip?.dropoff_coordinates);
+    if (fb.lat != null && fb.lng != null) {
+      dLat = fb.lat;
+      dLng = fb.lng;
+    }
+  }
+  const rpcPrev = trip?.route_preview_coordinates;
+  if (Array.isArray(rpcPrev) && rpcPrev.length >= 2) {
+    if (pLat == null || pLng == null) {
+      const a = rpcPrev[0] as Record<string, unknown>;
+      const lat = Number(a?.lat ?? a?.latitude);
+      const lng = Number(a?.lng ?? a?.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        pLat = lat;
+        pLng = lng;
+      }
+    }
+    if (dLat == null || dLng == null) {
+      const b = rpcPrev[rpcPrev.length - 1] as Record<string, unknown>;
+      const lat = Number(b?.lat ?? b?.latitude);
+      const lng = Number(b?.lng ?? b?.longitude);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        dLat = lat;
+        dLng = lng;
+      }
+    }
+  }
+  const pickupLine = typeof pl === 'string' ? pl : (pl as { address?: string })?.address || 'Pickup location';
+  const dropLine =
+    typeof dl === 'string'
+      ? dl
+      : (dl as { address?: string })?.address ||
+        (typeof trip?.destination === 'string'
+          ? trip.destination
+          : (trip?.destination as { address?: string })?.address || 'Destination');
+
+  const directionsApiKey =
+    process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ||
+    (Constants.expoConfig?.extra?.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY as string | undefined) ||
+    '';
+
+  useEffect(() => {
+    if (!visible || !trip?.id || !directionsApiKey) {
+      setGoogleTripRoutes([]);
+      return;
+    }
+    if (
+      pLat == null ||
+      pLng == null ||
+      dLat == null ||
+      dLng == null ||
+      !Number.isFinite(pLat) ||
+      !Number.isFinite(pLng) ||
+      !Number.isFinite(dLat) ||
+      !Number.isFinite(dLng)
+    ) {
+      setGoogleTripRoutes([]);
+      return;
+    }
+    let cancelled = false;
+    fetchGoogleDrivingRoutes(pLat, pLng, dLat, dLng, directionsApiKey)
+      .then((res) => {
+        if (cancelled || !res?.routes?.length) return;
+        setGoogleTripRoutes(res.routes);
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleTripRoutes([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, trip?.id, directionsApiKey, pLat, pLng, dLat, dLng]);
+
+  const rideRequestRouteCoords = useMemo(() => {
+    const prev =
+      Array.isArray(trip?.route_preview_coordinates) && trip!.route_preview_coordinates!.length >= 2
+        ? (trip!.route_preview_coordinates as Array<{ lat: number; lng: number }>)
+        : null;
+    const g0 = googleTripRoutes[0]?.overview;
+    if (g0 && g0.length >= 2) {
+      const mapped = g0.map((p) => ({ lat: p.latitude, lng: p.longitude }));
+      if (mapped.length >= DIRECTIONS_ROUTE_MIN_POINTS) return mapped;
+      if (prev && prev.length >= DIRECTIONS_ROUTE_MIN_POINTS && prev.length > mapped.length) {
+        return prev;
+      }
+      return mapped.length >= 2 ? mapped : prev;
+    }
+    if (prev && prev.length >= 2) return prev;
+    return null;
+  }, [googleTripRoutes, trip?.route_preview_coordinates]);
+
+  const displayTripKm =
+    googleTripRoutes[0] != null ? googleTripRoutes[0].distanceM / 1000 : distanceKm;
+  const displayTripMin =
+    googleTripRoutes[0] != null ? Math.ceil(googleTripRoutes[0].durationSec / 60) : durationMins;
+  const tripKmForFare = displayTripKm ?? distanceKm;
+  const pricePerKm =
+    tripKmForFare != null && tripKmForFare > 0 && riderOffer > 0
+      ? Math.round(riderOffer / tripKmForFare)
+      : null;
   const distPickup = trip?.distance_to_pickup != null ? Number(trip.distance_to_pickup) : null;
-  const etaPickupMin =
-    distPickup != null && distPickup >= 0 ? Math.max(1, Math.round(distPickup * 2.2)) : null;
+  const etaPickupMin = distPickup != null && distPickup >= 0 ? Math.max(1, Math.round(distPickup * 2.2)) : null;
+  const paymentRaw   = (trip?.payment_method || 'cash') as string;
+  const paymentLabel = paymentRaw === 'cash' ? 'Cash' : paymentRaw.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
 
-  const paymentRaw = (trip?.payment_method || 'cash') as string;
-  const paymentLabel =
-    paymentRaw === 'cash'
-      ? 'Cash'
-      : paymentRaw.replace(/_/g, ' ').replace(/\b\w/g, (l) => l.toUpperCase());
-
-  // Category display
-  const rawCat = String(trip?.service_type || trip?.vehicle_type || 'economy').toLowerCase();
+  const rawCat  = String(trip?.service_type || trip?.vehicle_type || 'economy').toLowerCase();
   const normCat = rawCat === 'standard' ? 'economy' : rawCat;
   const CATEGORY_META: Record<string, { label: string; color: string; icon: string }> = {
-    economy:     { label: 'Standard',  color: '#00D46A', icon: 'car-outline' },
-    comfort:     { label: 'Comfort',   color: '#0EA5E9', icon: 'car-sport-outline' },
-    xl:          { label: 'XL',        color: '#FFB800', icon: 'bus-outline' },
-    premium:     { label: 'Premium',   color: '#9333EA', icon: 'rocket-outline' },
-    female_only: { label: 'Women Only',color: '#EC4899', icon: 'woman-outline' },
+    economy:     { label: 'Standard',   color: '#00D46A', icon: 'car-outline' },
+    comfort:     { label: 'Comfort',    color: '#0EA5E9', icon: 'car-sport-outline' },
+    xl:          { label: 'XL',         color: '#FFB800', icon: 'bus-outline' },
+    premium:     { label: 'Premium',    color: '#9333EA', icon: 'rocket-outline' },
+    female_only: { label: 'Women Only', color: '#EC4899', icon: 'woman-outline' },
   };
   const catMeta = CATEGORY_META[normCat] ?? { label: normCat.toUpperCase(), color: '#94A3B8', icon: 'car-outline' };
   const ridePreferences = Array.isArray(trip?.ride_preferences)
-    ? (trip.ride_preferences as string[])
-        .map((item) => RIDE_PREFERENCE_LABELS[item] || item.replace(/_/g, ' '))
-        .slice(0, 4)
+    ? (trip.ride_preferences as string[]).map((item) => RIDE_PREFERENCE_LABELS[item] || item.replace(/_/g, ' ')).slice(0, 4)
     : [];
 
-  const pl = trip?.pickup_location;
-  const dl = trip?.dropoff_location;
-  const pLat = typeof pl === 'object' && pl ? (pl as any).lat : null;
-  const pLng = typeof pl === 'object' && pl ? (pl as any).lng : null;
-  const dLat = typeof dl === 'object' && dl ? (dl as any).lat : null;
-  const dLng = typeof dl === 'object' && dl ? (dl as any).lng : null;
-
+  /* ── Counter bid ── */
   const applyChip = useCallback(
     (pct: number) => {
       const base = riderOffer > 0 ? riderOffer : baseFare;
@@ -192,37 +346,26 @@ export default function DriverRideRequestModal({
     [riderOffer, baseFare, maxFare, minFare, onFareInputChange]
   );
 
-  /** Highlight increment chip closest to suggested fare (decision assist). */
   const recommendedChipIndex = useMemo(() => {
     const target = baseFare > 0 ? baseFare : riderOffer;
     if (!target || !riderOffer) return 1;
-    let bestI = 0;
-    let bestScore = Infinity;
+    let bestI = 0, bestScore = Infinity;
     CHIP_PRESETS.forEach((c, i) => {
       let v = roundFare(riderOffer * (1 + c.pct));
       if (maxFare != null && maxFare > 0) v = Math.min(v, maxFare);
       const score = Math.abs(v - target);
-      if (score < bestScore) {
-        bestScore = score;
-        bestI = i;
-      }
+      if (score < bestScore) { bestScore = score; bestI = i; }
     });
     return bestI;
   }, [baseFare, riderOffer, maxFare]);
 
   const selectedFare = parseFareInput(fareInput);
-  const acceptLabelFare =
-    Number.isFinite(selectedFare) && selectedFare > 0
-      ? selectedFare
-      : riderOffer || baseFare;
+  const hasCounter   = Number.isFinite(selectedFare) && selectedFare > 0 && selectedFare !== riderOffer;
+  const acceptLabelFare = Number.isFinite(selectedFare) && selectedFare > 0 ? selectedFare : riderOffer || baseFare;
 
-  // ── Smart Mode filter check ──────────────────────────────────────────────
+  /* ── Smart Mode ── */
   const [smartEnabled, setSmartEnabled] = useState(false);
-  const [smartResult, setSmartResult] = useState<{
-    match: boolean;
-    reasons: string[];
-    warnings: string[];
-  } | null>(null);
+  const [smartResult, setSmartResult]   = useState<{ match: boolean; reasons: string[]; warnings: string[] } | null>(null);
 
   useEffect(() => {
     if (!visible) return;
@@ -232,816 +375,749 @@ export default function DriverRideRequestModal({
         const s = JSON.parse(raw);
         if (!s?.enabled) return;
         setSmartEnabled(true);
-
-        const warnings: string[] = [];
-        const reasons: string[] = [];
+        const warnings: string[] = [], reasons: string[] = [];
         let match = true;
-
-        // Distance check
         if (distanceKm != null) {
-          if (distanceKm < (s.minDistance ?? 0)) {
-            match = false;
-            warnings.push(`Below min distance (${distanceKm.toFixed(1)} km < ${s.minDistance} km)`);
-          } else if (distanceKm > (s.maxDistance ?? 999)) {
-            match = false;
-            warnings.push(`Exceeds max distance (${distanceKm.toFixed(1)} km > ${s.maxDistance} km)`);
-          } else {
-            reasons.push(`${distanceKm.toFixed(1)} km — in range`);
-          }
+          if (distanceKm < (s.minDistance ?? 0))        { match = false; warnings.push('Below min distance'); }
+          else if (distanceKm > (s.maxDistance ?? 999)) { match = false; warnings.push('Exceeds max distance'); }
+          else reasons.push(`${distanceKm.toFixed(1)} km in range`);
         }
-
-        // Rider rating check
         const riderRating = Number(trip?.shield?.rider_reputation_avg ?? 0);
         if (s.avoidLowRated && riderRating > 0) {
-          if (riderRating < (s.minRating ?? 0)) {
-            match = false;
-            warnings.push(`Rider rating ${riderRating.toFixed(1)} below your ${s.minRating.toFixed(1)} ★ filter`);
-          } else {
-            reasons.push(`${riderRating.toFixed(1)} ★ rider`);
-          }
+          if (riderRating < (s.minRating ?? 0)) { match = false; warnings.push('Rider rating too low'); }
+          else reasons.push(`${riderRating.toFixed(1)}★ rider`);
         }
-
-        // Surge check
         if (s.acceptSurge && surgeMul > 1.05) {
-          if (surgeMul < (s.minSurgeMultiplier ?? 1)) {
-            match = false;
-            warnings.push(`Surge ${surgeMul.toFixed(1)}× below your ${s.minSurgeMultiplier.toFixed(1)}× minimum`);
-          } else {
-            reasons.push(`${surgeMul.toFixed(1)}× surge`);
-          }
+          if (surgeMul < (s.minSurgeMultiplier ?? 1)) { match = false; warnings.push('Surge too low'); }
+          else reasons.push(`${surgeMul.toFixed(1)}× surge`);
         }
-
         setSmartResult({ match, reasons, warnings });
       } catch { /* ignore */ }
     });
   }, [visible, distanceKm, surgeMul, trip?.shield?.rider_reputation_avg]);
 
-  const progress = Math.max(0, Math.min(1, countdownSeconds / countdownTotal));
+  /* ── Mood badges ── */
+  const moodBadges = useMemo(() => {
+    const mood = (trip as any)?.rider_mood as Record<string, string> | undefined;
+    const badges: { label: string; icon: string; color: string }[] = [];
+    if (!mood) return badges;
+    if (mood.conversation === 'quiet')   badges.push({ label: 'Quiet Ride',   icon: 'volume-mute',  color: '#3B82F6' });
+    if (mood.conversation === 'chatty')  badges.push({ label: 'Chatty Rider', icon: 'chatbubbles',  color: '#22C55E' });
+    if (mood.music === 'on')             badges.push({ label: 'Music On',     icon: 'musical-notes',color: '#F59E0B' });
+    if (mood.music === 'off')            badges.push({ label: 'No Music',     icon: 'musical-notes-outline', color: '#64748B' });
+    if (mood.temperature === 'cold')     badges.push({ label: 'Cold AC',      icon: 'snow',         color: '#3B82F6' });
+    if (mood.driving_style === 'smooth') badges.push({ label: 'Smooth Drive', icon: 'car',          color: '#22C55E' });
+    if (mood.driving_style === 'fast')   badges.push({ label: 'Quick Drive',  icon: 'speedometer',  color: '#EF4444' });
+    return badges;
+  }, [trip?.rider_mood]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const pickupLine =
-    typeof pl === 'string' ? pl : pl?.address || 'Pickup area';
-  const dropLine =
-    typeof dl === 'string'
-      ? dl
-      : dl?.address ||
-        (typeof trip?.destination === 'string'
-          ? trip.destination
-          : (trip?.destination as any)?.address || 'Destination area');
+  const offerExpired = countdownSeconds <= 0;
+  const progress   = Math.max(0, Math.min(1, countdownSeconds / countdownTotal));
+  const timerUrgent = !offerExpired && countdownSeconds <= 5;
 
   if (!trip) return null;
 
+  const BOTTOM_INNER = Math.max(insets.bottom, DS_SPACE.sm) + 6;
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="fullScreen">
-      <SafeAreaView style={styles.root} edges={['top']}>
+    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen">
+      <View style={s.root}>
+        <StatusBar style="light" />
+
+        {/* ── FULL-SCREEN MAP ── */}
+        <View style={StyleSheet.absoluteFillObject}>
+          <RideRequestMap
+            pickupLat={pLat}    pickupLng={pLng}
+            dropLat={dLat}      dropLng={dLng}
+            routeCoords={rideRequestRouteCoords ?? trip?.route_preview_coordinates}
+            riderPhoto={riderPhoto}
+            riderInitial={initial}
+            riderRiskColor={riskColor}
+            driverLat={driverLat}
+            driverLng={driverLng}
+            bottomPad={expanded ? SHEET_EXPANDED + 20 : SHEET_COLLAPSED + 20}
+            topPad={insets.top + 82}
+            showTraffic
+          />
+        </View>
+
+        {/* ── TOP FLOATING HEADER ── */}
+        <View style={[s.topHeader, { paddingTop: insets.top + 8 }]}>
+          {/* Timer bar */}
+          <TimerBar progress={progress} urgent={timerUrgent} />
+          <View style={s.topInner}>
+            <View>
+              <Text style={s.topEyebrow}>NEW RIDE REQUEST</Text>
+              <Text style={s.topTitle}>Review this trip</Text>
+            </View>
+            <View
+              style={[
+                s.timerBadge,
+                timerUrgent && !offerExpired && s.timerBadgeUrgent,
+                offerExpired && { borderColor: '#475569', backgroundColor: '#0f172a' },
+              ]}
+            >
+              <Ionicons
+                name={offerExpired ? 'hourglass-outline' : 'time-outline'}
+                size={14}
+                color={offerExpired ? '#94a3b8' : timerUrgent ? '#ef4444' : '#EAB308'}
+              />
+              <Text
+                style={[
+                  s.timerText,
+                  timerUrgent && !offerExpired && s.timerTextUrgent,
+                  offerExpired && { color: '#94a3b8' },
+                ]}
+              >
+                {offerExpired ? 'Expired' : `${countdownSeconds}s`}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* ── FARE FLOATING CHIP (top-right over map) ── */}
+        <View style={[s.fareBubble, { top: insets.top + 72 }]}>
+          <Text style={s.fareBubbleAmount}>₦{riderOffer.toLocaleString()}</Text>
+          {displayTripKm != null && Number.isFinite(displayTripKm) ? (
+            <Text style={s.fareBubbleSub}>
+              {displayTripKm.toFixed(displayTripKm >= 10 ? 0 : 1)} km trip
+              {displayTripMin != null && Number.isFinite(displayTripMin) ? ` · ~${displayTripMin} min` : ''}
+            </Text>
+          ) : displayTripMin != null && Number.isFinite(displayTripMin) ? (
+            <Text style={s.fareBubbleSub}>~{displayTripMin} min trip</Text>
+          ) : null}
+          {baseFare > 0 && Math.abs(baseFare - riderOffer) >= 50 && (
+            <Text style={s.fareBubbleHint}>Suggested ₦{baseFare.toLocaleString()}</Text>
+          )}
+        </View>
+
+        {/* ── DISTANCE TO PICKUP chip ── */}
+        {distPickup != null && (
+          <View style={[s.pickupChip, { top: insets.top + 72 }]}>
+            <Ionicons name="navigate" size={12} color="#0ea5e9" />
+            <Text style={s.pickupChipText}>
+              {distPickup < 1
+                ? `${Math.round(distPickup * 1000)}m`
+                : `${distPickup.toFixed(1)} km`}
+              {' to pickup'}
+              {etaPickupMin != null ? ` · ~${etaPickupMin} min` : ''}
+            </Text>
+          </View>
+        )}
+
+        {/* ── BOTTOM SHEET ── */}
         <KeyboardAvoidingView
-          style={styles.flex}
+          style={s.kvWrap}
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
         >
-          <View style={styles.flex}>
-            {/* —— What is happening? —— */}
-            <View style={styles.topBlock}>
-              <View style={styles.header}>
-                <View style={styles.headerLeft}>
-                  <Text style={styles.headerEyebrow}>Incoming request</Text>
-                  <Text style={styles.headerTitle}>Review trip</Text>
-                  <Text style={styles.headerSub}>Map · route · fare — then accept or counter</Text>
-                </View>
-                <View style={styles.timerPill}>
-                  <Ionicons name="time-outline" size={16} color="#EAB308" />
-                  <Text style={styles.timerText}>{countdownSeconds}s</Text>
-                </View>
-              </View>
-
-              <View style={styles.timerTrack}>
-                <LinearGradient
-                  colors={[C.primary, C.primaryDark]}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0 }}
-                  style={[styles.timerFill, { width: `${progress * 100}%` }]}
-                />
-              </View>
-
-              <DriverOfferRoutePreview
-                routePreviewCoordinates={trip?.route_preview_coordinates}
-                mapPreviewRegion={trip?.map_preview_region}
-                pickupLat={pLat}
-                pickupLng={pLng}
-                dropLat={dLat}
-                dropLng={dLng}
-                areaSummaryLine={trip?.area_summary_line}
-                distanceKm={distanceKm}
-                durationMins={durationMins}
-                distToPickupKm={distPickup}
-                etaToPickupMin={etaPickupMin}
-                pickupAddress={pickupLine !== 'Pickup area' ? pickupLine : null}
-                dropAddress={dropLine !== 'Destination area' ? dropLine : null}
-                driverLat={driverLat}
-                driverLng={driverLng}
-                mapHeight={mapHeight}
-                interactive
-                interactionLocked
-                darkOverlay
+          <Animated.View style={[s.sheet, { height: sheetAnim }]}>
+            {/* Drag handle + expand toggle */}
+            <TouchableOpacity
+              style={s.sheetHandle}
+              onPress={() => setExpanded((v) => !v)}
+              activeOpacity={0.8}
+            >
+              <View style={s.handleBar} />
+              <Text style={s.handleHint}>
+                {expanded ? 'Tap to collapse' : 'Tap for more details'}
+              </Text>
+              <Ionicons
+                name={expanded ? 'chevron-down' : 'chevron-up'}
+                size={14}
+                color="#64748B"
               />
-
-              {highDemand && (
-                <View style={styles.demandBanner}>
-                  <Ionicons name="flash" size={16} color={C.surge} />
-                  <Text style={styles.demandText}>
-                    High demand area · {surgeMul.toFixed(1)}×
-                  </Text>
-                </View>
-              )}
-
-              {/* ── Smart Mode indicator ── */}
-              {smartEnabled && smartResult && (
-                <View style={[
-                  styles.smartBanner,
-                  smartResult.match ? styles.smartBannerMatch : styles.smartBannerMiss,
-                ]}>
-                  <Ionicons
-                    name={smartResult.match ? 'flash' : 'flash-off'}
-                    size={15}
-                    color={smartResult.match ? '#00D46A' : '#F59E0B'}
-                  />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.smartBannerTitle, { color: smartResult.match ? '#00D46A' : '#F59E0B' }]}>
-                      {smartResult.match ? 'Smart Match ✓' : 'Outside Your Filters'}
-                    </Text>
-                    {(smartResult.match ? smartResult.reasons : smartResult.warnings).length > 0 && (
-                      <Text style={styles.smartBannerSub} numberOfLines={2}>
-                        {(smartResult.match ? smartResult.reasons : smartResult.warnings).join(' · ')}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-              )}
-
-              {/* PRICE = largest */}
-              <View style={styles.priceHero}>
-                <View style={styles.priceHeroTop}>
-                  <Text style={styles.priceHeroLabel}>Rider offer (you earn)</Text>
-                  {/* Category badge — always shown so driver knows exactly what type this is */}
-                  <View style={[styles.catBadge, { backgroundColor: catMeta.color + '20', borderColor: catMeta.color + '55' }]}>
-                    <Ionicons name={catMeta.icon as any} size={13} color={catMeta.color} />
-                    <Text style={[styles.catBadgeText, { color: catMeta.color }]}>{catMeta.label}</Text>
-                  </View>
-                </View>
-                <Text style={styles.priceHeroAmount}>₦{riderOffer.toLocaleString()}</Text>
-                <View style={styles.priceHeroMeta}>
-                  {distanceKm != null && (
-                    <Text style={styles.priceHeroMetaText}>
-                      {Number(distanceKm).toFixed(distanceKm >= 10 ? 0 : 1)} km
-                    </Text>
-                  )}
-                  {durationMins != null && (
-                    <Text style={styles.priceHeroMetaText}> · ~{durationMins} min</Text>
-                  )}
-                  {etaPickupMin != null && (
-                    <Text style={styles.priceHeroMetaText}> · ~{etaPickupMin} min to A</Text>
-                  )}
-                  {pricePerKm != null && (
-                    <Text style={styles.priceHeroMetaText}> · ~₦{pricePerKm}/km</Text>
-                  )}
-                </View>
-                {baseFare > 0 && (
-                  <Text style={styles.suggestedSmall}>
-                    Suggested ₦{baseFare.toLocaleString()}
-                    {minFare != null || maxFare != null
-                      ? ` · Range ${minFare != null ? `₦${minFare.toLocaleString()}` : '—'}${
-                          maxFare != null ? `–₦${maxFare.toLocaleString()}` : ''
-                        }`
-                      : ''}
-                  </Text>
-                )}
-              </View>
-
-              {/* ROUTE = second priority */}
-              <View style={styles.routeCompact}>
-                {/* Pickup row */}
-                <View style={styles.routeCompactRow}>
-                  <View style={[styles.badge, { backgroundColor: C.routeBlue }]}>
-                    <Text style={styles.badgeText}>A</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.routeCompactText} numberOfLines={1}>
-                      {pickupLine}
-                    </Text>
-                    {etaPickupMin != null && (
-                      <Text style={styles.routeCompactSub}>
-                        <Ionicons name="navigate" size={10} color="#0ea5e9" />
-                        {' '}~{etaPickupMin} min to reach pickup
-                        {distPickup != null ? ` · ${distPickup < 1 ? `${Math.round(distPickup * 1000)}m` : `${distPickup.toFixed(1)}km`} away` : ''}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-                {/* Connector */}
-                <View style={styles.routeConnector}>
-                  <View style={styles.routeConnectorLine} />
-                  {distanceKm != null && (
-                    <View style={styles.routeDistancePill}>
-                      <Text style={styles.routeDistancePillText}>
-                        {Number(distanceKm).toFixed(distanceKm >= 10 ? 0 : 1)} km · ~{durationMins ?? '?'} min trip
-                      </Text>
-                    </View>
-                  )}
-                  <View style={styles.routeConnectorLine} />
-                </View>
-                {/* Dropoff row */}
-                <View style={styles.routeCompactRow}>
-                  <View style={[styles.badge, { backgroundColor: C.primary }]}>
-                    <Text style={[styles.badgeText, { color: C.primaryInk }]}>B</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.routeCompactText} numberOfLines={1}>
-                      {dropLine}
-                    </Text>
-                    {pricePerKm != null && (
-                      <Text style={styles.routeCompactSub}>
-                        ₦{pricePerKm}/km · {paymentLabel}
-                      </Text>
-                    )}
-                  </View>
-                </View>
-                {/* Bottom chips */}
-                <View style={styles.routeBottomChips}>
-                  <View style={styles.payChip}>
-                    <Ionicons name="wallet-outline" size={13} color={C.primary} />
-                    <Text style={styles.payChipText}>{paymentLabel}</Text>
-                  </View>
-                  {highDemand && (
-                    <View style={[styles.payChip, { borderColor: '#f59e0b55', gap: 4 }]}>
-                      <Ionicons name="flash" size={13} color="#f59e0b" />
-                      <Text style={[styles.payChipText, { color: '#f59e0b' }]}>{surgeMul.toFixed(1)}× surge</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
-            </View>
+            </TouchableOpacity>
 
             <ScrollView
-              style={styles.scroll}
-              contentContainerStyle={styles.scrollContent}
-              keyboardShouldPersistTaps="handled"
+              style={s.sheetScroll}
+              contentContainerStyle={[s.sheetScrollContent, { paddingBottom: BOTTOM_INNER }]}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              scrollEnabled={expanded}
             >
-              <View style={styles.riderRow}>
-                <View style={styles.avatar}>
-                  <Text style={styles.avatarText}>{initial}</Text>
-                </View>
-                <View style={styles.riderMeta}>
-                  <Text style={styles.riderName} numberOfLines={1}>
-                    {riderName}
-                  </Text>
-                  <View style={styles.riderStats}>
-                    {rating != null && (
-                      <View style={styles.statChip}>
-                        <Ionicons name="star" size={14} color="#EAB308" />
-                        <Text style={styles.statChipText}>
-                          {rating}
-                          {ratingCount != null ? ` (${ratingCount})` : ''}
-                        </Text>
+
+              {/* ── HERO ROW: Fare + Rider ── */}
+              <View style={s.heroRow}>
+                {/* Fare block */}
+                <View style={s.heroFare}>
+                  <Text style={s.heroFareAmount}>₦{riderOffer.toLocaleString()}</Text>
+                  <View style={s.heroMetaRow}>
+                    {displayTripKm != null && Number.isFinite(displayTripKm) && (
+                      <View style={s.metaChip}>
+                        <Ionicons name="navigate-outline" size={11} color="#0ea5e9" />
+                        <Text style={s.metaChipText}>{displayTripKm.toFixed(displayTripKm >= 10 ? 0 : 1)} km</Text>
                       </View>
                     )}
-                    {riderRiskConfig && (
-                      <View style={[styles.statChip, { borderColor: riderRiskConfig.color + '66' }]}>
-                        <Ionicons name="shield-outline" size={14} color={riderRiskConfig.color} />
-                        <Text style={[styles.statChipText, { color: riderRiskConfig.color }]}>
-                          {riderRiskConfig.label}
-                          {riderRiskScore != null ? ` ${Math.round(riderRiskScore)}` : ''}
-                        </Text>
+                    {displayTripMin != null && Number.isFinite(displayTripMin) && (
+                      <View style={s.metaChip}>
+                        <Ionicons name="time-outline" size={11} color="#0ea5e9" />
+                        <Text style={s.metaChipText}>~{displayTripMin} min</Text>
                       </View>
+                    )}
+                    <View style={[s.fairPill, { backgroundColor: fairConfig.color + '18', borderColor: fairConfig.color + '55' }]}>
+                      <Ionicons name={fairConfig.icon} size={11} color={fairConfig.color} />
+                      <Text style={[s.fairPillText, { color: fairConfig.color }]}>{fairConfig.label}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Rider avatar block */}
+                <View style={s.heroRider}>
+                  <View style={[s.heroAvatarWrap, { borderColor: riskColor }]}>
+                    {riderPhoto && !imgError ? (
+                      <Image
+                        source={{ uri: riderPhoto }}
+                        style={s.heroAvatar}
+                        onError={() => setImgError(true)}
+                      />
+                    ) : (
+                      <LinearGradient colors={['#1e40af', '#1d4ed8']} style={s.heroAvatar}>
+                        <Text style={s.heroAvatarInitial}>{initial}</Text>
+                      </LinearGradient>
+                    )}
+                    <View style={s.onlineDot} />
+                  </View>
+                  <Text style={s.heroRiderName} numberOfLines={1}>{riderName}</Text>
+                  {rating != null && (
+                    <View style={s.ratingRow}>
+                      <Ionicons name="star" size={11} color="#EAB308" />
+                      <Text style={s.ratingText}>{rating}{ratingCount != null ? ` (${ratingCount})` : ''}</Text>
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* ── ROUTE CARD ── */}
+              <View style={s.routeCard}>
+                {/* Pickup A */}
+                <View style={s.routeRow}>
+                  <View style={s.dotA} />
+                  <View style={s.routeText}>
+                    <Text style={s.routeLabel}>PICKUP A</Text>
+                    <Text style={s.routeAddr} numberOfLines={2}>{pickupLine}</Text>
+                    {etaPickupMin != null && (
+                      <Text style={s.routeMeta}>~{etaPickupMin} min away</Text>
                     )}
                   </View>
                 </View>
-              </View>
 
-              <View style={[styles.fairCard, { borderColor: fairConfig.color + '55' }]}>
-                <View style={[styles.fairIconWrap, { backgroundColor: fairConfig.color + '22' }]}>
-                  <Ionicons name={fairConfig.icon} size={22} color={fairConfig.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.fairLabel, { color: fairConfig.color }]}>{fairConfig.label}</Text>
-                  <Text style={styles.fairSub}>{fairConfig.sub}</Text>
-                </View>
-              </View>
-
-              {trip?.shield && (
-                <View
-                  style={[
-                    styles.shield,
-                    trip.shield.rider_flagged_low_reputation && styles.shieldWarn,
-                  ]}
-                >
-                  <Ionicons
-                    name="shield-checkmark"
-                    size={20}
-                    color={trip.shield.rider_flagged_low_reputation ? C.danger : C.primary}
-                  />
-                  <View style={{ flex: 1, marginLeft: 10 }}>
-                    <Text style={styles.shieldTitle}>NEXRYDE Shield</Text>
-                    <Text style={styles.shieldBody}>
-                      {trip.shield.rider_new_account
-                        ? 'New rider — limited reputation history.'
-                        : `Driver-rated ${trip.shield.rider_reputation_avg != null ? `${Number(trip.shield.rider_reputation_avg).toFixed(1)}★` : '—'} · ${trip.shield.rider_reputation_trip_count ?? 0} trips`}
-                      {riderRiskConfig ? ` · Safety band ${riderRiskConfig.label} (${riderRiskConfig.hint})` : ''}
+                {/* Connector */}
+                <View style={s.connRow}>
+                  <View style={s.connDashes} />
+                  <View style={s.connLabel}>
+                    <Ionicons name="arrow-down" size={11} color="#0ea5e9" />
+                    <Text style={s.connLabelText}>
+                      {displayTripKm != null && Number.isFinite(displayTripKm)
+                        ? `${displayTripKm.toFixed(displayTripKm >= 10 ? 0 : 1)} km`
+                        : ''}
+                      {displayTripMin != null && Number.isFinite(displayTripMin)
+                        ? ` · ~${displayTripMin} min`
+                        : ''}
                     </Text>
                   </View>
+                  <View style={s.connDashes} />
                 </View>
-              )}
 
-              {ridePreferences.length > 0 && (
-                <>
-                  <Text style={styles.sectionLabel}>Rider vibe preferences</Text>
-                  <View style={styles.prefRow}>
-                    {ridePreferences.map((preference) => (
-                      <View key={preference} style={styles.prefChip}>
-                        <Ionicons name="sparkles-outline" size={14} color={C.primary} />
-                        <Text style={styles.prefChipText}>{preference}</Text>
+                {/* Destination B */}
+                <View style={[s.routeRow, s.destHighlight]}>
+                  <View style={s.dotB} />
+                  <View style={s.routeText}>
+                    <Text style={[s.routeLabel, { color: '#f87171' }]}>DESTINATION B</Text>
+                    <Text style={[s.routeAddr, s.destAddr]} numberOfLines={2}>{dropLine}</Text>
+                    <View style={s.destMeta}>
+                      {pricePerKm != null && (
+                        <View style={s.destChip}>
+                          <Ionicons name="speedometer-outline" size={10} color={C.primary} />
+                          <Text style={s.destChipText}>₦{pricePerKm}/km</Text>
+                        </View>
+                      )}
+                      <View style={s.destChip}>
+                        <Ionicons name={paymentRaw === 'cash' ? 'cash-outline' : 'wallet-outline'} size={10} color={C.primary} />
+                        <Text style={s.destChipText}>{paymentLabel}</Text>
                       </View>
-                    ))}
+                      {highDemand && (
+                        <View style={[s.destChip, { borderColor: '#f59e0b55' }]}>
+                          <Ionicons name="flash" size={10} color="#f59e0b" />
+                          <Text style={[s.destChipText, { color: '#f59e0b' }]}>{surgeMul.toFixed(1)}× surge</Text>
+                        </View>
+                      )}
+                      {shortTripRate && (
+                        <View style={[s.destChip, { borderColor: 'rgba(14,165,233,0.45)' }]}>
+                          <Ionicons name="map-outline" size={10} color="#38bdf8" />
+                          <Text style={[s.destChipText, { color: '#38bdf8' }]}>Short trip</Text>
+                        </View>
+                      )}
+                    </View>
                   </View>
+                </View>
+              </View>
+
+              {/* ── Extended details (visible when expanded) ── */}
+              {expanded && (
+                <>
+                  {/* Rider badges */}
+                  <View style={s.badgeRow}>
+                    {riderRiskConfig && (
+                      <View style={[s.badge, { backgroundColor: riderRiskConfig.color + '18', borderColor: riderRiskConfig.color + '44' }]}>
+                        <Ionicons name={riderRiskConfig.icon} size={12} color={riderRiskConfig.color} />
+                        <Text style={[s.badgeText, { color: riderRiskConfig.color }]}>{riderRiskConfig.label}</Text>
+                      </View>
+                    )}
+                    <View style={[s.badge, { backgroundColor: catMeta.color + '18', borderColor: catMeta.color + '44' }]}>
+                      <Ionicons name={catMeta.icon as any} size={12} color={catMeta.color} />
+                      <Text style={[s.badgeText, { color: catMeta.color }]}>{catMeta.label}</Text>
+                    </View>
+                    {highDemand && (
+                      <View style={[s.badge, { backgroundColor: '#f59e0b18', borderColor: '#f59e0b44' }]}>
+                        <Ionicons name="flash" size={12} color="#f59e0b" />
+                        <Text style={[s.badgeText, { color: '#f59e0b' }]}>Surge {surgeMul.toFixed(1)}×</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Nexryde Shield */}
+                  {trip?.shield && (
+                    <View style={[s.shield, trip.shield.rider_flagged_low_reputation && s.shieldWarn]}>
+                      <Ionicons name="shield-checkmark" size={16} color={trip.shield.rider_flagged_low_reputation ? C.danger : C.success} />
+                      <Text style={s.shieldText}>
+                        {trip.shield.rider_new_account
+                          ? 'New rider — limited history'
+                          : `Rated ${trip.shield.rider_reputation_avg != null ? `${Number(trip.shield.rider_reputation_avg).toFixed(1)}★` : '—'} · ${trip.shield.rider_reputation_trip_count ?? 0} trips`}
+                        {riderRiskConfig ? ` · ${riderRiskConfig.label}` : ''}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Mood badges */}
+                  {(moodBadges.length > 0 || ridePreferences.length > 0) && (
+                    <View style={s.moodWrap}>
+                      <Text style={s.moodLabel}>Rider mood & preferences</Text>
+                      <View style={s.moodRow}>
+                        {moodBadges.map((b, i) => (
+                          <View key={i} style={[s.moodChip, { borderColor: b.color, backgroundColor: b.color + '18' }]}>
+                            <Ionicons name={b.icon as any} size={12} color={b.color} />
+                            <Text style={[s.moodChipText, { color: b.color }]}>{b.label}</Text>
+                          </View>
+                        ))}
+                        {ridePreferences.map((p, i) => (
+                          <View key={`pref-${i}`} style={s.moodChip}>
+                            <Ionicons name="sparkles-outline" size={12} color={C.primary} />
+                            <Text style={s.moodChipText}>{p}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    </View>
+                  )}
+
+                  {/* Smart Mode */}
+                  {smartEnabled && smartResult && (
+                    <View style={[s.smart, smartResult.match ? s.smartMatch : s.smartMiss]}>
+                      <Ionicons name={smartResult.match ? 'flash' : 'flash-off'} size={14} color={smartResult.match ? '#00D46A' : '#F59E0B'} />
+                      <Text style={[s.smartText, { color: smartResult.match ? '#00D46A' : '#F59E0B' }]}>
+                        {smartResult.match ? 'Smart Match ✓' : 'Outside your filters'}
+                        {(smartResult.match ? smartResult.reasons : smartResult.warnings).length > 0 &&
+                          ` · ${(smartResult.match ? smartResult.reasons : smartResult.warnings).join(', ')}`}
+                      </Text>
+                    </View>
+                  )}
+
+                  {/* Counter section */}
+                  {counterMode && (
+                    <View style={s.counterBox}>
+                      <Text style={s.counterBoxLabel}>Your counter fare</Text>
+                      <View style={s.chipsRow}>
+                        {CHIP_PRESETS.map((c, idx) => {
+                          const best = idx === recommendedChipIndex;
+                          return (
+                            <TouchableOpacity
+                              key={c.label}
+                              style={[s.chip, best && s.chipBest, offerExpired && { opacity: 0.45 }]}
+                              onPress={() => {
+                                if (offerExpired) return;
+                                applyChip(c.pct);
+                              }}
+                              disabled={offerExpired}
+                              activeOpacity={0.85}
+                            >
+                              {best && <Ionicons name="flash-outline" size={12} color={C.primary} />}
+                              <Text style={[s.chipText, best && s.chipTextBest]}>{c.label}</Text>
+                            </TouchableOpacity>
+                          );
+                        })}
+                        <TouchableOpacity
+                          style={[s.chip, s.chipCustom, offerExpired && { opacity: 0.45 }]}
+                          onPress={() => {
+                            if (offerExpired) return;
+                            fareInputRef.current?.focus();
+                          }}
+                          disabled={offerExpired}
+                          activeOpacity={0.85}
+                        >
+                          <Ionicons name="create-outline" size={13} color={C.primary} />
+                          <Text style={s.chipCustomText}>Custom</Text>
+                        </TouchableOpacity>
+                      </View>
+                      <TextInput
+                        ref={fareInputRef}
+                        style={s.fareInput}
+                        keyboardType="number-pad"
+                        editable={!offerExpired}
+                        value={fareInput}
+                        onChangeText={onFareInputChange}
+                        placeholder={`Your fare — rider offered ₦${riderOffer.toLocaleString()}`}
+                        placeholderTextColor={C.muted}
+                      />
+                      {hasCounter && (
+                        <Text style={s.counterHint}>
+                          Counter: ₦{riderOffer.toLocaleString()} → ₦{Number(fareInput.replace(/,/g, '')).toLocaleString()}
+                          {' '}(+₦{(Number(fareInput.replace(/,/g, '')) - riderOffer).toLocaleString()})
+                        </Text>
+                      )}
+                    </View>
+                  )}
                 </>
               )}
 
-              <Text style={styles.sectionLabel}>Counter with one tap</Text>
-              <View style={styles.chipsRow}>
-                {CHIP_PRESETS.map((c, idx) => {
-                  const best = idx === recommendedChipIndex;
-                  return (
-                    <TouchableOpacity
-                      key={c.label}
-                      style={[styles.chip, best && styles.chipBest]}
-                      onPress={() => applyChip(c.pct)}
-                      activeOpacity={0.85}
-                    >
-                      {best && <Ionicons name="flash-outline" size={14} color={C.primary} style={{ marginRight: 4 }} />}
-                      <Text style={[styles.chipText, best && styles.chipTextBest]}>{c.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-                <TouchableOpacity
-                  style={[styles.chip, styles.chipAccent]}
-                  onPress={() => fareInputRef.current?.focus()}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.chipTextAccent}>Custom</Text>
-                  <Ionicons name="create-outline" size={16} color={C.primary} />
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                ref={fareInputRef}
-                style={styles.input}
-                keyboardType="number-pad"
-                value={fareInput}
-                onChangeText={onFareInputChange}
-                placeholder="Your fare (₦)"
-                placeholderTextColor={C.muted}
-              />
             </ScrollView>
 
-            {/* —— What should I do next? —— sticky */}
-            <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, DS_SPACE.sm) + 8 }]}>
+            {/* ── STICKY ACTION BUTTONS ── */}
+            <View style={[s.actions, { paddingBottom: BOTTOM_INNER }]}>
+              {/* Accept */}
               <TouchableOpacity
-                style={[styles.primaryBtn, accepting && { opacity: 0.72 }]}
+                style={[
+                  s.acceptBtn,
+                  (accepting || offerExpired || (counterMode && !hasCounter)) && { opacity: 0.65 },
+                ]}
                 onPress={() => {
-                  if (Platform.OS !== 'web') {
-                    void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  }
+                  if (offerExpired || accepting) return;
+                  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   onAccept();
                 }}
-                disabled={accepting}
+                disabled={accepting || offerExpired || (counterMode && !hasCounter)}
                 activeOpacity={0.92}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  offerExpired
+                    ? 'Offer expired'
+                    : accepting
+                      ? 'Accepting ride'
+                      : counterMode && hasCounter
+                        ? `Send counter offer ${acceptLabelFare} naira`
+                        : `Accept ride for ${acceptLabelFare} naira`
+                }
               >
                 <LinearGradient
-                  colors={[C.primary, C.primaryDark]}
+                  colors={
+                    counterMode && hasCounter
+                      ? ['#FBBF24', '#F59E0B', '#D97706']
+                      : ['#34F5B8', '#22E5A0', '#0D9F6E']
+                  }
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
-                  style={styles.primaryGrad}
+                  style={s.acceptGrad}
                 >
-                  <Text style={styles.primaryText}>
-                    {accepting ? 'Accepting…' : `Accept · ₦${acceptLabelFare.toLocaleString()}`}
+                  <Ionicons
+                    name={counterMode && hasCounter ? 'send' : 'checkmark-circle'}
+                    size={20}
+                    color={counterMode && hasCounter ? '#000' : C.primaryInk}
+                  />
+                  <Text style={[s.acceptText, counterMode && hasCounter && { color: '#000' }]}>
+                    {offerExpired
+                      ? 'Offer expired'
+                      : accepting
+                        ? 'Accepting…'
+                        : counterMode && hasCounter
+                          ? `Send Counter · ₦${acceptLabelFare.toLocaleString()}`
+                          : `Accept · ₦${acceptLabelFare.toLocaleString()}`}
                   </Text>
                 </LinearGradient>
               </TouchableOpacity>
 
-              <View style={styles.secondaryRow}>
+              {/* Secondary row */}
+              <View style={s.secRow}>
                 <TouchableOpacity
-                  style={styles.secondaryBtn}
-                  onPress={() => fareInputRef.current?.focus()}
-                  activeOpacity={0.88}
-                >
-                  <Ionicons name="swap-vertical" size={18} color={C.text} />
-                  <Text style={styles.secondaryText}>Counter offer</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.rejectBtn}
+                  style={[
+                    s.counterBtn,
+                    counterMode && s.counterBtnActive,
+                    offerExpired && { opacity: 0.45 },
+                  ]}
                   onPress={() => {
-                    if (Platform.OS !== 'web') {
-                      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    if (offerExpired) return;
+                    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    setCounterMode((v) => !v);
+                    setExpanded(true);
+                    if (!counterMode) {
+                      const base = riderOffer > 0 ? riderOffer : baseFare;
+                      onFareInputChange(base > 0 ? String(base) : '');
+                      setTimeout(() => fareInputRef.current?.focus(), 300);
                     }
+                  }}
+                  disabled={offerExpired}
+                  activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel={counterMode ? 'Close counter bid editor' : 'Counter or rebid fare'}
+                >
+                  <Ionicons name="swap-vertical" size={16} color={counterMode ? '#F59E0B' : C.text} />
+                  <Text style={[s.secBtnText, counterMode && { color: '#F59E0B' }]}>
+                    {counterMode ? 'Editing bid' : 'Counter / Rebid'}
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={s.ignoreBtn}
+                  onPress={() => {
+                    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                     onIgnore();
                   }}
                   activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel="Ignore this ride request"
                 >
-                  <Ionicons name="close-circle-outline" size={18} color={C.danger} />
-                  <Text style={styles.rejectText}>Reject</Text>
+                  <Ionicons name="close-circle-outline" size={16} color={C.danger} />
+                  <Text style={s.ignoreBtnText}>Ignore</Text>
                 </TouchableOpacity>
               </View>
             </View>
-          </View>
+          </Animated.View>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+
+      </View>
     </Modal>
   );
 }
 
 export { DRIVER_OFFER_COUNTDOWN_SECONDS as DRIVER_OFFER_TIMER_SECONDS };
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: C.bg },
-  flex: { flex: 1 },
-  topBlock: {
-    paddingHorizontal: DS_SPACE.sm,
-    paddingBottom: DS_SPACE.xs,
+/* ─────────────────────── Styles ─────────────────────── */
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#0a0f1e' },
+
+  /* Top header */
+  topHeader: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 20,
+    backgroundColor: 'rgba(6,10,20,0.92)',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(34,229,160,0.18)',
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    paddingTop: DS_SPACE.xs,
-    paddingBottom: DS_SPACE.xs,
+  topInner: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end',
+    paddingHorizontal: 16, paddingTop: 6, paddingBottom: 10,
   },
-  headerLeft: { flex: 1, paddingRight: DS_SPACE.sm },
-  headerEyebrow: {
-    ...DS_TYPE.caption,
-    color: C.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 4,
+  topEyebrow: { fontSize: 10, fontWeight: '800', color: '#22E5A0', letterSpacing: 1.5, textTransform: 'uppercase' },
+  topTitle:   { fontSize: 20, fontWeight: '900', color: '#E2E8F0', letterSpacing: -0.3 },
+  timerBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: '#1e293b', paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 999, borderWidth: 1, borderColor: '#334155',
   },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: C.text,
-    letterSpacing: -0.4,
-  },
-  headerSub: {
-    ...DS_TYPE.caption,
-    color: C.muted,
-    marginTop: 4,
-  },
-  timerPill: {
-    flexDirection: 'row',
+  timerBadgeUrgent: { borderColor: '#ef444455', backgroundColor: '#1f1010' },
+  timerText:        { fontSize: 15, fontWeight: '800', color: '#E2E8F0' },
+  timerTextUrgent:  { color: '#ef4444' },
+
+  /* Fare bubble */
+  fareBubble: {
+    position: 'absolute', right: 14, zIndex: 15,
+    backgroundColor: 'rgba(6,10,20,0.94)',
+    borderRadius: 18, paddingHorizontal: 16, paddingVertical: 10,
+    borderWidth: 1.5, borderColor: 'rgba(34,229,160,0.38)',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: C.cardElevated,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: DS_RADIUS.pill,
-    borderWidth: 1,
-    borderColor: C.border,
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
-  timerText: { fontSize: 15, fontWeight: '800', color: C.text },
-  timerTrack: {
-    height: 3,
-    backgroundColor: C.cardElevated,
-    borderRadius: 2,
+  fareBubbleAmount: { fontSize: 20, fontWeight: '900', color: '#22E5A0' },
+  fareBubbleSub:    { fontSize: 11, fontWeight: '700', color: '#64748B', marginTop: 1, textAlign: 'center' },
+  fareBubbleHint:   { fontSize: 10, fontWeight: '700', color: '#475569', marginTop: 4, textAlign: 'center' },
+
+  /* Pickup distance chip */
+  pickupChip: {
+    position: 'absolute', left: 14, zIndex: 15,
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(8,12,22,0.88)',
+    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 7,
+    borderWidth: 1, borderColor: 'rgba(14,165,233,0.4)',
+    maxWidth: '58%',
+  },
+  pickupChipText: { fontSize: 12, fontWeight: '700', color: '#0ea5e9', flexShrink: 1 },
+
+  /* KV wrapper */
+  kvWrap: { position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 30 },
+
+  /* Bottom sheet */
+  sheet: {
+    backgroundColor: 'rgba(6,11,24,0.99)',
+    borderTopLeftRadius: 28, borderTopRightRadius: 28,
+    borderWidth: 1, borderBottomWidth: 0,
+    borderColor: 'rgba(34,229,160,0.2)',
     overflow: 'hidden',
-    marginBottom: DS_SPACE.xs,
+    shadowColor: '#000', shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.55, shadowRadius: 24, elevation: 24,
   },
-  timerFill: { height: 3, borderRadius: 2 },
-  demandBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(245, 158, 11, 0.12)',
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.35)',
-    paddingHorizontal: DS_SPACE.sm,
-    paddingVertical: 10,
-    borderRadius: DS_RADIUS.md,
-    marginBottom: DS_SPACE.sm,
-    marginHorizontal: DS_SPACE.xs,
+  sheetHandle: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    gap: 8, paddingVertical: 10, paddingHorizontal: 16,
   },
-  demandText: {
-    ...DS_TYPE.body,
-    fontSize: 14,
-    color: C.surge,
-    flex: 1,
-  },
-  smartBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    paddingHorizontal: DS_SPACE.sm,
-    paddingVertical: 10,
-    borderRadius: DS_RADIUS.md,
-    marginBottom: DS_SPACE.sm,
-    marginHorizontal: DS_SPACE.xs,
-    borderWidth: 1,
-  },
-  smartBannerMatch: {
-    backgroundColor: 'rgba(0,212,106,0.1)',
-    borderColor: 'rgba(0,212,106,0.3)',
-  },
-  smartBannerMiss: {
-    backgroundColor: 'rgba(245,158,11,0.1)',
-    borderColor: 'rgba(245,158,11,0.3)',
-  },
-  smartBannerTitle: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  smartBannerSub: {
-    fontSize: 11,
-    color: '#94A3B8',
-    marginTop: 2,
-    lineHeight: 15,
-  },
-  priceHero: {
-    backgroundColor: C.card,
-    borderRadius: DS_RADIUS.lg,
-    padding: DS_SPACE.sm,
-    marginHorizontal: DS_SPACE.xs,
-    marginBottom: DS_SPACE.sm,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  priceHeroTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  priceHeroLabel: {
-    ...DS_TYPE.caption,
-    color: C.muted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-  },
-  catBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 20,
-    borderWidth: 1,
-  },
-  catBadgeText: {
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.3,
-  },
-  priceHeroAmount: {
-    ...DS_TYPE.display,
-    fontSize: 44,
-    lineHeight: 48,
-    color: C.primary,
-  },
-  priceHeroMeta: { flexDirection: 'row', flexWrap: 'wrap', marginTop: 6 },
-  priceHeroMetaText: {
-    ...DS_TYPE.body,
-    fontSize: 14,
-    color: C.muted,
-    fontWeight: '600',
-  },
-  suggestedSmall: {
-    ...DS_TYPE.caption,
-    marginTop: 10,
-    color: C.muted,
-  },
-  routeCompact: {
-    backgroundColor: C.card,
-    borderRadius: DS_RADIUS.lg,
-    padding: DS_SPACE.sm,
-    marginHorizontal: DS_SPACE.xs,
-    marginBottom: DS_SPACE.xs,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  routeCompactRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
-  routeArrow: { marginLeft: 13, marginVertical: 2 },
-  routeCompactSub: { fontSize: 11, color: '#64748b', marginTop: 2, fontWeight: '600' },
-  routeConnector: {
-    flexDirection: 'row', alignItems: 'center', marginLeft: 14, marginVertical: 4, gap: 6,
-  },
-  routeConnectorLine: { flex: 1, height: 1, backgroundColor: 'rgba(148,163,184,0.2)' },
-  routeDistancePill: {
+  handleBar:  { width: 36, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.2)' },
+  handleHint: { fontSize: 11, fontWeight: '600', color: '#475569' },
+  sheetScroll: { flex: 1 },
+  sheetScrollContent: { paddingHorizontal: 14, paddingTop: 2, gap: 10 },
+
+  /* Hero row */
+  heroRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  heroFare: { flex: 1 },
+  heroFareAmount: { fontSize: 36, fontWeight: '900', color: '#22E5A0', lineHeight: 42 },
+  heroMetaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 6 },
+  metaChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
     backgroundColor: 'rgba(14,165,233,0.12)',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 20,
-    borderWidth: 0.5,
-    borderColor: 'rgba(14,165,233,0.3)',
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20,
+    borderWidth: 0.5, borderColor: 'rgba(14,165,233,0.3)',
   },
-  routeDistancePillText: { fontSize: 10, fontWeight: '800', color: '#0ea5e9' },
-  routeBottomChips: { flexDirection: 'row', gap: 8, marginTop: 10, flexWrap: 'wrap' },
-  badge: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
+  metaChipText: { fontSize: 12, fontWeight: '700', color: '#0ea5e9' },
+  fairPill: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, borderWidth: 0.5,
   },
-  badgeText: { fontSize: 14, fontWeight: '900', color: '#FFF' },
-  routeCompactText: {
-    ...DS_TYPE.body,
-    lineHeight: 21,
-    color: C.text,
+  fairPillText: { fontSize: 11, fontWeight: '700' },
+  heroRider: { alignItems: 'center', gap: 4, minWidth: 72 },
+  heroAvatarWrap: {
+    width: 56, height: 56, borderRadius: 28,
+    overflow: 'hidden', borderWidth: 2.5,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6, elevation: 6,
   },
-  payChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: DS_RADIUS.pill,
+  heroAvatar: {
+    width: '100%', height: '100%',
+    alignItems: 'center', justifyContent: 'center',
   },
-  payChipText: { fontSize: 13, fontWeight: '800', color: C.primary },
-  scroll: { flex: 1 },
-  scrollContent: {
-    paddingHorizontal: DS_SPACE.sm,
-    paddingBottom: DS_SPACE.md,
+  heroAvatarInitial: { fontSize: 22, fontWeight: '900', color: '#FFF' },
+  onlineDot: {
+    position: 'absolute', bottom: 2, right: 2,
+    width: 13, height: 13, borderRadius: 6.5,
+    backgroundColor: '#22E5A0', borderWidth: 2, borderColor: '#0D1420',
   },
-  riderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: DS_SPACE.sm,
-    gap: 12,
+  heroRiderName: { fontSize: 13, fontWeight: '800', color: '#CBD5E1', textAlign: 'center', maxWidth: 76 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  ratingText: { fontSize: 11, fontWeight: '700', color: '#EAB308' },
+
+  /* Route card */
+  routeCard: {
+    backgroundColor: 'rgba(15,23,42,0.72)',
+    borderRadius: 18, padding: 16,
+    borderWidth: 1, borderColor: 'rgba(34,229,160,0.14)',
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: C.cardElevated,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
+  routeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  dotA:  { width: 12, height: 12, borderRadius: 6, backgroundColor: '#22E5A0', marginTop: 4, flexShrink: 0 },
+  dotB:  { width: 12, height: 12, borderRadius: 6, backgroundColor: '#ef4444', marginTop: 4, flexShrink: 0 },
+  routeText: { flex: 1 },
+  routeLabel: { fontSize: 10, fontWeight: '800', color: '#64748b', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 2 },
+  routeAddr:  { fontSize: 14, fontWeight: '700', color: '#E2E8F0', lineHeight: 20 },
+  routeMeta:  { fontSize: 11, fontWeight: '600', color: '#64748b', marginTop: 2 },
+  connRow:    { flexDirection: 'row', alignItems: 'center', marginLeft: 6, marginVertical: 6, gap: 6 },
+  connDashes: { flex: 1, height: 1, backgroundColor: 'rgba(148,163,184,0.15)' },
+  connLabel:  {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(14,165,233,0.12)', paddingHorizontal: 10, paddingVertical: 4,
+    borderRadius: 20, borderWidth: 0.5, borderColor: 'rgba(14,165,233,0.3)',
   },
-  avatarText: { fontSize: 20, fontWeight: '900', color: C.text },
-  riderMeta: { flex: 1 },
-  riderName: { fontSize: 17, fontWeight: '800', color: C.text },
-  riderStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 6 },
-  statChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(234,179,8,0.12)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
+  connLabelText: { fontSize: 11, fontWeight: '800', color: '#0ea5e9' },
+  destHighlight: { backgroundColor: 'rgba(239,68,68,0.06)', borderRadius: 10, padding: 8, marginTop: 2 },
+  destAddr: { fontSize: 15, fontWeight: '800', color: '#f1f5f9' },
+  destMeta: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 4 },
+  destChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    backgroundColor: 'rgba(0,212,106,0.1)', paddingHorizontal: 8, paddingVertical: 3,
+    borderRadius: 999, borderWidth: 0.5, borderColor: 'rgba(0,212,106,0.3)',
   },
-  statChipText: { fontSize: 13, fontWeight: '700', color: '#EAB308' },
-  fairCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: C.card,
-    borderRadius: DS_RADIUS.md,
-    padding: 14,
-    marginBottom: DS_SPACE.sm,
-    borderWidth: 1,
-    gap: 12,
-  },
-  fairIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  fairLabel: { fontSize: 15, fontWeight: '800' },
-  fairSub: { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 2 },
+  destChipText: { fontSize: 11, fontWeight: '700', color: '#00D46A' },
+
+  /* Badges row */
+  badgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10, borderWidth: 1 },
+  badgeText: { fontSize: 12, fontWeight: '700' },
+
+  /* Shield */
   shield: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(34,197,94,0.08)',
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: DS_SPACE.sm,
-    borderWidth: 1,
-    borderColor: 'rgba(34,197,94,0.25)',
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: 'rgba(34,197,94,0.08)', borderRadius: 12, padding: 10,
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.2)',
   },
-  shieldWarn: {
-    backgroundColor: C.dangerSoft,
-    borderColor: 'rgba(239,68,68,0.35)',
+  shieldWarn: { backgroundColor: 'rgba(239,68,68,0.08)', borderColor: 'rgba(239,68,68,0.3)' },
+  shieldText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#94a3b8' },
+
+  /* Mood */
+  moodWrap: { gap: 6 },
+  moodLabel: { fontSize: 10, fontWeight: '800', color: '#64748b', letterSpacing: 0.8, textTransform: 'uppercase' },
+  moodRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
+  moodChip: {
+    flexDirection: 'row', alignItems: 'center', gap: 5,
+    backgroundColor: 'rgba(0,212,106,0.08)', paddingHorizontal: 9, paddingVertical: 5,
+    borderRadius: 999, borderWidth: 1, borderColor: 'rgba(0,212,106,0.2)',
   },
-  shieldTitle: { fontSize: 13, fontWeight: '800', color: C.text },
-  shieldBody: { fontSize: 12, fontWeight: '600', color: C.muted, marginTop: 4, lineHeight: 17 },
-  prefRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 18,
+  moodChipText: { fontSize: 11, fontWeight: '700', color: '#00D46A' },
+
+  /* Smart Mode */
+  smart: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    paddingHorizontal: 10, paddingVertical: 8, borderRadius: 10, borderWidth: 1,
   },
-  prefChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
+  smartMatch: { backgroundColor: 'rgba(0,212,106,0.08)', borderColor: 'rgba(0,212,106,0.25)' },
+  smartMiss:  { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.25)' },
+  smartText:  { fontSize: 12, fontWeight: '700', flex: 1 },
+
+  /* Counter bid */
+  counterBox: {
+    backgroundColor: '#111827', borderRadius: 14, padding: 14,
+    borderWidth: 1, borderColor: 'rgba(245,158,11,0.35)',
   },
-  prefChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: C.text,
+  counterBoxLabel: { fontSize: 10, fontWeight: '800', color: '#64748b', letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 10 },
+  chipsRow:   { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 10 },
+  chip:       { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 10, backgroundColor: '#1e293b', borderWidth: 1, borderColor: '#334155' },
+  chipBest:   { borderColor: '#00D46A', backgroundColor: 'rgba(0,212,106,0.1)' },
+  chipText:   { fontSize: 13, fontWeight: '800', color: '#E2E8F0' },
+  chipTextBest: { color: '#00D46A' },
+  chipCustom: { borderColor: 'rgba(0,212,106,0.45)', backgroundColor: 'rgba(0,212,106,0.08)', gap: 4 },
+  chipCustomText: { fontSize: 13, fontWeight: '800', color: '#00D46A' },
+  fareInput: {
+    backgroundColor: '#0D1420', borderRadius: 12, borderWidth: 1.5, borderColor: '#F59E0B',
+    paddingHorizontal: 14, paddingVertical: 12, fontSize: 18, fontWeight: '800', color: '#E2E8F0',
+    marginBottom: 6,
   },
-  sectionLabel: {
-    ...DS_TYPE.caption,
-    color: C.muted,
-    letterSpacing: 0.8,
-    marginBottom: 10,
-    textTransform: 'uppercase',
+  counterHint: { fontSize: 12, fontWeight: '700', color: '#F59E0B', textAlign: 'center' },
+
+  /* Action buttons */
+  actions: {
+    borderTopWidth: 1, borderTopColor: 'rgba(34,229,160,0.12)',
+    paddingHorizontal: 14, paddingTop: 12, gap: 10,
+    backgroundColor: 'rgba(6,11,24,0.98)',
   },
-  chipsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
+  acceptBtn: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 10,
   },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: DS_RADIUS.sm,
-    backgroundColor: C.cardElevated,
-    borderWidth: 1,
-    borderColor: C.border,
+  acceptGrad: { paddingVertical: 17, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  acceptText: { fontSize: 17, fontWeight: '900', color: '#022C22' },
+  secRow: { flexDirection: 'row', gap: 8 },
+  counterBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#1e293b', paddingVertical: 13, borderRadius: 12,
+    borderWidth: 1, borderColor: '#334155',
+    minHeight: 48,
   },
-  chipBest: {
-    borderColor: C.primary,
-    backgroundColor: 'rgba(34,197,94,0.12)',
+  counterBtnActive: { borderColor: 'rgba(245,158,11,0.5)', backgroundColor: 'rgba(245,158,11,0.1)' },
+  ignoreBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: 'rgba(239,68,68,0.1)', paddingVertical: 13, borderRadius: 12,
+    borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)',
+    minHeight: 48,
   },
-  chipText: { fontSize: 14, fontWeight: '800', color: C.text },
-  chipTextBest: { color: C.primary },
-  chipAccent: {
-    borderColor: 'rgba(34,197,94,0.45)',
-    backgroundColor: 'rgba(34,197,94,0.1)',
-  },
-  chipTextAccent: { fontSize: 14, fontWeight: '800', color: C.primary },
-  input: {
-    backgroundColor: C.cardElevated,
-    borderRadius: DS_RADIUS.md,
-    borderWidth: 1,
-    borderColor: C.border,
-    paddingHorizontal: DS_SPACE.sm,
-    paddingVertical: 14,
-    fontSize: 18,
-    fontWeight: '800',
-    color: C.text,
-    marginBottom: DS_SPACE.sm,
-  },
-  footer: {
-    borderTopWidth: 1,
-    borderTopColor: C.border,
-    paddingHorizontal: DS_SPACE.sm,
-    paddingTop: DS_SPACE.sm,
-    backgroundColor: C.bg,
-  },
-  primaryBtn: { borderRadius: DS_RADIUS.lg, overflow: 'hidden', marginBottom: 10 },
-  primaryGrad: {
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 56,
-  },
-  primaryText: { fontSize: 18, fontWeight: '900', color: C.primaryInk },
-  secondaryRow: { flexDirection: 'row', gap: 10 },
-  secondaryBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: C.cardElevated,
-    paddingVertical: 14,
-    borderRadius: DS_RADIUS.md,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  secondaryText: { fontSize: 15, fontWeight: '800', color: C.text },
-  rejectBtn: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 14,
-    borderRadius: DS_RADIUS.md,
-    backgroundColor: C.dangerSoft,
-    borderWidth: 1,
-    borderColor: 'rgba(239,68,68,0.35)',
-  },
-  rejectText: { fontSize: 15, fontWeight: '800', color: C.danger },
+  secBtnText:  { fontSize: 13, fontWeight: '800', color: '#CBD5E1' },
+  ignoreBtnText: { fontSize: 13, fontWeight: '800', color: '#ef4444' },
 });

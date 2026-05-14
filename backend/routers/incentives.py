@@ -8,6 +8,8 @@ No signup bonuses. No credit on cancelled trips.
 """
 import re
 import uuid
+import os
+import random
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -28,6 +30,11 @@ MAX_CREDIT_PER_RIDE_NGN = 500        # cap: credit usable per ride
 MAX_RIDE_COVERAGE_PCT = 0.40         # credit can cover at most 40 % of a ride fare
 CREDIT_EXPIRY_DAYS = 7               # wallet credit expires in 7 days
 MAX_TOTAL_CREDIT_NGN = 1000          # per-user cap on outstanding promotional credit
+
+# Mystery bonus: small random promo credit on a subset of completed rides (rider only).
+MYSTERY_BONUS_CHANCE = float(os.environ.get("NEXRYDE_MYSTERY_BONUS_CHANCE", "0.05") or "0.05")
+MYSTERY_BONUS_MIN_NGN = int(os.environ.get("NEXRYDE_MYSTERY_BONUS_MIN_NGN", "100") or "100")
+MYSTERY_BONUS_MAX_NGN = int(os.environ.get("NEXRYDE_MYSTERY_BONUS_MAX_NGN", "1000") or "1000")
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -223,6 +230,28 @@ async def on_trip_completed(trip_id: str, rider_id: str, driver_id: str, fare: f
 
     # 3. Update driver trial trip count.
     await _update_driver_trial_progress(driver_id)
+
+    # 4. Mystery bonus — random chance each completed trip; ₦100–₦1,000 promo credit (surprise & delight).
+    try:
+        chance = max(0.0, min(1.0, MYSTERY_BONUS_CHANCE))
+        lo = max(1, min(MYSTERY_BONUS_MIN_NGN, MYSTERY_BONUS_MAX_NGN))
+        hi = max(lo, MYSTERY_BONUS_MAX_NGN)
+        if rider_id and chance > 0 and random.random() < chance:
+            roll = random.randint(lo, hi)
+            res_mb = await _grant_promo_credit(
+                rider_id,
+                float(roll),
+                reason="mystery_bonus",
+                trip_id=trip_id,
+            )
+            granted = float(res_mb.get("amount") or 0)
+            if res_mb.get("granted") and granted > 0:
+                results["mystery_bonus"] = {
+                    "amount_ngn": granted,
+                    "expires_at": res_mb.get("expires_at"),
+                }
+    except Exception as _mb_exc:
+        logger.warning("mystery_bonus hook failed trip=%s rider=%s: %s", trip_id, rider_id, _mb_exc)
 
     return results
 

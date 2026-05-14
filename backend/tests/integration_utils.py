@@ -78,8 +78,9 @@ def request_sample_trip(
     *,
     timeout: float = 90,
 ) -> Tuple[int, Any]:
-    """POST /api/trips/request — returns (status_code, json_or_none)."""
-    payload = {
+    """POST /api/trips/request — bids require a fare lock; we fetch /api/fare/estimate first."""
+    base = base_url.rstrip("/")
+    coords = {
         "pickup_lat": 6.5244,
         "pickup_lng": 3.3792,
         "pickup_address": "Victoria Island, Lagos",
@@ -87,11 +88,32 @@ def request_sample_trip(
         "dropoff_lng": 3.4,
         "dropoff_address": "Lekki Phase 1, Lagos",
         "service_type": "economy",
-        "offered_fare": 3500.0,
-        "recommended_fare": 4000.0,
+        "city": "lagos",
+        "rider_id": rider_id,
+    }
+    er = requests.post(f"{base}/api/fare/estimate", json=coords, timeout=timeout)
+    if er.status_code != 200:
+        try:
+            return er.status_code, er.json()
+        except Exception:
+            return er.status_code, None
+    est = er.json()
+    eid = est.get("estimate_id")
+    if not eid:
+        return 502, {"detail": "fare estimate missing estimate_id"}
+    min_p = float(est.get("min_price") or est.get("min_fare") or 0)
+    offer = max(3500.0, min_p)
+    rec = float(est.get("base_price") or est.get("total_fare") or offer)
+
+    payload = {
+        **coords,
+        "fare_estimate_id": eid,
+        "offered_fare": offer,
+        "recommended_fare": rec,
+        "payment_method": "cash",
     }
     r = requests.post(
-        f"{base_url.rstrip('/')}/api/trips/request",
+        f"{base}/api/trips/request",
         params={"rider_id": rider_id},
         json=payload,
         headers=bearer_headers(token),

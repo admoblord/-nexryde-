@@ -1,7 +1,7 @@
 """Drivers Router - Driver profile, location, documents, verification, stats, onboarding, earnings, heatmap."""
 from fastapi import APIRouter, HTTPException, Form, File, UploadFile, Request
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
 import logging
 import os
@@ -13,6 +13,12 @@ import asyncio
 import hashlib
 
 from database import db
+from surge_pricing import SURGE_CONFIG
+from surge_demand import (
+    haversine_km as _haversine_km,
+    trip_pickup_coords as _trip_pickup_coords,
+    estimate_area_demand_ratio_near as _estimate_area_demand_ratio_near,
+)
 from face_match import FACE_MATCH_SENSITIVE_MIN, face_match_confidence
 from earnings_query import match_completed_trip_paid_for_earnings
 from auth_guard import verify_owner_strict
@@ -169,24 +175,35 @@ async def _snapshot_approved_documents(
     return snapshot
 
 TIER_CONFIG = {
-    "basic": {"name": "KODA Basic", "monthly_fee": 18000, "earning_per_ride": {"min": 200, "max": 300}},
-    "premium": {"name": "KODA Premium", "monthly_fee": 18000, "earning_per_ride": {"min": 300, "max": 450}},
+    "basic": {"name": "Nexryde Basic", "monthly_fee": 18000, "earning_per_ride": {"min": 200, "max": 300}},
+    "premium": {"name": "Nexryde Premium", "monthly_fee": 18000, "earning_per_ride": {"min": 300, "max": 450}},
 }
 
 
-def _haversine_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
-    """Calculate great-circle distance in kilometers."""
-    r = 6371.0
-    d_lat = math.radians(lat2 - lat1)
-    d_lng = math.radians(lng2 - lng1)
-    a = (
-        math.sin(d_lat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(d_lng / 2) ** 2
-    )
-    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-    return r * c
+def _fare_city_for_surge(lat: Optional[float], lng: Optional[float], fallback_city: Optional[str]) -> str:
+    """Maps GPS / saved city → fare_config city slug."""
+    from routers.ai_features import detect_city
+
+    loc = detect_city(lat, lng, fallback_city)
+    raw = (loc.get("city") or "lagos").lower().strip().replace(" ", "_")
+    if raw in ("lagos", "abuja", "port_harcourt"):
+        return raw
+    return "default"
+
+
+def _surge_demand_band_meta(ratio: float) -> Dict[str, str]:
+    """Labels aligned with hybrid surge tier thresholds."""
+    r = max(0.0, min(1.0, float(ratio)))
+    hi = float(SURGE_CONFIG["high_demand_threshold"])
+    vh = float(SURGE_CONFIG["very_high_demand_threshold"])
+    cr = float(SURGE_CONFIG["critical_demand_threshold"])
+    if r >= cr:
+        return {"key": "critical", "label": "Critical demand"}
+    if r >= vh:
+        return {"key": "very_high", "label": "Very high demand"}
+    if r >= hi:
+        return {"key": "high", "label": "High demand"}
+    return {"key": "normal", "label": "Balanced supply"}
 
 
 def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
@@ -2214,23 +2231,55 @@ async def admin_get_verification_audit_log(verification_id: str, request: Reques
 
 # ==================== DRIVER HEATMAP ====================
 
+def _heatmap_zone_jitter(seed_bytes: bytes, idx: int, slot: str) -> float:
+    """Stable pseudo-random float in [-0.05, 0.05] derived from seed (no `random` nondeterminism across workers)."""
+    h = hashlib.sha256(seed_bytes + str(idx).encode() + slot.encode()).digest()
+    u = int.from_bytes(h[:4], "big") / 0xFFFFFFFF
+    return round((u * 0.10) - 0.05, 6)
+
+
 @drivers_router.get("/driver/heatmap")
 async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
     from routers.ai_features import detect_city
-    import random
+
     loc = detect_city(lat, lng, city)
     city_name = loc["city"]
-    base_lat, base_lng = loc["lat"], loc["lng"]
-    zones_data = loc["zones"]
-    random.seed(int(datetime.utcnow().hour))
+    base_lat, base_lng = float(loc["lat"]), float(loc["lng"])
+    zones_data = list(loc.get("zones") or [])
+    if not zones_data:
+        zones_data = detect_city(None, None, "lagos").get("zones") or ["Central"]
+
+    hour = int(datetime.utcnow().hour)
+    seed_bytes = f"{hour}-{city_name}".encode()
     zones = []
     for i, zone_name in enumerate(zones_data):
-        offset_lat = random.uniform(-0.05, 0.05)
-        offset_lng = random.uniform(-0.05, 0.05)
-        intensity = round(random.uniform(0.5, 0.95), 2)
-        surge = round(1.0 + random.uniform(0, 0.5), 1)
-        zones.append({"lat": round(base_lat + offset_lat, 4), "lng": round(base_lng + offset_lng, 4), "intensity": intensity, "zone_name": zone_name, "surge_multiplier": surge, "demand_level": "very_high" if intensity > 0.8 else "high" if intensity > 0.6 else "medium"})
-    return {"city": city_name, "zones": zones, "updated_at": datetime.utcnow().isoformat(), "recommendation": f"Head to {zones[0]['zone_name']} for best earnings" if zones else "No data available"}
+        offset_lat = _heatmap_zone_jitter(seed_bytes, i, "lat")
+        offset_lng = _heatmap_zone_jitter(seed_bytes, i, "lng")
+        ih = _heatmap_zone_jitter(seed_bytes, i, "int")
+        intensity = round(0.50 + (ih + 0.05) / 0.10 * 0.45, 2)
+        intensity = max(0.50, min(0.95, intensity))
+        sh = abs(_heatmap_zone_jitter(seed_bytes, i, "srg"))
+        surge = round(1.0 + min(0.50, (sh + 0.05) / 0.10 * 0.50), 1)
+        zones.append(
+            {
+                "lat": round(base_lat + offset_lat, 4),
+                "lng": round(base_lng + offset_lng, 4),
+                "intensity": intensity,
+                "zone_name": zone_name,
+                "surge_multiplier": surge,
+                "demand_level": "very_high"
+                if intensity > 0.8
+                else "high"
+                if intensity > 0.6
+                else "medium",
+            }
+        )
+    return {
+        "city": city_name,
+        "zones": zones,
+        "updated_at": datetime.utcnow().isoformat(),
+        "recommendation": f"Head to {zones[0]['zone_name']} for stronger demand this hour" if zones else "No data available",
+    }
 
 
 @drivers_router.get("/driver/fleet/nearby")
@@ -2379,12 +2428,64 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
     avg_per_km = total_earnings / total_distance if total_distance > 0 else 0
     hours_worked = (now_utc - (start_date + WAT_OFFSET)).total_seconds() / 3600
     projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 and period == "today" else total_earnings / max(1, (now_utc - start_date).days)
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "salary_mode": 1}) or {}
+    user_doc = await db.users.find_one({"id": driver_id}, {"_id": 0, "city": 1}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "salary_mode": 1, "current_location": 1, "active_categories": 1, "vehicle_type": 1},
+    ) or {}
 
-    # ── Live surge status (replaces old anti-surge guarantee) ───────────
-    # Import here to avoid circular imports at module level
+    # ── Live surge (hybrid): GPS bubble demand + profile city/service tier ──
     from routers.payments import calculate_surge_multiplier
-    surge_status = calculate_surge_multiplier()  # No location needed for time/season-based surge
+
+    cloc = profile.get("current_location") or {}
+    lat_raw = cloc.get("lat")
+    lng_raw = cloc.get("lng")
+    has_coords = False
+    lat_f = 0.0
+    lng_f = 0.0
+    try:
+        if lat_raw is not None and lng_raw is not None:
+            lat_f = float(lat_raw)
+            lng_f = float(lng_raw)
+            has_coords = abs(lat_f) > 1e-5 or abs(lng_f) > 1e-5
+    except (TypeError, ValueError):
+        has_coords = False
+
+    cats = profile.get("active_categories") or []
+    if cats:
+        raw_svc = str(cats[0])
+    else:
+        raw_svc = str(profile.get("vehicle_type") or "economy")
+    norm_svc = _normalize_category(raw_svc) or "economy"
+    service_for_surge = "economy" if norm_svc == "female_only" else norm_svc
+
+    city_for_surge = _fare_city_for_surge(lat_f if has_coords else None, lng_f if has_coords else None, user_doc.get("city"))
+
+    demand_ratio = 0.0
+    if has_coords:
+        demand_ratio = await _estimate_area_demand_ratio_near(db, lat_f, lng_f)
+
+    surge_status = calculate_surge_multiplier(
+        lat=lat_f if has_coords else 0.0,
+        lng=lng_f if has_coords else 0.0,
+        demand_ratio=demand_ratio,
+        is_raining=False,
+        service_type=service_for_surge,
+        city=city_for_surge,
+    )
+    band = _surge_demand_band_meta(demand_ratio)
+    city_label = city_for_surge.replace("_", " ").title()
+    surge_status["surge_context"] = {
+        "city": city_for_surge,
+        "city_label": city_label,
+        "service_type": service_for_surge,
+        "service_label": service_for_surge.title(),
+        "demand_ratio_estimate": demand_ratio,
+        "demand_band": band["key"],
+        "demand_band_label": band["label"],
+        "gps_based_demand": bool(has_coords),
+        "tier_surge_cap": surge_status.get("service_cap"),
+    }
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_trips = await db.trips.find(
@@ -2765,6 +2866,65 @@ async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, 
     return {"success": True, "message": "SIM fingerprint check passed", "checked": True}
 
 
+@drivers_router.get("/drivers/{driver_id}/withdrawals")
+async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: int = 30, skip: int = 0):
+    """Return driver's withdrawal transaction history, most recent first."""
+    verify_owner_strict(http_request, driver_id)
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "wallet_balance": 1, "earnings_frozen": 1}) or {}
+    wallet_balance = round(float(user.get("wallet_balance") or 0.0), 2)
+    earnings_frozen = bool(user.get("earnings_frozen"))
+
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "bank_name": 1, "account_number": 1, "account_name": 1}
+    ) or {}
+    bank_ready = bool(profile.get("bank_name") and profile.get("account_number") and profile.get("account_name"))
+
+    txns = await db.transactions.find(
+        {"user_id": driver_id, "source": "driver_withdrawal"},
+        {"_id": 0}
+    ).sort("timestamp", -1).skip(skip).limit(limit).to_list(limit)
+
+    formatted = []
+    for t in txns:
+        status = str(t.get("status") or "pending_settlement")
+        amount = abs(float(t.get("amount") or 0))
+        meta = t.get("meta") or {}
+        ts = t.get("timestamp")
+        created_at = ts.isoformat() if hasattr(ts, "isoformat") else str(ts or "")
+        settled_at_raw = t.get("settlement_updated_at")
+        settled_at = settled_at_raw.isoformat() if hasattr(settled_at_raw, "isoformat") else None
+        formatted.append({
+            "id": t.get("id"),
+            "reference": t.get("reference"),
+            "amount": amount,
+            "status": status,
+            "bank_name": meta.get("bank_name") or profile.get("bank_name") or "",
+            "account_number": meta.get("account_number") or profile.get("account_number") or "",
+            "account_name": meta.get("account_name") or profile.get("account_name") or "",
+            "provider_reference": t.get("provider_reference"),
+            "settlement_reason": t.get("settlement_reason"),
+            "created_at": created_at,
+            "settled_at": settled_at,
+            "reversed_to_wallet": bool(t.get("reversed_to_wallet")),
+        })
+
+    total = await db.transactions.count_documents({"user_id": driver_id, "source": "driver_withdrawal"})
+    return {
+        "success": True,
+        "wallet_balance": wallet_balance,
+        "earnings_frozen": earnings_frozen,
+        "bank_ready": bank_ready,
+        "bank": {
+            "bank_name": profile.get("bank_name") or "",
+            "account_number": profile.get("account_number") or "",
+            "account_name": profile.get("account_name") or "",
+        },
+        "withdrawals": formatted,
+        "total": total,
+    }
+
+
 @drivers_router.post("/drivers/{driver_id}/withdraw-earnings")
 async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWithdrawalRequest, http_request: Request):
     """Withdraw driver wallet earnings only after live face confirmation."""
@@ -2972,4 +3132,175 @@ async def provider_withdrawal_callback(payload: WithdrawalProviderCallbackReques
         update_doc["reversed_at"] = datetime.utcnow()
 
     await db.transactions.update_one({"id": payload.transaction_id}, {"$set": update_doc})
-    return {"success": True, "transaction_id": payload.transaction_id, "status": target}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TRIPS TOWARDS DESTINATION — Driver destination mode
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DESTINATION_TRIP_DAILY_LIMIT = 3      # Max trips per day in destination mode
+DESTINATION_MAX_DETOUR_MIN = 10        # Max detour allowed (minutes)
+DESTINATION_ROUTE_RADIUS_KM = 2.5     # Pickup must be within Xkm of the driver→dest corridor
+
+
+class DestinationRequest(BaseModel):
+    destination_lat: float
+    destination_lng: float
+    destination_name: str
+    polyline_coords: Optional[list] = None
+    duration_mins: Optional[float] = None
+    distance_km: Optional[float] = None
+    saved_label: Optional[str] = None   # "home" | "favourite" | custom
+
+
+@drivers_router.post("/drivers/{user_id}/destination")
+async def set_driver_destination(user_id: str, body: DestinationRequest, request: Request):
+    """Activate 'Trips towards destination' mode for a driver."""
+    verify_owner_strict(request, user_id)
+
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+
+    # ── Check/reset daily counter ──
+    today = datetime.now().strftime("%Y-%m-%d")
+    last_reset = profile.get("destination_last_reset_date", "")
+    daily_trips = int(profile.get("daily_destination_trips", 0) or 0)
+    if last_reset != today:
+        daily_trips = 0  # new day — reset
+
+    if daily_trips >= DESTINATION_TRIP_DAILY_LIMIT:
+        return {
+            "blocked": True,
+            "daily_trips": daily_trips,
+            "limit": DESTINATION_TRIP_DAILY_LIMIT,
+            "trips_remaining": 0,
+            "message": f"Daily limit reached ({DESTINATION_TRIP_DAILY_LIMIT} trips). Resets at midnight.",
+        }
+
+    # ── Activate destination mode ──
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "destination_mode": True,
+            "destination_lat": body.destination_lat,
+            "destination_lng": body.destination_lng,
+            "destination_name": body.destination_name,
+            "destination_polyline": body.polyline_coords or [],
+            "destination_duration_mins": body.duration_mins,
+            "destination_distance_km": body.distance_km,
+            "destination_saved_label": body.saved_label or "",
+            "destination_set_at": datetime.now(timezone.utc).isoformat(),
+            "destination_last_reset_date": today,
+            "daily_destination_trips": daily_trips,
+        }}
+    )
+
+    return {
+        "success": True,
+        "active": True,
+        "daily_trips": daily_trips,
+        "limit": DESTINATION_TRIP_DAILY_LIMIT,
+        "trips_remaining": DESTINATION_TRIP_DAILY_LIMIT - daily_trips,
+        "destination_name": body.destination_name,
+    }
+
+
+@drivers_router.delete("/drivers/{user_id}/destination")
+async def cancel_driver_destination(user_id: str, request: Request):
+    """Cancel destination mode."""
+    verify_owner_strict(request, user_id)
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {"destination_mode": False, "destination_cancelled_at": datetime.now(timezone.utc).isoformat()}}
+    )
+    return {"success": True, "active": False}
+
+
+@drivers_router.get("/drivers/{user_id}/destination")
+async def get_driver_destination(user_id: str, request: Request):
+    """Get current destination mode state + daily trip count."""
+    verify_owner_strict(request, user_id)
+
+    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0})
+    if not profile:
+        raise HTTPException(status_code=404, detail="Driver profile not found")
+
+    # ── Reset daily counter if new day ──
+    today = datetime.now().strftime("%Y-%m-%d")
+    last_reset = profile.get("destination_last_reset_date", "")
+    daily_trips = int(profile.get("daily_destination_trips", 0) or 0)
+    if last_reset != today:
+        daily_trips = 0
+        await db.driver_profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"daily_destination_trips": 0, "destination_last_reset_date": today}}
+        )
+
+    limit_reached = daily_trips >= DESTINATION_TRIP_DAILY_LIMIT
+    mode_active = bool(profile.get("destination_mode")) and not limit_reached
+
+    # Auto-disable if limit reached
+    if limit_reached and profile.get("destination_mode"):
+        await db.driver_profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"destination_mode": False}}
+        )
+
+    return {
+        "active": mode_active,
+        "limit_reached": limit_reached,
+        "daily_trips": daily_trips,
+        "daily_limit": DESTINATION_TRIP_DAILY_LIMIT,
+        "trips_remaining": max(0, DESTINATION_TRIP_DAILY_LIMIT - daily_trips),
+        "destination_name": profile.get("destination_name") or "",
+        "destination_lat": profile.get("destination_lat"),
+        "destination_lng": profile.get("destination_lng"),
+        "destination_distance_km": profile.get("destination_distance_km"),
+        "destination_duration_mins": profile.get("destination_duration_mins"),
+        "destination_set_at": profile.get("destination_set_at"),
+        "destination_saved_label": profile.get("destination_saved_label") or "",
+    }
+
+
+@drivers_router.post("/drivers/{user_id}/destination/saved")
+async def save_driver_destination_location(user_id: str, request: Request):
+    """Save a Home or Favourite destination for quick access."""
+    verify_owner_strict(request, user_id)
+    body = await request.json()
+    label = body.get("label", "home")   # "home" | "favourite" | custom name
+    name = body.get("name", "")
+    lat = body.get("lat")
+    lng = body.get("lng")
+    if not lat or not lng or not name:
+        raise HTTPException(status_code=400, detail="lat, lng and name are required")
+
+    field = f"destination_saved_{label.lower()[:20]}"
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {field: {"name": name, "lat": lat, "lng": lng, "updated_at": datetime.now(timezone.utc).isoformat()}}}
+    )
+    return {"success": True, "label": label, "name": name}
+
+
+@drivers_router.get("/drivers/{user_id}/destination/saved")
+async def get_driver_saved_destinations(user_id: str, request: Request):
+    """Get saved Home/Favourite destinations for quick access."""
+    verify_owner_strict(request, user_id)
+    user = await db.users.find_one({"id": user_id}, {"_id": 0}) or {}
+    saved = []
+    for key, val in user.items():
+        if key.startswith("destination_saved_") and isinstance(val, dict):
+            label = key.replace("destination_saved_", "")
+            saved.append({"label": label, **val})
+    return {"saved": saved}
+
+
+@drivers_router.delete("/drivers/{user_id}/destination/saved/{label}")
+async def delete_driver_saved_destination(user_id: str, label: str, request: Request):
+    """Delete a saved destination (home, favourite, etc.)."""
+    verify_owner_strict(request, user_id)
+    safe_label = label.lower()[:20]
+    field = f"destination_saved_{safe_label}"
+    await db.users.update_one({"id": user_id}, {"$unset": {field: ""}})
+    return {"success": True, "label": safe_label}

@@ -21,6 +21,8 @@ import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { BRAND, LAYOUT } from '@/src/constants/designSystem';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 import policeContacts from '@/src/data/policeContacts';
 
 type PoliceContact = { state: string; aliases: string[]; phone: string };
@@ -96,6 +98,7 @@ function toneColor(tone: SafeRow['tone']) {
 export default function DriverSafetyHubScreen() {
   const router = useRouter();
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
 
   // Police state picker
   const [showPolicePicker, setShowPolicePicker] = useState(false);
@@ -172,10 +175,11 @@ export default function DriverSafetyHubScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <TabBrandStrip role="driver" />
       {/* Hero */}
       <LinearGradient
         colors={[BRAND.navyDeep, '#0F172A']}
-        style={styles.hero}
+        style={[styles.hero, { paddingHorizontal: flow.padH }]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
       >
@@ -185,7 +189,20 @@ export default function DriverSafetyHubScreen() {
         </Text>
       </LinearGradient>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabPad }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: tabPad,
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+            gap: Math.round(flow.sectionGap * 0.35),
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* Emergency Quick Actions */}
         <View style={styles.quickSection}>
@@ -377,7 +394,6 @@ export default function DriverSafetyHubScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.gray50 },
   hero: {
-    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.xl,
     borderBottomLeftRadius: BORDER_RADIUS.xxl,
@@ -386,7 +402,7 @@ const styles = StyleSheet.create({
   heroTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.white, letterSpacing: 0.3 },
   heroSub: { marginTop: SPACING.xs, fontSize: FONT_SIZE.sm, fontWeight: '600', color: 'rgba(255,255,255,0.8)', lineHeight: 20 },
 
-  scroll: { padding: SPACING.lg },
+  scroll: { paddingTop: SPACING.md },
 
   quickSection: { marginBottom: SPACING.lg },
   quickLabel: {

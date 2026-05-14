@@ -41,25 +41,25 @@ def test_rider_trip_payload_from_doc_empty():
 def test_extract_squad_checkout_url_authorization():
     url = extract_squad_checkout_url(
         {"success": True},
-        {"authorization_url": "https://checkout.example/pay"},
+        {"authorization_url": "https://pay.squadco.com/test-ref-auth"},
     )
-    assert url == "https://checkout.example/pay"
+    assert url == "https://pay.squadco.com/test-ref-auth"
 
 
 def test_extract_squad_checkout_url_typo_paymant_link():
     url = extract_squad_checkout_url(
         {"success": True},
-        {"paymant_link": "https://typo.example/"},
+        {"paymant_link": "https://sandbox-pay.squadco.com/typo-key"},
     )
-    assert url == "https://typo.example/"
+    assert url == "https://sandbox-pay.squadco.com/typo-key"
 
 
 def test_extract_squad_checkout_url_list_data():
     url = extract_squad_checkout_url(
-        {"success": True, "data": [{"link": "https://nested.example/"}]},
+        {"success": True, "data": [{"link": "https://checkout.squadco.com/nested"}]},
         {},
     )
-    assert url == "https://nested.example/"
+    assert url == "https://checkout.squadco.com/nested"
 
 
 def test_squad_dynamic_va_response_ok():

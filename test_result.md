@@ -102,7 +102,7 @@
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
 
-user_problem_statement: Build KODA - Nigeria's driver-first ride-hailing platform with subscription-based driver access, no commission model, and role switching between driver/rider mode.
+user_problem_statement: Build Nexryde - Nigeria's driver-first ride-hailing platform with subscription-based driver access, no commission model, and role switching between driver/rider mode.
 
 backend:
   - task: "Driver Document Verification API"
@@ -607,7 +607,7 @@ frontend:
     status_history:
         - working: true
         - agent: "main"
-        - comment: "KODA logo and loading animation displayed"
+        - comment: "Nexryde logo and loading animation displayed"
         - working: false
         - agent: "testing"
         - comment: "❌ ISSUE: Splash screen displays correctly (NEXRYDE logo, tagline 'RIDE SMART. RIDE SAFE.', Begin Your Journey button) but navigation to login screen is not working. Button clicks but doesn't navigate to /(auth)/login. User stays on splash screen indefinitely. Routing logic needs fixing."

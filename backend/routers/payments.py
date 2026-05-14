@@ -32,9 +32,21 @@ from squad_checkout_parse import (
     build_squad_checkout_url,
 )
 from database import db
+from fare_estimate_cache import save_fare_estimate
+from fare_config import (
+    FARE_CONFIG,
+    NEXRYDE_DRIVER_PAYOUT_POLICY_NOTE,
+    NEXRYDE_ESTIMATE_SURGE_MODEL,
+    NEXRYDE_NATIONWIDE_POSITIONING_BULLETS,
+    NEXRYDE_NATIONWIDE_POSITIONING_SUMMARY,
+    normalize_fare_city_key,
+)
+from surge_pricing import SURGE_CONFIG, compute_max_style_surge_multiplier
+from surge_demand import estimate_area_demand_ratio_near
 from smart_pricing import (
     area_summary_line,
     build_route_preview_coordinates,
+    fallback_fare_breakdown,
     region_for_preview,
     smart_bounds_from_base_price,
 )
@@ -42,6 +54,7 @@ from auth_guard import verify_owner_strict, verify_trip_participant, require_aut
 from admin_guard import require_admin_request
 from security_advanced import general_limiter
 from route_cache import get_cached_directions, store_cached_directions, log_api_call, haversine_route_estimate
+from routing_quality import is_directions_road_route
 
 logger = logging.getLogger('server')
 payments_router = APIRouter(prefix="/api", tags=["Payments"])
@@ -99,28 +112,78 @@ def set_payments_fare_estimate_store(store):
 
 async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng, trip_id: str = None):
     """Cached wrapper — checks MongoDB + LRU before calling Google API."""
-    cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
-    if cached:
-        await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
-        return cached
+    try:
+        cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
+        # Never serve haversine from cache — it blocks fare estimates when the client cannot
+        # supply Directions (e.g. Android-restricted Maps keys on device REST calls).
+        if cached and is_directions_road_route(cached):
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+            return cached
 
-    if _get_directions_fn:
-        result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
-        if result:
-            await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
-            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
-            return result
+        if _get_directions_fn:
+            result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
+            if result:
+                if is_directions_road_route(result):
+                    await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
+                await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+                return result
 
-    return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
+        return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
+    except Exception:
+        logger.warning(
+            "get_directions_from_google failed; using haversine fallback",
+            exc_info=True,
+        )
+        return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
 
-def calculate_fare(dist, dur, traffic, svc="economy", city="lagos"):
+def calculate_fare(
+    dist,
+    dur,
+    traffic,
+    svc="economy",
+    city="lagos",
+    demand_ratio=0.0,
+    is_raining=False,
+    pickup_lat=None,
+    pickup_lng=None,
+    dropoff_lat=None,
+    dropoff_lng=None,
+):
     if _calculate_fare_fn:
         try:
-            return _calculate_fare_fn(dist, dur, traffic, svc, city)
+            return _calculate_fare_fn(
+                dist,
+                dur,
+                traffic,
+                svc,
+                city,
+                demand_ratio,
+                is_raining,
+                pickup_lat,
+                pickup_lng,
+                dropoff_lat,
+                dropoff_lng,
+            )
         except TypeError:
-            return _calculate_fare_fn(dist, dur, traffic, svc)
-    base = max(700, dist * 150)
-    return {"base_fare": 300, "distance_fee": dist * 100, "time_fee": dur * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
+            try:
+                return _calculate_fare_fn(dist, dur, traffic, svc, city)
+            except TypeError:
+                try:
+                    return _calculate_fare_fn(dist, dur, traffic, svc)
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("injected calculate_fare failed; using fallback breakdown", exc_info=True)
+    svc_n = (svc or "economy").strip().lower()
+    if svc_n == "standard":
+        svc_n = "economy"
+    return fallback_fare_breakdown(
+        float(dist),
+        int(dur),
+        int(traffic),
+        city=city or "lagos",
+        service_type=svc_n,
+    )
 
 def calculate_distance_haversine(lat1, lon1, lat2, lon2):
     if _calculate_distance_fn:
@@ -151,35 +214,11 @@ SUBSCRIPTION_CONFIG = {
     }
 }
 
-# Surge pricing config
-SURGE_CONFIG = {
-    "enabled": True,
-    "base_multiplier": 1.0,
-    # Moderate cap — drivers earn more during peak demand but increases stay fair for riders.
-    # All hours are Nigeria WAT (UTC+1).
-    "max_multiplier": 1.30,
-    "peak_hours": {
-        # WAT hours. morning_rush 6-10 AM, evening_peak 5-9 PM.
-        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
-        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
-    },
-    # Demand-based tiers (applied on top of base/peak)
-    "high_demand_threshold": 0.70,        # 70% capacity => +1.20x
-    "very_high_demand_threshold": 0.85,   # 85% capacity => +1.25x
-    "critical_demand_threshold": 0.95,    # 95% capacity => 1.30x (hard cap)
-    "surge_levels": {
-        "normal":    1.0,
-        "peak":      1.15,
-        "high":      1.20,
-        "very_high": 1.25,
-        "critical":  1.30,
-    },
-    # Weather multiplier (wet season Apr-Oct)
-    "rain_multiplier": 1.10,
-}
+# Surge config lives in surge_pricing.py (single source of truth).
 
 fare_estimate_store = {}
-FARE_LOCK_MINUTES = 3
+# Fare estimate TTL — must match trip-side validation for locked quotes.
+FARE_LOCK_MINUTES = 10
 FARE_ADJUSTMENT_CONFIG = {
     "free_buffer_minutes": 5,
     "max_increase_percentage": 50,
@@ -227,6 +266,13 @@ class FareEstimateRequest(BaseModel):
     pickup_address: Optional[str] = None
     dropoff_address: Optional[str] = None
     rider_id: Optional[str] = None  # supplied by frontend to check first-ride discount
+    preferred_driver_id: Optional[str] = None  # if in rider favourites, favourite-driver fare perk may apply
+    demand_ratio: Optional[float] = None  # 0–1 driver-busy proxy for surge tier
+    rain: Optional[bool] = None  # when true, applies rain multiplier from surge_pricing
+    # When server routing falls back to haversine (no Maps key / API error), validated client
+    # Google Directions leg metrics replace straight-line distance for fare (see estimate_fare).
+    google_route_distance_meters: Optional[float] = None
+    google_route_duration_seconds: Optional[float] = None
 
     class Config:
         extra = "ignore"
@@ -1171,10 +1217,10 @@ async def _run_ai_payment_review(screenshot_data_url: str, expected_amount: floa
     }
 
 
-# Tier config (matches server.py exactly)
+# Tier config (matches fare_config.py / server.calculate_fare)
 TIER_CONFIG = {
     "basic": {
-        "name": "KODA Basic",
+        "name": "Nexryde Basic",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 200, "max": 300},
         "commission": 0.15,
@@ -1183,7 +1229,7 @@ TIER_CONFIG = {
         "benefits": ["Standard rides"],
     },
     "premium": {
-        "name": "KODA Premium",
+        "name": "Nexryde Premium",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 300, "max": 450},
         "commission": 0.10,
@@ -1197,8 +1243,9 @@ TIER_CONFIG = {
     "diamond": {"name": "Diamond", "min_trips": 1000, "commission": 0.05, "monthly_fee": 18000, "earning_per_ride": {"min": 400, "max": 500}, "benefits": ["VIP everything", "20% bonus"]},
 }
 
-# Fare config
-FARE_CONFIG = {
+# Legacy flat fare table (kept for backward compatibility helpers only).
+# IMPORTANT: do not shadow imported `fare_config.FARE_CONFIG` used by surge caps.
+LEGACY_FARE_CONFIG = {
     "standard": {"base": 300, "per_km": 100, "per_min": 20, "min_fare": 700},
     "economy": {"base": 300, "per_km": 100, "per_min": 20, "min_fare": 700},
     "comfort": {"base": 500, "per_km": 150, "per_min": 30, "min_fare": 1000},
@@ -3581,6 +3628,34 @@ async def request_grace_period(driver_id: str, request: GracePeriodRequest, http
     }
 
 
+def _client_google_route_plausible(straight_km: float, distance_m: float, duration_s: float) -> bool:
+    """Reject impossible client-reported Directions legs vs great-circle distance."""
+    if distance_m is None or duration_s is None:
+        return False
+    try:
+        dm = float(distance_m)
+        ds = float(duration_s)
+    except (TypeError, ValueError):
+        return False
+    if dm < 80 or ds < 10:
+        return False
+    cd_km = dm / 1000.0
+    if straight_km < 0.02:
+        return cd_km <= 2.0
+    if cd_km < straight_km * 0.6:
+        return False
+    if cd_km > straight_km * 6.0:
+        return False
+    dur_min = max(ds / 60.0, 1 / 60.0)
+    implied_kmh = cd_km / (dur_min / 60.0)
+    if implied_kmh > 140:
+        return False
+    # Allow very slow traffic; only reject implausibly low speeds (likely unit / data errors).
+    if straight_km >= 2.0 and implied_kmh < 0.35:
+        return False
+    return True
+
+
 # ==================== FARE ESTIMATE ====================
 @payments_router.post("/fare/estimate")
 async def estimate_fare(request: FareEstimateRequest):
@@ -3588,38 +3663,117 @@ async def estimate_fare(request: FareEstimateRequest):
     if svc == "standard":
         svc = "economy"
     city = (request.city or "lagos").strip().lower()
+    city_norm = normalize_fare_city_key(city)
+    rain_flag = bool(request.rain) if request.rain is not None else False
+
+    if request.demand_ratio is not None:
+        demand_effective = max(0.0, min(1.0, float(request.demand_ratio)))
+        demand_source = "client"
+    else:
+        demand_effective = await estimate_area_demand_ratio_near(
+            db, float(request.pickup_lat), float(request.pickup_lng)
+        )
+        demand_source = "area_estimate"
 
     route_data = await get_directions_from_google(
         request.pickup_lat, request.pickup_lng,
         request.dropoff_lat, request.dropoff_lng
     )
-    
-    if route_data:
-        distance_km = route_data["distance_meters"] / 1000
-        duration_min = math.ceil(route_data["duration_seconds"] / 60)
-        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-        polyline = route_data.get("polyline")
-    else:
-        distance_km = calculate_distance_haversine(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
+
+    straight_km = calculate_distance_haversine(
+        request.pickup_lat,
+        request.pickup_lng,
+        request.dropoff_lat,
+        request.dropoff_lng,
+    )
+
+    distance_km = 0.0
+    duration_min = 5
+    traffic_duration_min = 5
+    polyline = None
+    route_metrics_source = "none"
+    road_ok = False
+
+    if is_directions_road_route(route_data):
+        try:
+            distance_km = float(route_data["distance_meters"]) / 1000.0
+            duration_min = math.ceil(float(route_data["duration_seconds"]) / 60.0)
+            dit = route_data.get("duration_in_traffic_seconds")
+            if dit is None:
+                dit = route_data["duration_seconds"]
+            traffic_duration_min = math.ceil(float(dit) / 60.0)
+            polyline = route_data.get("polyline")
+            route_metrics_source = str(route_data.get("source") or "google")
+            road_ok = True
+        except (TypeError, ValueError, KeyError):
+            road_ok = False
+
+    # Server could not produce usable road metrics (no key, API error, bad cache, parse error).
+    # If the app has a real Directions leg, accept it when plausibility vs great-circle holds.
+    if not road_ok:
+        cm = request.google_route_distance_meters
+        cs = request.google_route_duration_seconds
+        if cm is not None and cs is not None and _client_google_route_plausible(straight_km, cm, cs):
+            distance_km = max(0.5, float(cm) / 1000.0)
+            duration_min = max(5, math.ceil(float(cs) / 60.0))
+            traffic_duration_min = max(
+                duration_min,
+                math.ceil(float(cs) / 60.0 * 1.08),
+            )
+            route_metrics_source = "client_google_directions"
+            road_ok = True
+            logger.info(
+                "fare_estimate using client Google Directions (server route unusable; source=%s) km=%.2f min=%s",
+                str((route_data or {}).get("source") if isinstance(route_data, dict) else ""),
+                distance_km,
+                duration_min,
+            )
+
+    if not road_ok:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Driving route unavailable. Enable Google Directions API and configure your Maps key. "
+                "NEXRYDE does not price rides using straight-line distance."
+            ),
         )
-        duration_min = max(5, math.ceil((distance_km / 25) * 60))
-        traffic_duration_min = duration_min
-        polyline = None
-    
+
     distance_km = max(0.5, distance_km)
     duration_min = max(5, duration_min)
     
-    fare = calculate_fare(distance_km, duration_min, traffic_duration_min, svc, city)
+    fare = calculate_fare(
+        distance_km,
+        duration_min,
+        traffic_duration_min,
+        svc,
+        city,
+        demand_effective,
+        rain_flag,
+        request.pickup_lat,
+        request.pickup_lng,
+        request.dropoff_lat,
+        request.dropoff_lng,
+    )
+
+    # Same hybrid surge path as driver earnings / GET /surge/check (per-service cap from FARE_CONFIG).
+    surge_details = calculate_surge_multiplier(
+        float(request.pickup_lat),
+        float(request.pickup_lng),
+        demand_effective,
+        rain_flag,
+        svc,
+        city,
+    )
+    rain_mult = float(SURGE_CONFIG.get("rain_multiplier", 1.4)) if rain_flag else 1.0
 
     # ── First-ride discount: 20% off total fare for riders with 0 completed trips ──
     first_ride_discount_applied = False
     original_total_fare = fare["total_fare"]
-    if request.rider_id:
+    rider_id_for_discount = (str(request.rider_id).strip() if request.rider_id is not None else "") or None
+    if rider_id_for_discount:
         try:
             prior_completed = await db.trips.count_documents({
-                "rider_id": request.rider_id,
+                "rider_id": rider_id_for_discount,
                 "status": "completed",
             })
             if prior_completed == 0:
@@ -3628,6 +3782,27 @@ async def estimate_fare(request: FareEstimateRequest):
                 first_ride_discount_applied = True
         except Exception:
             pass  # silently skip on DB error — never block a fare estimate
+
+    favorite_driver_discount_applied = False
+    favorite_driver_discount_pct: Optional[float] = None
+    pref_est = (getattr(request, "preferred_driver_id", None) or "").strip() or None
+    if rider_id_for_discount and pref_est:
+        try:
+            rider_doc = await db.users.find_one({"id": rider_id_for_discount})
+            fav_ids = (rider_doc or {}).get("favorite_drivers") or []
+            if pref_est in fav_ids:
+                try:
+                    fav_pct_est = float(os.environ.get("NEXRYDE_FAVORITE_DRIVER_DISCOUNT_PCT", "0.05") or "0")
+                except (TypeError, ValueError):
+                    fav_pct_est = 0.05
+                fav_pct_est = max(0.0, min(fav_pct_est, 0.25))
+                if fav_pct_est > 0:
+                    amt = round(float(fare["total_fare"]) * fav_pct_est)
+                    fare = {**fare, "total_fare": max(300, float(fare["total_fare"]) - amt)}
+                    favorite_driver_discount_applied = True
+                    favorite_driver_discount_pct = fav_pct_est
+        except Exception:
+            pass
 
     base_price, min_price, max_price = smart_bounds_from_base_price(float(fare["total_fare"]))
     preview_coords = build_route_preview_coordinates(
@@ -3648,8 +3823,28 @@ async def estimate_fare(request: FareEstimateRequest):
         request.dropoff_address or "",
     )
 
+    comp_summary: str | None = None
+    comp_bullets: list[str] | None = None
+    if city_norm != "lagos":
+        comp_summary = NEXRYDE_NATIONWIDE_POSITIONING_SUMMARY
+        comp_bullets = list(NEXRYDE_NATIONWIDE_POSITIONING_BULLETS)
+
+    lagride_profile_out: dict | None = None
+    _lp = fare.get("lagride_profile")
+    if city_norm == "lagos" and isinstance(_lp, dict):
+        lagride_profile_out = {
+            **_lp,
+            "route_metrics_source": route_metrics_source,
+            "road_route_ok": bool(road_ok),
+        }
+        if first_ride_discount_applied:
+            lagride_profile_out["first_ride_discount_applied"] = True
+            lagride_profile_out["rider_total_after_discount"] = float(fare["total_fare"])
+
     estimate_id = str(uuid.uuid4())
-    fare_estimate_store[estimate_id] = {
+    _now_utc = datetime.now(timezone.utc)
+    _lock_until_utc = _now_utc + timedelta(minutes=FARE_LOCK_MINUTES)
+    _lock_doc = {
         "fare": fare,
         "distance_km": round(distance_km, 2),
         "duration_min": duration_min,
@@ -3658,15 +3853,31 @@ async def estimate_fare(request: FareEstimateRequest):
         "city": city,
         "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng},
         "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng},
-        "created_at": datetime.utcnow(),
-        "expires_at": datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES),
+        "created_at": _now_utc,
+        "expires_at": _lock_until_utc,
         "base_price": base_price,
         "min_price": min_price,
         "max_price": max_price,
         "route_preview_coordinates": preview_coords,
         "map_preview_region": map_region,
         "area_summary_line": area_line,
+        "demand_ratio": demand_effective,
+        "demand_ratio_source": demand_source,
+        "rain_applied": rain_flag,
+        "rain_multiplier": rain_mult,
+        "surge_details": surge_details,
+        "route_metrics_source": route_metrics_source,
+        "lagride_profile": lagride_profile_out,
+        "competitive_positioning_summary": comp_summary,
+        "competitive_positioning_bullets": comp_bullets,
+        "surge_model": NEXRYDE_ESTIMATE_SURGE_MODEL,
+        "driver_payout_policy_note": NEXRYDE_DRIVER_PAYOUT_POLICY_NOTE,
     }
+    try:
+        await save_fare_estimate(estimate_id, _lock_doc)
+    except Exception:
+        logger.exception("Mongo fare lock save failed; using in-process store only")
+    fare_estimate_store[estimate_id] = _lock_doc
 
     return {
         "estimate_id": estimate_id,
@@ -3674,26 +3885,54 @@ async def estimate_fare(request: FareEstimateRequest):
         "duration_min": duration_min,
         "estimated_time_minutes": duration_min,
         "traffic_duration_min": traffic_duration_min,
+        "route_metrics_source": route_metrics_source,
+        "road_route_ok": bool(road_ok),
+        "fare_rate_model": fare.get("fare_rate_model"),
+        **({"lagride_profile": lagride_profile_out} if lagride_profile_out is not None else {}),
+        "pricing_route_minutes": fare.get("pricing_route_minutes"),
         "base_fare": fare["base_fare"],
         "distance_fee": fare["distance_fee"],
         "time_fee": fare["time_fee"],
         "traffic_fee": fare["traffic_fee"],
         "booking_fee": fare["booking_fee"],
         "subtotal": fare["subtotal"],
+        "location_multiplier": fare.get("location_multiplier"),
+        "location_zone": fare.get("location_zone"),
+        "service_multiplier": fare.get("service_multiplier"),
         "total_fare": fare["total_fare"],
         "base_price": base_price,
         "min_price": min_price,
         "max_price": max_price,
-        "smart_pricing_note": "Rides at or above 95% of suggested price are prioritized for matching.",
+        "smart_pricing_note": (
+            "Lagos: your fare is route-based (distance × area × tier × surge)—see breakdown. "
+            "Offers near the suggested fare match faster."
+            if city_norm == "lagos"
+            else "Rides at or above 95% of suggested price are prioritized for matching."
+        ),
+        "competitive_positioning_summary": comp_summary,
+        "competitive_positioning_bullets": comp_bullets,
+        "surge_model": NEXRYDE_ESTIMATE_SURGE_MODEL,
+        "driver_payout_policy_note": NEXRYDE_DRIVER_PAYOUT_POLICY_NOTE,
         "first_ride_discount_applied": first_ride_discount_applied,
         "original_total_fare": original_total_fare if first_ride_discount_applied else None,
+        "favorite_driver_discount_applied": favorite_driver_discount_applied,
+        "favorite_driver_discount_pct": favorite_driver_discount_pct,
         "surge_multiplier": fare["surge_multiplier"],
+        "surge_uncapped": fare.get("surge_uncapped"),
+        "surge_factors": fare.get("surge_factors"),
+        "surge_details": surge_details,
+        "demand_ratio": demand_effective,
+        "demand_ratio_source": demand_source,
+        "rain_applied": rain_flag,
+        "rain_multiplier": rain_mult,
         "is_peak": fare["is_peak"],
         "is_weekend": fare["is_weekend"],
         "peak_type": fare["peak_type"],
         "currency": fare["currency"],
         "min_fare": fare["min_fare"],
         "cancellation_fee": fare["cancellation_fee"],
+        "fare_bucket": fare.get("fare_bucket"),
+        "short_trip_threshold_km": fare.get("short_trip_threshold_km"),
         "service_type": svc,
         "city": city,
         "polyline": polyline,
@@ -3701,7 +3940,7 @@ async def estimate_fare(request: FareEstimateRequest):
         "map_preview_region": map_region,
         "area_summary_line": area_line,
         "price_breakdown": fare["price_breakdown"],
-        "price_valid_until": (datetime.utcnow() + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
+        "price_valid_until": _lock_until_utc.isoformat().replace("+00:00", "Z"),
         "price_lock_minutes": FARE_LOCK_MINUTES,
         "is_insured": True,
     }
@@ -4059,107 +4298,51 @@ async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Requ
 
 
 # ==================== SURGE PRICING ====================
-def calculate_surge_multiplier(lat: float = 0.0, lng: float = 0.0, demand_ratio: float = 0.0) -> dict:
+def _service_surge_cap(city: str, service_type: str) -> float:
+    city_key = normalize_fare_city_key(city or "default")
+    svc = (service_type or "economy").strip().lower()
+    if svc == "standard":
+        svc = "economy"
+    if svc == "pro":
+        svc = "premium"
+    city_cfg = FARE_CONFIG.get(city_key, FARE_CONFIG["default"])
+    tier = city_cfg.get(svc) or city_cfg.get("economy") or FARE_CONFIG["default"]["economy"]
+    return float(tier.get("max_multiplier", 2.5))
+
+
+def calculate_surge_multiplier(
+    lat: float = 0.0,
+    lng: float = 0.0,
+    demand_ratio: float = 0.0,
+    is_raining: bool = False,
+    service_type: str = "economy",
+    city: str = "lagos",
+) -> dict:
     """
-    Calculate surge pricing multiplier for the current time and demand.
-
-    - All time comparisons use Nigeria WAT (UTC+1).
-    - Max surge is capped at 1.30x — moderate, fair, never alarming.
-    - Returns full context for UI display (driver and rider views).
+    Rider-facing surge: max(Normal, High demand, Rain, Peak) in WAT — matches nationwide product card
+    and Lagos Lagride fare engine. Capped by ``FARE_CONFIG`` tier ``max_multiplier``.
     """
-    WAT_OFFSET = timedelta(hours=1)
-    now_wat = datetime.utcnow() + WAT_OFFSET
-    hour = now_wat.hour
-    month = now_wat.month
-
-    multiplier = SURGE_CONFIG["base_multiplier"]
-    reasons: list[str] = []
-    active_window: str | None = None
-    window_ends_label: str | None = None
-
-    # ── Time-based peak windows ──────────────────────────────────────────
-    for key, cfg in SURGE_CONFIG["peak_hours"].items():
-        if cfg["start"] <= hour < cfg["end"]:
-            if cfg["multiplier"] > multiplier:
-                multiplier = cfg["multiplier"]
-                active_window = cfg["label"]
-                # Compute window end label
-                end_h = cfg["end"]
-                suffix = "AM" if end_h < 12 else "PM"
-                display_h = end_h if end_h <= 12 else end_h - 12
-                window_ends_label = f"{display_h}:00 {suffix}"
-            reasons.append(cfg["label"])
-
-    # ── Wet season (rain) bonus ──────────────────────────────────────────
-    if month in {4, 5, 6, 7, 9, 10}:
-        rain_bonus = SURGE_CONFIG.get("rain_multiplier", 1.0) - 1.0
-        multiplier = min(multiplier + rain_bonus, SURGE_CONFIG["max_multiplier"])
-        reasons.append("Wet season")
-
-    # ── Demand-based tier (demand_ratio from real-time load) ─────────────
-    surge_levels = SURGE_CONFIG["surge_levels"]
-    if demand_ratio >= SURGE_CONFIG["critical_demand_threshold"]:
-        multiplier = max(multiplier, surge_levels["critical"])
-        reasons.append("Very high demand in your area")
-    elif demand_ratio >= SURGE_CONFIG["very_high_demand_threshold"]:
-        multiplier = max(multiplier, surge_levels["very_high"])
-        reasons.append("High demand in your area")
-    elif demand_ratio >= SURGE_CONFIG["high_demand_threshold"]:
-        multiplier = max(multiplier, surge_levels["high"])
-        reasons.append("Elevated demand nearby")
-
-    final = round(min(multiplier, SURGE_CONFIG["max_multiplier"]), 2)
-    is_surge = final > 1.0
-    pct_extra = round((final - 1.0) * 100)
-
-    # Determine tier label
-    if final >= 1.25:
-        tier = "high"
-        tier_label = "High surge"
-        tier_color = "#EF4444"
-    elif final >= 1.15:
-        tier = "moderate"
-        tier_label = "Moderate surge"
-        tier_color = "#F59E0B"
-    elif final > 1.0:
-        tier = "low"
-        tier_label = "Low surge"
-        tier_color = "#F59E0B"
-    else:
-        tier = "normal"
-        tier_label = "Normal pricing"
-        tier_color = "#16A34A"
-
-    return {
-        "multiplier": final,
-        "is_surge": is_surge,
-        "tier": tier,
-        "tier_label": tier_label,
-        "tier_color": tier_color,
-        "pct_extra": pct_extra,
-        "reasons": reasons if reasons else ["Normal pricing"],
-        "active_window": active_window,
-        "window_ends_label": window_ends_label,
-        # Driver message
-        "driver_message": (
-            f"+{pct_extra}% on every fare right now — {', '.join(reasons[:2])}."
-            if is_surge
-            else "Normal fares. Stay online — surge could activate anytime."
-        ),
-        # Rider message
-        "rider_message": (
-            f"Fares are {pct_extra}% higher due to {', '.join(reasons[:1]).lower()}."
-            if is_surge
-            else "Standard fare — no extra charges."
-        ),
-        "expires_in_minutes": 5,
-    }
+    cap = _service_surge_cap(city, service_type)
+    return compute_max_style_surge_multiplier(
+        lat=lat,
+        lng=lng,
+        demand_ratio=demand_ratio,
+        is_raining=is_raining,
+        service_max_multiplier=cap,
+    )
 
 
 @payments_router.get("/surge/check")
-async def check_surge_pricing(lat: float = 0.0, lng: float = 0.0):
+async def check_surge_pricing(
+    lat: float = 0.0,
+    lng: float = 0.0,
+    demand_ratio: float = 0.0,
+    rain: int = 0,
+    service_type: str = "economy",
+    city: str = "lagos",
+):
     """Check current surge pricing for a location."""
-    return calculate_surge_multiplier(lat, lng)
+    return calculate_surge_multiplier(lat, lng, demand_ratio, bool(rain), service_type, city)
 
 
 # ==================== PROMO CODES ====================

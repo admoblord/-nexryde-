@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
+import { Alert, InteractionManager, Platform } from 'react-native';
 
 export type RecordingType = 'audio' | 'video' | 'both';
 export type RecordingStatus = 'idle' | 'recording' | 'paused' | 'stopped';
@@ -112,7 +112,12 @@ export class RideRecordingService {
       // Request permissions
       const { granted } = await Audio.requestPermissionsAsync();
       if (!granted) {
-        Alert.alert('Permission Required', 'Please allow audio recording for trip safety.');
+        InteractionManager.runAfterInteractions(() => {
+          const delay = Platform.OS === 'android' ? 450 : 0;
+          setTimeout(() => {
+            Alert.alert('Permission Required', 'Please allow audio recording for trip safety.');
+          }, delay);
+        });
         return { recording: null, recordingId: '' };
       }
       
@@ -465,35 +470,34 @@ export const useRideRecording = () => {
     type: 'audio',
     quality: 'medium',
     autoStart: true,
-    notifyOtherParty: true,
+    notifyOtherParty: false,
     cloudBackup: false,
   });
   
   /**
    * Start recording trip
    */
-  const startRecording = useCallback(async (tripId: string, driverId: string, riderId: string) => {
-    if (!settings.enabled) return;
-    
-    const result = await RideRecordingService.startRecording(tripId, driverId, riderId, settings.type);
-    
-    if (result.recording) {
-      setRecording(result.recording);
-      setRecordingId(result.recordingId);
-      setStatus('recording');
-      const started = await RideRecordingService.getRecording(result.recordingId);
-      if (started) {
-        setCurrentRecording(started);
+  const startRecording = useCallback(async (tripId: string, driverId: string, riderId: string): Promise<boolean> => {
+    try {
+      if (!settings.enabled) return false;
+      if (!tripId.trim() || !riderId.trim()) return false;
+
+      const result = await RideRecordingService.startRecording(tripId, driverId, riderId, settings.type);
+
+      if (result.recording) {
+        setRecording(result.recording);
+        setRecordingId(result.recordingId);
+        setStatus('recording');
+        const started = await RideRecordingService.getRecording(result.recordingId);
+        if (started) {
+          setCurrentRecording(started);
+        }
+        return true;
       }
-      
-      // Notify other party
-      if (settings.notifyOtherParty) {
-        Alert.alert(
-          'Recording Active',
-          'This trip is being recorded for safety purposes. Local recordings are retained for 7 days unless preserved for an incident.',
-          [{ text: 'OK' }]
-        );
-      }
+      return false;
+    } catch (e) {
+      if (__DEV__) console.warn('useRideRecording.startRecording failed:', e);
+      return false;
     }
   }, [settings]);
   

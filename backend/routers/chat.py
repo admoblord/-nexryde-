@@ -258,6 +258,24 @@ async def send_chat_message(request: ChatMessageRequest, http_request: Request):
             {"$set": {"last_message_at": datetime.now(timezone.utc)}}
         )
 
+        # Keep WebSocket subscribers in sync (same shape as WS `new_message` path).
+        user = await db.users.find_one({"id": auth_user_id}, {"name": 1, "_id": 0})
+        await chat_manager.broadcast_to_trip(
+            {
+                "type": "new_message",
+                "id": message["id"],
+                "trip_id": request.trip_id,
+                "sender_id": auth_user_id,
+                "sender_name": (user or {}).get("name", "User"),
+                "sender_role": sender_role,
+                "message": request.message,
+                "message_type": request.message_type,
+                "timestamp": message["timestamp"],
+                "is_read": False,
+            },
+            request.trip_id,
+        )
+
         return {
             "success": True,
             "message_id": message["id"],

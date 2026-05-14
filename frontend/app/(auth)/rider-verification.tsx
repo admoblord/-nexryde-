@@ -8,7 +8,6 @@ import * as ImagePicker from 'expo-image-picker';
 import { useAppStore } from '@/src/store/appStore';
 import { completeRiderVerification, verifyFace } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
-import { BiometricScanner } from '@/src/components/tier1';
 
 const COLORS = {
   bg: '#0F172A',
@@ -29,7 +28,6 @@ export default function RiderVerificationScreen() {
   const [address, setAddress] = useState((user as any)?.address || '');
   const [nin, setNin] = useState((user as any)?.nin || '');
   const [faceVerified, setFaceVerified] = useState(Boolean((user as any)?.face_verified));
-  const [biometricVerified, setBiometricVerified] = useState(false);
   const [facePreview, setFacePreview] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -39,14 +37,15 @@ export default function RiderVerificationScreen() {
       phone.trim().length >= 10 &&
       address.trim().length > 5 &&
       /^\d{11}$/.test(nin.trim()) &&
-      faceVerified &&
-      biometricVerified
+      faceVerified
     );
-  }, [name, phone, address, nin, faceVerified, biometricVerified]);
+  }, [name, phone, address, nin, faceVerified]);
 
   const handleFaceCapture = async () => {
     if (!user?.id) {
-      Alert.alert('Session error', 'Please login again.');
+      Alert.alert('Session expired', 'Please log in again to continue.', [
+        { text: 'Log in', onPress: () => router.replace('/(auth)/login') },
+      ]);
       return;
     }
     try {
@@ -68,7 +67,17 @@ export default function RiderVerificationScreen() {
       setFaceVerified(true);
       Alert.alert('Face verified', 'Your face scan has been saved for rider verification.');
     } catch (e: any) {
-      Alert.alert('Face verification failed', e?.response?.data?.detail || 'Could not verify your face now.');
+      const status = e?.response?.status;
+      const detail = e?.response?.data?.detail || '';
+      if (status === 401) {
+        Alert.alert(
+          'Session expired',
+          'Your session has expired. Please log in again to continue verification.',
+          [{ text: 'Log in', onPress: () => router.replace('/(auth)/login') }],
+        );
+        return;
+      }
+      Alert.alert('Face verification failed', detail || 'Could not verify your face. Please try again.');
     }
   };
 
@@ -78,7 +87,7 @@ export default function RiderVerificationScreen() {
       return;
     }
     if (!canSubmit) {
-      Alert.alert('Incomplete details', 'Enter your details, complete face verification, and confirm device biometrics.');
+      Alert.alert('Incomplete details', 'Enter your details and complete face verification to continue.');
       return;
     }
     setLoading(true);
@@ -135,7 +144,23 @@ export default function RiderVerificationScreen() {
               />
 
               <Text style={styles.label}>Face Verification</Text>
-              <TouchableOpacity style={styles.faceCard} onPress={() => void handleFaceCapture()}>
+              <TouchableOpacity
+                style={styles.faceCard}
+                onPress={() => {
+                  if (faceVerified) {
+                    Alert.alert(
+                      'Face already verified',
+                      'Your selfie is already saved. Retake only if you want to update it.',
+                      [
+                        { text: 'Keep current', style: 'cancel' },
+                        { text: 'Retake', onPress: () => void handleFaceCapture() },
+                      ],
+                    );
+                  } else {
+                    void handleFaceCapture();
+                  }
+                }}
+              >
                 <View style={styles.faceIconWrap}>
                   <Ionicons
                     name={faceVerified ? 'checkmark-circle' : 'camera'}
@@ -153,19 +178,6 @@ export default function RiderVerificationScreen() {
                   {facePreview ? <Text style={styles.faceHint}>Latest capture saved</Text> : null}
                 </View>
               </TouchableOpacity>
-            </View>
-
-            <View style={styles.card}>
-              <BiometricScanner
-                title="Confirm device biometric"
-                subtitle="Use fingerprint or face unlock on this device to harden your account."
-                confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify biometric'}
-                onSuccess={() => {
-                  setBiometricVerified(true);
-                  Alert.alert('Biometric confirmed', 'Device biometric check complete.');
-                }}
-                onFailure={(msg) => Alert.alert('Biometric check', msg)}
-              />
             </View>
 
             <TouchableOpacity disabled={!canSubmit || loading} onPress={handleSubmit} style={styles.buttonWrap}>

@@ -1,11 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Dimensions,
   Animated,
   StatusBar,
   Modal,
@@ -14,7 +13,8 @@ import {
 } from 'react-native';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
+import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguage } from '@/src/i18n/LanguageContext';
@@ -24,11 +24,23 @@ import { BACKEND_URL, getAuthHeaders, getDriverOfMonth, voteDriverOfMonth } from
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
+import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
 import { COLORS } from '@/src/constants/theme';
-import { HOME_PALETTE } from '@/src/constants/designSystem';
+import { BRAND, HOME_PALETTE } from '@/src/constants/designSystem';
+import {
+  RIDER_HOME_DEST_BAR_BORDER,
+  RIDER_HOME_RESUME_ACCENT,
+  RIDER_HOME_WALLET_BORDER,
+  RIDER_PRIMARY_CTA_GRADIENT,
+} from '@/src/constants/riderRideChrome';
 import notificationService from '@/src/services/notifications';
-
-const { width } = Dimensions.get('window');
+import {
+  loadRiderSavedPlaces,
+  RIDER_SAVED_SLOT_META,
+  RIDER_SAVED_SLOTS_ORDER,
+  type RiderSavedPlace,
+} from '@/src/services/riderSavedPlaces';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 const ICON_EMERGENCY = '#EF4444';
 const ICON_SUPPORT = '#F97316';
@@ -50,8 +62,14 @@ export default function ModernRiderHome() {
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
   const [recentTripsLoading, setRecentTripsLoading] = useState(false);
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
+  const gridColW = useMemo(
+    () => Math.max(68, Math.floor((flow.width - flow.padH * 2 - 24) / 4)),
+    [flow.padH, flow.width],
+  );
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [completedTripCount, setCompletedTripCount] = useState<number>(-1);
+  const [savedPlaces, setSavedPlaces] = useState<RiderSavedPlace[]>([]);
 
   const QUICK_FEATURES = [
     {
@@ -86,6 +104,7 @@ export default function ModernRiderHome() {
 
   /** Secondary shortcuts — share-trip lives under Quick “Witness”; wallet in hub. */
   const ALL_FEATURES = [
+    { id: 'saved-places', label: 'Saved places', icon: 'bookmark' as const, route: '/rider/saved-places', bg: '#0D9488' },
     { id: 'tracking', label: t.home.liveTrack, icon: 'navigate' as const, route: '/rider/tracking', bg: FEAT_LIVE },
     { id: 'safety-center', label: 'Safety Center', icon: 'shield-checkmark' as const, route: '/(rider-tabs)/rider-safety', bg: FEAT_SAFETY },
     { id: 'stories', label: 'Stories', icon: 'book' as const, route: '/stories', bg: HOME_PALETTE.heroPurple },
@@ -125,6 +144,31 @@ export default function ModernRiderHome() {
     };
     enforceRiderVerification();
   }, [router, user?.id, user?.role]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!user?.id) {
+        setSavedPlaces([]);
+        return;
+      }
+      void loadRiderSavedPlaces(user.id).then(setSavedPlaces).catch(() => setSavedPlaces([]));
+    }, [user?.id]),
+  );
+
+  const openBookToSaved = useCallback(
+    (place: RiderSavedPlace) => {
+      void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      router.push({
+        pathname: '/rider/book',
+        params: {
+          dropoff: place.address,
+          dropoffLat: String(place.lat),
+          dropoffLng: String(place.lng),
+        },
+      } as any);
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (!user?.id) return;
@@ -259,25 +303,27 @@ export default function ModernRiderHome() {
       <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
       
       {/* HEADER */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <View style={{ flex: 1, marginRight: 8 }}>
           <Text style={styles.greeting}>
             {t.common.hello}, {firstName}!
           </Text>
-          <Text style={styles.subtitle}>{t.home.whereTo}</Text>
+          <Text style={styles.subtitle}>Where would you like to go?</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity
             onPress={() => setFeatureHubOpen(true)}
-            style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
+            style={styles.headerIconBtn}
             accessibilityLabel="Open feature hub"
             accessibilityRole="button"
           >
             <Ionicons name="menu" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
-          <TouchableOpacity 
+          <TouchableOpacity
             onPress={() => setShowLangPicker(true)}
-            style={{ width: 38, height: 38, borderRadius: 19, backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center' }}
+            style={styles.headerIconBtnSm}
+            accessibilityLabel="Change language"
+            accessibilityRole="button"
           >
             <Text style={{ fontSize: 18 }}>{SUPPORTED_LANGUAGES.find(l => l.code === language)?.flag || '🌐'}</Text>
           </TouchableOpacity>
@@ -294,7 +340,7 @@ export default function ModernRiderHome() {
 
       {showResumeChip ? (
         <TouchableOpacity
-          style={styles.resumeTripChip}
+          style={[styles.resumeTripChip, { marginHorizontal: flow.padH }]}
           onPress={() => router.push({ pathname: '/rider/tracking', params: { tripId: currentTrip?.id } } as any)}
           activeOpacity={0.85}
         >
@@ -306,10 +352,31 @@ export default function ModernRiderHome() {
         </TouchableOpacity>
       ) : null}
 
+      {/* ── Uber-style "Where to?" destination bar ── */}
+      <TouchableOpacity
+        style={[styles.whereToBar, { marginHorizontal: flow.padH }]}
+        onPress={() => router.push('/rider/book' as any)}
+        activeOpacity={0.86}
+        accessibilityLabel="Book a ride — Where to?"
+        accessibilityRole="button"
+      >
+        <View style={styles.whereToBarDot} />
+        <Text style={styles.whereToBarText}>Where to?</Text>
+        <LinearGradient
+          colors={[...RIDER_PRIMARY_CTA_GRADIENT]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.whereToBarCta}
+        >
+          <Text style={styles.whereToBarCtaText}>Book</Text>
+          <Ionicons name="arrow-forward" size={13} color="#FFF" />
+        </LinearGradient>
+      </TouchableOpacity>
+
       {/* Language Picker Modal */}
       <Modal visible={showLangPicker} transparent animationType="fade">
         <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
-          <View style={{ marginHorizontal: 20, backgroundColor: '#FFF', borderRadius: 16, padding: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 }}>
+          <View style={{ marginHorizontal: flow.padH, backgroundColor: '#FFF', borderRadius: 16, padding: 8, shadowColor: '#000', shadowOpacity: 0.15, shadowRadius: 10, elevation: 5 }}>
             <Text style={{ fontSize: 13, fontWeight: '800', color: '#6B7280', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
             {SUPPORTED_LANGUAGES.map((lang) => (
               <TouchableOpacity
@@ -332,7 +399,7 @@ export default function ModernRiderHome() {
       {/* ── Wallet balance strip ─────────────────────────────────── */}
       {walletBalance !== null && (
         <TouchableOpacity
-          style={styles.walletStrip}
+          style={[styles.walletStrip, { marginHorizontal: flow.padH }]}
           onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)}
           activeOpacity={0.85}
         >
@@ -348,7 +415,7 @@ export default function ModernRiderHome() {
       {/* ── First-ride discount nudge (only before first completed trip) ── */}
       {completedTripCount === 0 && (
         <TouchableOpacity
-          style={styles.firstRideBanner}
+          style={[styles.firstRideBanner, { marginHorizontal: flow.padH }]}
           onPress={() => router.push('/rider/book' as any)}
           activeOpacity={0.88}
         >
@@ -371,13 +438,17 @@ export default function ModernRiderHome() {
         </TouchableOpacity>
       )}
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
+      <ScrollView
+        style={[styles.content, { paddingHorizontal: flow.padH }]}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingBottom: tabPad, gap: Math.round(flow.sectionGap * 0.35) }}
+      >
         {/* PRIORITY ACTIONS — full-bleed green hero, then two equal cards */}
         <Animated.View
           style={[
             styles.heroSection,
             styles.heroSectionBleed,
-            { opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
+            { marginHorizontal: -flow.padH, opacity: fadeAnim, transform: [{ translateY: slideAnim }] },
           ]}
         >
           <TouchableOpacity
@@ -436,6 +507,62 @@ export default function ModernRiderHome() {
           </View>
         </Animated.View>
 
+        {/* SAVED PLACES — one-tap destination (pickup = current location on book screen) */}
+        <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitleInline}>Saved places</Text>
+            <TouchableOpacity
+              onPress={() => router.push('/rider/saved-places' as any)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Text style={styles.seeAll}>
+                {savedPlaces.length > 0 ? 'Edit' : 'Set up'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.savedPlacesHint}>
+            Book to Home, Work, or a saved spot — pickup defaults to where you are now.
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.savedPlacesRow}
+          >
+            {RIDER_SAVED_SLOTS_ORDER.map((slot) => {
+              const meta = RIDER_SAVED_SLOT_META[slot];
+              const place = savedPlaces.find((p) => p.slot === slot);
+              return (
+                <TouchableOpacity
+                  key={slot}
+                  style={[styles.savedPlaceChip, !place && styles.savedPlaceChipEmpty]}
+                  onPress={() => {
+                    if (place) openBookToSaved(place);
+                    else {
+                      void Haptics.selectionAsync();
+                      router.push('/rider/saved-places' as any);
+                    }
+                  }}
+                  activeOpacity={0.88}
+                  accessibilityLabel={place ? `Book to ${meta.label}` : `Set ${meta.label}`}
+                  accessibilityRole="button"
+                >
+                  <RiderSavedSlotPremiumIcon slot={slot} filled={!!place} style={styles.savedPlaceIconWrap} />
+                  <Text style={[styles.savedPlaceLabel, !place && styles.savedPlaceLabelMuted]} numberOfLines={1}>
+                    {meta.label}
+                  </Text>
+                  {place ? (
+                    <Text style={styles.savedPlaceAddr} numberOfLines={2}>
+                      {place.address}
+                    </Text>
+                  ) : (
+                    <Text style={styles.savedPlaceTap}>Tap to add</Text>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </Animated.View>
+
         {/* QUICK ACCESS - ICON ROW */}
         <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
           <Text style={styles.sectionTitle}>{t.home.quickAccess}</Text>
@@ -443,7 +570,7 @@ export default function ModernRiderHome() {
             {QUICK_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
-                style={styles.quickCard}
+                style={[styles.quickCard, { width: gridColW }]}
                 onPress={() => router.push(feature.route as any)}
                 activeOpacity={0.85}
                 accessibilityLabel={feature.label}
@@ -602,7 +729,7 @@ export default function ModernRiderHome() {
             {ALL_FEATURES.map((feature) => (
               <TouchableOpacity
                 key={feature.id}
-                style={styles.featureCard}
+                style={[styles.featureCard, { width: gridColW }]}
                 onPress={() => router.push(feature.route as any)}
                 activeOpacity={0.85}
                 accessibilityLabel={feature.label}
@@ -632,7 +759,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 20,
     paddingVertical: 16,
   },
   greeting: {
@@ -647,6 +773,36 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: COLORS.lightTextSecondary,
     letterSpacing: 0.2,
+  },
+  headerIconBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.08)',
+    shadowColor: HOME_PALETTE.cardShadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.07,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+  headerIconBtnSm: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.08)',
+    shadowColor: HOME_PALETTE.cardShadowColor,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   profileButton: {
     width: 48,
@@ -666,20 +822,25 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-    paddingHorizontal: 20,
   },
   resumeTripChip: {
-    marginHorizontal: 20,
     marginBottom: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 14,
-    backgroundColor: '#D1FAE5',
+    backgroundColor: '#ECFDF5',
     borderWidth: 1,
     borderColor: '#A7F3D0',
+    borderLeftWidth: 4,
+    borderLeftColor: RIDER_HOME_RESUME_ACCENT,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    shadowColor: BRAND.primaryNeon,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 8,
+    elevation: 2,
   },
   resumeTripChipText: {
     flex: 1,
@@ -688,29 +849,78 @@ const styles = StyleSheet.create({
     color: '#065F46',
     textTransform: 'capitalize',
   },
-  walletStrip: {
-    marginHorizontal: 20,
-    marginBottom: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 14,
-    backgroundColor: '#FFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
+  whereToBar: {
+    marginTop: 4,
+    marginBottom: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    backgroundColor: '#FFF',
+    borderRadius: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    borderWidth: 1.5,
+    borderColor: RIDER_HOME_DEST_BAR_BORDER,
+    shadowColor: BRAND.primaryNeon,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    elevation: 4,
+  },
+  whereToBarDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: COLORS.accentGreen,
+    marginRight: 14,
+    shadowColor: COLORS.accentGreen,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 6,
+  },
+  whereToBarText: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#94A3B8',
+    letterSpacing: 0.2,
+  },
+  whereToBarCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(2,44,34,0.12)',
+  },
+  whereToBarCtaText: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#022C22',
+    letterSpacing: 0.5,
+  },
+  walletStrip: {
+    marginBottom: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: '#FFF',
+    borderWidth: 1.5,
+    borderColor: RIDER_HOME_WALLET_BORDER,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     shadowColor: '#000',
-    shadowOpacity: 0.04,
-    shadowOffset: { width: 0, height: 1 },
-    shadowRadius: 4,
+    shadowOpacity: 0.05,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 8,
     elevation: 1,
   },
-  walletStripLeft: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 },
-  walletStripLabel: { fontSize: 13, fontWeight: '700', color: '#475569' },
-  walletStripBalance: { fontSize: 15, fontWeight: '900', color: '#0F172A' },
+  walletStripLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 },
+  walletStripLabel: { fontSize: 13, fontWeight: '700', color: '#64748B' },
+  walletStripBalance: { fontSize: 17, fontWeight: '900', color: '#0F172A', letterSpacing: 0.2 },
   firstRideBanner: {
-    marginHorizontal: 20,
     marginBottom: 8,
     borderRadius: 16,
     overflow: 'hidden',
@@ -734,9 +944,7 @@ const styles = StyleSheet.create({
   heroSection: {
     marginTop: 8,
   },
-  heroSectionBleed: {
-    marginHorizontal: -20,
-  },
+  heroSectionBleed: {},
   heroCard: {
     minHeight: 196,
     width: '100%',
@@ -862,31 +1070,87 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0.3,
   },
+  savedPlacesHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#64748B',
+    lineHeight: 18,
+    marginBottom: 14,
+    marginTop: -8,
+    paddingHorizontal: 2,
+  },
+  savedPlacesRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingRight: 8,
+    paddingBottom: 4,
+  },
+  savedPlaceChip: {
+    width: 152,
+    backgroundColor: COLORS.white,
+    borderRadius: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.28)',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.07,
+    shadowRadius: 14,
+    elevation: 3,
+  },
+  savedPlaceChipEmpty: {
+    borderStyle: 'dashed',
+    borderColor: 'rgba(100,116,139,0.42)',
+    backgroundColor: '#FAFBFD',
+  },
+  savedPlaceIconWrap: {
+    marginBottom: 10,
+    alignSelf: 'flex-start',
+  },
+  savedPlaceLabel: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: COLORS.lightTextPrimary,
+    letterSpacing: -0.2,
+  },
+  savedPlaceLabelMuted: {
+    color: '#64748B',
+  },
+  savedPlaceAddr: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    marginTop: 6,
+    lineHeight: 14,
+  },
+  savedPlaceTap: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.accentGreen,
+    marginTop: 8,
+  },
   quickGrid: {
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
   quickCard: {
-    width: (width - 60) / 4,
     alignItems: 'center',
   },
   quickIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 20,
+    width: 60,
+    height: 60,
+    borderRadius: 22,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.35)',
+    marginBottom: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.12,
+    shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 4,
   },
   quickLabel: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
     color: COLORS.lightTextPrimary,
     textAlign: 'center',
@@ -1107,7 +1371,6 @@ const styles = StyleSheet.create({
     marginHorizontal: -6,
   },
   featureCard: {
-    width: (width - 60) / 4,
     alignItems: 'center',
     marginBottom: 20,
     paddingHorizontal: 6,

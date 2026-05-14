@@ -26,6 +26,7 @@ import {
   updateUserTheme,
   toggleWomenOnlyMode,
 } from '@/src/services/api';
+import { DriverOfferSoundPreferences } from '@/src/components/profile/DriverOfferSoundPreferences';
 
 type Variant = 'rider' | 'driver';
 
@@ -283,6 +284,8 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
           thumbColor={emailEnabled ? COLORS.accent : COLORS.gray100}
         />
       </View>
+
+      {variant === 'driver' && <DriverOfferSoundPreferences />}
 
       <View style={[styles.block, { borderBottomColor: COLORS.gray100 }]}>
         <TouchableOpacity

@@ -195,11 +195,8 @@ export default function SplashScreen() {
           if (userData.role === 'driver') {
             const driverState = await loadDriverState(userData.id).catch(() => null);
             if (driverState?.activeTripId) {
-              // Driver was mid-trip — go straight to the tracking screen
-              router.replace({
-                pathname: '/driver/tracking' as any,
-                params: { tripId: driverState.activeTripId },
-              });
+              // Mid-trip resume: live trip UI lives on driver home (no separate /driver/tracking route).
+              router.replace('/(driver-tabs)/driver-home' as any);
             } else {
               router.replace('/(driver-tabs)/driver-home');
             }

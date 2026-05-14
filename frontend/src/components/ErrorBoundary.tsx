@@ -1,6 +1,8 @@
 import React, { Component, ReactNode } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { COLORS } from '@/src/constants/theme';
 import CrashReporter from '@/src/services/crashReporting';
 
 interface Props {
@@ -75,39 +77,43 @@ export class ErrorBoundary extends Component<Props, State> {
 
       // Default error screen
       return (
-        <View style={styles.container}>
-          <View style={styles.content}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="alert-circle" size={80} color="#EF4444" />
+        <SafeAreaView style={styles.safe} edges={['top', 'left', 'right', 'bottom']}>
+          <View style={styles.container}>
+            <View style={styles.content}>
+              <View style={styles.iconContainer}>
+                <Ionicons name="alert-circle" size={80} color={COLORS.errorBright} />
+              </View>
+
+              <Text style={styles.title}>Something went wrong</Text>
+              <Text style={styles.message}>
+                The app hit an unexpected error. Your account data on the server is unchanged — try again, or restart the app if this keeps happening.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.resetButton}
+                onPress={this.handleReset}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Try again after an error"
+              >
+                <Ionicons name="refresh" size={20} color={COLORS.primaryDark} />
+                <Text style={styles.resetButtonText}>Try again</Text>
+              </TouchableOpacity>
+
+              {__DEV__ && this.state.error && (
+                <ScrollView style={styles.errorDetails}>
+                  <Text style={styles.errorTitle}>Error details (development only)</Text>
+                  <Text style={styles.errorText}>{this.state.error.toString()}</Text>
+                  {this.state.errorInfo && (
+                    <Text style={styles.errorText}>
+                      {this.state.errorInfo.componentStack}
+                    </Text>
+                  )}
+                </ScrollView>
+              )}
             </View>
-            
-            <Text style={styles.title}>Oops! Something went wrong</Text>
-            <Text style={styles.message}>
-              The app encountered an unexpected error. Don't worry, your data is safe.
-            </Text>
-
-            <TouchableOpacity 
-              style={styles.resetButton}
-              onPress={this.handleReset}
-              activeOpacity={0.8}
-            >
-              <Ionicons name="refresh" size={20} color="#FFFFFF" />
-              <Text style={styles.resetButtonText}>Try Again</Text>
-            </TouchableOpacity>
-
-            {__DEV__ && this.state.error && (
-              <ScrollView style={styles.errorDetails}>
-                <Text style={styles.errorTitle}>Error Details (Dev Mode):</Text>
-                <Text style={styles.errorText}>{this.state.error.toString()}</Text>
-                {this.state.errorInfo && (
-                  <Text style={styles.errorText}>
-                    {this.state.errorInfo.componentStack}
-                  </Text>
-                )}
-              </ScrollView>
-            )}
           </View>
-        </View>
+        </SafeAreaView>
       );
     }
 
@@ -116,9 +122,13 @@ export class ErrorBoundary extends Component<Props, State> {
 }
 
 const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: COLORS.background,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: COLORS.background,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
@@ -133,14 +143,14 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: '900',
-    color: '#0F172A',
+    color: COLORS.textPrimary,
     marginBottom: 12,
     textAlign: 'center',
   },
   message: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#475569',
+    color: COLORS.textMuted,
     textAlign: 'center',
     marginBottom: 32,
     lineHeight: 24,
@@ -149,27 +159,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#00D46A',
+    backgroundColor: COLORS.accentGreen,
     minHeight: 56,
     paddingVertical: 16,
     paddingHorizontal: 32,
     borderRadius: 16,
     gap: 8,
-    shadowColor: '#00D46A',
+    shadowColor: COLORS.accentGreen,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.35,
     shadowRadius: 12,
     elevation: 4,
   },
   resetButtonText: {
     fontSize: 16,
     fontWeight: '800',
-    color: '#FFFFFF',
+    color: COLORS.primaryDark,
   },
   errorDetails: {
     marginTop: 24,
     padding: 16,
-    backgroundColor: '#FEE2E2',
+    backgroundColor: COLORS.errorSoft,
     borderRadius: 12,
     maxHeight: 200,
     width: '100%',
@@ -177,13 +187,13 @@ const styles = StyleSheet.create({
   errorTitle: {
     fontSize: 14,
     fontWeight: '800',
-    color: '#991B1B',
+    color: COLORS.errorBright,
     marginBottom: 8,
   },
   errorText: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#DC2626',
+    color: COLORS.errorBright,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });

@@ -13,6 +13,8 @@ export type RiderTripWsMessage = {
   trip_id?: string;
   status?: string;
   trip?: Record<string, unknown>;
+  /** Present on some pushes when driver GPS was merged for the rider map. */
+  driver_location?: { lat: number; lng: number; updated_at?: string } | null;
 };
 
 type Options = {

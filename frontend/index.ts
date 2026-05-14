@@ -1,8 +1,14 @@
 import 'expo-router/entry';
-import { registerWidgetTaskHandler } from 'react-native-android-widget';
-import { widgetTaskHandler } from './src/widgets/widgetTaskHandler';
+import { Platform } from 'react-native';
 
-// Register the Android home-screen widget task handler.
-// This runs when Android fires a widget lifecycle event (add / update / click / delete).
-// It is a no-op on iOS and in Expo Go.
-registerWidgetTaskHandler(widgetTaskHandler);
+// Android-only: register home-screen widget task handler.
+// The react-native-android-widget package is a no-op shim on other platforms,
+// but we guard here to be completely safe with iOS linker / bridge.
+if (Platform.OS === 'android') {
+  // Dynamic require so Metro never tries to resolve native Android code on iOS.
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { registerWidgetTaskHandler } = require('react-native-android-widget') as typeof import('react-native-android-widget');
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { widgetTaskHandler } = require('./src/widgets/widgetTaskHandler') as typeof import('./src/widgets/widgetTaskHandler');
+  registerWidgetTaskHandler(widgetTaskHandler);
+}

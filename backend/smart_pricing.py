@@ -3,6 +3,15 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
+from lagride_lagos_pricing import build_lagos_lagride_fare_breakdown
+from nexryde_pricing import (
+    core_components_from_rate_card,
+    nexryde_route_location_multiplier,
+    nexryde_route_time_minutes,
+    nexryde_service_multiplier,
+)
+
 # Bands around system-recommended fare (total_fare from calculate_fare).
 MIN_FARE_MULTIPLIER = 0.85
 MAX_FARE_MULTIPLIER = 1.15
@@ -103,9 +112,12 @@ def build_route_preview_coordinates(
     max_points: int = 18,
 ) -> List[Dict[str, float]]:
     if encoded_polyline:
-        decoded = decode_google_polyline(encoded_polyline)
-        if len(decoded) >= 2:
-            return simplify_coordinates(decoded, max_points=max_points)
+        try:
+            decoded = decode_google_polyline(encoded_polyline)
+            if len(decoded) >= 2:
+                return simplify_coordinates(decoded, max_points=max_points)
+        except Exception:
+            pass
     return simplify_coordinates(
         [(pickup_lat, pickup_lng), (dropoff_lat, dropoff_lng)],
         max_points=max(2, max_points),
@@ -129,6 +141,97 @@ def region_for_preview(
         "longitude": mid_lng,
         "latitudeDelta": max(0.12, dlat * 2.4 + pad),
         "longitudeDelta": max(0.12, dlng * 2.4 + pad),
+    }
+
+
+def fallback_fare_breakdown(
+    distance_km: float,
+    duration_min: int,
+    traffic_duration_min: int,
+    city: str = "lagos",
+    service_type: str = "economy",
+    pickup_lat: Optional[float] = None,
+    pickup_lng: Optional[float] = None,
+    dropoff_lat: Optional[float] = None,
+    dropoff_lng: Optional[float] = None,
+) -> Dict[str, Any]:
+    """
+    Full-shaped fare dict when the injected ``calculate_fare`` is not yet wired
+    (startup race) or fails to load — must match keys consumed by POST /fare/estimate.
+    """
+    city_key = normalize_fare_city_key(city or "lagos")
+    svc = (service_type or "economy").strip().lower()
+    if svc == "standard":
+        svc = "economy"
+    if svc == "pro":
+        svc = "premium"
+    if city_key == "lagos":
+        lag_cfg = FARE_CONFIG.get("lagos", FARE_CONFIG["default"])
+        tier_cfg = lag_cfg.get(svc) or lag_cfg.get("economy") or FARE_CONFIG["default"]["economy"]
+        return build_lagos_lagride_fare_breakdown(
+            distance_km=float(distance_km),
+            duration_min=int(duration_min),
+            traffic_duration_min=int(traffic_duration_min),
+            service_key=svc,
+            demand_ratio=0.0,
+            is_raining=False,
+            pickup_lat=pickup_lat,
+            pickup_lng=pickup_lng,
+            max_multiplier=float(tier_cfg.get("max_multiplier", 2.5)),
+            cancellation_fee=float(tier_cfg.get("cancellation_fee", 300)),
+            min_fare=float(tier_cfg.get("min_fare", 0)),
+            short_trip_threshold_km=float(SHORT_TRIP_KM_THRESHOLD),
+            dropoff_lat=dropoff_lat,
+            dropoff_lng=dropoff_lng,
+        )
+    bucket = "short" if float(distance_km) < float(SHORT_TRIP_KM_THRESHOLD) else "standard"
+    fare_rate_model = "short_city_table" if bucket == "short" else "long_lagride_style"
+    route_time = nexryde_route_time_minutes(duration_min, traffic_duration_min)
+    card = resolve_fare_rate_card(city_key, svc, bucket)
+    line = core_components_from_rate_card(
+        card["base_fare"], card["per_km"], card["per_min"], float(distance_km), route_time
+    )
+    base_fare = line["base_fare"]
+    distance_fee = line["distance_fee"]
+    time_fee = line["time_fee"]
+    traffic_fee = 0.0
+    booking_fee = 0.0
+    loc_m, loc_z = nexryde_route_location_multiplier(
+        city_key, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+    )
+    svc_m = nexryde_service_multiplier(svc)
+    subtotal = round(float(line["core_presurge_pres_adjustment"]) * loc_m * svc_m, 2)
+    step = 10.0 if bucket == "short" else 50.0
+    floor_fare = 200.0 if bucket == "short" else 500.0
+    total_fare = max(floor_fare, round(subtotal / step) * step)
+    return {
+        "base_fare": base_fare,
+        "distance_fee": distance_fee,
+        "time_fee": time_fee,
+        "traffic_fee": traffic_fee,
+        "booking_fee": booking_fee,
+        "pricing_route_minutes": route_time,
+        "subtotal": round(subtotal, 2),
+        "location_multiplier": round(loc_m, 4),
+        "location_zone": loc_z,
+        "service_multiplier": round(svc_m, 4),
+        "surge_multiplier": 1.0,
+        "surge_uncapped": None,
+        "surge_factors": None,
+        "total_fare": total_fare,
+        "min_fare": 0.0,
+        "cancellation_fee": 300.0,
+        "is_peak": False,
+        "is_weekend": False,
+        "peak_type": None,
+        "currency": "NGN",
+        "fare_bucket": bucket,
+        "fare_rate_model": fare_rate_model,
+        "short_trip_threshold_km": float(SHORT_TRIP_KM_THRESHOLD),
+        "price_breakdown": (
+            f"₦{int(base_fare)} + ₦{int(distance_fee)} ({float(distance_km):.1f}km) + "
+            f"₦{int(time_fee)} ({route_time}min) × loc {round(loc_m, 2)} ({loc_z}) · fallback"
+        ),
     }
 
 

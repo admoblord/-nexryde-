@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
@@ -38,6 +38,7 @@ export default function ActiveTripBar() {
   const insets = useSafeAreaInsets();
 
   const activeTrip = (currentTrip || null) as ActiveTrip | null;
+  const segments = useSegments();
 
   useEffect(() => {
     Animated.spring(slideAnim, {
@@ -65,7 +66,7 @@ export default function ActiveTripBar() {
         const targetLabel = user?.role === 'driver' ? 'Rider' : 'Driver';
         Alert.alert(
           `Call ${targetLabel}`,
-          'NEXRYDE secure call via masked relay number.\nYour real number is hidden.',
+          'Nexryde secure call via masked relay number.\nYour real number is hidden.',
           [
             {
               text: 'Call via Phone',
@@ -130,13 +131,25 @@ export default function ActiveTripBar() {
   const otherParty = isRider ? 'Driver' : 'Rider';
   const effectiveStatus = normalizeTripStatus(activeTrip.status, activeTrip.payment_status);
 
+  /** Trip dock on driver-home already shows call/chat + trip id — avoid duplicate strip. */
+  const hideDuplicateDriverStrip =
+    user?.role === 'driver' &&
+    ['accepted', 'arrived', 'ongoing'].includes(effectiveStatus) &&
+    segments.some((s) => s === 'driver-home');
+
+  if (hideDuplicateDriverStrip) return null;
+
   const statusLabel =
     effectiveStatus === 'pending' || effectiveStatus === 'pending_driver_offers'
       ? (isRider ? 'Finding nearby drivers' : 'Waiting for rider confirmation')
       : effectiveStatus === 'accepted'
-        ? `${otherParty} is on the way`
+        ? isRider
+          ? `${otherParty} is on the way`
+          : 'You are heading to pickup'
         : effectiveStatus === 'arrived'
-          ? `${otherParty} arrived`
+          ? isRider
+            ? `${otherParty} arrived`
+            : 'At pickup — meet your rider'
           : effectiveStatus === 'ongoing'
             ? 'Trip in progress'
             : effectiveStatus === 'pending_payment'

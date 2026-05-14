@@ -19,15 +19,18 @@ from cryptography.fernet import Fernet
 import httpx
 
 from database import db
+from fare_estimate_cache import get_fare_estimate
 from face_match import face_match_confidence
 from smart_pricing import (
     area_summary_line,
     build_route_preview_coordinates,
+    fallback_fare_breakdown,
     region_for_preview,
     rider_meets_priority_threshold,
     smart_bounds_from_base_price,
     strip_addresses_for_driver_preview,
 )
+from favorite_driver_notifications import maybe_send_rider_favorite_engagement_pushes
 from push_notifications import send_push_notification
 from routers.realtime_dispatch import push_driver_new_offer, push_rider_trip_update
 from trip_ws_payload import rider_trip_payload_from_doc
@@ -44,8 +47,15 @@ from earnings_query import match_completed_trip_paid_for_earnings
 from user_scores import calculate_rider_risk_score
 from security_advanced import general_limiter, trip_request_limiter
 from route_cache import get_cached_directions, store_cached_directions, log_api_call, haversine_route_estimate
+from routing_quality import is_directions_road_route
+from surge_demand import haversine_km, estimate_area_demand_ratio_near
 
 logger = logging.getLogger('server')
+
+DRIVING_ROUTE_UNAVAILABLE_DETAIL = (
+    "Driving route unavailable. Enable Google Directions API and configure your Maps key. "
+    "NEXRYDE does not price trips using straight-line distance."
+)
 trips_router = APIRouter(prefix="/api", tags=["Trips"])
 
 # Trip Guardian thresholds (production values, no mock logic).
@@ -56,7 +66,9 @@ GUARDIAN_AUTO_ESCALATE_SECONDS = 35  # no rider response window
 
 # Import shared state from server (will be set at inclusion time)
 fare_estimate_store = {}
-FARE_LOCK_MINUTES = 3
+FARE_LOCK_MINUTES = 10
+# Max pickup/drop shift vs locked fare estimate (km) before requiring refresh.
+FARE_ESTIMATE_COORD_MAX_KM = 1.0
 
 # Import shared functions from server (set at init time)
 _get_directions_fn = None
@@ -95,15 +107,83 @@ def _normalize_service_type(service_type: Optional[str]) -> str:
     return "economy" if normalized == "standard" else normalized
 
 
-def calculate_fare(distance_km, duration_min, traffic_duration_min, service_type="economy", city="lagos"):
+def calculate_fare(
+    distance_km,
+    duration_min,
+    traffic_duration_min,
+    service_type="economy",
+    city="lagos",
+    demand_ratio: float = 0.0,
+    is_raining: bool = False,
+    pickup_lat=None,
+    pickup_lng=None,
+    dropoff_lat=None,
+    dropoff_lng=None,
+):
+    """Delegates to server-injected ``calculate_fare`` (single pricing engine)."""
     normalized_service = _normalize_service_type(service_type)
     if _calculate_fare_fn:
         try:
-            return _calculate_fare_fn(distance_km, duration_min, traffic_duration_min, normalized_service, city)
+            return _calculate_fare_fn(
+                distance_km,
+                duration_min,
+                traffic_duration_min,
+                normalized_service,
+                city,
+                float(demand_ratio),
+                bool(is_raining),
+                pickup_lat,
+                pickup_lng,
+                dropoff_lat,
+                dropoff_lng,
+            )
         except TypeError:
-            return _calculate_fare_fn(distance_km, duration_min, traffic_duration_min, normalized_service)
-    base = max(700, distance_km * 150)
-    return {"base_fare": 300, "distance_fee": distance_km * 100, "time_fee": duration_min * 20, "traffic_fee": 0, "total_fare": base, "surge_multiplier": 1.0}
+            try:
+                return _calculate_fare_fn(distance_km, duration_min, traffic_duration_min, normalized_service, city)
+            except TypeError:
+                try:
+                    return _calculate_fare_fn(distance_km, duration_min, traffic_duration_min, normalized_service)
+                except Exception:
+                    pass
+        except Exception:
+            logger.warning("trips.calculate_fare injected fn failed; using fallback", exc_info=True)
+    return fallback_fare_breakdown(
+        float(distance_km),
+        int(duration_min),
+        int(traffic_duration_min),
+        city=city or "lagos",
+        service_type=normalized_service,
+        pickup_lat=pickup_lat,
+        pickup_lng=pickup_lng,
+        dropoff_lat=dropoff_lat,
+        dropoff_lng=dropoff_lng,
+    )
+
+
+def _fare_estimate_coords_match(est: dict, pickup_lat: float, pickup_lng: float, drop_lat: float, drop_lng: float) -> bool:
+    pu = est.get("pickup") or {}
+    du = est.get("dropoff") or {}
+    try:
+        pul, pulg = float(pu["lat"]), float(pu["lng"])
+        dul, dulg = float(du["lat"]), float(du["lng"])
+        return (
+            haversine_km(pul, pulg, float(pickup_lat), float(pickup_lng)) <= FARE_ESTIMATE_COORD_MAX_KM
+            and haversine_km(dul, dulg, float(drop_lat), float(drop_lng)) <= FARE_ESTIMATE_COORD_MAX_KM
+        )
+    except (TypeError, ValueError, KeyError):
+        return False
+
+
+def _fare_estimate_expired(est: dict) -> bool:
+    exp = est.get("expires_at")
+    if not isinstance(exp, datetime):
+        return True
+    now = datetime.now(timezone.utc)
+    if exp.tzinfo is None:
+        exp_utc = exp.replace(tzinfo=timezone.utc)
+    else:
+        exp_utc = exp.astimezone(timezone.utc)
+    return now >= exp_utc
 
 def calculate_distance_haversine(lat1, lon1, lat2, lon2):
     if _calculate_distance_fn:
@@ -129,19 +209,76 @@ GPS_SPOOF_SPEED_KMH = 180.0
 GPS_SPOOF_JUMP_KM = 2.0
 
 
+def _driver_location_snapshot_for_trip(
+    trip: dict,
+    profile_current_location: Optional[dict],
+) -> Optional[dict]:
+    """Rider map: prefer last GPS point on the trip while en-route; else driver profile last ping."""
+    status_raw = str(trip.get("status") or "").strip().lower()
+    route_track_statuses = {"accepted", "arrived", "ongoing"}
+    actual_route = trip.get("actual_route") or []
+
+    def _from_profile() -> Optional[dict]:
+        if not isinstance(profile_current_location, dict):
+            return None
+        lat, lng = profile_current_location.get("lat"), profile_current_location.get("lng")
+        if lat is None or lng is None:
+            return None
+        try:
+            return {
+                "lat": float(lat),
+                "lng": float(lng),
+                "updated_at": profile_current_location.get("updated_at"),
+            }
+        except (TypeError, ValueError):
+            return None
+
+    def _from_route_last() -> Optional[dict]:
+        if not actual_route:
+            return None
+        last = actual_route[-1]
+        if not isinstance(last, dict):
+            return None
+        lat, lng = last.get("lat"), last.get("lng")
+        if lat is None or lng is None:
+            return None
+        try:
+            return {
+                "lat": float(lat),
+                "lng": float(lng),
+                "updated_at": last.get("timestamp"),
+            }
+        except (TypeError, ValueError):
+            return None
+
+    if status_raw in route_track_statuses:
+        snap = _from_route_last()
+        if snap:
+            return snap
+        return _from_profile()
+    return _from_profile()
+
+
 async def _emit_rider_trip_realtime(trip_id: str) -> None:
     """Push current trip document to rider WebSocket subscribers."""
     trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     if not trip or not trip.get("rider_id"):
         return
-    await push_rider_trip_update(
-        trip["rider_id"],
-        {
-            "trip_id": trip_id,
-            "status": trip.get("status"),
-            "trip": rider_trip_payload_from_doc(trip),
-        },
-    )
+    profile_loc: Optional[dict] = None
+    driver_id = trip.get("driver_id")
+    if driver_id:
+        prof = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "current_location": 1}) or {}
+        raw = prof.get("current_location")
+        profile_loc = raw if isinstance(raw, dict) else None
+    driver_location = _driver_location_snapshot_for_trip(trip, profile_loc)
+    payload = {
+        "trip_id": trip_id,
+        "status": trip.get("status"),
+        "trip": rider_trip_payload_from_doc(trip),
+    }
+    if driver_location:
+        payload["driver_location"] = driver_location
+    await push_rider_trip_update(trip["rider_id"], payload)
 
 
 def _stable_json(value) -> str:
@@ -712,7 +849,7 @@ async def attach_rider_shield_to_trips(trips: list) -> None:
         return
     users = await db.users.find(
         {"id": {"$in": rider_ids}},
-        {"_id": 0, "id": 1, "rating": 1, "rider_reputation_trip_count": 1, "shield_rider_flag": 1, "name": 1},
+        {"_id": 0, "id": 1, "rating": 1, "rider_reputation_trip_count": 1, "shield_rider_flag": 1, "name": 1, "profile_image": 1},
     ).to_list(len(rider_ids))
     by_id = {u["id"]: u for u in users}
     for t in trips:
@@ -731,15 +868,19 @@ async def attach_rider_shield_to_trips(trips: list) -> None:
         low = (not insufficient) and (
             bool(u.get("shield_rider_flag")) or avg < SHIELD_LOW_RIDER_RATING
         )
+        rider_name = (u.get("name") or "Rider")[:48]
         t["shield"] = {
             "rider_reputation_avg": round(avg, 2) if cnt > 0 else None,
             "rider_reputation_trip_count": cnt,
             "rider_flagged_low_reputation": bool(low),
             "rider_new_account": bool(insufficient),
-            "rider_display_name": (u.get("name") or "Rider")[:48],
+            "rider_display_name": rider_name,
             "rider_risk_score": risk_score,
             "rider_risk_band": risk_band,
         }
+        # Expose rider name and photo directly on the trip for easy access
+        t["rider_name"] = rider_name
+        t["rider_photo"] = u.get("profile_image") or None
 
 
 async def _log_trip_event(trip_id: str, event_type: str, actor_id: Optional[str], data: Optional[dict] = None):
@@ -955,6 +1096,61 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
         if distance > 15 and driver_id != preferred_driver_id:
             continue
 
+        # ── Destination-mode filter ──────────────────────────────────────────
+        if profile.get("destination_mode"):
+            dest_lat = profile.get("destination_lat")
+            dest_lng = profile.get("destination_lng")
+
+            # Check/reset daily counter
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            last_reset = profile.get("destination_last_reset_date", "")
+            daily_dest = int(profile.get("daily_destination_trips", 0) or 0)
+            if last_reset != today_str:
+                daily_dest = 0
+
+            DEST_LIMIT = 3
+            DEST_RADIUS_KM = 2.5
+
+            if daily_dest >= DEST_LIMIT:
+                # Auto-disable silently — driver reached daily limit
+                await db.driver_profiles.update_one(
+                    {"user_id": driver_id},
+                    {"$set": {"destination_mode": False}},
+                )
+                # Falls through to normal dispatch after disabling
+
+            elif dest_lat and dest_lng:
+                driver_lat_f = float(loc["lat"])
+                driver_lng_f = float(loc["lng"])
+                dest_lat_f = float(dest_lat)
+                dest_lng_f = float(dest_lng)
+
+                # 1) Point-to-corridor check: how far is the pickup from the
+                #    straight line between driver and destination?
+                # We use the existing _distance_from_route_km helper.
+                route_dist = _distance_from_route_km(
+                    [{"lat": driver_lat_f, "lng": driver_lng_f},
+                     {"lat": dest_lat_f, "lng": dest_lng_f}],
+                    pickup_lat, pickup_lng
+                )
+                if route_dist > DEST_RADIUS_KM:
+                    continue  # pickup too far off the corridor
+
+                # 2) Direction alignment: ensure trip goes roughly the same way
+                #    as driver→destination (dot product > 0 = same hemisphere).
+                dropoff = trip.get("dropoff_location") or {}
+                drop_lat = dropoff.get("lat") or dropoff.get("latitude")
+                drop_lng = dropoff.get("lng") or dropoff.get("longitude")
+                if drop_lat and drop_lng:
+                    dest_vec_lat = dest_lat_f - driver_lat_f
+                    dest_vec_lng = dest_lng_f - driver_lng_f
+                    trip_vec_lat = float(drop_lat) - pickup_lat
+                    trip_vec_lng = float(drop_lng) - pickup_lng
+                    dot = dest_vec_lat * trip_vec_lat + dest_vec_lng * trip_vec_lng
+                    if dot <= 0:
+                        continue  # opposite direction
+        # ────────────────────────────────────────────────────────────────────
+
         visibility_score = float(profile.get("visibility_score", 50.0))
         salary_mode = profile.get("salary_mode") or {}
         if salary_mode.get("enabled") and float(salary_mode.get("monthly_income_target", 0) or 0) > 0:
@@ -995,7 +1191,7 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
 async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[dict]:
     eligible = await _get_eligible_drivers_for_trip(trip, blocked_drivers)
     now = datetime.now(timezone.utc)
-    expires_at = (now + timedelta(seconds=90)).isoformat()
+    expires_at = (now + timedelta(minutes=5)).isoformat()  # 5 min window — offer repeats on driver screen
     offers = []
 
     if eligible:
@@ -1037,10 +1233,11 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
     rider_name = "Rider"
     rider = await db.users.find_one(
         {"id": trip["rider_id"]},
-        {"_id": 0, "name": 1, "rating": 1, "rider_reputation_trip_count": 1, "shield_rider_flag": 1},
+        {"_id": 0, "name": 1, "rating": 1, "rider_reputation_trip_count": 1, "shield_rider_flag": 1, "profile_image": 1},
     )
     if rider and rider.get("name"):
         rider_name = rider["name"]
+    rider_photo = (rider or {}).get("profile_image") or None
     rider_risk_score = calculate_rider_risk_score(rider or {})
     if rider_risk_score < 35:
         rider_risk_band = "green"
@@ -1059,6 +1256,25 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
         "rider_risk_band": rider_risk_band,
     }
 
+    # Build mood hint for push notification body
+    _mood = trip.get("rider_mood_preferences") or {}
+    _mood_parts = []
+    if _mood.get("conversation") == "quiet":
+        _mood_parts.append("Quiet ride")
+    elif _mood.get("conversation") == "chatty":
+        _mood_parts.append("Chatty rider")
+    if _mood.get("music") == "on":
+        _mood_parts.append("Music on")
+    elif _mood.get("music") == "off":
+        _mood_parts.append("No music")
+    if _mood.get("temperature") == "cold":
+        _mood_parts.append("Cold AC")
+    if _mood.get("driving_style") == "smooth":
+        _mood_parts.append("Smooth drive")
+    elif _mood.get("driving_style") == "fast":
+        _mood_parts.append("Fast drive")
+    mood_hint = " · ".join(_mood_parts)
+
     async def _dispatch_offer_to_driver(offer: dict) -> None:
         pickup_addr = (trip.get("pickup_location") or {}).get("address", "Pickup")
         dropoff_addr = (trip.get("dropoff_location") or {}).get("address", "Destination")
@@ -1066,10 +1282,13 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
             str(pickup_addr or ""),
             str(dropoff_addr or ""),
         )
+        notif_body = f"{rider_name}: {route_hint}"
+        if mood_hint:
+            notif_body += f" • {mood_hint}"
         await send_push_notification(
             offer["driver_id"],
             "New Ride Request",
-            f"{rider_name}: {route_hint}",
+            notif_body,
             {"type": "ride_request", "trip_id": trip["id"], "offer_id": offer["id"]},
         )
         logger.info(
@@ -1100,7 +1319,10 @@ async def _create_trip_offers(trip: dict, blocked_drivers: list[str]) -> list[di
                 "maximum_allowed_price": trip.get("max_price"),
                 "recommended_fare": trip.get("recommended_fare") or trip.get("base_price"),
                 "ride_preferences": trip.get("ride_preferences") or [],
+                "rider_mood": trip.get("rider_mood_preferences") or {},
                 "shield": rider_shield,
+                "rider_name": rider_name,
+                "rider_photo": rider_photo,
                 "status": "searching",
             },
         )
@@ -1164,35 +1386,43 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
                 request.dropoff_lat,
                 request.dropoff_lng,
             )
-            if route_data:
-                distance_km = route_data["distance_meters"] / 1000
-                duration_min = math.ceil(route_data["duration_seconds"] / 60)
-                traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-                poly = route_data.get("polyline")
-            else:
-                distance_km = calculate_distance_haversine(
-                    request.pickup_lat,
-                    request.pickup_lng,
-                    request.dropoff_lat,
-                    request.dropoff_lng,
-                )
-                duration_min = max(5, math.ceil((distance_km / 25) * 60))
-                traffic_duration_min = duration_min
-                poly = None
+            if not is_directions_road_route(route_data):
+                raise HTTPException(status_code=503, detail=DRIVING_ROUTE_UNAVAILABLE_DETAIL)
+            distance_km = route_data["distance_meters"] / 1000
+            duration_min = math.ceil(route_data["duration_seconds"] / 60)
+            traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
+            poly = route_data.get("polyline")
             normalized_vehicle = _normalize_service_type(request.vehicle_type)
-            fare = calculate_fare(distance_km, duration_min, traffic_duration_min, normalized_vehicle, "lagos")
+            dr = await estimate_area_demand_ratio_near(db, request.pickup_lat, request.pickup_lng)
+            fare = calculate_fare(
+                distance_km,
+                duration_min,
+                traffic_duration_min,
+                normalized_vehicle,
+                "lagos",
+                dr,
+                False,
+                request.pickup_lat,
+                request.pickup_lng,
+                request.dropoff_lat,
+                request.dropoff_lng,
+            )
             base_price, min_price, max_price = smart_bounds_from_base_price(float(fare["total_fare"]))
             recommended_server = float(fare["total_fare"])
-            if request.offered_fare < min_price - 0.5:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Minimum fare for this trip is ₦{min_price:,.0f}",
-                )
-            if max_price is not None and request.offered_fare > max_price + 0.5:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Maximum fare for this trip is ₦{max_price:,.0f}",
-                )
+            if request.offered_fare is not None:
+                off_r = int(round(float(request.offered_fare)))
+                min_r = int(round(float(min_price)))
+                max_r = int(round(float(max_price)))
+                if off_r < min_r:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Minimum fare for this trip is ₦{min_r:,.0f}",
+                    )
+                if max_r > 0 and off_r > max_r:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Maximum fare for this trip is ₦{max_r:,.0f}",
+                    )
             smart_priority = rider_meets_priority_threshold(request.offered_fare, base_price)
             preview_coords = build_route_preview_coordinates(
                 request.pickup_lat,
@@ -1250,6 +1480,10 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
             "max_price": max_price,
             "distance_km": distance_km_out,
             "duration_mins": duration_min_out,
+            "duration_minutes": duration_min_out,
+            "fare_bucket": fare.get("fare_bucket"),
+            "surge_multiplier": fare.get("surge_multiplier", 1.0),
+            "quoted_subtotal": fare.get("subtotal"),
             "area_summary_line": area_line,
             "route_preview_coordinates": preview_coords,
             "map_preview_region": map_region,
@@ -1264,6 +1498,9 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
             "rider_face_verified_at_pickup": False,
             "rider_face_match_confidence": 0.0,
             "rider_face_verified_at": None,
+            "rider_mood_preferences": rider.get("ride_mood_preferences", {
+                "conversation": "any", "music": "any", "temperature": "any", "driving_style": "any"
+            }),
         }
         await db.trips.insert_one(trip)
         logger.info(f"Custom price trip created: {trip_id} with offer N{request.offered_fare}")
@@ -1316,6 +1553,9 @@ class TripRequest(BaseModel):
     trip_type: Optional[str] = None
     preferred_driver_id: Optional[str] = None
     ride_preferences: Optional[list[str]] = None
+    # When no locked estimate: same semantics as POST /fare/estimate (omit demand_ratio for area estimate).
+    demand_ratio: Optional[float] = None
+    rain: Optional[bool] = None
 
 
 class ComfortRatingRequest(BaseModel):
@@ -1401,26 +1641,46 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
     blocked_drivers = rider.get("blocked_drivers", []) if rider else []
     
     fare_data = None
-    if request.fare_estimate_id and request.fare_estimate_id in fare_estimate_store:
-        estimate = fare_estimate_store[request.fare_estimate_id]
-        if datetime.utcnow() < estimate["expires_at"]:
-            fare_data = estimate
+    raw_eid = getattr(request, "fare_estimate_id", None)
+    if raw_eid is None:
+        estimate_id = None
+    elif isinstance(raw_eid, str):
+        estimate_id = raw_eid.strip() or None
+    else:
+        estimate_id = str(raw_eid).strip() or None
 
-    def _coord_match(est: dict) -> bool:
-        pu = est.get("pickup") or {}
-        du = est.get("dropoff") or {}
-        try:
-            return (
-                abs(float(pu.get("lat", 0)) - float(request.pickup_lat)) < 0.004
-                and abs(float(pu.get("lng", 0)) - float(request.pickup_lng)) < 0.004
-                and abs(float(du.get("lat", 0)) - float(request.dropoff_lat)) < 0.004
-                and abs(float(du.get("lng", 0)) - float(request.dropoff_lng)) < 0.004
+    if request.offered_fare is not None and not estimate_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing fare lock for your bid. Tap Refresh estimate, then request again.",
+        )
+
+    if estimate_id:
+        est = await get_fare_estimate(estimate_id)
+        if not est:
+            est = fare_estimate_store.get(estimate_id)
+        if not est:
+            raise HTTPException(
+                status_code=400,
+                detail="Fare estimate not found or expired. Tap Refresh estimate.",
             )
-        except (TypeError, ValueError):
-            return False
-
-    if fare_data and not _coord_match(fare_data):
-        fare_data = None
+        if _fare_estimate_expired(est):
+            raise HTTPException(
+                status_code=400,
+                detail="Fare estimate expired. Tap Refresh estimate.",
+            )
+        if not _fare_estimate_coords_match(
+            est,
+            request.pickup_lat,
+            request.pickup_lng,
+            request.dropoff_lat,
+            request.dropoff_lng,
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Pickup or destination changed more than allowed. Refresh estimate.",
+            )
+        fare_data = est
 
     if fare_data:
         distance_km = fare_data["distance_km"]
@@ -1432,22 +1692,31 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
             request.pickup_lat, request.pickup_lng,
             request.dropoff_lat, request.dropoff_lng
         )
-        
-        if route_data:
-            distance_km = route_data["distance_meters"] / 1000
-            duration_min = math.ceil(route_data["duration_seconds"] / 60)
-            traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-            polyline = route_data.get("polyline")
+        if not is_directions_road_route(route_data):
+            raise HTTPException(status_code=503, detail=DRIVING_ROUTE_UNAVAILABLE_DETAIL)
+        distance_km = route_data["distance_meters"] / 1000
+        duration_min = math.ceil(route_data["duration_seconds"] / 60)
+        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
+        polyline = route_data.get("polyline")
+
+        if request.demand_ratio is not None:
+            dr = max(0.0, min(1.0, float(request.demand_ratio)))
         else:
-            distance_km = calculate_distance_haversine(
-                request.pickup_lat, request.pickup_lng,
-                request.dropoff_lat, request.dropoff_lng
-            )
-            duration_min = max(5, math.ceil((distance_km / 25) * 60))
-            traffic_duration_min = duration_min
-            polyline = None
-        
-        fare = calculate_fare(distance_km, duration_min, traffic_duration_min, normalized_service_type, city)
+            dr = await estimate_area_demand_ratio_near(db, request.pickup_lat, request.pickup_lng)
+        rain_f = bool(request.rain) if request.rain is not None else False
+        fare = calculate_fare(
+            distance_km,
+            duration_min,
+            traffic_duration_min,
+            normalized_service_type,
+            city,
+            dr,
+            rain_f,
+            request.pickup_lat,
+            request.pickup_lng,
+            request.dropoff_lat,
+            request.dropoff_lng,
+        )
 
     if fare_data and fare_data.get("base_price") is not None:
         base_price = float(fare_data["base_price"])
@@ -1473,16 +1742,20 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
 
     area_line = area_summary_line(request.pickup_address, request.dropoff_address)
 
-    if request.offered_fare is not None and request.offered_fare < min_price - 0.5:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Minimum fare for this trip is ₦{min_price:,.0f}",
-        )
-    if request.offered_fare is not None and request.offered_fare > max_price + 0.5:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Maximum fare for this trip is ₦{max_price:,.0f}",
-        )
+    if request.offered_fare is not None:
+        off_r = int(round(float(request.offered_fare)))
+        min_r = int(round(float(min_price)))
+        max_r = int(round(float(max_price)))
+        if off_r < min_r:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Minimum fare for this trip is ₦{min_r:,.0f}",
+            )
+        if off_r > max_r:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Maximum fare for this trip is ₦{max_r:,.0f}",
+            )
 
     final_fare = request.offered_fare if request.offered_fare is not None else fare["total_fare"]
 
@@ -1500,6 +1773,27 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
             first_ride_discount_ngn = round(float(final_fare) * first_ride_discount_pct, 2)
             final_fare = round(float(final_fare) * (1 - first_ride_discount_pct), 2)
             # Keep final_fare within the allowed bounds
+            final_fare = max(float(min_price), final_fare)
+
+    # ── Favourite-driver perk (stacked after first-ride when both apply) ───────
+    favorite_driver_discount_pct = 0.0
+    favorite_driver_discount_ngn = 0.0
+    pref_id = getattr(request, "preferred_driver_id", None)
+    if (
+        request.offered_fare is None
+        and pref_id
+        and rider
+        and pref_id in (rider.get("favorite_drivers") or [])
+    ):
+        try:
+            fav_pct = float(os.environ.get("NEXRYDE_FAVORITE_DRIVER_DISCOUNT_PCT", "0.05") or "0")
+        except (TypeError, ValueError):
+            fav_pct = 0.05
+        fav_pct = max(0.0, min(fav_pct, 0.25))
+        if fav_pct > 0:
+            favorite_driver_discount_pct = fav_pct
+            favorite_driver_discount_ngn = round(float(final_fare) * fav_pct, 2)
+            final_fare = round(float(final_fare) * (1 - fav_pct), 2)
             final_fare = max(float(min_price), final_fare)
 
     trip_status = "pending_driver_offers" if request.offered_fare is not None else "pending"
@@ -1522,6 +1816,8 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         "offered_fare": request.offered_fare,
         "first_ride_discount_pct": first_ride_discount_pct,
         "first_ride_discount_ngn": first_ride_discount_ngn,
+        "favorite_driver_discount_pct": favorite_driver_discount_pct,
+        "favorite_driver_discount_ngn": favorite_driver_discount_ngn,
         "is_first_ride": first_ride_discount_pct > 0,
         "recommended_fare": float(base_price),
         "base_price": base_price,
@@ -1532,6 +1828,10 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         "map_preview_region": map_region,
         "smart_match_priority": smart_priority,
         "surge_multiplier": fare.get("surge_multiplier", 1.0),
+        "fare_bucket": fare.get("fare_bucket"),
+        "duration_minutes": duration_min,
+        "quoted_subtotal": fare.get("subtotal"),
+        "fare_estimate_id": estimate_id,
         "service_type": normalized_service_type,
         "city": city,
         "status": trip_status,
@@ -1575,6 +1875,7 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
             "dropoff": request.dropoff_address,
             "ride_preferences": request.ride_preferences or [],
             "eligible_drivers": len(offers),
+            "favorite_driver_discount_ngn": favorite_driver_discount_ngn,
         },
     )
 
@@ -1590,22 +1891,27 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest, http_requ
         request.pickup_lat, request.pickup_lng,
         request.dropoff_lat, request.dropoff_lng
     )
-    
-    if route_data:
-        distance_km = route_data["distance_meters"] / 1000
-        duration_min = math.ceil(route_data["duration_seconds"] / 60)
-        traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
-        polyline = route_data.get("polyline")
-    else:
-        distance_km = calculate_distance_haversine(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
-        )
-        duration_min = max(5, math.ceil((distance_km / 25) * 60))
-        traffic_duration_min = duration_min
-        polyline = None
-    
-    fare = calculate_fare(distance_km, duration_min, traffic_duration_min, normalized_service_type, city)
+    if not is_directions_road_route(route_data):
+        raise HTTPException(status_code=503, detail=DRIVING_ROUTE_UNAVAILABLE_DETAIL)
+    distance_km = route_data["distance_meters"] / 1000
+    duration_min = math.ceil(route_data["duration_seconds"] / 60)
+    traffic_duration_min = math.ceil(route_data["duration_in_traffic_seconds"] / 60)
+    polyline = route_data.get("polyline")
+
+    dr = await estimate_area_demand_ratio_near(db, request.pickup_lat, request.pickup_lng)
+    fare = calculate_fare(
+        distance_km,
+        duration_min,
+        traffic_duration_min,
+        normalized_service_type,
+        city,
+        dr,
+        False,
+        request.pickup_lat,
+        request.pickup_lng,
+        request.dropoff_lat,
+        request.dropoff_lng,
+    )
     base_price, min_price, max_price = smart_bounds_from_base_price(float(fare["total_fare"]))
     preview_coords = build_route_preview_coordinates(
         request.pickup_lat,
@@ -1631,6 +1937,7 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest, http_requ
         "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
         "distance_km": round(distance_km, 2),
         "duration_mins": duration_min,
+        "duration_minutes": duration_min,
         "base_fare": fare["base_fare"],
         "distance_fee": fare["distance_fee"],
         "time_fee": fare["time_fee"],
@@ -1639,6 +1946,8 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest, http_requ
         "base_price": base_price,
         "min_price": min_price,
         "max_price": max_price,
+        "fare_bucket": fare.get("fare_bucket"),
+        "quoted_subtotal": fare.get("subtotal"),
         "area_summary_line": area_line,
         "route_preview_coordinates": preview_coords,
         "map_preview_region": map_region,
@@ -1834,6 +2143,86 @@ async def get_driver_trip_offers(driver_id: str, request: Request):
     )
     await attach_rider_shield_to_trips(hydrated)
     logger.info("dispatch_offer_fetch driver_id=%s active_offers=%s", driver_id, len(hydrated))
+
+    # ── Auto-redispatch: if this online driver has no active offers, scan for nearby
+    # pending trips that have no un-expired offer assigned to them and create one.
+    if not hydrated:
+        try:
+            driver_profile = await db.driver_profiles.find_one(
+                {"user_id": driver_id, "is_online": True},
+                {"_id": 0, "current_lat": 1, "current_lng": 1, "vehicle_type": 1, "blocked_riders": 1},
+            )
+            if driver_profile:
+                d_lat = driver_profile.get("current_lat")
+                d_lng = driver_profile.get("current_lng")
+                if d_lat and d_lng:
+                    redispatch_window = (datetime.now(timezone.utc) - timedelta(minutes=8)).isoformat()
+                    pending_trips = await db.trips.find(
+                        {"status": {"$in": ["pending", "pending_driver_offers"]}, "created_at": {"$gte": redispatch_window}},
+                        {"_id": 0, "id": 1, "rider_id": 1, "pickup_location": 1, "vehicle_type": 1},
+                    ).to_list(20)
+                    new_offer_exp = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+                    new_offers_created = 0
+                    blocked = driver_profile.get("blocked_riders") or []
+                    for pt in pending_trips:
+                        if new_offers_created >= 3:
+                            break
+                        if pt.get("rider_id") in blocked:
+                            continue
+                        # Check driver doesn't already have an offer/decline for this trip
+                        existing = await db.trip_offers.find_one(
+                            {"trip_id": pt["id"], "driver_id": driver_id, "status": {"$nin": ["expired"]}},
+                        )
+                        if existing:
+                            continue
+                        pickup = pt.get("pickup_location") or {}
+                        if isinstance(pickup, dict) and pickup.get("lat") and pickup.get("lng"):
+                            dist = calculate_distance_haversine(d_lat, d_lng, pickup["lat"], pickup["lng"])
+                            if dist > 15:
+                                continue
+                        from uuid import uuid4 as _uuid4
+                        new_offer = {
+                            "id": str(_uuid4()),
+                            "trip_id": pt["id"],
+                            "driver_id": driver_id,
+                            "rider_id": pt.get("rider_id"),
+                            "status": "offered",
+                            "distance_to_pickup": round(dist, 2) if isinstance(pickup, dict) and pickup.get("lat") else 0,
+                            "created_at": datetime.now(timezone.utc).isoformat(),
+                            "expires_at": new_offer_exp,
+                            "preferred": False,
+                            "auto_redispatch": True,
+                        }
+                        await db.trip_offers.insert_one(new_offer)
+                        new_offers_created += 1
+                    if new_offers_created > 0:
+                        logger.info("auto_redispatch driver_id=%s new_offers=%s", driver_id, new_offers_created)
+                        # Re-fetch now that offers exist
+                        redispatch_offers = await db.trip_offers.find(
+                            {"driver_id": driver_id, "status": "offered", "expires_at": {"$gte": now_iso}},
+                            {"_id": 0},
+                        ).to_list(5)
+                        redispatch_trip_ids = [o.get("trip_id") for o in redispatch_offers if o.get("trip_id")]
+                        redispatch_trips = await db.trips.find(
+                            {"id": {"$in": redispatch_trip_ids}, "status": {"$in": ["pending", "pending_driver_offers"]}},
+                            {"_id": 0},
+                        ).to_list(5)
+                        redispatch_map = {str(t["id"]): t for t in redispatch_trips}
+                        for ro in redispatch_offers:
+                            rt = redispatch_map.get(str(ro.get("trip_id")))
+                            if rt:
+                                rt = enrich_trip_offer_preview(rt)
+                                hydrated.append({
+                                    **rt,
+                                    "offer_id": ro["id"],
+                                    "offer_expires_at": ro["expires_at"],
+                                    "distance_to_pickup": ro.get("distance_to_pickup"),
+                                    "preferred": False,
+                                })
+                        await attach_rider_shield_to_trips(hydrated)
+        except Exception as _e:
+            logger.warning("auto_redispatch_error driver_id=%s err=%s", driver_id, _e)
+
     return hydrated
 
 
@@ -1865,14 +2254,8 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
         expired_names = ", ".join(d["document"] for d in doc_status["expired"])
         raise HTTPException(status_code=403, detail=f"Cannot accept rides. Expired documents: {expired_names}. Please renew them.")
 
-    monthly = await check_monthly_uploads(driver_id)
-    if not monthly.get("compliant", True):
-        missing = []
-        if not monthly.get("interior_uploaded"):
-            missing.append("vehicle interior photo")
-        if not monthly.get("selfie_uploaded"):
-            missing.append("driver selfie")
-        raise HTTPException(status_code=403, detail=f"Monthly verification required. Please upload: {', '.join(missing)}")
+    # Monthly re-upload check — soft reminder only, never blocks a verified driver
+    # (Hard block only fires if actual documents have expired, handled above)
 
     # Driver must have a valid, unexpired offer for this trip.
     requested_offer_id = (request or {}).get("offer_id")
@@ -2495,11 +2878,107 @@ async def start_trip(trip_id: str, request: Request):
     if result.modified_count == 0:
         raise HTTPException(status_code=400, detail="Cannot start trip")
     
+    # Auto-lock vehicle data on trip start to prevent mid-trip plate swap
+    driver_profile = await db.driver_profiles.find_one(
+        {"user_id": trip.get("driver_id")},
+        {"_id": 0, "vehicle_plate": 1, "vehicle_model": 1, "vehicle_color": 1, "vehicle_type": 1}
+    ) or {}
+    locked_vehicle = {
+        "plate":        driver_profile.get("vehicle_plate") or trip.get("vehicle_plate", ""),
+        "model":        driver_profile.get("vehicle_model") or trip.get("vehicle_model", ""),
+        "color":        driver_profile.get("vehicle_color") or trip.get("vehicle_color", ""),
+        "vehicle_type": driver_profile.get("vehicle_type") or trip.get("vehicle_type", ""),
+        "locked_at":    datetime.utcnow().isoformat(),
+    }
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {"locked_vehicle": locked_vehicle}}
+    )
+
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
     await _log_trip_event(trip_id, "trip_started", trip.get("driver_id"), {})
     await _emit_rider_trip_realtime(trip_id)
     return trip
+
+
+@trips_router.post("/trips/{trip_id}/lock-vehicle")
+async def lock_vehicle(trip_id: str, request: Request):
+    """Rider confirms driver identity — locks vehicle data so driver cannot swap plate mid-trip."""
+    rider_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("rider_id") != rider_id:
+        raise HTTPException(status_code=403, detail="Only the rider can lock vehicle data")
+    if trip.get("status") not in ("accepted", "arrived", "ongoing"):
+        raise HTTPException(status_code=400, detail="Cannot lock vehicle in current trip state")
+
+    # Fetch live vehicle data from driver profile
+    driver_profile = await db.driver_profiles.find_one(
+        {"user_id": trip.get("driver_id")},
+        {"_id": 0, "vehicle_plate": 1, "vehicle_model": 1, "vehicle_color": 1, "vehicle_type": 1}
+    ) or {}
+    locked_vehicle = {
+        "plate":        driver_profile.get("vehicle_plate") or trip.get("vehicle_plate", ""),
+        "model":        driver_profile.get("vehicle_model") or trip.get("vehicle_model", ""),
+        "color":        driver_profile.get("vehicle_color") or trip.get("vehicle_color", ""),
+        "vehicle_type": driver_profile.get("vehicle_type") or trip.get("vehicle_type", ""),
+        "locked_at":    datetime.utcnow().isoformat(),
+        "locked_by_rider": True,
+    }
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {
+            "locked_vehicle": locked_vehicle,
+            "rider_identity_confirmed": True,
+            "rider_identity_confirmed_at": datetime.utcnow().isoformat(),
+        }}
+    )
+    await _log_trip_event(trip_id, "vehicle_locked", rider_id, {"locked_vehicle": locked_vehicle})
+    return {"success": True, "locked_vehicle": locked_vehicle}
+
+
+@trips_router.post("/trips/{trip_id}/report-mismatch")
+async def report_vehicle_mismatch(trip_id: str, request: Request):
+    """Rider reports vehicle/driver identity mismatch before boarding."""
+    rider_id = require_authenticated(request)
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    if trip.get("rider_id") != rider_id:
+        raise HTTPException(status_code=403, detail="Only the rider can report a mismatch")
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    mismatch_record = {
+        "reported_at": datetime.utcnow().isoformat(),
+        "reported_by": rider_id,
+        "trip_id":     trip_id,
+        "driver_id":   trip.get("driver_id"),
+        "type":        body.get("type", "vehicle_mismatch"),
+        "notes":       body.get("notes", ""),
+    }
+    await db.trips.update_one(
+        {"id": trip_id},
+        {"$set": {
+            "mismatch_report": mismatch_record,
+            "mismatch_reported_at": datetime.utcnow().isoformat(),
+        }}
+    )
+    # Flag on driver profile for safety review
+    if trip.get("driver_id"):
+        await db.driver_profiles.update_one(
+            {"user_id": trip["driver_id"]},
+            {"$inc": {"mismatch_report_count": 1},
+             "$push": {"mismatch_reports": mismatch_record}}
+        )
+    await _log_trip_event(trip_id, "mismatch_reported", rider_id, mismatch_record)
+    return {"success": True, "message": "Mismatch report submitted. Nexryde safety team has been notified."}
 
 
 @trips_router.post("/trips/{trip_id}/confirm-safe-arrival")
@@ -2916,6 +3395,22 @@ async def update_trip_location(trip_id: str, request: LocationUpdate, http_reque
             },
         },
     )
+    try:
+        drv = trip.get("driver_id")
+        if drv:
+            await db.driver_profiles.update_one(
+                {"user_id": drv},
+                {"$set": {
+                    "current_location": {
+                        "lat": float(request.latitude),
+                        "lng": float(request.longitude),
+                        "updated_at": location_point["timestamp"],
+                    }
+                }},
+            )
+    except Exception:
+        logger.debug("profile current_location sync from trip update skipped", exc_info=True)
+
     await _log_trip_event(
         trip_id,
         "location_update",
@@ -2930,6 +3425,11 @@ async def update_trip_location(trip_id: str, request: LocationUpdate, http_reque
             "guardian_alert_active": bool(guardian_alert),
         },
     )
+
+    try:
+        await _emit_rider_trip_realtime(trip_id)
+    except Exception:
+        logger.debug("emit rider trip realtime failed", exc_info=True)
 
     return {
         "location_updated": True,
@@ -2962,15 +3462,7 @@ async def get_trip_status(trip_id: str, request: Request):
     if driver_id:
         user = await db.users.find_one({"id": driver_id}) or {}
         profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
-        loc = (profile.get("current_location") or {})
-
-        if isinstance(loc, dict) and loc.get("lat") is not None and loc.get("lng") is not None:
-            driver_location = {
-                "lat": float(loc.get("lat")),
-                "lng": float(loc.get("lng")),
-                "updated_at": loc.get("updated_at"),
-            }
-
+        loc = profile.get("current_location") if isinstance(profile.get("current_location"), dict) else {}
         actual_route = trip.get("actual_route") or []
         if len(actual_route) >= 2:
             p1 = actual_route[-2]
@@ -2983,6 +3475,8 @@ async def get_trip_status(trip_id: str, request: Request):
                     float(p2["lng"]),
                 )
                 driver_moving = moved_km >= 0.03  # ~30 meters+
+
+        driver_location = _driver_location_snapshot_for_trip(trip, loc if isinstance(loc, dict) else None)
 
         # Phone visibility gate: only expose during active ride OR if rider has favorited this driver
         ACTIVE_CALL_STATUSES = {"accepted", "arrived", "ongoing", "pending_payment"}
@@ -3004,15 +3498,34 @@ async def get_trip_status(trip_id: str, request: Request):
                 return digits[:4] + "***" + digits[-4:]
             return p
 
+        # Use locked vehicle data if available (anti-fraud: prevents mid-trip plate swap)
+        locked_v = trip.get("locked_vehicle") or {}
+        live_plate = locked_v.get("plate") or profile.get("vehicle_plate") or ""
+        live_model = locked_v.get("model") or profile.get("vehicle_model") or "Vehicle"
+        live_color = locked_v.get("color") or profile.get("vehicle_color") or ""
+        live_vtype = locked_v.get("vehicle_type") or profile.get("vehicle_type") or ""
+
         driver_info = {
             "driver_id": driver_id,
             "name": user.get("name", "Driver"),
-            "rating": user.get("rating", 4.5),
-            "vehicle": profile.get("vehicle_model") or "Vehicle",
-            "plate": profile.get("vehicle_plate") or "",
-            "color": profile.get("vehicle_color") or "",
+            "rating": float(user.get("rating") or profile.get("avg_rating") or 4.5),
+            "avg_rating": float(profile.get("avg_rating") or user.get("rating") or 4.5),
+            # Visual identity fields — critical for arrival verification
+            "profile_image": user.get("profile_image") or None,
+            "face_image": profile.get("face_image") or user.get("face_image") or None,
+            # Vehicle identity
+            "vehicle": live_model,
+            "vehicle_model": live_model,
+            "vehicle_type": live_vtype,
+            "plate": live_plate,
+            "color": live_color,
+            # Lock status
+            "vehicle_locked": bool(locked_v),
+            "rider_identity_confirmed": bool(trip.get("rider_identity_confirmed")),
+            # Live state
             "is_online": bool(profile.get("is_online")),
             "is_moving": driver_moving,
+            # Payment info
             "bank_name": profile.get("bank_name"),
             "account_number": profile.get("account_number"),
             "account_name": profile.get("account_name"),
@@ -3046,6 +3559,9 @@ async def get_trip_status(trip_id: str, request: Request):
         "invisible_shield_mode": trip.get("invisible_shield_mode"),
         "safe_arrival_check": trip.get("safe_arrival_check"),
         "estate_gate_access": estate_gate_access,
+        "locked_vehicle": trip.get("locked_vehicle"),
+        "rider_identity_confirmed": bool(trip.get("rider_identity_confirmed")),
+        "mismatch_reported": bool(trip.get("mismatch_reported_at")),
     }
 
 @trips_router.put("/trips/{trip_id}/complete")
@@ -3103,28 +3619,96 @@ async def complete_trip(trip_id: str, request: Request):
 
     await db.users.update_one({"id": trip["rider_id"]}, {"$inc": {"total_trips": 1}})
 
-    # Apply incentives (first-ride reward, referral, driver trial progress).
+    # Apply incentives (first-ride reward, referral, driver trial, mystery bonus).
+    inc_res: dict = {}
     try:
         from routers.incentives import on_trip_completed as _on_trip_completed
-        await _on_trip_completed(
+        inc_res = await _on_trip_completed(
             trip_id=trip_id,
             rider_id=trip["rider_id"],
             driver_id=trip.get("driver_id", ""),
             fare=float(trip.get("fare") or 0),
-        )
+        ) or {}
     except Exception as _ie:
         logger.warning(f"Incentive hook failed for trip={trip_id}: {_ie}")
+
+    mb = inc_res.get("mystery_bonus") if isinstance(inc_res, dict) else None
+    if isinstance(mb, dict) and mb.get("amount_ngn"):
+        try:
+            amt_mb = float(mb["amount_ngn"])
+            if amt_mb > 0:
+                mb_set = {"mystery_bonus_ngn": amt_mb}
+                if mb.get("expires_at"):
+                    mb_set["mystery_bonus_expires_at"] = mb["expires_at"]
+                await db.trips.update_one({"id": trip_id}, {"$set": mb_set})
+                trip["mystery_bonus_ngn"] = amt_mb
+                if mb.get("expires_at"):
+                    trip["mystery_bonus_expires_at"] = mb["expires_at"]
+                await _log_trip_event(
+                    trip_id,
+                    "mystery_bonus_awarded",
+                    trip.get("rider_id"),
+                    {"amount_ngn": amt_mb},
+                )
+        except (TypeError, ValueError):
+            pass
+
+    # ── Destination mode: increment daily trip counter ──────────────────────
+    if trip.get("driver_id"):
+        driver_dest_profile = await db.driver_profiles.find_one(
+            {"user_id": trip["driver_id"]}, {"_id": 0, "destination_mode": 1,
+                                              "daily_destination_trips": 1,
+                                              "destination_last_reset_date": 1}
+        )
+        if driver_dest_profile and driver_dest_profile.get("destination_mode"):
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            last_reset = driver_dest_profile.get("destination_last_reset_date", "")
+            current_count = int(driver_dest_profile.get("daily_destination_trips", 0) or 0)
+            if last_reset != today_str:
+                current_count = 0
+            new_count = current_count + 1
+            DEST_DAILY_LIMIT = 3
+            updates = {
+                "daily_destination_trips": new_count,
+                "destination_last_reset_date": today_str,
+            }
+            if new_count >= DEST_DAILY_LIMIT:
+                updates["destination_mode"] = False  # auto-disable on limit
+            await db.driver_profiles.update_one(
+                {"user_id": trip["driver_id"]},
+                {"$set": updates}
+            )
+            if new_count >= DEST_DAILY_LIMIT:
+                await send_push_notification(
+                    trip["driver_id"],
+                    "Daily Destination Limit Reached",
+                    f"You've completed {DEST_DAILY_LIMIT} trips towards your destination today. Trips towards destination is now disabled. Resets at midnight.",
+                    {"type": "destination_limit_reached"},
+                )
+            else:
+                remaining = DEST_DAILY_LIMIT - new_count
+                await send_push_notification(
+                    trip["driver_id"],
+                    "Destination Trip Counted",
+                    f"Trip counted towards destination ({new_count}/{DEST_DAILY_LIMIT}). {remaining} trip{'s' if remaining != 1 else ''} remaining today.",
+                    {"type": "destination_trip_counted", "count": new_count, "limit": DEST_DAILY_LIMIT},
+                )
+    # ────────────────────────────────────────────────────────────────────────
     
     trip["_id"] = str(trip["_id"])
     await _log_trip_event(trip_id, "trip_completed", trip.get("driver_id"), {"fare": trip.get("fare")})
     if trip.get("driver_id"):
         await _refresh_driver_visibility_score(trip["driver_id"])
     if trip.get("rider_id"):
+        trip_body = f"Your trip is complete. Fare: ₦{trip.get('fare', 0):,.0f}"
+        mb_ngn = float(trip.get("mystery_bonus_ngn") or 0)
+        if mb_ngn > 0:
+            trip_body += f" You unlocked a Mystery Bonus: ₦{mb_ngn:,.0f} promo credit."
         await send_push_notification(
             trip["rider_id"],
             "Trip Completed",
-            f"Your trip is complete. Fare: ₦{trip.get('fare', 0):,.0f}",
-            {"type": "trip_completed", "trip_id": trip_id},
+            trip_body,
+            {"type": "trip_completed", "trip_id": trip_id, "mystery_bonus_ngn": mb_ngn or None},
         )
         await send_push_notification(
             trip["rider_id"],
@@ -3132,13 +3716,36 @@ async def complete_trip(trip_id: str, request: Request):
             "Please confirm you arrived safely. Nexryde will check in automatically if you do not respond.",
             {"type": "safe_arrival_checkin", "trip_id": trip_id},
         )
+        await maybe_send_rider_favorite_engagement_pushes(trip["rider_id"], trip.get("driver_id"))
     if trip.get("driver_id"):
-        await send_push_notification(
-            trip["driver_id"],
-            "Trip Completed",
-            f"Trip completed! ₦{trip.get('fare', 0):,.0f} earned.",
-            {"type": "trip_completed", "trip_id": trip_id},
-        )
+        did = trip["driver_id"]
+        try:
+            n_drv_done = await db.trips.count_documents({"driver_id": did, "status": "completed"})
+        except Exception:
+            n_drv_done = 0
+        try:
+            fare_f = float(trip.get("fare") or 0)
+        except (TypeError, ValueError):
+            fare_f = 0.0
+        # Richer copy on early milestones — same push channel as every trip (bar + lock screen).
+        if n_drv_done == 1:
+            drv_title = "First trip in the books"
+            drv_body = (
+                f"You earned ₦{fare_f:,.0f}. Stay online on the map so nearby riders can send you requests."
+            )
+            drv_data = {"type": "trip_completed", "trip_id": trip_id, "milestone": "first_driver_trip"}
+        elif n_drv_done == 3:
+            drv_title = "Trip completed"
+            drv_body = (
+                f"₦{fare_f:,.0f} earned — momentum builds your visibility. "
+                f"Peak hours often mean back-to-back trips."
+            )
+            drv_data = {"type": "trip_completed", "trip_id": trip_id, "milestone": "three_driver_trips"}
+        else:
+            drv_title = "Trip Completed"
+            drv_body = f"Trip completed! ₦{fare_f:,.0f} earned."
+            drv_data = {"type": "trip_completed", "trip_id": trip_id}
+        await send_push_notification(did, drv_title, drv_body, drv_data)
     await _emit_rider_trip_realtime(trip_id)
     return trip
 
@@ -3375,6 +3982,19 @@ async def get_trip(trip_id: str, request: Request):
     trip["speed_spike_alert"] = trip.get("speed_spike_alert")
     trip["gps_spoofing_alert"] = trip.get("gps_spoofing_alert")
     trip["safe_arrival_check"] = trip.get("safe_arrival_check")
+    # Driver app: expose rider name/phone for call & chat (same active window as rider seeing driver phone)
+    if actor_id == trip.get("driver_id") and trip.get("rider_id"):
+        trip_status_raw = str(trip.get("status") or "")
+        if trip_status_raw in {"accepted", "arrived", "ongoing", "pending_payment"}:
+            rider_doc = await db.users.find_one(
+                {"id": trip["rider_id"]},
+                {"_id": 0, "name": 1, "phone": 1, "profile_image": 1},
+            )
+            if rider_doc:
+                trip["rider_phone"] = rider_doc.get("phone")
+                if not trip.get("rider_name"):
+                    trip["rider_name"] = rider_doc.get("name")
+                trip["rider_profile_image"] = rider_doc.get("profile_image")
     return trip
 
 

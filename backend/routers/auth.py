@@ -1024,7 +1024,8 @@ async def email_sign_in(request: EmailSignInRequest):
             ) or {}
             device_id = (request.device_id or "").strip()
             known_devices = set(driver_profile.get("fortress_known_devices") or [])
-            if not device_id or device_id not in known_devices:
+            # fortress_exempt flag allows test/admin accounts to skip the fortress check
+            if not user.get("fortress_exempt") and (not device_id or device_id not in known_devices):
                 challenge_id = str(uuid.uuid4())
                 expires_at = datetime.now(timezone.utc) + timedelta(minutes=8)
                 await db.driver_login_fortress_challenges.insert_one(

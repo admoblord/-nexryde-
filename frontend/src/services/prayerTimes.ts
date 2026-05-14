@@ -9,16 +9,7 @@ import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import { BACKEND_URL } from '@/src/services/api';
 
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Foreground notification behavior: see `useNotifications` (root layout).
 
 export type PrayerName = 'Fajr' | 'Dhuhr' | 'Asr' | 'Maghrib' | 'Isha';
 
@@ -150,76 +141,61 @@ export function usePrayerTimes() {
   const fetchPrayerTimes = async () => {
     try {
       setLoading(true);
-      
-      // Resolve user location; if unavailable we still query with default city center.
+
+      // --- 1. Try to serve from cache immediately (today's date key) ---
+      const todayKey = new Date().toISOString().slice(0, 10); // "2026-05-04"
+      const CACHE_KEY = `prayer_times_cache_${todayKey}`;
+      try {
+        const cached = await AsyncStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const prayers: PrayerTime[] = JSON.parse(cached);
+          setPrayerTimes(prayers);
+          const nowMs = Date.now();
+          setNextPrayer(prayers.find(p => p.timestamp > nowMs) || prayers[0]);
+          setLoading(false); // show instantly from cache
+        }
+      } catch { /* ignore cache errors */ }
+
+      // --- 2. Resolve GPS in background ---
       let latitude = 6.5244;
       let longitude = 3.3792;
-
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
-          const userLocation = await Location.getCurrentPositionAsync({});
+          const userLocation = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
           latitude = userLocation.coords.latitude;
           longitude = userLocation.coords.longitude;
         }
       } catch {
-        // Location unavailable — continue with Lagos default coordinates
+        // continue with Lagos default
       }
-
       setLocation({ lat: latitude, lng: longitude });
 
-      // Fetch prayer times from Aladhan API (free, accurate, Islamic prayer times API)
+      // --- 3. Fetch fresh times from Aladhan API ---
       const response = await fetch(
-        `https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=2`
+        `https://api.aladhan.com/v1/timings?latitude=${latitude}&longitude=${longitude}&method=2`,
+        { signal: AbortSignal.timeout(8000) }
       );
-      
       const data = await response.json();
-      
+
       if (data.code === 200 && data.data) {
         const timings = data.data.timings;
         const today = new Date();
-        
         const prayers: PrayerTime[] = [
-          {
-            name: 'Fajr',
-            time: timings.Fajr,
-            timestamp: parseTimeToTimestamp(timings.Fajr, today),
-          },
-          {
-            name: 'Dhuhr',
-            time: timings.Dhuhr,
-            timestamp: parseTimeToTimestamp(timings.Dhuhr, today),
-          },
-          {
-            name: 'Asr',
-            time: timings.Asr,
-            timestamp: parseTimeToTimestamp(timings.Asr, today),
-          },
-          {
-            name: 'Maghrib',
-            time: timings.Maghrib,
-            timestamp: parseTimeToTimestamp(timings.Maghrib, today),
-          },
-          {
-            name: 'Isha',
-            time: timings.Isha,
-            timestamp: parseTimeToTimestamp(timings.Isha, today),
-          },
+          { name: 'Fajr',    time: timings.Fajr,    timestamp: parseTimeToTimestamp(timings.Fajr, today) },
+          { name: 'Dhuhr',   time: timings.Dhuhr,   timestamp: parseTimeToTimestamp(timings.Dhuhr, today) },
+          { name: 'Asr',     time: timings.Asr,     timestamp: parseTimeToTimestamp(timings.Asr, today) },
+          { name: 'Maghrib', time: timings.Maghrib, timestamp: parseTimeToTimestamp(timings.Maghrib, today) },
+          { name: 'Isha',    time: timings.Isha,    timestamp: parseTimeToTimestamp(timings.Isha, today) },
         ];
-
         setPrayerTimes(prayers);
-        
-        // Find next prayer
-        const now = Date.now();
-        const next = prayers.find(p => p.timestamp > now);
-        setNextPrayer(next || prayers[0]); // If all passed, next is tomorrow's Fajr
+        const nowMs = Date.now();
+        setNextPrayer(prayers.find(p => p.timestamp > nowMs) || prayers[0]);
+        // Cache for today
+        try { await AsyncStorage.setItem(CACHE_KEY, JSON.stringify(prayers)); } catch { /* ignore */ }
       }
-      
       setLoading(false);
-    } catch (error) {
-      console.error('Failed to fetch prayer times:', error);
-      setPrayerTimes([]);
-      setNextPrayer(null);
+    } catch {
       setLoading(false);
     }
   };

@@ -2,8 +2,10 @@ import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Animated } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export function OfflineBanner() {
+  const insets = useSafeAreaInsets();
   const [isOffline, setIsOffline] = useState(false);
   const slideAnim = React.useRef(new Animated.Value(-60)).current;
 
@@ -22,8 +24,15 @@ export function OfflineBanner() {
 
   if (!isOffline) return null;
 
+  const padTop = Math.max(insets.top, 10);
+
   return (
-    <Animated.View style={[styles.container, { transform: [{ translateY: slideAnim }] }]}>
+    <Animated.View
+      style={[
+        styles.container,
+        { paddingTop: padTop + 6, transform: [{ translateY: slideAnim }] },
+      ]}
+    >
       <Ionicons name="cloud-offline" size={16} color="#FFF" />
       <Text style={styles.text}>No internet connection</Text>
     </Animated.View>
@@ -40,8 +49,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    paddingTop: 50,
+    paddingBottom: 10,
     gap: 8,
     zIndex: 9999,
   },

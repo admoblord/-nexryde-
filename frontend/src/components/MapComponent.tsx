@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, Platform, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '../constants/theme';
+import { DIRECTIONS_ROUTE_MIN_POINTS } from '../navigation/navUtils';
 
 interface Location {
   latitude: number;
@@ -58,15 +59,17 @@ const WebPlaceholder: React.FC<MapComponentProps> = ({ pickup, dropoff, style })
   </View>
 );
 
-/* ─── Dark map style ──────────────────────────────────────────── */
+/* ─── Premium dark map (matches rider booking) ───────────────── */
 const DARK_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#0D1117' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#8B9EB7' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#0D1117' }] },
-  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1E2D3D' }] },
-  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#131C24' }] },
-  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2C3E50' }] },
-  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060E18' }] },
+  { elementType: 'geometry', stylers: [{ color: '#0B1220' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#94A3B8' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#0B1220' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1A2838' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#0F172A' }] },
+  { featureType: 'road.arterial', elementType: 'geometry', stylers: [{ color: '#243447' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#2D3F56' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#1E293B' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#060D18' }] },
   { featureType: 'poi', stylers: [{ visibility: 'off' }] },
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ];
@@ -108,22 +111,40 @@ const NativeMap: React.FC<MapComponentProps> = ({
         longitudeDelta: 0.1,
       };
 
-  // Fit to markers when both pickup & dropoff exist
+  const cleanRoute: { latitude: number; longitude: number }[] = Array.isArray(routeCoordinates)
+    ? routeCoordinates.filter(
+        (p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude),
+      )
+    : [];
+
+  // Fit to route polyline when present, else pickup + dropoff (+ driver).
   useEffect(() => {
     if (!mapRef.current || !hasPickup || !hasDropoff) return;
     const t = setTimeout(() => {
       try {
-        const coords: { latitude: number; longitude: number }[] = [];
-        if (hasPickup) coords.push({ latitude: pickup!.latitude, longitude: pickup!.longitude });
-        if (hasDropoff)
-          coords.push({ latitude: dropoff!.latitude, longitude: dropoff!.longitude });
-        if (hasDriver)
-          coords.push({
-            latitude: driverLocation!.latitude,
-            longitude: driverLocation!.longitude,
-          });
-        mapRef.current.fitToCoordinates(coords, {
-          edgePadding: { top: 48, right: 48, bottom: 48, left: 48 },
+        let coordsFit: { latitude: number; longitude: number }[] = [];
+        if (cleanRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS) {
+          if (cleanRoute.length <= 48) coordsFit = cleanRoute;
+          else {
+            const n = cleanRoute.length;
+            const max = 48;
+            for (let i = 0; i < max; i++) {
+              const idx = Math.min(n - 1, Math.round((i / Math.max(1, max - 1)) * (n - 1)));
+              coordsFit.push(cleanRoute[idx]!);
+            }
+          }
+        } else {
+          if (hasPickup) coordsFit.push({ latitude: pickup!.latitude, longitude: pickup!.longitude });
+          if (hasDropoff) coordsFit.push({ latitude: dropoff!.latitude, longitude: dropoff!.longitude });
+          if (hasDriver)
+            coordsFit.push({
+              latitude: driverLocation!.latitude,
+              longitude: driverLocation!.longitude,
+            });
+        }
+        if (coordsFit.length < 1) return;
+        mapRef.current.fitToCoordinates(coordsFit, {
+          edgePadding: { top: 80, right: 44, bottom: 80, left: 44 },
           animated: true,
         });
       } catch {
@@ -139,13 +160,8 @@ const NativeMap: React.FC<MapComponentProps> = ({
     pickup?.longitude,
     dropoff?.latitude,
     dropoff?.longitude,
+    cleanRoute.length,
   ]);
-
-  const cleanRoute: { latitude: number; longitude: number }[] = Array.isArray(routeCoordinates)
-    ? routeCoordinates.filter(
-        (p) => p && Number.isFinite(p.latitude) && Number.isFinite(p.longitude),
-      )
-    : [];
 
   return (
     <View style={[styles.nativeMap, style]}>
@@ -165,16 +181,35 @@ const NativeMap: React.FC<MapComponentProps> = ({
         showsIndoors={false}
         toolbarEnabled={false}
         onMapReady={onMapReady}
+        customMapStyle={DARK_STYLE}
       >
-        {/* Route polyline */}
-        {cleanRoute.length >= 2 ? (
+        {/* Route polyline — layered cyan / ice (premium vs flat Bolt blue) */}
+        {cleanRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <>
             <Polyline
               coordinates={cleanRoute}
-              strokeColor="rgba(0,212,106,0.18)"
-              strokeWidth={12}
+              strokeColor="rgba(56,189,248,0.12)"
+              strokeWidth={20}
+              geodesic={false}
+              lineCap="round"
+              lineJoin="round"
             />
-            <Polyline coordinates={cleanRoute} strokeColor="#00D46A" strokeWidth={3.5} />
+            <Polyline
+              coordinates={cleanRoute}
+              strokeColor="rgba(14,165,233,0.45)"
+              strokeWidth={10}
+              geodesic={false}
+              lineCap="round"
+              lineJoin="round"
+            />
+            <Polyline
+              coordinates={cleanRoute}
+              strokeColor="#E0F2FE"
+              strokeWidth={3}
+              geodesic={false}
+              lineCap="round"
+              lineJoin="round"
+            />
           </>
         ) : null}
 

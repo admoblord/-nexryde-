@@ -894,12 +894,12 @@ const s = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 16, paddingVertical: 14,
+    paddingHorizontal: 20, paddingVertical: 16,
     borderBottomLeftRadius: 22, borderBottomRightRadius: 22,
   },
   backBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 19, fontWeight: '900', color: '#fff' },
-  headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 1 },
+  headerSub: { fontSize: 12, color: 'rgba(255,255,255,0.7)', marginTop: 2, lineHeight: 16 },
 
   mainTabs: { flexDirection: 'row', backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.06)' },
   mainTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 6 },
@@ -907,21 +907,23 @@ const s = StyleSheet.create({
   mainTabTxt: { fontSize: 14, fontWeight: '700', color: '#4B5563' },
   mainTabTxtActive: { color: '#7C3AED' },
 
-  content: { padding: 16 },
+  content: { padding: 20 },
 
   searchBar: {
     flexDirection: 'row', alignItems: 'center', gap: 10,
-    backgroundColor: CARD, borderRadius: 14, paddingHorizontal: 14, paddingVertical: 11,
+    backgroundColor: CARD, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 13,
+    minHeight: 54,
     marginBottom: 18, borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
   },
 
-  sectionLabel: { fontSize: 10, fontWeight: '800', color: '#4B5563', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 6 },
-  sectionSub: { fontSize: 12, color: '#374151', marginBottom: 10, marginTop: -2 },
+  sectionLabel: { fontSize: 10, fontWeight: '800', color: '#4B5563', letterSpacing: 1.4, textTransform: 'uppercase', marginBottom: 8 },
+  sectionSub: { fontSize: 12, color: '#374151', marginBottom: 12, marginTop: -1, lineHeight: 17 },
 
   groupRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: CARD, borderRadius: 16, padding: 12,
-    marginBottom: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: CARD, borderRadius: 18, padding: 14,
+    minHeight: 78,
+    marginBottom: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
   },
   groupRowIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', position: 'relative' },
   unreadBadge: {
@@ -930,31 +932,31 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3,
   },
   unreadText: { fontSize: 10, fontWeight: '900', color: '#fff' },
-  groupRowName: { fontSize: 14, fontWeight: '800', color: '#fff' },
-  groupRowLatest: { fontSize: 12, color: '#4B5563', marginTop: 2 },
-  groupRowDesc: { fontSize: 12, color: '#4B5563', marginTop: 2 },
+  groupRowName: { fontSize: 15, fontWeight: '800', color: '#fff' },
+  groupRowLatest: { fontSize: 12, color: '#4B5563', marginTop: 3, lineHeight: 17 },
+  groupRowDesc: { fontSize: 12, color: '#4B5563', marginTop: 3, lineHeight: 17 },
   groupRowTime: { fontSize: 11, color: '#374151' },
   groupRowMeta: { fontSize: 11, color: '#374151' },
 
   // Announcements
-  announceBanner: { borderRadius: 16, overflow: 'hidden', marginBottom: 14 },
-  announceBannerInner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
+  announceBanner: { borderRadius: 18, overflow: 'hidden', marginBottom: 16 },
+  announceBannerInner: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 18 },
   announceCard: {
-    backgroundColor: CARD, borderRadius: 16, padding: 16, marginBottom: 12,
+    backgroundColor: CARD, borderRadius: 18, padding: 18, marginBottom: 14,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
     borderLeftWidth: 3, borderLeftColor: '#7C3AED',
   },
   announceText: { fontSize: 14, color: '#CBD5E1', lineHeight: 22 },
 
   // Chat header
-  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, gap: 10 },
+  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 13, gap: 10 },
   chatBackBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },
   chatTitle: { fontSize: 16, fontWeight: '900', color: '#fff' },
   chatSub: { fontSize: 11, color: 'rgba(255,255,255,0.65)', marginTop: 1 },
   chatRefreshBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: 'rgba(255,255,255,0.12)', alignItems: 'center', justifyContent: 'center' },
 
   chatTabs: { flexDirection: 'row', backgroundColor: CARD, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.07)' },
-  chatTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, gap: 4, borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  chatTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, gap: 4, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   chatTabActive: {},
   chatTabTxt: { fontSize: 12, fontWeight: '700', color: '#4B5563' },
 
@@ -963,11 +965,11 @@ const s = StyleSheet.create({
   emptyChatSub: { fontSize: 13, color: '#1F2937' },
 
   // Messages
-  msgWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 6 },
+  msgWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 8 },
   msgWrapMe: { flexDirection: 'row-reverse' },
   msgAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   msgAvatarTxt: { fontSize: 13, fontWeight: '900', color: '#fff' },
-  msgBubble: { maxWidth: '78%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  msgBubble: { maxWidth: '78%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 11 },
   msgBubbleOther: { backgroundColor: '#1e293b', borderBottomLeftRadius: 4 },
   msgBubbleMe: { backgroundColor: '#1D4ED8', borderBottomRightRadius: 4 },
   msgBubbleAdmin: { backgroundColor: '#2d1b69', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)' },
@@ -985,12 +987,13 @@ const s = StyleSheet.create({
   // Input
   inputBar: {
     flexDirection: 'row', alignItems: 'flex-end', gap: 8,
-    paddingHorizontal: 12, paddingTop: 10,
+    paddingHorizontal: 14, paddingTop: 10,
     backgroundColor: CARD, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.07)',
   },
   chatInput: {
     flex: 1, backgroundColor: '#1e293b', borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 10,
+    paddingHorizontal: 16, paddingVertical: 11,
+    minHeight: 44,
     fontSize: 14, color: '#fff', maxHeight: 100,
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
   },

@@ -13,34 +13,44 @@ import {
   ScrollView,
   Dimensions,
   Animated,
+  Easing,
   StatusBar,
   ActivityIndicator,
   Alert,
-  Modal,
-  Vibration,
   Linking,
   Platform,
   AppState,
+  Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter, type Href } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import * as SecureStore from 'expo-secure-store';
-import { useAppStore } from '@/src/store/appStore';
+import { useAppStore, type Trip, type DriverProfile } from '@/src/store/appStore';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SupportedLanguage } from '@/src/i18n/translations';
+import { driverOffersFallbackPollIntervalMs } from '@/src/constants/tripRealtimeRhythm';
 import {
   BACKEND_URL,
   getAuthHeaders,
   getDriverSubscriptionStatus,
   reportDriverSimSwapSignal,
   formatApiDetail,
+  messageFromAxiosError,
+  getDriverWithdrawals,
+  getTrip,
+  arriveTrip,
+  startTrip,
+  cancelTrip,
+  completeTrip,
+  rateTrip,
 } from '@/src/services/api';
 
 
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
+import { useDriverOfferAlert } from '@/src/hooks/useDriverOfferAlert';
 import {
   driverTermsRouteParams,
   driverDocumentsRouteParams,
@@ -55,14 +65,23 @@ import {
 } from '@/src/services/offlineMode';
 import * as Haptics from 'expo-haptics';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
-import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
-import { useFloatingDriverBubble } from '@/src/hooks/useFloatingDriverBubble';
 import { buildDriverPriorityFeatures, buildDriverToolFeatures } from '@/src/config/driverHomeFeatures';
 import DriverRideRequestModal from '@/src/components/DriverRideRequestModal';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
+import { PrayerStripWidget } from '@/src/components/PrayerStripWidget';
 import { SkeletonBlock } from '@/src/components/SkeletonBlock';
 import { COLORS } from '@/src/constants/theme';
 import { HOME_PALETTE } from '@/src/constants/designSystem';
+import { useFlowLayout } from '@/src/constants/flowLayout';
+import DriverLiveMapView, {
+  NEXRYDE_MAP_STYLE,
+  type ActiveTrip,
+} from '@/src/components/DriverLiveMapView';
+import DriverTripCompletionPanel, {
+  type TripCompletionPayload,
+} from '@/src/components/driver/DriverTripCompletionPanel';
+import DriverCompleteTripConfirmModal from '@/src/components/driver/DriverCompleteTripConfirmModal';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 const { width } = Dimensions.get('window');
 
@@ -85,6 +104,161 @@ const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * c;
 };
 
+function normalizeRoutePreview(raw: unknown): Array<{ lat: number; lng: number }> | null {
+  if (!Array.isArray(raw) || raw.length < 2) return null;
+  const out: Array<{ lat: number; lng: number }> = [];
+  for (const p of raw) {
+    const o = p && typeof p === 'object' ? (p as Record<string, unknown>) : null;
+    if (!o) continue;
+    const lat = Number(o.lat ?? o.latitude);
+    const lng = Number(o.lng ?? o.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    out.push({ lat, lng });
+  }
+  return out.length >= 2 ? out : null;
+}
+
+function readTripShield(raw: Record<string, unknown>): Record<string, unknown> | null {
+  const s = raw.shield;
+  return s && typeof s === 'object' ? (s as Record<string, unknown>) : null;
+}
+
+function tripToActiveTrip(trip: Trip | null, driverProfile: DriverProfile | null): ActiveTrip | null {
+  if (!trip?.id) return null;
+  const st = trip.status;
+  if (!['accepted', 'arrived', 'ongoing', 'pending_payment'].includes(st)) return null;
+  const raw = trip as unknown as Record<string, unknown>;
+  const route =
+    normalizeRoutePreview(raw.route_preview_coordinates) ??
+    normalizeRoutePreview(raw.polyline_coords);
+  const sh = readTripShield(raw);
+  let rider_reputation_avg: number | null = null;
+  if (sh) {
+    const a = sh.rider_reputation_avg;
+    const n = typeof a === 'number' ? a : typeof a === 'string' ? parseFloat(a) : NaN;
+    if (Number.isFinite(n) && n > 0 && n <= 5) rider_reputation_avg = Math.round(n * 10) / 10;
+  }
+  const tcRaw = sh?.rider_reputation_trip_count;
+  const tcNum = typeof tcRaw === 'number' ? tcRaw : typeof tcRaw === 'string' ? parseInt(tcRaw, 10) : NaN;
+  const rider_trip_count = Number.isFinite(tcNum) && tcNum >= 0 ? tcNum : null;
+  const rider_new_account = sh ? !!sh.rider_new_account : false;
+  return {
+    id: trip.id,
+    pickup_location: trip.pickup_location,
+    dropoff_location: trip.dropoff_location,
+    route_preview_coordinates: route,
+    status: trip.status,
+    rider_name: (raw.rider_name as string) || null,
+    rider_profile_image: (raw.rider_profile_image as string) || null,
+    rider_phone: (raw.rider_phone as string) || null,
+    pickup_code_verified: trip.pickup_code_verified,
+    security_code_verified: trip.security_code_verified,
+    arrived_at: trip.arrived_at ?? null,
+    started_at: trip.started_at ?? null,
+    fare: Number.isFinite(trip.fare) ? trip.fare : null,
+    payment_method: trip.payment_method ?? null,
+    payment_status: trip.payment_status ?? null,
+    rider_reputation_avg,
+    rider_trip_count,
+    rider_new_account,
+    distance_to_next_km: (() => {
+      const d = raw.distance_to_next_km ?? raw.distance_to_pickup_km ?? raw.distance_to_pickup;
+      if (d == null) return null;
+      const n = Number(d);
+      return Number.isFinite(n) ? n : null;
+    })(),
+    distance_km: Number.isFinite(Number(trip.distance_km)) ? Number(trip.distance_km) : null,
+    duration_mins: Number.isFinite(Number(trip.duration_mins)) ? Number(trip.duration_mins) : null,
+    base_fare: (() => {
+      const v = Number(raw.base_fare);
+      return Number.isFinite(v) ? v : null;
+    })(),
+    distance_fee: (() => {
+      const v = Number(raw.distance_fee);
+      return Number.isFinite(v) ? v : null;
+    })(),
+    time_fee: (() => {
+      const v = Number(raw.time_fee);
+      return Number.isFinite(v) ? v : null;
+    })(),
+    vehicle_model: (raw.vehicle_model as string) || driverProfile?.vehicle_model || null,
+    vehicle_plate: (raw.vehicle_plate as string) || driverProfile?.vehicle_plate || null,
+    vehicle_color: (raw.vehicle_color as string) || driverProfile?.vehicle_color || null,
+  };
+}
+
+function formatTripShortIdForUi(id: string | undefined | null): string {
+  if (!id || typeof id !== 'string') return '—';
+  const tail = id.replace(/-/g, '').slice(-6).toUpperCase();
+  return tail.length >= 4 ? tail : id.slice(0, 6).toUpperCase();
+}
+
+function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCompletionPayload {
+  const raw = merged as Record<string, unknown>;
+  const rr = merged.rider_rating;
+  const alreadyRated = typeof rr === 'number' && rr > 0 && rr <= 5;
+  const riderName =
+    typeof raw.rider_name === 'string' && raw.rider_name.trim().length > 0
+      ? raw.rider_name.trim()
+      : 'Your rider';
+  const riderPhoto = typeof raw.rider_profile_image === 'string' ? raw.rider_profile_image : null;
+  const mb = raw.mystery_bonus_ngn;
+  const sh = readTripShield(raw);
+  let riderRatingAvg: number | null = null;
+  if (sh) {
+    const a = sh.rider_reputation_avg;
+    const n = typeof a === 'number' ? a : typeof a === 'string' ? parseFloat(a) : NaN;
+    if (Number.isFinite(n) && n > 0 && n <= 5) riderRatingAvg = Math.round(n * 10) / 10;
+  }
+  const tcRaw = sh?.rider_reputation_trip_count;
+  const tcNum = typeof tcRaw === 'number' ? tcRaw : typeof tcRaw === 'string' ? parseInt(tcRaw, 10) : NaN;
+  const riderTripCount = Number.isFinite(tcNum) && tcNum >= 0 ? tcNum : null;
+  const baseFareNgn = (() => {
+    const v = Number(raw.base_fare);
+    return Number.isFinite(v) && v >= 0 ? v : null;
+  })();
+  const distanceFareNgn = (() => {
+    const v = Number(raw.distance_fee);
+    return Number.isFinite(v) && v >= 0 ? v : null;
+  })();
+  const timeFareNgn = (() => {
+    const v = Number(raw.time_fee);
+    return Number.isFinite(v) && v >= 0 ? v : null;
+  })();
+  return {
+    tripId: merged.id,
+    tripDisplayId: `Trip ${formatTripShortIdForUi(merged.id)}`,
+    riderName,
+    riderPhoto,
+    fare: Number(merged.fare ?? 0),
+    paymentMethod: String(merged.payment_method ?? 'cash'),
+    paymentPending: String(merged.payment_status || '').toLowerCase() === 'pending',
+    alreadyRated,
+    mysteryBonusNgn: mb != null && Number.isFinite(Number(mb)) ? Number(mb) : null,
+    riderRatingAvg,
+    riderTripCount,
+    baseFareNgn,
+    distanceFareNgn,
+    timeFareNgn,
+  };
+}
+
+function openGoogleNavigation(lat: number | null, lng: number | null, addressFallback?: string) {
+  if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+    const url =
+      Platform.select({
+        ios: `maps:0,0?q=${lat},${lng}`,
+        android: `google.navigation:q=${lat},${lng}`,
+      }) || `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+    Linking.openURL(url).catch(() => {
+      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+    });
+  } else if (addressFallback) {
+    const encoded = encodeURIComponent(addressFallback);
+    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`);
+  }
+}
+
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
 function mapWsRideOfferToTrip(data: Record<string, unknown>) {
   const riderOffer = data.rider_offer_price;
@@ -106,6 +280,9 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
     base_price: rec,
     recommended_fare: rec,
     ride_preferences: Array.isArray(data.ride_preferences) ? data.ride_preferences : [],
+    rider_mood: data.rider_mood ?? {},
+    rider_name: data.rider_name ?? '',
+    rider_photo: data.rider_photo ?? null,
     shield: data.shield as Record<string, unknown> | undefined,
     status: data.status,
     preferred: data.preferred,
@@ -123,7 +300,15 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
 
 export default function ModernDriverHome() {
   const router = useRouter();
-  const { user, token, setCurrentTrip, setCurrentLocation } = useAppStore();
+  const {
+    user,
+    token,
+    currentTrip,
+    setCurrentTrip,
+    setCurrentLocation,
+    setIsOnline: setStoreIsOnline,
+    driverProfile,
+  } = useAppStore();
 
   // ── Quick-access action (from widget tap or app shortcut) ─────────────────
   const { action: rawAction } = useLocalSearchParams<{ action?: string }>();
@@ -133,9 +318,26 @@ export default function ModernDriverHome() {
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(isOnline);
   isOnlineRef.current = isOnline;
+  // Sync to global store so _layout can style the tab bar for map mode
+  useEffect(() => { setStoreIsOnline(isOnline); }, [isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { enable: bubbleEnable, disable: bubbleDisable, updateStatus: bubbleUpdate } =
-    useFloatingDriverBubble();
+  // Load destination mode state whenever driver comes online
+  useEffect(() => {
+    if (!isOnline || !user?.id) return;
+    let mounted = true;
+    (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination`, { headers: getAuthHeaders() });
+        if (res.ok && mounted) {
+          const data = await res.json();
+          setDestinationActive(!!data.active);
+          setDestinationName(data.destination_name || '');
+          setDestinationTripsRemaining(Number(data.trips_remaining ?? 0));
+        }
+      } catch { /* silent */ }
+    })();
+    return () => { mounted = false; };
+  }, [isOnline, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const priorityFeatures = useMemo(
     () => buildDriverPriorityFeatures(t),
@@ -145,7 +347,12 @@ export default function ModernDriverHome() {
     () => buildDriverToolFeatures(t),
     [language, t.verification.vehicleVerified, t.verification.uploadDocuments, t.safety.safetyTips, t.driver.rating]
   );
-  const [earnings, setEarnings] = useState({ today: 0, week: 0, trips: 0 });
+  const [earnings, setEarnings] = useState({
+    today: 0,
+    week: 0,
+    trips: 0,
+    tripHoursToday: 0,
+  });
   const [surgePricing, setSurgePricing] = useState<any>(null);
 
   // Load real earnings from backend
@@ -174,10 +381,13 @@ export default function ModernDriverHome() {
             todaySummary.total_earnings ?? todayData.today_earnings ?? todayData?.projections?.daily ?? 0
           );
           const weekEarnings = Number(weekSummary.total_earnings ?? weekData?.projections?.weekly ?? 0);
+          const tripMins = Number(todaySummary.total_time_mins ?? 0);
+          const tripHoursToday = tripMins > 0 ? Math.round((tripMins / 60) * 10) / 10 : 0;
           setEarnings({
             today: todayEarnings,
             week: weekEarnings,
-            trips: Number(user?.total_trips ?? todaySummary.total_trips ?? 0),
+            trips: Number(todaySummary.total_trips ?? 0),
+            tripHoursToday,
           });
           setSurgePricing(todayData.surge || null);
           setEarningsError(false);
@@ -190,6 +400,10 @@ export default function ModernDriverHome() {
     };
     fetchEarnings(true);
     const interval = setInterval(() => fetchEarnings(false), 60000);
+    // Fetch wallet balance in background
+    getDriverWithdrawals(user.id).then(r => {
+      if (mounted) setWalletBalance(r.data.wallet_balance ?? 0);
+    }).catch(() => {});
     return () => {
       mounted = false;
       clearInterval(interval);
@@ -202,10 +416,19 @@ export default function ModernDriverHome() {
   const [trialExtended, setTrialExtended] = useState<boolean>(false);
   const driverApproved = verificationStatus === 'approved';
   const trialReady = subscriptionStatus ? ['trial', 'active', 'grace_period'].includes(subscriptionStatus) : false;
+  const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
+  const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
   const driverCanReceiveOffers = driverApproved && trialReady;
   const verificationLocked = Boolean(verificationStatus && !driverApproved);
   const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const [incomingRide, setIncomingRide] = useState<any>(null);
+  const incomingOfferAlertKey =
+    incomingRide?.offer_id != null
+      ? String(incomingRide.offer_id)
+      : incomingRide?.id != null
+        ? String(incomingRide.id)
+        : null;
+  useDriverOfferAlert(Platform.OS !== 'web' && Boolean(incomingRide), incomingOfferAlertKey);
   const [driverOffersWsConnected, setDriverOffersWsConnected] = useState(false);
   const driverOffersWsRef = useRef<WebSocket | null>(null);
   const driverOffersReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -216,7 +439,7 @@ export default function ModernDriverHome() {
   const [showLangPicker, setShowLangPicker] = useState(false);
   const [featureHubOpen, setFeatureHubOpen] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
-  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number; heading?: number } | null>(null);
   const lastLocationPushAtRef = useRef<number>(0);
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const [simSignalSent, setSimSignalSent] = useState(false);
@@ -224,6 +447,16 @@ export default function ModernDriverHome() {
   const [toggleSyncing, setToggleSyncing] = useState(false);
   const [earningsLoading, setEarningsLoading] = useState(true);
   const [earningsError, setEarningsError] = useState(false);
+  const [walletBalance, setWalletBalance] = useState(0);
+
+  // ── Destination mode state ──────────────────────────────────────────────
+  const [destinationActive, setDestinationActive] = useState(false);
+  const [destinationName, setDestinationName] = useState('');
+  const [destinationTripsRemaining, setDestinationTripsRemaining] = useState(0);
+
+  const [tripActionBusy, setTripActionBusy] = useState<string | null>(null);
+  const [tripCompletion, setTripCompletion] = useState<TripCompletionPayload | null>(null);
+  const [completeTripConfirmOpen, setCompleteTripConfirmOpen] = useState(false);
 
   // ─── Ride category selection ─────────────────────────────────────────────
   const CATEGORY_OPTIONS = [
@@ -296,16 +529,178 @@ export default function ModernDriverHome() {
   const tabPad = useTabBottomPad(8);
   const navigationInFlightRef = useRef(false);
   const guardedPush = useCallback(
-    (route: string) => {
+    (route: Href) => {
       if (navigationInFlightRef.current) return;
       navigationInFlightRef.current = true;
-      router.push(route as any);
+      router.push(route);
       setTimeout(() => {
         navigationInFlightRef.current = false;
       }, 700);
     },
     [router]
   );
+
+  const activeTripForMap = useMemo(
+    () => tripToActiveTrip(currentTrip, driverProfile),
+    [currentTrip, driverProfile],
+  );
+
+  const handleTripOpenNavigation = useCallback(() => {
+    if (!currentTrip) return;
+    const st = currentTrip.status;
+    const pick = currentTrip.pickup_location;
+    const drop = currentTrip.dropoff_location;
+    const pv = !!(currentTrip.pickup_code_verified || currentTrip.security_code_verified);
+    if (st === 'accepted' && pick) {
+      openGoogleNavigation(Number(pick.lat), Number(pick.lng), pick.address);
+    } else if (st === 'arrived' && pv && drop) {
+      openGoogleNavigation(Number(drop.lat), Number(drop.lng), drop.address);
+    } else if (st === 'arrived' && pick) {
+      openGoogleNavigation(Number(pick.lat), Number(pick.lng), pick.address);
+    } else if (st === 'ongoing' && drop) {
+      openGoogleNavigation(Number(drop.lat), Number(drop.lng), drop.address);
+    }
+  }, [currentTrip]);
+
+  const handleTripMarkArrived = useCallback(async () => {
+    if (!currentTrip?.id || !user?.id) return;
+    setTripActionBusy('arrive');
+    try {
+      const res = await arriveTrip(currentTrip.id, user.id);
+      setCurrentTrip(res.data as Trip);
+    } catch (e: unknown) {
+      let msg = 'Try again.';
+      if (typeof e === 'object' && e !== null && 'response' in e) {
+        const d = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
+        if (typeof d === 'string') msg = d;
+      }
+      Alert.alert('Could not update', msg);
+    } finally {
+      setTripActionBusy(null);
+    }
+  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+
+  const handleTripStart = useCallback(() => {
+    if (!currentTrip?.id || !user?.id) return;
+    guardedPush(
+      `/driver/verify-rider-code?trip_id=${encodeURIComponent(currentTrip.id)}&driver_id=${encodeURIComponent(user.id)}&auto=0`
+    );
+  }, [currentTrip?.id, user?.id, guardedPush]);
+
+  const handleTripConfirmStart = useCallback(async () => {
+    if (!currentTrip?.id) return;
+    setTripActionBusy('start');
+    try {
+      const res = await startTrip(currentTrip.id);
+      setCurrentTrip((res?.data as Trip) || currentTrip);
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Could not start trip', messageFromAxiosError(e, 'Try again in a moment.'));
+    } finally {
+      setTripActionBusy(null);
+    }
+  }, [currentTrip, setCurrentTrip]);
+
+  const handleTripCancelFromDock = useCallback(async () => {
+    if (!currentTrip?.id || !user?.id) return;
+    setTripActionBusy('cancel');
+    try {
+      await cancelTrip(currentTrip.id, user.id);
+      setCurrentTrip(null);
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Could not cancel', messageFromAxiosError(e, 'Try again in a moment.'));
+    } finally {
+      setTripActionBusy(null);
+    }
+  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+
+  const handleTripPauseFromDock = useCallback(() => {
+    Alert.alert(
+      'Pause trip',
+      'Full trip pause from here is not available yet. Pull over safely, then use Chat or Call if you need a moment with your rider.',
+    );
+  }, []);
+
+  const performCompleteTrip = useCallback(async () => {
+    if (!currentTrip?.id) return;
+    setTripActionBusy('complete');
+    try {
+      const response = await completeTrip(currentTrip.id);
+      const tripAfter = (response?.data || {}) as Trip & Record<string, unknown>;
+      const statusAfter =
+        tripAfter.status === 'completed' && tripAfter.payment_status === 'pending'
+          ? 'pending_payment'
+          : tripAfter.status;
+      const merged = {
+        ...(currentTrip || ({} as Trip)),
+        ...tripAfter,
+        id: (tripAfter as Trip).id || currentTrip.id,
+        ...(statusAfter === 'pending_payment' ? { status: 'pending_payment' as const } : {}),
+      } as Trip & Record<string, unknown>;
+      setCompleteTripConfirmOpen(false);
+      setTripCompletion(tripToCompletionPayload(merged));
+      if (statusAfter === 'pending_payment') {
+        setCurrentTrip(merged as Trip);
+      } else {
+        setCurrentTrip(null);
+      }
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      }
+    } catch (e: unknown) {
+      Alert.alert('Could not complete', messageFromAxiosError(e, 'Try again in a moment.'));
+    } finally {
+      setTripActionBusy(null);
+    }
+  }, [currentTrip, setCurrentTrip]);
+
+  const handleTripComplete = useCallback(() => {
+    if (!currentTrip?.id) return;
+    setCompleteTripConfirmOpen(true);
+  }, [currentTrip?.id]);
+
+  const completeModalRiderName = useMemo(() => {
+    const raw = currentTrip as unknown as Record<string, unknown> | null;
+    const n = raw?.rider_name;
+    return typeof n === 'string' && n.trim() ? n.trim() : 'Your rider';
+  }, [currentTrip]);
+
+  const completeModalFare = useMemo(() => {
+    if (!currentTrip || currentTrip.fare == null) return null;
+    const f = Number(currentTrip.fare);
+    return Number.isFinite(f) ? f : null;
+  }, [currentTrip]);
+
+  const handleCompletionRate = useCallback(
+    async (stars: number, comment: string) => {
+      if (!user?.id) throw new Error('Not signed in');
+      const tid = tripCompletion?.tripId;
+      if (!tid) throw new Error('Missing trip');
+      await rateTrip(tid, user.id, stars, comment);
+    },
+    [user?.id, tripCompletion?.tripId],
+  );
+
+  const handleTripCallRider = useCallback(() => {
+    const raw = currentTrip as unknown as Record<string, unknown> | null;
+    const phone = raw?.rider_phone;
+    if (typeof phone !== 'string' || !phone.trim()) {
+      Alert.alert('Call unavailable', 'Rider phone will appear here once the trip syncs.');
+      return;
+    }
+    Linking.openURL(`tel:${phone.replace(/\s+/g, '')}`);
+  }, [currentTrip]);
+
+  const handleTripMessageRider = useCallback(() => {
+    if (!currentTrip?.id) return;
+    guardedPush({ pathname: '/chat', params: { tripId: String(currentTrip.id) } });
+  }, [currentTrip?.id, guardedPush]);
+
   const hydrateOnlineState = async () => {
     if (!user?.id) return;
     try {
@@ -408,29 +803,33 @@ export default function ModernDriverHome() {
 
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (mounted && lastKnown) {
-          const c = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude };
+          const c = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude, heading: lastKnown.coords.heading ?? 0 };
           setDriverCoords(c);
           setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
 
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         if (mounted) {
-          const c = { lat: loc.coords.latitude, lng: loc.coords.longitude };
+          const c = { lat: loc.coords.latitude, lng: loc.coords.longitude, heading: loc.coords.heading ?? 0 };
           setDriverCoords(c);
           setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
 
         locationSub = await Location.watchPositionAsync(
           {
-            // 12 s interval + 40 m movement threshold — reduces battery drain ~60%
+            // 5 s interval when online (for map follow), 12 s when offline
             // Backend push is further debounced (15 s + 50 m) so no extra API calls
             accuracy: Location.Accuracy.Balanced,
-            timeInterval: 12000,
-            distanceInterval: 40,
+            timeInterval: 5000,
+            distanceInterval: 10,
           },
           (update) => {
             if (mounted) {
-              const c = { lat: update.coords.latitude, lng: update.coords.longitude };
+              const c = {
+                lat: update.coords.latitude,
+                lng: update.coords.longitude,
+                heading: update.coords.heading ?? 0,
+              };
               setDriverCoords(c);
               setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
             }
@@ -591,9 +990,6 @@ export default function ModernDriverHome() {
             if (prev?.offer_id === mapped.offer_id) return prev;
             setTimeout(() => {
               setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
-              if (Platform.OS !== 'web') {
-                Vibration.vibrate(400);
-              }
             }, 0);
             return mapped;
           });
@@ -622,6 +1018,10 @@ export default function ModernDriverHome() {
         clearTimeout(driverOffersReconnectTimerRef.current);
         driverOffersReconnectTimerRef.current = null;
       }
+      if (snoozeTimerRef.current) {
+        clearTimeout(snoozeTimerRef.current);
+        snoozeTimerRef.current = null;
+      }
       if (driverOffersWsRef.current) {
         try {
           driverOffersWsRef.current.close();
@@ -640,7 +1040,7 @@ export default function ModernDriverHome() {
 
     if (isOnline && !incomingRide) {
       void fetchIncomingRide();
-      const pollMs = driverOffersWsConnected ? 90000 : 8000;
+      const pollMs = driverOffersFallbackPollIntervalMs(driverOffersWsConnected);
       pollInterval = setInterval(() => {
         void fetchIncomingRide();
       }, pollMs);
@@ -651,6 +1051,77 @@ export default function ModernDriverHome() {
     };
   }, [isOnline, incomingRide, user?.id, driverOffersWsConnected, fetchIncomingRide]);
 
+  // Restore accepted / in-progress trip when driver goes online (resume after kill or refresh).
+  useEffect(() => {
+    if (!isOnline || !user?.id) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/api/trips/active/${user.id}`, {
+          headers: getAuthHeaders(),
+        });
+        if (!response.ok || cancelled) return;
+        const payload = await response.json();
+        if (!payload?.active || !payload?.trip || cancelled) return;
+        const trip = payload.trip as Record<string, unknown>;
+        const status = String(trip.status ?? '');
+        let normalized: Trip['status'] | null = status as Trip['status'];
+        if (status === 'pickup') normalized = 'arrived';
+        if (status === 'completed' && trip.payment_status === 'pending') normalized = 'pending_payment';
+        const allow: Trip['status'][] = ['accepted', 'arrived', 'ongoing', 'pending_payment'];
+        if (!normalized || !allow.includes(normalized)) return;
+        setCurrentTrip({
+          ...(trip as unknown as Trip),
+          status: normalized,
+        });
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOnline, user?.id, setCurrentTrip]);
+
+  // Keep trip snapshot fresh (pickup coords, rider phone, status transitions).
+  useEffect(() => {
+    if (!user?.id || !currentTrip?.id) return;
+    let cancelled = false;
+    const tripId = currentTrip.id;
+
+    const sync = async () => {
+      try {
+        const res = await getTrip(tripId);
+        const d = res.data as Trip & { status?: string; payment_status?: string };
+        if (cancelled) return;
+        const st = String(d.status ?? '');
+        if (st === 'completed') {
+          const pst = String(d.payment_status ?? '');
+          if (pst === 'pending') {
+            setCurrentTrip({ ...d, status: 'pending_payment' });
+          } else {
+            setCurrentTrip(null);
+          }
+          return;
+        }
+        if (st === 'cancelled') {
+          setCurrentTrip(null);
+          return;
+        }
+        setCurrentTrip(d as Trip);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    void sync();
+    const iv = setInterval(sync, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(iv);
+    };
+  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+
   useEffect(() => {
     if (!incomingRide?.id) return;
     const r = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
@@ -659,7 +1130,9 @@ export default function ModernDriverHome() {
 
   const declineHandlerRef = useRef<() => Promise<void>>(async () => {});
   const offerTimerExpiredRef = useRef(false);
+  const snoozeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Formal decline — driver tapped "Ignore" explicitly. Calls backend, records violation.
   const handleDeclineRide = useCallback(async () => {
     const ride = incomingRide;
     if (!ride) return;
@@ -675,6 +1148,23 @@ export default function ModernDriverHome() {
     setIncomingRide(null);
     setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
   }, [incomingRide, user?.id]);
+
+  // Snooze — timer ran out without explicit action. Hide modal, re-poll in 4s.
+  // Does NOT call the backend decline endpoint so the offer stays alive and repeats.
+  const handleSnoozeOffer = useCallback(() => {
+    setIncomingRide(null);
+    setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
+    if (snoozeTimerRef.current) clearTimeout(snoozeTimerRef.current);
+    snoozeTimerRef.current = setTimeout(() => {
+      void fetchIncomingRide();
+    }, 4000);
+  }, [fetchIncomingRide]);
+
+  // Keep snooze ref in sync
+  const snoozeHandlerRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    snoozeHandlerRef.current = handleSnoozeOffer;
+  }, [handleSnoozeOffer]);
 
   useEffect(() => {
     declineHandlerRef.current = handleDeclineRide;
@@ -693,7 +1183,8 @@ export default function ModernDriverHome() {
           if (!offerTimerExpiredRef.current) {
             offerTimerExpiredRef.current = true;
             clearInterval(id);
-            void declineHandlerRef.current();
+            // Snooze (not decline) — offer repeats after 4 seconds
+            snoozeHandlerRef.current();
           }
           return 0;
         }
@@ -703,133 +1194,136 @@ export default function ModernDriverHome() {
     return () => clearInterval(id);
   }, [incomingRide?.id]);
 
-  const handleAcceptRide = async () => {
-    if (!incomingRide) return;
-    if (!user?.id) {
-      Alert.alert('Profile Required', 'Please login again to accept rides.');
-      return;
-    }
-    setAcceptingRide(true);
-    const fallbackProposed = Math.round(
-      Number(String(counterFareInput).replace(/,/g, '').trim()) ||
-        Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0)
-    );
-    try {
-      const tripId = incomingRide.id;
-      const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
-      const maxP = incomingRide.max_price != null ? Math.round(Number(incomingRide.max_price)) : null;
-      const minP = incomingRide.min_price != null ? Math.round(Number(incomingRide.min_price)) : null;
-      const proposed = Math.round(Number(String(counterFareInput).replace(/,/g, '').trim()) || riderOffer);
-      if (!Number.isFinite(proposed) || proposed < 1) {
-        Alert.alert('Fare', 'Enter a valid fare.');
-        setAcceptingRide(false);
+  const submitIncomingAcceptance = useCallback(
+    async (proposed: number) => {
+      if (!incomingRide) return;
+      if (!user?.id) {
+        Alert.alert('Profile Required', 'Please login again to accept rides.');
         return;
       }
-      if (riderOffer > 0 && proposed < riderOffer) {
-        Alert.alert('Fare', 'Your counter cannot be below the rider’s offer.');
-        setAcceptingRide(false);
-        return;
-      }
-      if (minP != null && minP > 0 && proposed < minP) {
-        Alert.alert('Minimum fare', `Minimum allowed price is ₦${minP.toLocaleString()}`);
-        setAcceptingRide(false);
-        return;
-      }
-      if (maxP != null && maxP > 0 && proposed > maxP) {
-        Alert.alert('Maximum fare', `Maximum allowed price is ₦${maxP.toLocaleString()}`);
-        setAcceptingRide(false);
-        return;
-      }
-      const networkReady = await checkOnlineStatus();
-      if (!networkReady) {
-        await queueDriverRideAcceptance(
-          tripId,
-          {
+      setAcceptingRide(true);
+      const fallbackProposed = Math.round(
+        Number.isFinite(proposed) && proposed > 0
+          ? proposed
+          : Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0)
+      );
+      try {
+        const tripId = incomingRide.id;
+        const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+        const maxP = incomingRide.max_price != null ? Math.round(Number(incomingRide.max_price)) : null;
+        const minP = incomingRide.min_price != null ? Math.round(Number(incomingRide.min_price)) : null;
+        if (!Number.isFinite(proposed) || proposed < 1) {
+          Alert.alert('Fare', 'Enter a valid fare.');
+          setAcceptingRide(false);
+          return;
+        }
+        if (riderOffer > 0 && proposed < riderOffer) {
+          Alert.alert('Fare', 'Your counter cannot be below the rider’s offer.');
+          setAcceptingRide(false);
+          return;
+        }
+        if (minP != null && minP > 0 && proposed < minP) {
+          Alert.alert('Minimum fare', `Minimum allowed price is ₦${minP.toLocaleString()}`);
+          setAcceptingRide(false);
+          return;
+        }
+        if (maxP != null && maxP > 0 && proposed > maxP) {
+          Alert.alert('Maximum fare', `Maximum allowed price is ₦${maxP.toLocaleString()}`);
+          setAcceptingRide(false);
+          return;
+        }
+        const networkReady = await checkOnlineStatus();
+        if (!networkReady) {
+          await queueDriverRideAcceptance(
+            tripId,
+            {
+              driver_id: user.id,
+              offer_id: incomingRide?.offer_id,
+              proposed_fare: proposed,
+            },
+            token
+          );
+          setOfflineQueueCount(await getQueueSize());
+          setIncomingRide(null);
+          return;
+        }
+        const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/accept`, {
+          method: 'PUT',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
             driver_id: user.id,
             offer_id: incomingRide?.offer_id,
             proposed_fare: proposed,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          if (Platform.OS !== 'web') {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          }
+          const drec = data as Record<string, unknown>;
+          const apiRoute = normalizeRoutePreview(drec.route_preview_coordinates);
+          const offerRoute = normalizeRoutePreview(incomingRide?.route_preview_coordinates);
+          const incomingRec = incomingRide as Record<string, unknown> | null | undefined;
+          const mergedTrip = {
+            ...data,
+            route_preview_coordinates: apiRoute ?? offerRoute ?? null,
+            rider_profile_image:
+              (typeof drec.rider_profile_image === 'string' ? drec.rider_profile_image : undefined) ??
+              (incomingRide?.rider_photo != null ? String(incomingRide.rider_photo) : undefined),
+            rider_name:
+              (typeof drec.rider_name === 'string' && drec.rider_name.trim()
+                ? drec.rider_name
+                : undefined) ??
+              (typeof incomingRide?.rider_name === 'string' ? incomingRide.rider_name : undefined),
+            shield:
+              (drec.shield as Record<string, unknown> | undefined) ??
+              (incomingRec?.shield as Record<string, unknown> | undefined),
+          } as Trip;
+
+          setCurrentTrip(mergedTrip);
+          setIncomingRide(null);
+        } else {
+          Alert.alert('Could not accept', formatApiDetail(data?.detail) || 'This offer may have expired. Try the next one.');
+        }
+      } catch (e) {
+        await queueDriverRideAcceptance(
+          incomingRide.id,
+          {
+            driver_id: user.id,
+            offer_id: incomingRide?.offer_id,
+            proposed_fare: fallbackProposed,
           },
           token
         );
         setOfflineQueueCount(await getQueueSize());
         setIncomingRide(null);
-        return;
+      } finally {
+        setAcceptingRide(false);
       }
-      const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/accept`, {
-        method: 'PUT',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({
-          driver_id: user.id,
-          offer_id: incomingRide?.offer_id,
-          proposed_fare: proposed,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        if (Platform.OS !== 'web') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
-        setCurrentTrip(data);
-        const pickup = incomingRide?.pickup_location;
-        const pickupAddress =
-          typeof pickup === 'string'
-            ? pickup
-            : pickup?.address || 'Pickup location';
-        const pickupLat = typeof pickup === 'object' ? pickup?.lat : null;
-        const pickupLng = typeof pickup === 'object' ? pickup?.lng : null;
+    },
+    [incomingRide, user?.id, token]
+  );
 
-        const openNavigation = () => {
-          if (pickupLat && pickupLng) {
-            const url = Platform.select({
-              ios: `maps:0,0?q=${pickupLat},${pickupLng}`,
-              android: `google.navigation:q=${pickupLat},${pickupLng}`,
-            }) || `https://www.google.com/maps/dir/?api=1&destination=${pickupLat},${pickupLng}`;
-            Linking.openURL(url).catch(() => {
-              Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${pickupLat},${pickupLng}`);
-            });
-          } else if (pickupAddress && pickupAddress !== 'Pickup location') {
-            const encoded = encodeURIComponent(pickupAddress);
-            Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`);
-          }
-        };
+  const handleAcceptRide = useCallback(() => {
+    if (!incomingRide) return;
+    const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+    const proposed = Math.round(Number(String(counterFareInput).replace(/,/g, '').trim()) || riderOffer);
+    void submitIncomingAcceptance(proposed);
+  }, [incomingRide, counterFareInput, submitIncomingAcceptance]);
 
-        Alert.alert(
-          'Ride Accepted!',
-          `Navigate to pickup:\n${pickupAddress}`,
-          [
-            {
-              text: 'Open Trip',
-              onPress: () => router.push(DRIVER_TRIPS_TAB_HREF),
-              style: 'default',
-            },
-            { text: 'Navigate', onPress: openNavigation, style: 'default' },
-            {
-              text: 'Later',
-              style: 'cancel',
-              onPress: () => router.push(DRIVER_TRIPS_TAB_HREF),
-            },
-          ]
-        );
-        setIncomingRide(null);
-      } else {
-        Alert.alert('Could not accept', formatApiDetail(data?.detail) || 'This offer may have expired. Try the next one.');
-      }
-    } catch (e) {
-      await queueDriverRideAcceptance(
-        incomingRide.id,
-        {
-          driver_id: user.id,
-          offer_id: incomingRide?.offer_id,
-          proposed_fare: fallbackProposed,
-        },
-        token
-      );
-      setOfflineQueueCount(await getQueueSize());
-      setIncomingRide(null);
-    } finally {
-      setAcceptingRide(false);
-    }
-  };
+  const handleAcceptIncomingAtRiderOffer = useCallback(() => {
+    if (!incomingRide) return;
+    const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+    void submitIncomingAcceptance(riderOffer);
+  }, [incomingRide, submitIncomingAcceptance]);
+
+  const handleAcceptIncomingAtCounterFare = useCallback(() => {
+    if (!incomingRide) return;
+    const riderOffer = Math.round(Number(incomingRide.offered_fare ?? incomingRide.fare ?? 0));
+    const proposed = Math.round(Number(String(counterFareInput).replace(/,/g, '').trim()) || riderOffer);
+    void submitIncomingAcceptance(proposed);
+  }, [incomingRide, counterFareInput, submitIncomingAcceptance]);
 
   const handleToggleOnline = async () => {
     if (onlineToggleInFlightRef.current) return;
@@ -874,7 +1368,7 @@ export default function ModernDriverHome() {
             { text: 'Later', style: 'cancel' },
             { text: 'View Plans', onPress: () => guardedPush('/driver/subscription') },
           ]);
-        } else if (lower.includes('bank') || lower.includes('account')) {
+        } else if (lower.includes('bank detail') || lower.includes('bank account') || lower.includes('payout') || lower.includes('account number')) {
           Alert.alert('Add Bank Details', 'Add your bank account so you can receive payouts.', [
             { text: 'Later', style: 'cancel' },
             { text: 'Add Now', onPress: () => guardedPush('/driver/bank') },
@@ -902,12 +1396,8 @@ export default function ModernDriverHome() {
       setIsOnline(nextStatus);
       if (nextStatus) {
         fetchIncomingRide();
-        // Enable floating bubble so driver sees status when app is minimised
-        bubbleEnable('online');
       } else {
         setIncomingRide(null);
-        // Disable floating bubble when driver goes offline
-        bubbleDisable();
       }
       // Persist so widget and smart-resume reflect the new status instantly
       if (user?.id) {
@@ -921,7 +1411,7 @@ export default function ModernDriverHome() {
     }
   };
   
-  const checkOnboardingStatus = async () => {
+  const checkOnboardingStatus = async (retryCount = 0) => {
     try {
       if (!user?.id) {
         setCheckingOnboarding(false);
@@ -932,10 +1422,31 @@ export default function ModernDriverHome() {
       const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/onboarding-status`, {
         headers: getAuthHeaders(),
       });
+
+      if (!response.ok) {
+        // Retry up to 2 times on transient server errors before giving up gracefully
+        if (response.status >= 500 && retryCount < 2) {
+          await new Promise(r => setTimeout(r, 1500 * (retryCount + 1)));
+          return checkOnboardingStatus(retryCount + 1);
+        }
+        // 4xx or exhausted retries: show dashboard with limited state, don't trap driver
+        if (__DEV__) console.warn('onboarding-status fetch failed', response.status);
+        setVerificationStatus('pending_review');
+        setCheckingOnboarding(false);
+        return;
+      }
+
       if (response.ok) {
         const status = await response.json();
         
         setVerificationStatus(status.verification_status || (status.completed ? 'approved' : 'pending_review'));
+
+        // Backend uses completed:true + can_go_online:false while docs wait for approval (dashboard_limited).
+        if (status.completed === true && status.can_go_online === false) {
+          setSubscriptionStatus('locked_until_approval');
+          setIsOnline(false);
+        }
+
         if (!status.completed) {
           // Redirect driver to the appropriate onboarding step
           if (status.step === 'terms') {
@@ -968,9 +1479,14 @@ export default function ModernDriverHome() {
             });
             return;
           }
+          // Incomplete but unknown step (e.g. not_found, error) — do NOT run subscription "approved" path
+          if (__DEV__) console.warn('[driver-home] onboarding incomplete unhandled step', status.step);
+          setVerificationStatus(status.verification_status || 'pending_review');
+          setCheckingOnboarding(false);
+          return;
         }
         
-        // Driver is approved — set verification status and show dashboard
+        // Driver completed onboarding API flow — verification may still be pending until admin approves
         setVerificationStatus(status.verification_status || 'approved');
         try {
           const subRes = await getDriverSubscriptionStatus();
@@ -1009,559 +1525,148 @@ export default function ModernDriverHome() {
     );
   }
   
-  return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
+  /* ── LIVE MAP MODE: full-screen when driver is online ── */
+  if (isOnline) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0a0f1e' }}>
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
 
-      {/* SIM Swap Alert Banner — non-blocking, appears only on genuine SIM change */}
-      {simSwapAlert && (
-        <View style={styles.simSwapBanner}>
-          <View style={styles.simSwapBannerIconWrap}>
-            <Ionicons name="shield-half-outline" size={20} color="#FFF" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.simSwapBannerTitle}>Security Alert: New SIM Detected</Text>
-            <Text style={styles.simSwapBannerText}>
-              Your account has been temporarily secured. If this wasn't you, contact support immediately.
-            </Text>
-            <TouchableOpacity
-              onPress={() => {
-                Linking.openURL('mailto:admin@admoblordgroup.com?subject=SIM%20Swap%20Alert').catch(() =>
-                  Linking.openURL('https://wa.me/2348000000000?text=SIM+swap+alert+on+my+account')
-                );
-              }}
-              style={styles.simSwapContactBtn}
-            >
-              <Text style={styles.simSwapContactBtnText}>Contact Support →</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 6, alignSelf: 'flex-start' }}>
-            <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
-        </View>
-      )}
-      
-      {/* HEADER WITH GRADIENT */}
-      <LinearGradient
-        colors={[COLORS.accentGreen, COLORS.accentGreenDark]}
-        style={styles.header}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-      >
-        <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.greeting}>{(() => { const h = new Date().getHours(); return h < 12 ? t.home.goodMorning : h < 17 ? t.home.goodAfternoon : t.home.goodEvening; })()}</Text>
-            <Text style={styles.driverName}>{user?.name || 'Driver'}</Text>
-            {/* Quick earnings snapshot — visible without scrolling */}
-            {!earningsLoading && (earnings.today > 0 || earnings.trips > 0) && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Ionicons name="wallet-outline" size={12} color="rgba(255,255,255,0.8)" />
-                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, fontWeight: '700' }}>
-                    ₦{earnings.today >= 1000 ? `${(earnings.today / 1000).toFixed(1)}k` : earnings.today.toLocaleString()} today
-                  </Text>
-                </View>
-                {earnings.trips > 0 && (
-                  <>
-                    <Text style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12 }}>•</Text>
-                    <Text style={{ color: 'rgba(255,255,255,0.75)', fontSize: 12, fontWeight: '600' }}>
-                      {earnings.trips} trip{earnings.trips !== 1 ? 's' : ''}
-                    </Text>
-                  </>
-                )}
-              </View>
-            )}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <TouchableOpacity
-              onPress={() => setFeatureHubOpen(true)}
-              style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
-              accessibilityLabel="Open feature hub"
-              accessibilityRole="button"
-            >
-              <Ionicons name="menu" size={26} color="#FFF" />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              onPress={() => setShowLangPicker(true)}
-              style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Text style={{ fontSize: 18 }}>{availableLanguages.find(l => l.code === language)?.flag || '🌐'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.profileButton} onPress={() => guardedPush('/(driver-tabs)/driver-profile')}>
-              <Ionicons name="person-circle" size={40} color="#FFF" />
-            </TouchableOpacity>
-          </View>
-        </View>
+        <DriverLiveMapView
+          driverCoords={driverCoords}
+          isOnline={isOnline}
+          driverCanReceiveOffers={driverCanReceiveOffers}
+          todayEarnings={earnings.today}
+          todayTrips={earnings.trips}
+          todayTripHours={earnings.tripHoursToday}
+          driverRating={typeof user?.rating === 'number' ? user.rating : null}
+          weekEarnings={earnings.week}
+          driverOffersWsConnected={driverOffersWsConnected}
+          surgeActive={!!(surgePricing?.is_surge)}
+          surgeMultiplier={Number(surgePricing?.multiplier ?? 1)}
+          destinationActive={destinationActive}
+          destinationName={destinationName}
+          destinationTripsRemaining={destinationTripsRemaining}
+          onGoOnline={handleToggleOnline}
+          onGoOffline={handleToggleOnline}
+          toggling={toggleSyncing}
+          driverApproved={driverApproved}
+          trialReady={trialReady}
+          onFeatureHub={() => setFeatureHubOpen(true)}
+          onSearch={() => guardedPush('/driver/heatmap')}
+          onShieldPress={() => guardedPush('/(driver-tabs)/driver-safety')}
+          onInboxPress={() => guardedPush('/(driver-tabs)/driver-notifications')}
+          onDestination={() => guardedPush('/driver/destination')}
+          activeTrip={activeTripForMap}
+          embeddedOfferTrip={incomingRide}
+          embeddedOfferCountdown={rideCountdown}
+          embeddedOfferFareInput={counterFareInput}
+          onEmbeddedOfferFareInputChange={setCounterFareInput}
+          onEmbeddedOfferAcceptRider={() => void handleAcceptIncomingAtRiderOffer()}
+          onEmbeddedOfferAcceptCounter={() => void handleAcceptIncomingAtCounterFare()}
+          onEmbeddedOfferDecline={() => void handleDeclineRide()}
+          embeddedOfferAccepting={acceptingRide}
+          onTripOpenNavigation={handleTripOpenNavigation}
+          onTripMarkArrived={handleTripMarkArrived}
+          onTripStart={handleTripStart}
+          onTripConfirmStart={handleTripConfirmStart}
+          onTripCancel={handleTripCancelFromDock}
+          onTripComplete={handleTripComplete}
+          onTripPause={handleTripPauseFromDock}
+          onTripCallRider={handleTripCallRider}
+          onTripMessageRider={handleTripMessageRider}
+          tripActionBusy={tripActionBusy}
+          suppressTripDock={!!tripCompletion || completeTripConfirmOpen}
+        />
 
-        {/* ── ONLINE STATUS CARD ──────────────────────────────────────────── */}
-        <Animated.View style={[styles.statusCard, { opacity: fadeAnim }, isOnline && styles.statusCardOnlineGlow]}>
-          {/* Status indicator dot */}
-          <View style={[styles.statusDot, isOnline && styles.statusDotOnline, !driverCanReceiveOffers && styles.statusDotLocked]}>
-            {isOnline ? (
-              <Ionicons name="radio-button-on" size={20} color="#22E180" />
-            ) : !driverApproved ? (
-              <Ionicons name="shield-half" size={20} color="#FBBF24" />
-            ) : !trialReady ? (
-              <Ionicons name="flash" size={20} color="#FBBF24" />
-            ) : (
-              <Ionicons name="power" size={20} color="rgba(255,255,255,0.5)" />
-            )}
-          </View>
+        <DriverCompleteTripConfirmModal
+          visible={completeTripConfirmOpen}
+          riderName={completeModalRiderName}
+          fare={completeModalFare}
+          confirming={tripActionBusy === 'complete'}
+          onCancel={() => setCompleteTripConfirmOpen(false)}
+          onConfirm={() => void performCompleteTrip()}
+        />
 
-          <View style={styles.statusLeft}>
-            <Text style={styles.statusTitle}>
-              {isOnline
-                ? t.driver.youAreOnline
-                : !driverApproved
-                  ? 'Pending Verification'
-                  : !trialReady
-                    ? 'Activate Free Trial'
-                    : t.driver.youAreOffline}
-            </Text>
-            <Text style={styles.statusSubtitle} numberOfLines={2}>
-              {isOnline
-                ? (subscriptionStatus === 'trial'
-                    ? `Free trial • ${trialTripsCompleted}/${trialTripsTarget} trips done`
-                    : t.driver.statusReceivingOffers)
-                : !driverApproved
-                  ? 'Under review — access unlocks after admin approval.'
-                  : !trialReady
-                    ? 'Tap Activate for your free 20-trip trial.'
-                    : t.driver.statusGoOnlineHint}
-            </Text>
+        {tripCompletion ? (
+          <DriverTripCompletionPanel
+            payload={tripCompletion}
+            onDismiss={() => setTripCompletion(null)}
+            onSubmitRating={handleCompletionRate}
+            onViewDetails={() => {
+              setTripCompletion(null);
+              guardedPush('/(driver-tabs)/driver-trips' as Href);
+            }}
+          />
+        ) : null}
+        {/* Ride request: on-map dock while online; full modal when offline */}
+        <DriverRideRequestModal
+          visible={!!incomingRide && !isOnline}
+          trip={incomingRide}
+          countdownSeconds={rideCountdown}
+          countdownTotal={DRIVER_OFFER_COUNTDOWN_SECONDS}
+          fareInput={counterFareInput}
+          onFareInputChange={setCounterFareInput}
+          accepting={acceptingRide}
+          onAccept={handleAcceptRide}
+          onIgnore={handleDeclineRide}
+          driverLat={driverCoords?.lat}
+          driverLng={driverCoords?.lng}
+        />
 
-            {/* Inline trial progress bar — visible whenever on trial */}
-            {subscriptionStatus === 'trial' && trialTripsTarget > 0 && (
-              <View style={{ marginTop: 8, gap: 4 }}>
-                <View style={styles.trialBarBg}>
-                  <View
-                    style={[
-                      styles.trialBarFill,
-                      {
-                        width: `${Math.min(100, (trialTripsCompleted / trialTripsTarget) * 100)}%` as any,
-                        backgroundColor: trialExtended ? '#F59E0B' : '#22E180',
-                      },
-                    ]}
-                  />
-                </View>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-                  <Text style={{ fontSize: 10, color: isOnline ? 'rgba(255,255,255,0.6)' : '#9CA3AF' }}>
-                    {trialExtended ? '⚡ Extended' : 'Free trial'}
-                  </Text>
-                  <Text style={{ fontSize: 10, fontWeight: '700', color: isOnline ? 'rgba(255,255,255,0.8)' : '#374151' }}>
-                    {trialTripsCompleted}/{trialTripsTarget} trips
-                  </Text>
-                </View>
-              </View>
-            )}
-          </View>
+        {/* Feature hub drawer */}
+        <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
 
-          {/* Action button */}
-          {!driverApproved ? (
-            <View style={styles.pendingBadge}>
-              <Ionicons name="time-outline" size={14} color="#FBBF24" />
-              <Text style={styles.pendingBadgeText}>Review</Text>
+        {/* SIM Swap Banner */}
+        {simSwapAlert && (
+          <View style={[styles.simSwapBanner, { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999 }]}>
+            <View style={styles.simSwapBannerIconWrap}>
+              <Ionicons name="shield-half-outline" size={20} color="#FFF" />
             </View>
-          ) : !trialReady ? (
-            <TouchableOpacity style={styles.activateBtn} onPress={() => guardedPush('/driver/subscription')} activeOpacity={0.88}>
-              <Text style={styles.activateBtnText}>Activate</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[styles.toggleButton, isOnline && styles.toggleButtonActive, toggleSyncing && styles.toggleButtonDisabled]}
-              onPress={handleToggleOnline}
-              activeOpacity={0.8}
-              disabled={toggleSyncing}
-            >
-              {toggleSyncing ? (
-                <ActivityIndicator size="small" color="#FFF" style={{ margin: 6 }} />
-              ) : (
-                <View style={[styles.toggleThumb, isOnline && styles.toggleThumbActive]} />
-              )}
-            </TouchableOpacity>
-          )}
-        </Animated.View>
-
-        <View style={styles.headerPills}>
-          {/* Verification status pill */}
-          <View style={[styles.headerPill, driverApproved && { backgroundColor: 'rgba(34,225,128,0.15)' }]}>
-            <Ionicons
-              name={driverApproved ? 'shield-checkmark' : 'shield-half'}
-              size={16}
-              color={driverApproved ? '#22E180' : '#FBBF24'}
-            />
-            <Text style={[styles.headerPillText, driverApproved && { color: '#22E180' }]}>
-              {driverApproved ? 'Verified Driver' : 'Under review'}
-            </Text>
-          </View>
-
-          {/* Subscription / trial pill */}
-          {driverApproved && (
-            <View style={[styles.headerPill, trialReady && { backgroundColor: 'rgba(34,225,128,0.12)' }]}>
-              <Ionicons
-                name={trialReady ? 'checkmark-circle' : 'alert-circle'}
-                size={16}
-                color={trialReady ? '#22E180' : '#FBBF24'}
-              />
-              <Text style={[styles.headerPillText, trialReady && { color: '#22E180' }]}>
-                {trialReady ? 'Active' : 'Activate account'}
+            <View style={{ flex: 1 }}>
+              <Text style={styles.simSwapBannerTitle}>Security Alert: New SIM Detected</Text>
+              <Text style={styles.simSwapBannerText}>
+                Your account has been temporarily secured. If this wasn't you, contact support immediately.
               </Text>
             </View>
-          )}
-
-          {/* Live dispatch — only show when actually connected, hide "Fallback sync" noise */}
-          {driverOffersWsConnected && (
-            <View style={[styles.headerPill, { backgroundColor: 'rgba(34,225,128,0.12)' }]}>
-              <Ionicons name="radio" size={16} color="#22E180" />
-              <Text style={[styles.headerPillText, { color: '#22E180' }]}>Live dispatch</Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient>
-
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: tabPad }}>
-
-        {/* ── RIDE CATEGORY SELECTOR ─────────────────────────────────────── */}
-        {driverCanReceiveOffers && (
-          <View style={styles.catCard}>
-            <View style={styles.catCardHeader}>
-              <Ionicons name="layers-outline" size={18} color="#94A3B8" />
-              <Text style={styles.catCardTitle}>Ride Categories</Text>
-              {categorySyncing && <ActivityIndicator size="small" color="#00D46A" style={{ marginLeft: 6 }} />}
-              <Text style={styles.catCardHint}>Select the types of rides you want to receive</Text>
-            </View>
-            <View style={styles.catGrid}>
-              {CATEGORY_OPTIONS.map((cat) => {
-                const active = activeCategories.includes(cat.id);
-                return (
-                  <TouchableOpacity
-                    key={cat.id}
-                    style={[styles.catTile, active && { borderColor: cat.color, backgroundColor: cat.color + '18' }]}
-                    onPress={() => toggleCategory(cat.id)}
-                    activeOpacity={0.75}
-                  >
-                    <View style={[styles.catTileIcon, { backgroundColor: cat.color + (active ? '30' : '15') }]}>
-                      <Ionicons name={cat.icon} size={22} color={active ? cat.color : '#64748B'} />
-                    </View>
-                    <Text style={[styles.catTileLabel, active && { color: cat.color }]}>{cat.label}</Text>
-                    <Text style={styles.catTileDesc}>{cat.desc}</Text>
-                    {active && (
-                      <View style={[styles.catCheck, { backgroundColor: cat.color }]}>
-                        <Ionicons name="checkmark" size={10} color="#FFF" />
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+            <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 6, alignSelf: 'flex-start' }}>
+              <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
+            </TouchableOpacity>
           </View>
         )}
+      </View>
+    );
+  }
 
-        {/* ── IDLE BOOST SUGGESTION ──────────────────────────────────────── */}
-        {idleBoostVisible && (
-          <TouchableOpacity
-            style={styles.idleBoostBanner}
-            onPress={() => { setIdleBoostVisible(false); }}
-            activeOpacity={0.85}
-          >
-            <Ionicons name="bulb-outline" size={18} color="#FFB800" />
-            <Text style={styles.idleBoostText}>
-              You've been idle a while. Enable more categories to get more rides!
-            </Text>
-            <Ionicons name="close" size={16} color="#94A3B8" />
-          </TouchableOpacity>
-        )}
-        {/* ─────────────────────────────────────────────────────────────── */}
-
-        {verificationLocked && (
-          <Animated.View style={[styles.verificationRoadmap, { opacity: fadeAnim }]}>
-            <View style={styles.roadmapHeader}>
-              <LinearGradient colors={[COLORS.accentGreen, '#00C853']} style={styles.roadmapIconGrad}>
-                <Ionicons name="shield-checkmark-outline" size={22} color="#FFF" />
-              </LinearGradient>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.roadmapBadge}>REVIEW IN PROGRESS</Text>
-                <Text style={styles.roadmapTitle}>Documents submitted ✓</Text>
-                <Text style={styles.roadmapSubtitle}>
-                  Our team is reviewing your documents. You'll receive a notification once approved.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.roadmapSteps}>
-              <View style={styles.roadmapStep}>
-                <View style={[styles.roadmapStepDot, { backgroundColor: COLORS.accentGreen }]}>
-                  <Ionicons name="checkmark" size={11} color="#FFF" />
-                </View>
-                <Text style={styles.roadmapStepText}>Documents submitted</Text>
-              </View>
-              <View style={styles.roadmapStepLine} />
-              <View style={styles.roadmapStep}>
-                <View style={[styles.roadmapStepDot, { backgroundColor: COLORS.warning }]}>
-                  <ActivityIndicator size="small" color="#FFF" style={{ transform: [{ scale: 0.7 }] }} />
-                </View>
-                <Text style={styles.roadmapStepText}>Company review in progress</Text>
-              </View>
-              <View style={styles.roadmapStepLine} />
-              <View style={styles.roadmapStep}>
-                <View style={[styles.roadmapStepDot, { backgroundColor: '#CBD5E1' }]}>
-                  <Ionicons name="lock-closed" size={11} color="#FFF" />
-                </View>
-                <Text style={[styles.roadmapStepText, { color: '#94A3B8' }]}>Free 20-trip activity trial</Text>
-              </View>
-            </View>
-
-            <View style={styles.roadmapActions}>
-              <TouchableOpacity style={styles.roadmapPrimary} onPress={() => void checkOnboardingStatus()}>
-                <Ionicons name="refresh" size={16} color="#FFF" />
-                <Text style={styles.roadmapPrimaryText}>Refresh status</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.roadmapSecondary} onPress={() => guardedPush('/support')}>
-                <Text style={styles.roadmapSecondaryText}>Contact support</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        )}
-
-        {driverApproved && !trialReady && (
-          <Animated.View style={[styles.verificationRoadmap, styles.activationRoadmap, { opacity: fadeAnim }]}>
-            <View style={styles.roadmapHeader}>
-              <LinearGradient colors={['#F59E0B', '#D97706']} style={styles.roadmapIconGrad}>
-                <Ionicons name="checkmark-circle" size={22} color="#FFF" />
-              </LinearGradient>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.roadmapBadge, { color: '#F59E0B' }]}>APPROVED — ACTION NEEDED</Text>
-                <Text style={styles.roadmapTitle}>Account approved! 🎉</Text>
-                <Text style={styles.roadmapSubtitle}>
-                  Your account is verified! Activate your free 20-trip activity trial to start receiving ride offers now.
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.roadmapActions}>
-              <TouchableOpacity
-                style={[styles.roadmapPrimary, { backgroundColor: '#F59E0B' }]}
-                onPress={() => guardedPush('/driver/subscription')}
-              >
-                <Ionicons name="flash" size={16} color="#FFF" />
-                <Text style={styles.roadmapPrimaryText}>Activate 20-trip trial</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.roadmapSecondary} onPress={() => void checkOnboardingStatus()}>
-                <Text style={styles.roadmapSecondaryText}>Refresh</Text>
-              </TouchableOpacity>
-            </View>
-          </Animated.View>
-        )}
-
-        {offlineQueueCount > 0 && (
-          <View style={styles.offlineSyncCard}>
-            <View style={styles.offlineSyncIcon}>
-              <Ionicons name="cloud-upload-outline" size={18} color={COLORS.warning} />
-            </View>
-            <View style={styles.offlineSyncTextWrap}>
-              <Text style={styles.offlineSyncTitle}>Offline ride sync pending</Text>
-              <Text style={styles.offlineSyncSubtitle}>
-                {offlineQueueCount} action{offlineQueueCount === 1 ? '' : 's'} queued. NEXRYDE will retry automatically when the network is stable.
-              </Text>
-            </View>
-          </View>
-        )}
-        {/* ── SURGE PRICING CARD ───────────────────────────────────────── */}
-        {surgePricing && (() => {
-          const s = surgePricing;
-          const isSurge = Boolean(s.is_surge);
-          const pct = Number(s.pct_extra || 0);
-          const multiplier = Number(s.multiplier || 1);
-          const tierColor: string = s.tier_color || (isSurge ? '#F59E0B' : '#16A34A');
-          const bgColor = isSurge ? '#FFFBEB' : '#F0FDF4';
-          const borderColor = isSurge ? '#FCD34D' : '#86EFAC';
-
-          return (
-            <View style={[styles.surgeCard, { backgroundColor: bgColor, borderColor }]}>
-              {/* Left: icon + info */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}>
-                <View style={[styles.surgeIconWrap, { backgroundColor: tierColor + '20' }]}>
-                  <Ionicons
-                    name={isSurge ? 'flash' : 'checkmark-circle-outline'}
-                    size={20}
-                    color={tierColor}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={[styles.surgeTitle, { color: tierColor }]}>
-                    {isSurge ? `⚡ ${s.tier_label || 'Surge active'} — ${multiplier}x` : 'Normal pricing'}
-                  </Text>
-                  <Text style={styles.surgeReason} numberOfLines={2}>
-                    {s.driver_message || (isSurge ? `Earn ${pct}% more per trip right now.` : 'Standard fares. Stay online for surge windows.')}
-                  </Text>
-                </View>
-              </View>
-              {/* Right: multiplier badge */}
-              {isSurge && (
-                <View style={[styles.surgeBadge, { backgroundColor: tierColor }]}>
-                  <Text style={styles.surgeBadgeText}>+{pct}%</Text>
-                </View>
-              )}
-            </View>
-          );
-        })()}
-        {/* ── TRIAL COMPLETE — Subscribe CTA ──────────────────────────── */}
-        {subscriptionStatus === 'pending_payment' && (
-          <TouchableOpacity
-            style={styles.trialCompleteBanner}
-            onPress={() => guardedPush('/driver/subscription')}
-            activeOpacity={0.88}
-          >
-            <LinearGradient
-              colors={['#1D4ED8', '#2563EB', '#3B82F6']}
-              style={styles.trialCompleteBannerGrad}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 42, height: 42, borderRadius: 21, backgroundColor: 'rgba(255,255,255,0.2)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Ionicons name="trophy" size={22} color="#FFF" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '800' }}>Trial Complete!</Text>
-                  <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12, marginTop: 2 }}>
-                    You completed all trial trips. Subscribe now to keep earning.
-                  </Text>
-                </View>
-                <View style={{ backgroundColor: '#FFF', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 6 }}>
-                  <Text style={{ color: '#2563EB', fontWeight: '800', fontSize: 13 }}>Subscribe →</Text>
-                </View>
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
-
-        {/* ── EARNINGS CARDS ──────────────────────────────────────────── */}
-        <Animated.View style={[styles.section, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}>
-          <TouchableOpacity
-            onPress={() => guardedPush('/(driver-tabs)/driver-earnings')}
-            activeOpacity={0.92}
-            accessibilityRole="button"
-            accessibilityLabel="Open driver earnings"
-          >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-              <Text style={styles.sectionTitle}>{t.driver.todayEarnings}</Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                {earningsLoading && <ActivityIndicator size="small" color={COLORS.accentGreen} />}
-                {earningsError && !earningsLoading && (
-                  <Text style={{ fontSize: 11, color: '#f87171' }}>Tap to retry</Text>
-                )}
-                <Ionicons name="chevron-forward" size={16} color={COLORS.accentGreen} />
-              </View>
-            </View>
-            <LinearGradient
-              colors={['#022c22', '#064e3b', '#0f766e']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.earningsGradientWrap}
-            >
-              {earningsLoading ? (
-                <View style={{ alignItems: 'center', paddingVertical: 28 }}>
-                  <ActivityIndicator size="large" color="#22E180" />
-                  <Text style={{ color: '#86efac', fontSize: 13, marginTop: 8 }}>Loading earnings...</Text>
-                </View>
-              ) : (
-                <>
-                  <View style={styles.earningsGrid}>
-                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                      <View style={[styles.earningIcon, { backgroundColor: '#F59E0B' }]}>
-                        <Ionicons name="wallet" size={22} color="#FFF" />
-                      </View>
-                      <Text style={styles.earningLabelLight}>Today</Text>
-                      <Text style={styles.earningValueLight}>
-                        ₦{earnings.today >= 1000
-                          ? `${(earnings.today / 1000).toFixed(1)}k`
-                          : earnings.today.toLocaleString()}
-                      </Text>
-                    </View>
-
-                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                      <View style={[styles.earningIcon, { backgroundColor: '#16A34A' }]}>
-                        <Ionicons name="calendar" size={22} color="#FFF" />
-                      </View>
-                      <Text style={styles.earningLabelLight}>This Week</Text>
-                      <Text style={styles.earningValueLight}>
-                        ₦{earnings.week >= 1000
-                          ? `${(earnings.week / 1000).toFixed(1)}k`
-                          : earnings.week.toLocaleString()}
-                      </Text>
-                    </View>
-
-                    <View style={[styles.earningCard, styles.earningCardOnGreen]}>
-                      <View style={[styles.earningIcon, { backgroundColor: HOME_PALETTE.accentIndigo }]}>
-                        <Ionicons name="car" size={22} color="#FFF" />
-                      </View>
-                      <Text style={styles.earningLabelLight}>Total Trips</Text>
-                      <Text style={styles.earningValueLight}>{earnings.trips}</Text>
-                    </View>
-                  </View>
-                  {/* Keep 100% — reminder */}
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 8, paddingHorizontal: 4 }}>
-                    <Ionicons name="checkmark-circle" size={12} color="#86EFAC" />
-                    <Text style={{ color: '#86EFAC', fontSize: 11, fontWeight: '600' }}>
-                      You keep 100% of all earnings — riders pay you directly
-                    </Text>
-                  </View>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-
-        {/* PRIORITY FEATURES - BIG CARDS */}
-        <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <Text style={styles.sectionTitle}>{t.driver.coreActions}</Text>
-          <View style={styles.priorityGrid}>
-            {priorityFeatures.map((feature) => (
-              <TouchableOpacity
-                key={feature.id}
-                style={styles.priorityCard}
-                onPress={() => guardedPush(feature.route)}
-                activeOpacity={0.88}
-              >
-                <LinearGradient
-                  colors={[feature.color, feature.color + 'CC']}
-                  style={styles.priorityGradient}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                >
-                  <Ionicons name={feature.icon as any} size={28} color="#FFF" />
-                  <Text style={styles.priorityLabel}>{feature.label}</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-
-        {/* ALL FEATURES GRID - COMPLETE ACCESS */}
-        <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>{t.driver.toolsSection}</Text>
-            <Text style={styles.featureCount}>{toolFeatures.length}</Text>
-          </View>
-          <Text style={styles.toolsHint}>{t.driver.toolsHubHint}</Text>
-          <View style={styles.allFeaturesGrid}>
-            {toolFeatures.map((feature) => (
-              <TouchableOpacity
-                key={feature.id}
-                style={styles.featureCard}
-                onPress={() => guardedPush(feature.route)}
-                activeOpacity={0.7}
-              >
-                <View style={[styles.featureIconBox, { backgroundColor: feature.color + '15' }]}>
-                  <Ionicons name={feature.icon as any} size={24} color={feature.color} />
-                </View>
-                <Text style={styles.featureText} numberOfLines={2}>{feature.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </Animated.View>
-
-      </ScrollView>
+  /* ═══════════════════════════════════════════════════════════════════
+     OFFLINE HOME — reference go-online layout (map, stats, GO above tabs)
+     ═══════════════════════════════════════════════════════════════════ */
+  return <DriverOfflineHome
+    driverCoords={driverCoords}
+    earnings={earnings}
+    profileImageUri={user?.profile_image ?? null}
+    driverRating={typeof user?.rating === 'number' && Number.isFinite(user.rating) ? user.rating : 0}
+    surgeActive={!!(surgePricing?.is_surge)}
+    driverApproved={driverApproved}
+    trialReady={trialReady}
+    subscriptionStatus={subscriptionStatus}
+    trialTripsCompleted={trialTripsCompleted}
+    trialTripsTarget={trialTripsTarget}
+    trialExtended={trialExtended}
+    verificationStatus={verificationStatus}
+    simSwapAlert={simSwapAlert}
+    toggling={toggleSyncing}
+    featureHubOpen={featureHubOpen}
+    onGoOnline={handleToggleOnline}
+    onFeatureHub={() => setFeatureHubOpen(true)}
+    onShield={() => guardedPush('/(driver-tabs)/driver-safety')}
+    onHeatmap={() => guardedPush('/driver/heatmap')}
+    onDestination={() => guardedPush('/driver/destination')}
+    onEarnings={() => guardedPush('/(driver-tabs)/driver-earnings')}
+    onTrips={() => guardedPush('/(driver-tabs)/driver-trips')}
+    onProfile={() => guardedPush('/(driver-tabs)/driver-profile')}
+    onOpenSubscription={() => guardedPush('/driver/subscription')}
+    onDismissSimSwap={() => setSimSwapAlert(false)}
+    rideRequestModal={
       <DriverRideRequestModal
         visible={!!incomingRide}
         trip={incomingRide}
@@ -1575,35 +1680,927 @@ export default function ModernDriverHome() {
         driverLat={driverCoords?.lat}
         driverLng={driverCoords?.lng}
       />
-
-      {/* Language Picker Modal */}
-      <Modal visible={showLangPicker} transparent animationType="fade">
-        <TouchableOpacity style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-start', paddingTop: 100 }} activeOpacity={1} onPress={() => setShowLangPicker(false)}>
-          <View style={{ marginHorizontal: 20, backgroundColor: '#1E293B', borderRadius: 16, padding: 8, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
-            <Text style={{ fontSize: 13, fontWeight: '800', color: '#94A3B8', paddingHorizontal: 12, paddingVertical: 8 }}>SELECT LANGUAGE</Text>
-            {availableLanguages.map((lang) => (
-              <TouchableOpacity
-                key={lang.code}
-                onPress={() => { setLanguage(lang.code as SupportedLanguage); setShowLangPicker(false); }}
-                style={{ flexDirection: 'row', alignItems: 'center', padding: 12, borderRadius: 10, backgroundColor: language === lang.code ? 'rgba(34,225,128,0.15)' : 'transparent', gap: 12 }}
-              >
-                <Text style={{ fontSize: 22 }}>{lang.flag}</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFF' }}>{lang.nativeName}</Text>
-                  <Text style={{ fontSize: 12, color: '#64748B' }}>{lang.name}</Text>
-                </View>
-                {language === lang.code && <Ionicons name="checkmark-circle" size={22} color="#22E180" />}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
+    }
+    featureHubDrawer={
       <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
+    }
+  />;
+}
 
-    </SafeAreaView>
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OFFLINE HOME COMPONENT
+   ═══════════════════════════════════════════════════════════════════════════ */
+function DriverOfflineHome({
+  driverCoords,
+  earnings,
+  profileImageUri,
+  driverRating,
+  surgeActive,
+  driverApproved,
+  trialReady,
+  subscriptionStatus,
+  trialTripsCompleted,
+  trialTripsTarget,
+  trialExtended,
+  verificationStatus,
+  simSwapAlert,
+  toggling,
+  featureHubOpen: _featureHubOpen,
+  onGoOnline,
+  onFeatureHub,
+  onShield: _onShield,
+  onHeatmap,
+  onDestination: _onDestination,
+  onEarnings,
+  onTrips,
+  onProfile,
+  onOpenSubscription,
+  onDismissSimSwap,
+  rideRequestModal,
+  featureHubDrawer,
+}: {
+  driverCoords: { lat: number; lng: number; heading?: number } | null;
+  earnings: { today: number; trips: number; week: number; tripHoursToday?: number };
+  profileImageUri: string | null;
+  driverRating: number;
+  surgeActive: boolean;
+  driverApproved: boolean;
+  trialReady: boolean;
+  subscriptionStatus: string | null;
+  trialTripsCompleted: number;
+  trialTripsTarget: number;
+  trialExtended: boolean;
+  verificationStatus: string | null;
+  simSwapAlert: boolean;
+  toggling: boolean;
+  featureHubOpen: boolean;
+  onGoOnline: () => void;
+  onFeatureHub: () => void;
+  onShield: () => void;
+  onHeatmap: () => void;
+  onDestination: () => void;
+  onEarnings: () => void;
+  onTrips: () => void;
+  onProfile: () => void;
+  onOpenSubscription: () => void;
+  onDismissSimSwap: () => void;
+  rideRequestModal: React.ReactNode;
+  featureHubDrawer: React.ReactNode;
+}) {
+  const insets = useSafeAreaInsets();
+  const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
+  const mapRef = useRef<MapView | null>(null);
+  const goPulse = useRef(new Animated.Value(1)).current;
+
+  /* Time-based greeting */
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+
+  /* LIVE badge pulse */
+  const livePulse = useRef(new Animated.Value(0.4)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(livePulse, { toValue: 1, duration: 700, useNativeDriver: true }),
+        Animated.timing(livePulse, { toValue: 0.4, duration: 700, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* GO button outer ring */
+  const goRingOuter = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!driverApproved || !trialReady) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(goRingOuter, { toValue: 1, duration: 1600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(goRingOuter, { toValue: 0, duration: 0, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [driverApproved, trialReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* Slow pulse on GO button */
+  useEffect(() => {
+    if (!driverApproved || !trialReady) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(goPulse, { toValue: 1.06, duration: 1000, useNativeDriver: true }),
+        Animated.timing(goPulse, { toValue: 1, duration: 1000, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [driverApproved, trialReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const mapRegion = useMemo(
+    () =>
+      driverCoords
+        ? {
+            latitude: driverCoords.lat,
+            longitude: driverCoords.lng,
+            latitudeDelta: 0.055,
+            longitudeDelta: 0.055,
+          }
+        : { latitude: 6.5244, longitude: 3.3792, latitudeDelta: 0.1, longitudeDelta: 0.1 },
+    [driverCoords?.lat, driverCoords?.lng],
+  );
+
+  useEffect(() => {
+    if (!driverCoords || !mapRef.current) return;
+    mapRef.current.animateToRegion(
+      {
+        latitude: driverCoords.lat,
+        longitude: driverCoords.lng,
+        latitudeDelta: 0.055,
+        longitudeDelta: 0.055,
+      },
+      480,
+    );
+  }, [driverCoords?.lat, driverCoords?.lng]);
+
+  const fmtNGN = (n: number) =>
+    n >= 1000 ? `₦${(n / 1000).toFixed(1)}k` : `₦${Math.round(n).toLocaleString()}`;
+
+  const ratingLabel =
+    driverRating > 0 && driverRating <= 5 ? driverRating.toFixed(1) : '—';
+
+  const notApproved = !driverApproved;
+  const needsSubscription = driverApproved && !trialReady;
+  const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
+  const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
+  const profileReadyDot = driverApproved && trialReady;
+
+  const goHalftoneDots = useMemo(
+    () => Array.from({ length: 42 }, (_, i) => <View key={i} style={ohStyles.goHalftoneDot} />),
+    [],
+  );
+
+  return (
+    <View style={ohStyles.screenRoot}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: tabPad + 112,
+          paddingHorizontal: flow.padH,
+          gap: Math.round(flow.sectionGap * 0.28),
+        }}
+        showsVerticalScrollIndicator={false}
+        bounces
+      >
+        <View style={{ width: '100%', maxWidth: flow.maxContentWidth, alignSelf: 'center' }}>
+        {/* Driver offline — go-online (reference UI) */}
+        <View style={[ohStyles.topBar, { paddingTop: insets.top + 10 }]}>
+          <TouchableOpacity style={ohStyles.topIconBtn} onPress={onFeatureHub} activeOpacity={0.8}>
+            <Ionicons name="menu" size={22} color="#E2E8F0" />
+          </TouchableOpacity>
+
+          <View style={ohStyles.topBarCenterSlot} pointerEvents="box-none">
+            <View style={ohStyles.offlinePill}>
+              <View style={ohStyles.offlineDot} />
+              <Text style={ohStyles.offlinePillText}>OFFLINE</Text>
+            </View>
+          </View>
+
+          <TouchableOpacity style={ohStyles.profileTap} onPress={onProfile} activeOpacity={0.82}>
+            <View style={ohStyles.profileRing}>
+              {profileImageUri ? (
+                <Image source={{ uri: profileImageUri }} style={ohStyles.profileImg} />
+              ) : (
+                <Ionicons name="person" size={20} color="#94A3B8" />
+              )}
+              <View
+                style={[
+                  ohStyles.profileStatusDot,
+                  !profileReadyDot && ohStyles.profileStatusDotMuted,
+                ]}
+              />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        <View style={ohStyles.heroWrap}>
+          <Text style={ohStyles.heroGreeting}>{greeting}</Text>
+          <Text style={ohStyles.heroTitle}>You're offline</Text>
+          <Text style={ohStyles.heroSub}>Tap GO to start receiving trips</Text>
+        </View>
+
+        {showTrialProgress && (
+          <TouchableOpacity
+            style={ohStyles.trialProgressChip}
+            activeOpacity={0.86}
+            onPress={onOpenSubscription}
+          >
+            <View style={ohStyles.trialProgressDot} />
+            <Text style={ohStyles.trialProgressText}>
+              Free trial: {trialTripsCompleted}/{trialTripsTarget} • {trialRemaining} left
+            </Text>
+            {trialExtended && (
+              <View style={ohStyles.trialExtBadge}>
+                <Text style={ohStyles.trialExtText}>Extended</Text>
+              </View>
+            )}
+            <Ionicons name="chevron-forward" size={16} color="#64748B" />
+          </TouchableOpacity>
+        )}
+
+        <View style={ohStyles.mapCard}>
+          <View style={ohStyles.mapMapLayer}>
+            <MapView
+              ref={mapRef}
+              style={StyleSheet.absoluteFillObject}
+              provider={PROVIDER_GOOGLE}
+              customMapStyle={NEXRYDE_MAP_STYLE}
+              initialRegion={mapRegion}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              pitchEnabled={false}
+              rotateEnabled={false}
+              showsUserLocation={false}
+              showsMyLocationButton={false}
+              showsCompass={false}
+              showsPointsOfInterest
+              showsBuildings={false}
+              showsTraffic={false}
+              toolbarEnabled={false}
+              liteMode={Platform.OS === 'android'}
+            >
+              {driverCoords && (
+                <Marker
+                  coordinate={{ latitude: driverCoords.lat, longitude: driverCoords.lng }}
+                  anchor={{ x: 0.5, y: 1 }}
+                >
+                  <View style={ohStyles.mapPinWrap} collapsable={false}>
+                    <Ionicons name="location" size={44} color="#22E5A0" />
+                  </View>
+                </Marker>
+              )}
+            </MapView>
+
+            <LinearGradient
+              colors={['rgba(6,11,20,0.2)', 'transparent', 'rgba(6,11,20,0.88)']}
+              locations={[0, 0.45, 1]}
+              style={ohStyles.mapVignette}
+              pointerEvents="none"
+            />
+
+            <View style={ohStyles.liveBadge} pointerEvents="none">
+              <Ionicons name="radio" size={11} color="#F87171" />
+              <Animated.View style={[ohStyles.liveDot, { opacity: livePulse }]} />
+              <Text style={ohStyles.liveBadgeText}>LIVE</Text>
+            </View>
+
+            {driverCoords ? (
+              <View style={ohStyles.mapLocBadge} pointerEvents="none">
+                <Text style={ohStyles.mapLocText}>Your location</Text>
+              </View>
+            ) : null}
+          </View>
+
+          <TouchableOpacity
+            style={ohStyles.mapFooterCta}
+            onPress={onHeatmap}
+            activeOpacity={0.88}
+            accessibilityRole="button"
+            accessibilityLabel="See ride opportunities in your area"
+          >
+            <Ionicons name="scan-outline" size={18} color="#22E5A0" />
+            <Text style={ohStyles.mapFooterCtaText}>See ride opportunities in your area</Text>
+          </TouchableOpacity>
+        </View>
+
+        <View style={ohStyles.statsStrip}>
+          <TouchableOpacity style={ohStyles.statChip} onPress={onEarnings} activeOpacity={0.78}>
+            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
+              <Ionicons name="wallet-outline" size={17} color="#22E5A0" />
+            </View>
+            <Text style={ohStyles.statChipValue}>{fmtNGN(earnings.today)}</Text>
+            <Text style={ohStyles.statChipLabel}>Earnings</Text>
+          </TouchableOpacity>
+          <View style={ohStyles.statDivider} />
+          <TouchableOpacity style={ohStyles.statChip} onPress={onTrips} activeOpacity={0.78}>
+            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
+              <Ionicons name="car-outline" size={17} color="#22E5A0" />
+            </View>
+            <Text style={ohStyles.statChipValue}>{earnings.trips}</Text>
+            <Text style={ohStyles.statChipLabel}>Trips</Text>
+          </TouchableOpacity>
+          <View style={ohStyles.statDivider} />
+          <TouchableOpacity style={ohStyles.statChip} onPress={onProfile} activeOpacity={0.78}>
+            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
+              <Ionicons name="stats-chart" size={17} color="#22E5A0" />
+            </View>
+            <Text style={ohStyles.statChipValue}>{ratingLabel}</Text>
+            <Text style={ohStyles.statChipLabel}>Rating</Text>
+          </TouchableOpacity>
+        </View>
+
+        {surgeActive ? (
+          <View style={ohStyles.surgeStrip}>
+            <Ionicons name="flash" size={15} color="#FBBF24" />
+            <Text style={ohStyles.surgeStripText}>Surge is on — fares are elevated nearby</Text>
+          </View>
+        ) : null}
+
+        <View style={ohStyles.prayerSlot}>
+          <PrayerStripWidget />
+        </View>
+
+        {/* ── Verification / approval banner ── */}
+        {notApproved && (
+          <View style={ohStyles.bannerWarn}>
+            <Ionicons name="time-outline" size={18} color="#FBBF24" />
+            <View style={{ flex: 1 }}>
+              <Text style={ohStyles.bannerTitle}>Verification Pending</Text>
+              <Text style={ohStyles.bannerBody}>
+                {verificationStatus === 'pending'
+                  ? 'Your documents are being reviewed. You can drive once approved.'
+                  : 'Complete your document verification to start driving.'}
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#FBBF24" />
+          </View>
+        )}
+        {needsSubscription && (
+          <View style={ohStyles.bannerInfo}>
+            <Ionicons name="flash-outline" size={18} color="#3B82F6" />
+            <View style={{ flex: 1 }}>
+              <Text style={[ohStyles.bannerTitle, { color: '#93C5FD' }]}>Activate Trial</Text>
+              <Text style={ohStyles.bannerBody}>Start your free trial to receive ride requests.</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#3B82F6" />
+          </View>
+        )}
+
+        {/* SIM Swap banner */}
+        {simSwapAlert && (
+          <View style={[ohStyles.bannerDanger, { marginBottom: 14 }]}>
+            <Ionicons name="shield-half-outline" size={18} color="#FFF" />
+            <View style={{ flex: 1 }}>
+              <Text style={[ohStyles.bannerTitle, { color: '#FCA5A5' }]}>Security Alert</Text>
+              <Text style={ohStyles.bannerBody}>New SIM detected. Contact support if this wasn't you.</Text>
+            </View>
+            <TouchableOpacity onPress={onDismissSimSwap} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close" size={18} color="rgba(255,255,255,0.6)" />
+            </TouchableOpacity>
+          </View>
+        )}
+        </View>
+      </ScrollView>
+
+      {/* Primary CTA — sits above driver tab bar */}
+      <View style={[ohStyles.goBar, { bottom: tabPad, paddingBottom: 10 }]}>
+        <LinearGradient
+          colors={['transparent', 'rgba(6,11,20,0.92)']}
+          style={ohStyles.goBarTopGradient}
+          pointerEvents="none"
+        />
+        {driverApproved && trialReady ? (
+          <View style={{ width: '100%', maxWidth: flow.maxContentWidth, alignSelf: 'center', alignItems: 'center' }}>
+            <Animated.View
+              style={[
+                ohStyles.goBtnOuterRing,
+                {
+                  opacity: goRingOuter.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.35, 0.12, 0] }),
+                  transform: [{ scale: goRingOuter.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] }) }],
+                },
+              ]}
+            />
+            <Animated.View style={{ transform: [{ scale: goPulse }], width: '100%' }}>
+              <TouchableOpacity
+                style={ohStyles.goBtn}
+                onPress={onGoOnline}
+                activeOpacity={0.88}
+                disabled={toggling}
+                accessibilityRole="button"
+                accessibilityLabel={toggling ? 'Connecting to go online' : 'Go online and receive ride requests'}
+              >
+                <LinearGradient
+                  colors={['#2BFFB1', '#22E5A0', '#0BB87A']}
+                  style={[ohStyles.goBtnGrad, ohStyles.goBtnGradClip]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                >
+                  <View style={ohStyles.goBtnInner}>
+                    {toggling ? (
+                      <ActivityIndicator size="small" color="#FFFFFF" />
+                    ) : (
+                      <Ionicons name="radio" size={22} color="rgba(255,255,255,0.95)" />
+                    )}
+                    <Text style={ohStyles.goBtnTextLight}>
+                      {toggling ? 'Connecting…' : 'GO ONLINE'}
+                    </Text>
+                  </View>
+                  {!toggling ? (
+                    <View style={ohStyles.goHalftone} pointerEvents="none">
+                      {goHalftoneDots}
+                    </View>
+                  ) : null}
+                </LinearGradient>
+              </TouchableOpacity>
+            </Animated.View>
+          </View>
+        ) : notApproved ? (
+          <TouchableOpacity style={ohStyles.goBtnPending} activeOpacity={0.8}>
+            <Ionicons name="time-outline" size={20} color="#FBBF24" />
+            <Text style={ohStyles.goBtnPendingText}>Waiting for Approval</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={ohStyles.goBtnActivate}
+            activeOpacity={0.85}
+            onPress={() => {
+              Alert.alert(
+                'Activate Your Account',
+                'Your documents are approved! Start your free trial to receive ride requests.',
+                [
+                  { text: 'Later', style: 'cancel' },
+                  {
+                    text: 'Activate Now',
+                    onPress: onOpenSubscription,
+                  },
+                ]
+              );
+            }}
+          >
+            <Ionicons name="flash" size={20} color="#FFF" />
+            <Text style={ohStyles.goBtnActivateText}>Activate to Drive</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Overlays */}
+      {rideRequestModal}
+      {featureHubDrawer}
+    </View>
   );
 }
+
+/* ── Offline home styles ─────────────────────────────────────── */
+const ohStyles = StyleSheet.create({
+  screenRoot: { flex: 1, backgroundColor: '#050A12' },
+  topBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 10,
+  },
+  topIconBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255,255,255,0.055)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 5,
+  },
+  topCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
+  topBarCenterSlot: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  profileTap: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  profileRing: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 2,
+    borderColor: 'rgba(148,163,184,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'visible',
+  },
+  profileImg: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#1e293b' },
+  profileStatusDot: {
+    position: 'absolute',
+    bottom: -1,
+    right: -1,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#22E5A0',
+    borderWidth: 2,
+    borderColor: '#060B14',
+  },
+  profileStatusDotMuted: { backgroundColor: '#64748B' },
+  offlinePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(15,23,42,0.72)',
+    borderRadius: 22,
+    paddingHorizontal: 17,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.14)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    elevation: 4,
+  },
+  offlineDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: '#64748B' },
+  offlinePillText: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 2 },
+
+  /* Hero */
+  heroWrap: { paddingTop: 6, paddingBottom: 18 },
+  heroGreeting: { fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 6, letterSpacing: 1.4, textTransform: 'uppercase' },
+  heroTitle: {
+    fontSize: 32,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -1.6,
+    lineHeight: 38,
+    textShadowColor: 'rgba(0,0,0,0.45)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 8,
+  },
+  heroSub: { fontSize: 15, fontWeight: '600', color: '#78869B', marginTop: 8, letterSpacing: 0.12, lineHeight: 22 },
+  trialProgressChip: {
+    marginBottom: 12,
+    minHeight: 48,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(16,185,129,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,229,160,0.32)',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.2,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  trialProgressDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#1DFFA0' },
+  trialProgressText: { flex: 1, fontSize: 12, fontWeight: '700', color: '#CFECDD' },
+  trialExtBadge: {
+    backgroundColor: 'rgba(245,158,11,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.35)',
+    borderRadius: 999,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  trialExtText: { fontSize: 10, fontWeight: '800', color: '#F59E0B' },
+
+  /* Map card — preview + heatmap entry (matches reference layout) */
+  mapCard: {
+    borderRadius: 24,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(34,229,160,0.26)',
+    marginBottom: 16,
+    backgroundColor: '#080E18',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+    elevation: 14,
+  },
+  mapMapLayer: {
+    height: 208,
+    width: '100%',
+    position: 'relative',
+    backgroundColor: '#0c1220',
+  },
+  mapPinWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 6,
+  },
+  mapVignette: { ...StyleSheet.absoluteFillObject },
+  mapLocBadge: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 12,
+    alignItems: 'center',
+  },
+  mapLocText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#4ADE80',
+    paddingHorizontal: 13,
+    paddingVertical: 7,
+    borderRadius: 12,
+    backgroundColor: 'rgba(5,10,18,0.9)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,229,160,0.4)',
+    overflow: 'hidden',
+  },
+  mapFooterCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(5,10,18,0.96)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(34,229,160,0.2)',
+    borderTopLeftRadius: 18,
+    borderTopRightRadius: 18,
+  },
+  mapFooterCtaText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#CBD5E1',
+    letterSpacing: 0.2,
+  },
+  liveBadge: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: 'rgba(5,10,18,0.92)',
+    borderRadius: 999,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.38)',
+  },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F87171' },
+  liveBadgeText: { fontSize: 10, fontWeight: '900', color: '#F87171', letterSpacing: 1.2 },
+
+  /* Stats — earnings / trips / rating */
+  statsStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: 0,
+    marginBottom: 14,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    borderRadius: 22,
+    paddingHorizontal: 18,
+    paddingVertical: 17,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.1)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.28,
+    shadowRadius: 14,
+    elevation: 5,
+  },
+  statChip: { flex: 1, alignItems: 'center', gap: 4 },
+  statIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 3,
+  },
+  statChipValue: { fontSize: 18, fontWeight: '900', color: '#E2E8F0', letterSpacing: -0.5 },
+  statChipLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.55, textTransform: 'uppercase' },
+  statDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.07)' },
+  statIconWrapGreen: {
+    backgroundColor: 'rgba(34,229,160,0.11)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,229,160,0.2)',
+  },
+  surgeStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 16,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.28)',
+  },
+  surgeStripText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FCD34D', lineHeight: 17 },
+  prayerSlot: { marginBottom: 12 },
+
+  /* Banners */
+  bannerWarn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 0,
+    marginBottom: 14,
+    backgroundColor: 'rgba(251,191,36,0.1)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.25)',
+  },
+  bannerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 0,
+    marginBottom: 14,
+    backgroundColor: 'rgba(59,130,246,0.1)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.25)',
+  },
+  bannerDanger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(153,27,27,0.5)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.3)',
+  },
+  bannerTitle: { fontSize: 13, fontWeight: '800', color: '#FBBF24', marginBottom: 2 },
+  bannerBody: { fontSize: 12, fontWeight: '400', color: '#94A3B8', lineHeight: 16 },
+
+  /* Feature grid */
+  gridWrap: { marginBottom: 14 },
+  gridTitle: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#94A3B8',
+    letterSpacing: 1.5,
+    marginBottom: 12,
+    textTransform: 'uppercase',
+  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  gridItem: {
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderRadius: 20,
+    alignItems: 'center',
+    paddingVertical: 18,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  gridIcon: {
+    width: 50,
+    height: 50,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  gridLabel: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 0.3 },
+
+  /* GO bar */
+  goBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    backgroundColor: 'rgba(4,8,16,0.96)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(34,229,160,0.18)',
+  },
+  goBarTopGradient: {
+    position: 'absolute',
+    top: -40,
+    left: 0,
+    right: 0,
+    height: 40,
+  },
+  goBtn: {
+    width: '100%',
+    borderRadius: 28,
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 22,
+    elevation: 16,
+  },
+  goBtnOuterRing: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    borderRadius: 28,
+    borderWidth: 2,
+    borderColor: 'rgba(34,229,160,0.55)',
+  },
+  goBtnGrad: {
+    borderRadius: 28,
+    paddingVertical: 18,
+    paddingHorizontal: 22,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+  },
+  goBtnGradClip: {
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  goBtnInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  goBtnTextLight: {
+    fontSize: 19,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: 3,
+  },
+  goHalftone: {
+    position: 'absolute',
+    right: 4,
+    top: 0,
+    bottom: 0,
+    width: 76,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-end',
+    alignContent: 'center',
+    paddingRight: 8,
+    opacity: 0.22,
+  },
+  goHalftoneDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
+    margin: 3,
+  },
+  goBtnIconChip: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: 'rgba(2,44,34,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(2,44,34,0.18)',
+  },
+  goBtnText: { fontSize: 18, fontWeight: '900', color: '#022C22', letterSpacing: 2 },
+  goBtnSub: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '700',
+    color: 'rgba(2,44,34,0.72)',
+    letterSpacing: 0.2,
+  },
+  goBarHint: {
+    marginTop: 12,
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    lineHeight: 17,
+    paddingHorizontal: 8,
+  },
+  goBtnPending: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: 20,
+    paddingVertical: 20,
+    backgroundColor: 'rgba(251,191,36,0.12)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(251,191,36,0.4)',
+    width: '100%',
+  },
+  goBtnPendingText: { fontSize: 16, fontWeight: '800', color: '#FBBF24' },
+  goBtnActivate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: 20,
+    paddingVertical: 20,
+    backgroundColor: '#F59E0B',
+    width: '100%',
+  },
+  goBtnActivateText: { fontSize: 16, fontWeight: '900', color: '#FFF' },
+});
+
 
 const styles = StyleSheet.create({
   container: {
@@ -2075,6 +3072,17 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     letterSpacing: 0.5,
   },
+  walletWithdrawStrip: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: '#052e16', marginHorizontal: 16, marginBottom: 10,
+    borderRadius: 14, paddingHorizontal: 14, paddingVertical: 12,
+    borderWidth: 1, borderColor: 'rgba(34,197,94,0.3)',
+  },
+  walletWithdrawLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  walletWithdrawLabel: { fontSize: 10, fontWeight: '800', color: '#86efac', letterSpacing: 1, textTransform: 'uppercase' },
+  walletWithdrawAmount: { fontSize: 15, fontWeight: '900', color: '#22c55e' },
+  walletWithdrawBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#22c55e', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 },
+  walletWithdrawBtnText: { fontSize: 12, fontWeight: '900', color: '#022C22' },
   seeAll: {
     fontSize: 15,
     color: COLORS.accentGreen,

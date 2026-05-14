@@ -740,7 +740,7 @@ async def get_languages():
 async def get_translations(lang: str):
     return {"language": lang, "translations": TRANSLATIONS.get(lang, TRANSLATIONS["en"])}
 
-# ==================== KODA FAMILY ====================
+# ==================== NEXRYDE FAMILY ====================
 
 @support_router.post("/family/create")
 async def create_family(owner_id: str, family_name: str, request: Request):
@@ -864,7 +864,7 @@ async def share_trip(trip_id: str, recipient_phone: str, request: Request, recip
     verify_trip_participant(request, trip)
     share_token = str(uuid.uuid4())[:8].upper()
     await db.trip_shares.insert_one({"trip_id": trip_id, "token": share_token, "recipient_phone": recipient_phone, "recipient_name": recipient_name, "shared_at": datetime.now(timezone.utc), "expires_at": datetime.now(timezone.utc) + timedelta(hours=24)})
-    return {"message": f"Trip shared with {recipient_name or recipient_phone}", "share_token": share_token, "tracking_link": f"https://koda.app/track/{share_token}"}
+    return {"message": f"Trip shared with {recipient_name or recipient_phone}", "share_token": share_token, "tracking_link": f"https://nexryde.app/track/{share_token}"}
 
 @support_router.get("/trips/track/{share_token}")
 async def track_shared_trip(share_token: str):
@@ -1096,7 +1096,7 @@ async def get_trip_insurance(trip_id: str, request: Request):
     if not trip:
         raise HTTPException(status_code=404, detail="Trip not found")
     verify_trip_participant(request, trip)
-    return {"trip_id": trip_id, "is_insured": True, "coverage": {"personal_accident": "₦500,000", "medical_expenses": "₦100,000", "property_damage": "₦50,000"}, "provider": "KODA Insurance Partners"}
+    return {"trip_id": trip_id, "is_insured": True, "coverage": {"personal_accident": "₦500,000", "medical_expenses": "₦100,000", "property_damage": "₦50,000"}, "provider": "Nexryde Insurance Partners"}
 
 @support_router.post("/trips/{trip_id}/track")
 async def update_trip_tracking(trip_id: str, update: TripTrackingUpdate, request: Request):

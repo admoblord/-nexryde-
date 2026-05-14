@@ -3,7 +3,7 @@ import 'react-native-get-random-values';
 
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text, Platform } from 'react-native';
+import { StyleSheet, View, Text, Platform, AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { COLORS } from '@/src/constants/theme';
@@ -13,7 +13,7 @@ import { LanguageProvider } from '@/src/i18n/LanguageContext';
 import { QueryProvider } from '@/src/providers/QueryProvider';
 import { useNotifications } from '@/src/hooks/useNotifications';
 import { useAppStore } from '@/src/store/appStore';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -103,9 +103,40 @@ function extractActionKey(url: string): string | null {
   }
 }
 
+/**
+ * Request App Tracking Transparency permission on iOS 14+.
+ * Called once after the app is fully interactive to avoid blocking launch.
+ * We don't collect cross-app tracking data, so we request as a best-practice
+ * signal to the OS and declare NSPrivacyTracking=false in PrivacyInfo.xcprivacy.
+ */
+async function requestATTIfNeeded() {
+  if (Platform.OS !== 'ios') return;
+  try {
+    // Dynamic import so Metro doesn't bundle this module on Android
+    const TrackingTransparency = await import('expo-tracking-transparency').catch(() => null);
+    if (!TrackingTransparency) return;
+    const { status } = await TrackingTransparency.getTrackingPermissionsAsync();
+    if (status === 'undetermined') {
+      await TrackingTransparency.requestTrackingPermissionsAsync();
+    }
+  } catch {
+    // expo-tracking-transparency not installed — safe to ignore
+  }
+}
+
 export default function RootLayout() {
   const router = useRouter();
   const { user } = useAppStore();
+  const attRequested = useRef(false);
+
+  // Request ATT on iOS after first render
+  useEffect(() => {
+    if (attRequested.current) return;
+    attRequested.current = true;
+    // Small delay so the app is interactive before the system dialog appears
+    const t = setTimeout(() => void requestATTIfNeeded(), 2000);
+    return () => clearTimeout(t);
+  }, []);
 
   // ── Deep link listener ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -141,34 +172,63 @@ export default function RootLayout() {
   try {
     useNotifications();
     return (
-      <ErrorBoundary>
-        <QueryProvider>
-          <LanguageProvider>
-            <GestureHandlerRootView style={styles.container}>
-              <SafeAreaProvider>
+      <GestureHandlerRootView style={styles.container}>
+        <SafeAreaProvider>
+          <ErrorBoundary>
+            <QueryProvider>
+              <LanguageProvider>
                 <StatusBar style="light" />
                 <OfflineBanner />
                 <Stack
                   screenOptions={{
                     headerShown: false,
                     contentStyle: { backgroundColor: COLORS.background },
+                    // iOS: use native slide animation; Android: slide up from bottom
                     animation: Platform.OS === 'ios' ? 'default' : 'fade_from_bottom',
+                    // iOS: gesture-back enabled everywhere
+                    gestureEnabled: Platform.OS === 'ios',
+                    // iOS: full-height modal sheets with dark handle
+                    presentation: 'card',
                   }}
                 >
                   <Stack.Screen name="index" />
-                  <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+                  <Stack.Screen name="(auth)" options={{ headerShown: false, animation: 'fade' }} />
                   <Stack.Screen name="(rider-tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="(driver-tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
                   <Stack.Screen name="driver" options={{ headerShown: false }} />
                   <Stack.Screen name="rider" options={{ headerShown: false }} />
                   <Stack.Screen name="assistant" options={{ headerShown: false }} />
+                  {/* Modal-style screens — iOS bottom sheet */}
+                  <Stack.Screen
+                    name="support"
+                    options={{
+                      headerShown: false,
+                      presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+                      animation: Platform.OS === 'ios' ? 'slide_from_bottom' : 'fade_from_bottom',
+                    }}
+                  />
+                  <Stack.Screen
+                    name="driver/bank"
+                    options={{
+                      headerShown: false,
+                      presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+                    }}
+                  />
+                  <Stack.Screen
+                    name="driver/withdrawal"
+                    options={{
+                      headerShown: false,
+                      presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+                      animation: Platform.OS === 'ios' ? 'slide_from_bottom' : 'fade_from_bottom',
+                    }}
+                  />
                 </Stack>
-              </SafeAreaProvider>
-            </GestureHandlerRootView>
-          </LanguageProvider>
-        </QueryProvider>
-      </ErrorBoundary>
+              </LanguageProvider>
+            </QueryProvider>
+          </ErrorBoundary>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   } catch (error) {
     console.error('🚨 CRITICAL ERROR IN ROOT LAYOUT:', error);

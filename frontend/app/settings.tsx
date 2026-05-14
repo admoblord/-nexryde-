@@ -13,17 +13,19 @@ import {
 } from '@/src/constants/theme';
 import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMergedPreferences';
 import { useAppStore } from '@/src/store/appStore';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
   const { colors } = useThemeColors();
   const { user } = useAppStore();
   const prefVariant = user?.role === 'driver' ? 'driver' : 'rider';
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>
-      <View style={[styles.header, { borderBottomColor: colors.border }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border, paddingHorizontal: flow.padH }]}>
         <TouchableOpacity
           onPress={() => router.back()}
           style={[styles.backBtn, { backgroundColor: colors.card }]}
@@ -36,7 +38,17 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, 24) + 16 }]}
+        contentContainerStyle={[
+          styles.scroll,
+          {
+            paddingBottom: Math.max(insets.bottom, 24) + 16,
+            paddingHorizontal: flow.padH,
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+            gap: Math.round(flow.sectionGap * 0.75),
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
@@ -68,7 +80,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
@@ -85,8 +96,8 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   scroll: {
-    padding: SPACING.lg,
     paddingTop: SPACING.sm,
+    paddingBottom: SPACING.md,
   },
   lead: {
     fontSize: FONT_SIZE.sm,

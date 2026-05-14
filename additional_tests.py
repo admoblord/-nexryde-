@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Additional KODA Backend API Tests
+Additional NEXRYDE Backend API Tests
 Tests edge cases and AI assistant responses
 """
 

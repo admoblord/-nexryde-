@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 import {
   FeatureAnnouncement,
   fetchFeatureAnnouncements,
@@ -21,6 +22,7 @@ import {
 } from '@/src/services/featureAnnouncements';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
 type Props = {
   role: 'rider' | 'driver';
@@ -69,6 +71,7 @@ function relativeTime(raw: string): string {
 export default function FeatureNotificationsScreen({ role }: Props) {
   const router = useRouter();
   const { user } = useAppStore();
+  const flow = useFlowLayout();
 
   const [tab, setTab] = useState<NotifTab>('activity');
   const [loading, setLoading] = useState(true);
@@ -170,8 +173,9 @@ export default function FeatureNotificationsScreen({ role }: Props) {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
+      <TabBrandStrip role={role} />
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Notifications</Text>
           <Text style={styles.subtitle}>Stay updated on your activity</Text>
@@ -184,7 +188,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       </View>
 
       {/* Tab pills */}
-      <View style={styles.tabRow}>
+      <View style={[styles.tabRow, { paddingHorizontal: flow.padH }]}>
         <TouchableOpacity
           style={[styles.tabPill, tab === 'activity' && styles.tabPillActive]}
           onPress={() => setTab('activity')}
@@ -221,7 +225,15 @@ export default function FeatureNotificationsScreen({ role }: Props) {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingHorizontal: flow.padH,
+              paddingTop: SPACING.sm,
+              gap: flow.sectionGap * 0.45,
+              paddingBottom: 88,
+            },
+          ]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
           showsVerticalScrollIndicator={false}
         >
@@ -333,7 +345,6 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.sm,
     paddingBottom: SPACING.md,
     gap: SPACING.md,
@@ -353,7 +364,6 @@ const styles = StyleSheet.create({
   tabRow: {
     flexDirection: 'row',
     gap: SPACING.sm,
-    paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.md,
   },
   tabPill: {
@@ -361,7 +371,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     paddingHorizontal: SPACING.md,
-    paddingVertical: 8,
+    paddingVertical: 10,
+    minHeight: 44,
     borderRadius: BORDER_RADIUS.full,
     backgroundColor: COLORS.white,
     borderWidth: 1,
@@ -374,7 +385,7 @@ const styles = StyleSheet.create({
   tabPillText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.lightTextSecondary },
   tabPillTextActive: { color: COLORS.white },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  content: { padding: SPACING.lg, paddingTop: SPACING.xs, gap: SPACING.sm, paddingBottom: 80 },
+  content: { flexGrow: 1 },
   markAllBtn: {
     alignSelf: 'flex-start',
     flexDirection: 'row',
@@ -408,7 +419,7 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
   },
@@ -435,7 +446,7 @@ const styles = StyleSheet.create({
   featCard: {
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.md,
+    padding: SPACING.lg,
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
     gap: SPACING.sm,

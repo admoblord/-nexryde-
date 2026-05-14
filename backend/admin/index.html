@@ -1118,6 +1118,19 @@ let refreshInterval = null;
 // ── Helpers ──
 function H(v){return String(v??'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#39;');}
 function authHdr(json=false){const h={};if(json)h['Content-Type']='application/json';if(adminToken)h['x-admin-token']=adminToken;return h;}
+function isAuthStatus(status){return status===401||status===403;}
+function handleAuthError(r){
+  if(isAuthStatus(r.status)){clearSession();return true;}
+  return false;
+}
+function toDataImageSrc(raw, fallback='image/jpeg'){
+  if(!raw) return '';
+  const s=String(raw).trim();
+  if(!s) return '';
+  if(s.startsWith('data:image/')) return s;
+  if(s.startsWith('http://') || s.startsWith('https://')) return s;
+  return `data:${fallback};base64,${s}`;
+}
 function fmtN(n){return Number(n||0).toLocaleString();}
 function fmtDate(d){return d?new Date(d).toLocaleString():'—';}
 function fmtDateShort(d){return d?new Date(d).toLocaleDateString():'—';}
@@ -1154,10 +1167,13 @@ async function validateSession(){
   const tok=adminToken;
   try{
     const r=await fetch(`${API}/admin/overview`,{headers:{'x-admin-token':tok}});
-    if(!r.ok){clearSession();return;}
+    if(!r.ok){
+      if(isAuthStatus(r.status)){clearSession();return;}
+      return;
+    }
     const d=await r.json();
     if(adminToken===tok) showDash(d);
-  }catch{clearSession();}
+  }catch{}
 }
 
 function clearSession(msg='Admin session expired. Please log in again.'){
@@ -1276,7 +1292,10 @@ function filterDrivers(q){
 async function loadOverview(){
   try{
     const r=await fetch(`${API}/admin/overview`,{headers:authHdr()});
-    if(!r.ok){clearSession();return;}
+    if(!r.ok){
+      if(handleAuthError(r)) return;
+      throw new Error(`Overview failed (${r.status})`);
+    }
     const d=await r.json();
     renderOverview(d);
   }catch(e){console.error('overview',e);}
@@ -1331,7 +1350,10 @@ function renderOverview(d){
 async function loadDrivers(){
   try{
     const r=await fetch(`${API}/admin/drivers`,{headers:authHdr()});
-    if(!r.ok){clearSession();return;}
+    if(!r.ok){
+      if(handleAuthError(r)) return;
+      throw new Error(`Drivers failed (${r.status})`);
+    }
     const d=await r.json();
     allDriversData=d.drivers||[];
     document.getElementById('driverCount').textContent=`${allDriversData.length} drivers`;
@@ -1392,7 +1414,10 @@ async function loadRiders(){
     let url = `${API}/admin/riders?limit=${RIDER_PAGE}&skip=${riderSkip}`;
     if(search) url += `&search=${encodeURIComponent(search)}`;
     const r = await fetch(url, {headers:authHdr()});
-    if(!r.ok){clearSession();return;}
+    if(!r.ok){
+      if(handleAuthError(r)) return;
+      throw new Error(`Riders failed (${r.status})`);
+    }
     const d = await r.json();
     riderTotal = d.total || 0;
     let riders = d.riders || [];
@@ -1480,9 +1505,20 @@ async function openRiderDrawer(riderId){
   document.getElementById('rdMeta').textContent = '';
   document.getElementById('rdBody').innerHTML = '<p style="color:var(--muted);">Fetching rider profile…</p>';
   try{
-    const r = await fetch(`${API}/admin/riders/${riderId}`, {headers:authHdr()});
-    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const [r, identityRes] = await Promise.all([
+      fetch(`${API}/admin/riders/${riderId}`, {headers:authHdr()}),
+      fetch(`${API}/admin/riders/${riderId}/identity`, {headers:authHdr()}),
+    ]);
+    if(!r.ok){
+      if(handleAuthError(r)) return;
+      throw new Error(`HTTP ${r.status}`);
+    }
+    if(!identityRes.ok && isAuthStatus(identityRes.status)){
+      clearSession();
+      return;
+    }
     const d = await r.json();
+    const identity = identityRes.ok ? await identityRes.json() : {};
     const rider = d.rider || {};
     const stats = d.stats || {};
     const trips = d.recent_trips || [];
@@ -1493,9 +1529,16 @@ async function openRiderDrawer(riderId){
     document.getElementById('rdMeta').textContent = `${rider.phone||'—'} · ${rider.blocked?'⛔ Blocked':'✅ Active'}${rider.nin_verified?' · NIN ✓':''}`;
 
     const walletBal = d.wallet_balance != null ? `₦${fmtN(d.wallet_balance)}` : '₦0';
-    const ninDisplay = rider.nin
-      ? `<span class="rd-nin">${H(rider.nin)}</span> ${rider.nin_verified?'<span class="badge green" style="font-size:10px;">Verified</span>':'<span class="badge amber" style="font-size:10px;">Not Verified</span>'}`
-      : '<span style="color:var(--dim);">Not provided</span>';
+    const ninRaw = identity.nin || rider.nin || '';
+    const ninMasked = identity.nin_masked || rider.nin_masked || '';
+    const ninDisplay = ninRaw
+      ? `<span class="rd-nin">${H(ninRaw)}</span>`
+      : (ninMasked ? `<span class="rd-nin">${H(ninMasked)}</span>` : '<span style="color:var(--dim);">Not provided</span>');
+    const ninBadge = rider.nin_verified
+      ? '<span class="badge green" style="font-size:10px;">Verified</span>'
+      : '<span class="badge amber" style="font-size:10px;">Not Verified</span>';
+    const profileSrc = toDataImageSrc(identity.profile_image, 'image/jpeg');
+    const faceSrc = toDataImageSrc(identity.face_image, 'image/jpeg');
 
     document.getElementById('rdBody').innerHTML = `
 
@@ -1517,7 +1560,26 @@ async function openRiderDrawer(riderId){
         <div class="rd-section-title"><i class="ri-fingerprint-line"></i> Verification & Security</div>
         <div style="margin-bottom:10px;">
           <div class="rd-cell-label">National ID Number (NIN)</div>
-          <div style="font-size:13px;font-weight:700;margin-top:3px;">${ninDisplay}</div>
+          <div style="font-size:13px;font-weight:700;margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;">${ninDisplay} ${ninBadge}</div>
+          ${ninMasked && ninMasked !== ninRaw ? `<div style="font-size:11px;color:var(--dim);margin-top:4px;">Masked: ${H(ninMasked)}</div>` : ''}
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-bottom:10px;">
+          <div>
+            <div class="rd-cell-label" style="margin-bottom:6px;">Profile Photo</div>
+            ${
+              profileSrc
+                ? `<img src="${profileSrc}" alt="Rider profile photo" style="width:100%;height:152px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" />`
+                : `<div style="height:152px;border:1px dashed var(--border);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px;">No profile image</div>`
+            }
+          </div>
+          <div>
+            <div class="rd-cell-label" style="margin-bottom:6px;">Face Verification Photo</div>
+            ${
+              faceSrc
+                ? `<img src="${faceSrc}" alt="Rider face verification photo" style="width:100%;height:152px;object-fit:cover;border-radius:10px;border:1px solid var(--border);" />`
+                : `<div style="height:152px;border:1px dashed var(--border);border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--dim);font-size:12px;">No face verification image</div>`
+            }
+          </div>
         </div>
         <div class="rd-grid">
           ${rdCell('NIN Verified', rider.nin_verified?'✅ Yes':'❌ No')}
@@ -1682,7 +1744,10 @@ async function loadVerifications(){
   const filter=document.getElementById('verifFilter')?.value||'';
   try{
     const r=await fetch(`${API}/admin/verifications`,{headers:authHdr()});
-    if(!r.ok){clearSession();return;}
+    if(!r.ok){
+      if(handleAuthError(r)) return;
+      throw new Error(`Verifications failed (${r.status})`);
+    }
     const d=await r.json();
     currentVerifications=d.verifications||[];
     // Apply filter

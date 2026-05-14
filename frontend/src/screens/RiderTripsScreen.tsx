@@ -16,6 +16,8 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/
 import { useAppStore } from '@/src/store/appStore';
 import { getUserTrips } from '@/src/services/api';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 type TripTab = 'upcoming' | 'completed' | 'cancelled';
 
@@ -26,6 +28,7 @@ export default function RiderTripsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
   const [trips, setTrips] = useState<any[]>([]);
 
   const loadTrips = useCallback(async () => {
@@ -59,6 +62,39 @@ export default function RiderTripsScreen() {
 
   const visibleTrips = segmented[activeTab];
 
+  const insights = useMemo(() => {
+    const completed = segmented.completed;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const monthTrips = completed.filter((t: any) => {
+      const raw = t.completed_at || t.created_at;
+      if (!raw) return false;
+      const ts = new Date(raw).getTime();
+      return !Number.isNaN(ts) && ts >= monthStart;
+    });
+    const ridesMonth = monthTrips.length;
+    const spendMonth = monthTrips.reduce((s: number, t: any) => s + Number(t.fare || 0), 0);
+    const getDrop = (t: any): string => {
+      const d = t.dropoff_location;
+      if (!d) return '';
+      return typeof d === 'string' ? d.trim() : String(d.address || '').trim();
+    };
+    const destCounts = new Map<string, number>();
+    for (const t of monthTrips) {
+      const addr = getDrop(t);
+      if (!addr || addr.startsWith(',')) continue;
+      const key = addr.length > 80 ? `${addr.slice(0, 77)}…` : addr;
+      destCounts.set(key, (destCounts.get(key) || 0) + 1);
+    }
+    let topDest: { label: string; count: number } | null = null;
+    for (const [label, count] of destCounts) {
+      if (!topDest || count > topDest.count) topDest = { label, count };
+    }
+    const allTimeRides = completed.length;
+    const allSpend = completed.reduce((s: number, t: any) => s + Number(t.fare || 0), 0);
+    return { ridesMonth, spendMonth, topDest, allTimeRides, allSpend, hasAny: completed.length > 0 };
+  }, [segmented.completed]);
+
   const formatDate = (raw?: string) => {
     if (!raw) return 'Recent';
     const d = new Date(raw);
@@ -89,8 +125,27 @@ export default function RiderTripsScreen() {
     const distKm = Number(trip.distance_km || 0);
     const durationMins = Number(trip.duration_mins || trip.duration_min || 0);
 
+    const dropObj = trip.dropoff_location;
+    const pickupObj = trip.pickup_location;
+    const dropLat =
+      dropObj && typeof dropObj === 'object'
+        ? Number((dropObj as any).lat ?? (dropObj as any).latitude)
+        : NaN;
+    const dropLng =
+      dropObj && typeof dropObj === 'object'
+        ? Number((dropObj as any).lng ?? (dropObj as any).longitude)
+        : NaN;
+    const pickupLat =
+      pickupObj && typeof pickupObj === 'object'
+        ? Number((pickupObj as any).lat ?? (pickupObj as any).latitude)
+        : NaN;
+    const pickupLng =
+      pickupObj && typeof pickupObj === 'object'
+        ? Number((pickupObj as any).lng ?? (pickupObj as any).longitude)
+        : NaN;
+
     return (
-      <View key={trip.id} style={styles.tripCard}>
+      <View key={trip.id} style={[styles.tripCard, { padding: flow.cardPad, marginBottom: flow.sectionGap }]}>
         <View style={styles.tripHeader}>
           <Text style={styles.tripDate}>{formatDate(trip.created_at || trip.accepted_at || trip.completed_at)}</Text>
           <Text style={styles.tripFare}>{CURRENCY}{fare.toLocaleString()}</Text>
@@ -134,50 +189,79 @@ export default function RiderTripsScreen() {
         </View>
 
         {activeTab === 'completed' ? (
-          <View style={styles.tripActions}>
-            {/* Book Again — top priority action */}
-            <TouchableOpacity
-              style={styles.bookAgainButton}
-              onPress={() =>
-                router.push({
-                  pathname: '/rider/book',
-                  params: {
-                    pickup: typeof trip.pickup_location === 'string'
-                      ? trip.pickup_location
-                      : trip.pickup_location?.address || '',
-                    dropoff: typeof trip.dropoff_location === 'string'
-                      ? trip.dropoff_location
-                      : trip.dropoff_location?.address || '',
-                  },
-                } as any)
-              }
-            >
-              <Ionicons name="refresh-circle" size={16} color="#FFF" />
-              <Text style={styles.bookAgainText}>Book Again</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.receiptButton}
-              onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } })}
-            >
-              <Ionicons name="receipt-outline" size={16} color={COLORS.accentBlue} />
-              <Text style={styles.receiptButtonText}>Receipt</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.reportButton}
-              onPress={() => router.push({ pathname: '/shield-disputes', params: { tripId: trip.id, mode: 'report' } } as any)}
-            >
-              <Ionicons name="shield-outline" size={16} color={COLORS.error} />
-              <Text style={styles.reportButtonText}>Issue</Text>
-            </TouchableOpacity>
-          </View>
+          <>
+            <View style={styles.tripActions}>
+              <TouchableOpacity
+                style={styles.bookAgainButton}
+                onPress={() =>
+                  router.push({
+                    pathname: '/rider/book',
+                    params: {
+                      pickup: typeof trip.pickup_location === 'string'
+                        ? trip.pickup_location
+                        : trip.pickup_location?.address || '',
+                      dropoff: typeof trip.dropoff_location === 'string'
+                        ? trip.dropoff_location
+                        : trip.dropoff_location?.address || '',
+                      ...(Number.isFinite(pickupLat) && Number.isFinite(pickupLng)
+                        ? { pickupLat: String(pickupLat), pickupLng: String(pickupLng) }
+                        : {}),
+                      ...(Number.isFinite(dropLat) && Number.isFinite(dropLng)
+                        ? { dropoffLat: String(dropLat), dropoffLng: String(dropLng) }
+                        : {}),
+                    },
+                  } as any)
+                }
+              >
+                <Ionicons name="refresh-circle" size={16} color="#FFF" />
+                <Text style={styles.bookAgainText}>Book Again</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.receiptButton}
+                onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: trip.id } })}
+              >
+                <Ionicons name="receipt-outline" size={16} color={COLORS.accentBlue} />
+                <Text style={styles.receiptButtonText}>Receipt</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.reportButton}
+                onPress={() =>
+                  router.push({ pathname: '/shield-disputes', params: { tripId: trip.id, mode: 'report' } } as any)
+                }
+              >
+                <Ionicons name="shield-outline" size={16} color={COLORS.error} />
+                <Text style={styles.reportButtonText}>Issue</Text>
+              </TouchableOpacity>
+            </View>
+            {trip.driver_id ? (
+              <TouchableOpacity
+                style={styles.sameDriverButton}
+                onPress={() =>
+                  router.push({
+                    pathname: '/rider/book',
+                    params: {
+                      requestedDriverId: String(trip.driver_id),
+                      driverName: String(trip.driver_name || driverLabel || ''),
+                    },
+                  } as any)
+                }
+                accessibilityRole="button"
+                accessibilityLabel="Book with same driver"
+              >
+                <Ionicons name="heart-outline" size={16} color={COLORS.primary} />
+                <Text style={styles.sameDriverText}>Same driver</Text>
+              </TouchableOpacity>
+            ) : null}
+          </>
         ) : null}
       </View>
     );
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <TabBrandStrip role="rider" />
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
         </TouchableOpacity>
@@ -191,7 +275,7 @@ export default function RiderTripsScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.tabsContainer}>
+      <View style={[styles.tabsContainer, { paddingHorizontal: flow.padH }]}>
         {(['upcoming', 'completed', 'cancelled'] as TripTab[]).map((tab) => (
           <TouchableOpacity key={tab} style={[styles.tab, activeTab === tab && styles.tabActive]} onPress={() => setActiveTab(tab)}>
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
@@ -208,9 +292,57 @@ export default function RiderTripsScreen() {
         </View>
       ) : (
         <ScrollView
-          contentContainerStyle={[styles.content, { paddingBottom: tabPad }]}
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingHorizontal: flow.padH,
+              paddingTop: Math.round(flow.sectionGap * 0.65),
+              paddingBottom: tabPad,
+              gap: Math.round(flow.sectionGap * 0.45),
+            },
+          ]}
           refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadTrips(); }} />}
         >
+          {insights.hasAny ? (
+            <View
+              style={[
+                styles.insightsCard,
+                {
+                  padding: flow.cardPad,
+                  maxWidth: Math.min(flow.maxContentWidth, flow.width - flow.padH * 2),
+                },
+              ]}
+            >
+              <Text style={styles.insightsTitle}>Your activity</Text>
+              <View style={styles.insightsRow}>
+                <View style={styles.insightCell}>
+                  <Text style={styles.insightValue}>{insights.ridesMonth}</Text>
+                  <Text style={styles.insightLabel}>Rides this month</Text>
+                </View>
+                <View style={styles.insightDivider} />
+                <View style={styles.insightCell}>
+                  <Text style={styles.insightValue}>
+                    {CURRENCY}
+                    {Math.round(insights.spendMonth).toLocaleString()}
+                  </Text>
+                  <Text style={styles.insightLabel}>Spent this month</Text>
+                </View>
+              </View>
+              {insights.topDest ? (
+                <View style={styles.topDestRow}>
+                  <Ionicons name="trophy-outline" size={16} color={COLORS.accent} />
+                  <Text style={styles.topDestText} numberOfLines={2}>
+                    Top stop: {insights.topDest.label}
+                  </Text>
+                </View>
+              ) : null}
+              <Text style={styles.insightsFoot}>
+                {insights.allTimeRides} completed · {CURRENCY}
+                {Math.round(insights.allSpend).toLocaleString()} lifetime
+              </Text>
+            </View>
+          ) : null}
+
           {visibleTrips.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="calendar-outline" size={64} color={COLORS.gray300} />
@@ -237,7 +369,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
@@ -248,14 +379,20 @@ const styles = StyleSheet.create({
   tabsContainer: {
     flexDirection: 'row',
     backgroundColor: COLORS.white,
-    paddingHorizontal: SPACING.md,
     paddingBottom: SPACING.sm,
   },
-  tab: { flex: 1, paddingVertical: SPACING.sm, alignItems: 'center', borderBottomWidth: 2, borderBottomColor: 'transparent' },
+  tab: {
+    flex: 1,
+    paddingVertical: SPACING.md,
+    minHeight: 48,
+    alignItems: 'center',
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
   tabActive: { borderBottomColor: COLORS.primary },
   tabText: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.gray500 },
   tabTextActive: { color: COLORS.primary, fontWeight: '800' },
-  content: { padding: SPACING.lg, paddingBottom: SPACING.lg }, // paddingBottom overridden inline with tabPad
+  content: { flexGrow: 1 },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   loadingText: { marginTop: SPACING.sm, color: COLORS.gray500, fontWeight: '600' },
   emptyState: { alignItems: 'center', paddingVertical: SPACING.xxl },
@@ -271,9 +408,7 @@ const styles = StyleSheet.create({
   bookButtonText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
   tripCard: {
     backgroundColor: COLORS.white,
-    padding: SPACING.md,
     borderRadius: BORDER_RADIUS.lg,
-    marginBottom: SPACING.md,
     ...SHADOWS.sm,
   },
   tripHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
@@ -351,4 +486,56 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(239,68,68,0.2)',
   },
   reportButtonText: { color: COLORS.error, fontWeight: '700', fontSize: FONT_SIZE.sm },
+  sameDriverButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: SPACING.sm,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,158,247,0.35)',
+    backgroundColor: COLORS.white,
+  },
+  sameDriverText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.primary },
+  insightsCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.gray100,
+    ...SHADOWS.sm,
+    alignSelf: 'center',
+    width: '100%',
+  },
+  insightsTitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: COLORS.gray800,
+    marginBottom: SPACING.sm,
+    letterSpacing: 0.2,
+  },
+  insightsRow: { flexDirection: 'row', alignItems: 'center' },
+  insightCell: { flex: 1, alignItems: 'center', paddingVertical: SPACING.xs },
+  insightDivider: { width: 1, height: 36, backgroundColor: COLORS.gray100 },
+  insightValue: { fontSize: FONT_SIZE.xl, fontWeight: '900', color: COLORS.primary },
+  insightLabel: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: COLORS.gray500, marginTop: 4, textAlign: 'center' },
+  topDestRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: SPACING.sm,
+    paddingTop: SPACING.sm,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.gray100,
+  },
+  topDestText: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray700 },
+  insightsFoot: {
+    marginTop: SPACING.sm,
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: COLORS.gray400,
+    textAlign: 'center',
+  },
 });

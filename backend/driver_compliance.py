@@ -34,7 +34,8 @@ DOCUMENT_NAMES = {
 
 
 def parse_expiry(expiry_str: str) -> Optional[datetime]:
-    """Parse MM/YYYY expiry format to datetime."""
+    """Parse MM/YYYY expiry format to the actual last day of that month."""
+    import calendar
     if not expiry_str:
         return None
     try:
@@ -42,7 +43,8 @@ def parse_expiry(expiry_str: str) -> Optional[datetime]:
         if len(parts) == 2:
             month = int(parts[0])
             year = int(parts[1])
-            return datetime(year, month, 28, tzinfo=timezone.utc)
+            last_day = calendar.monthrange(year, month)[1]
+            return datetime(year, month, last_day, 23, 59, 59, tzinfo=timezone.utc)
     except (ValueError, IndexError):
         pass
     return None
@@ -100,22 +102,35 @@ async def run_expiry_check_all_drivers():
 
         if status["expired"]:
             doc_names = ", ".join(d["document"] for d in status["expired"])
-            await db.driver_profiles.update_one(
-                {"user_id": driver_id},
-                {"$set": {"is_online": False, "suspended_reason": "expired_documents"}}
-            )
-            await db.users.update_one(
-                {"id": driver_id},
-                {"$set": {"suspended_until": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
-                          "suspension_reason": "expired_documents"}}
-            )
-            await send_push_notification(
-                driver_id,
-                "Account Suspended - Expired Documents",
-                f"Your {doc_names} has expired. Upload renewed documents to reactivate your account.",
-                {"type": "document_expired"},
-            )
-            results["suspended"] += 1
+            # Only hard-suspend when a document is *critically* expired (>30 days past due),
+            # matching the go-online gate policy in enforcement_system.py.
+            critically_expired = status.get("critically_expired", False)
+            if critically_expired:
+                await db.driver_profiles.update_one(
+                    {"user_id": driver_id},
+                    {"$set": {"is_online": False, "suspended_reason": "expired_documents"}}
+                )
+                await db.users.update_one(
+                    {"id": driver_id},
+                    {"$set": {"suspended_until": (datetime.now(timezone.utc) + timedelta(days=365)).isoformat(),
+                              "suspension_reason": "expired_documents"}}
+                )
+                await send_push_notification(
+                    driver_id,
+                    "Account Suspended - Expired Documents",
+                    f"Your {doc_names} has expired. Upload renewed documents to reactivate your account.",
+                    {"type": "document_expired"},
+                )
+                results["suspended"] += 1
+            else:
+                # Recently expired (<= 30 days) — warn but don't hard-suspend yet
+                await send_push_notification(
+                    driver_id,
+                    "Action Required - Documents Expired",
+                    f"Your {doc_names} has recently expired. Please upload renewed documents within 30 days to avoid suspension.",
+                    {"type": "document_expired_warning"},
+                )
+                results["reminded"] += 1
 
         elif status["expiring_soon"]:
             for doc in status["expiring_soon"]:
@@ -256,21 +271,14 @@ async def run_monthly_verification_check():
                     )
                     results["reminded"] += 1
             else:
-                await db.driver_profiles.update_one(
-                    {"user_id": driver_id},
-                    {"$set": {"is_online": False, "suspended_reason": "monthly_verification_overdue", "monthly_verification_complete": False}}
-                )
-                await db.users.update_one(
-                    {"id": driver_id},
-                    {"$set": {"suspension_reason": "monthly_verification_overdue"}}
-                )
+                # Soft reminder only — never suspend verified drivers over monthly photos
                 await send_push_notification(
                     driver_id,
-                    "Account Restricted - Monthly Verification Overdue",
-                    f"Upload your {missing_text} to go back online. This is required monthly for safety.",
-                    {"type": "monthly_verification_overdue"},
+                    "Monthly Verification Reminder",
+                    f"Please upload your {missing_text} when convenient. This helps keep Nexryde safe.",
+                    {"type": "monthly_verification_reminder"},
                 )
-                results["suspended"] += 1
+                results["reminded"] += 1
 
     logger.info(f"Monthly verification check: {results}")
     return results

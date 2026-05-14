@@ -4,6 +4,8 @@
   "version": "1.2.1",
   "scripts": {
     "start": "expo start",
+    "start:clear": "expo start --clear",
+    "cache:expo": "rm -rf .expo",
     "reset-project": "node ./scripts/reset-project.js",
     "android": "expo run:android",
     "ios": "expo run:ios",
@@ -17,8 +19,11 @@
     "ship:all": "bash ../scripts/one_click_ship.sh all",
     "build:local:apk": "./scripts/local-android-build.sh apk",
     "build:local:aab": "./scripts/local-android-build.sh aab",
-    "build:eas:android": "eas build --platform android --profile production",
-    "build:eas:android:apk": "eas build --platform android --profile preview",
+    "build:eas:android": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production",
+    "build:eas:android:aab": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production --non-interactive",
+    "build:eas:android:aab:clear": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile production --clear-cache --non-interactive",
+    "build:eas:android:apk": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile preview",
+    "build:eas:android:apk:clear": "EAS_SKIP_AUTO_FINGERPRINT=1 eas build --platform android --profile preview --clear-cache",
     "submit:android": "eas submit --platform android --profile production --latest"
   },
   "dependencies": {
@@ -61,6 +66,7 @@
     "expo-splash-screen": "~31.0.13",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
+    "expo-tracking-transparency": "^55.0.13",
     "expo-web-browser": "~15.0.11",
     "react": "19.1.0",
     "react-dom": "19.1.0",

@@ -8,7 +8,7 @@ import {
   RefreshControl,
   Animated,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,6 +16,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/consta
 import { BACKEND_URL, getAuthHeaders, getDriverProfile } from '@/src/services/api';
 import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
 import { useAppStore } from '@/src/store/appStore';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 const DOC_DESCRIPTIONS: Record<string, string> = {
   nin: 'National Identification Number — proves your Nigerian citizenship',
@@ -77,6 +78,8 @@ interface DocStatus {
 
 export default function DocumentsScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
   const { user } = useAppStore();
 
   const [loading, setLoading] = useState(true);
@@ -187,7 +190,7 @@ export default function DocumentsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color={COLORS.gray800} />
         </TouchableOpacity>
@@ -196,7 +199,17 @@ export default function DocumentsScreen() {
       </View>
 
       <ScrollView
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: Math.max(insets.bottom, 24) + 16,
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+            gap: flow.sectionGap * 0.5,
+          },
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         showsVerticalScrollIndicator={false}
       >
@@ -322,7 +335,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     backgroundColor: COLORS.white,
     borderBottomWidth: 1,
@@ -330,7 +342,7 @@ const styles = StyleSheet.create({
   },
   backButton: { padding: SPACING.sm },
   headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.gray800 },
-  content: { padding: SPACING.lg, paddingBottom: 40 },
+  content: { paddingTop: SPACING.lg, paddingBottom: SPACING.md },
   statusBanner: {
     flexDirection: 'row',
     alignItems: 'center',

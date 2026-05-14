@@ -9,11 +9,13 @@ import {
   Pressable,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { BRAND, LAYOUT } from '@/src/constants/designSystem';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 type HubRole = 'driver' | 'rider';
 
@@ -27,6 +29,18 @@ type HubItem = {
 type HubSection = { id: string; title: string; items: HubItem[] };
 
 const DRIVER_SECTIONS: HubSection[] = [
+  {
+    id: 'ride_alerts',
+    title: 'Ride alerts',
+    items: [
+      {
+        label: 'Offer ringtone',
+        route: '/driver/offer-ringtone',
+        icon: 'musical-notes',
+        hint: 'Pick a sound for new ride requests',
+      },
+    ],
+  },
   {
     id: 'community',
     title: 'Community & social',
@@ -50,7 +64,6 @@ const DRIVER_SECTIONS: HubSection[] = [
     title: 'Convenience',
     items: [
       { label: 'Smart mode', route: '/driver/smart-mode', icon: 'flash', hint: 'Driving assist' },
-      { label: 'Traffic & routes', route: '/driver/traffic', icon: 'navigate', hint: 'AI route context' },
       { label: 'Prayer times', route: '/driver/prayer-times', icon: 'moon', hint: 'Local times' },
       { label: 'Wellness', route: '/driver/wellness', icon: 'fitness', hint: 'Driver wellness' },
     ],
@@ -59,6 +72,8 @@ const DRIVER_SECTIONS: HubSection[] = [
     id: 'account',
     title: 'Account & payments',
     items: [
+      { label: 'Withdraw Earnings', route: '/driver/withdrawal', icon: 'arrow-up-circle', hint: 'Cash out balance' },
+      { label: 'Bank details', route: '/driver/bank', icon: 'business-outline', hint: 'Payout account' },
       { label: 'Subscription', route: '/driver/subscription', icon: 'card-outline', hint: 'Plan & billing' },
     ],
   },
@@ -119,6 +134,8 @@ export type FeatureHubDrawerProps = {
 
 export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerProps) {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
   const sections = useMemo(() => (role === 'driver' ? DRIVER_SECTIONS : RIDER_SECTIONS), [role]);
 
   const navigate = (route: string) => {
@@ -132,11 +149,22 @@ export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerPro
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose}>
-        <Pressable style={styles.sheet} onPress={e => e.stopPropagation()}>
+        <Pressable
+          style={[
+            styles.sheet,
+            {
+              width: '100%',
+              maxWidth: flow.maxContentWidth,
+              alignSelf: 'center',
+              paddingBottom: SPACING.xl + insets.bottom,
+            },
+          ]}
+          onPress={e => e.stopPropagation()}
+        >
           <View style={styles.grab}>
             <View style={styles.grabBar} />
           </View>
-          <View style={styles.sheetHeader}>
+          <View style={[styles.sheetHeader, { paddingHorizontal: flow.padH }]}>
             <View>
               <Text style={styles.sheetTitle}>NEXRYDE hub</Text>
               <Text style={styles.sheetSubtitle}>
@@ -147,14 +175,25 @@ export function FeatureHubDrawer({ visible, onClose, role }: FeatureHubDrawerPro
               <Ionicons name="close" size={22} color={COLORS.lightTextPrimary} />
             </TouchableOpacity>
           </View>
-          <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={[
+              styles.scroll,
+              {
+                paddingHorizontal: flow.padH,
+                paddingTop: Math.round(flow.sectionGap * 0.65),
+                paddingBottom: SPACING.huge,
+                gap: flow.sectionGap * 0.35,
+              },
+            ]}
+            showsVerticalScrollIndicator={false}
+          >
             {sections.map(section => (
-              <View key={section.id} style={styles.section}>
+              <View key={section.id} style={[styles.section, { marginBottom: flow.sectionGap }]}>
                 <Text style={styles.sectionTitle}>{section.title}</Text>
                 {section.items.map(item => (
                   <TouchableOpacity
                     key={item.route + item.label}
-                    style={styles.row}
+                    style={[styles.row, { minHeight: flow.rowMinHeight, paddingVertical: SPACING.md }]}
                     onPress={() => navigate(item.route)}
                     activeOpacity={0.85}
                     accessibilityRole="button"
@@ -193,7 +232,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.lightBackground,
     borderTopLeftRadius: BORDER_RADIUS.xxl,
     borderTopRightRadius: BORDER_RADIUS.xxl,
-    paddingBottom: SPACING.xl,
     borderTopWidth: 2,
     borderTopColor: 'rgba(0, 217, 255, 0.28)',
     ...SHADOWS.xl,
@@ -209,7 +247,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.sm,
     borderBottomWidth: 1,
@@ -234,12 +271,8 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.lg,
     backgroundColor: COLORS.lightSurface,
   },
-  scroll: {
-    paddingHorizontal: SPACING.lg,
-    paddingTop: SPACING.md,
-    paddingBottom: SPACING.huge,
-  },
-  section: { marginBottom: SPACING.lg },
+  scroll: {},
+  section: {},
   sectionTitle: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '800',
@@ -253,12 +286,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: COLORS.white,
     borderRadius: BORDER_RADIUS.lg,
-    paddingVertical: SPACING.sm + 2,
     paddingHorizontal: SPACING.md,
     marginBottom: SPACING.sm,
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
-    minHeight: LAYOUT.touchMin,
   },
   rowIcon: {
     width: 40,

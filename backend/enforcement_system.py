@@ -39,28 +39,29 @@ VIOLATION_CONFIG = {
     },
     "driver_cancellation": {
         "description": "Driver cancelled after accepting",
-        "threshold": 3,
+        "threshold": 7,
         "window_hours": 24,
         "penalty": "warning",
         "strikes": 1,
         "escalation": {
-            3: {"action": "warning", "message": "You've cancelled 3 trips today. Your acceptance rate is dropping."},
-            5: {"action": "timeout_2h", "message": "Too many cancellations. You're offline for 2 hours."},
-            7: {"action": "suspend_24h", "message": "Excessive cancellations. Account suspended for 24 hours."},
-            10: {"action": "suspend_7d", "message": "Repeated cancellations. Account suspended for 7 days. Contact support."},
+            1: {"action": "warning", "message": "⚠️ Cancelling after you accept leaves riders stranded. Only accept trips you can complete."},
+            4: {"action": "warning", "message": "⚠️ You've cancelled 4 trips after accepting in the last 24 hours. At 7, you cannot go online for 1 hour."},
+            6: {"action": "warning", "message": "⚠️ You've cancelled 6 trips after accepting in the last 24 hours. One more cancellation will block going online for 1 hour."},
+            7: {"action": "timeout_1h", "message": "🚫 Going online is paused for 1 hour. You've reached 7 post-accept cancellations in the last 24 hours. Please only accept trips you can complete."},
         },
         "role": "driver",
     },
     "rider_cancellation": {
         "description": "Rider cancelled trip",
-        "threshold": 5,
+        "threshold": 7,
         "window_hours": 24,
         "penalty": "warning",
         "strikes": 1,
         "escalation": {
-            5: {"action": "warning", "message": "You've cancelled 5 rides today. Frequent cancellations affect your rider score."},
-            8: {"action": "cooldown_30m", "message": "Too many cancellations. Please wait 30 minutes before booking again."},
-            12: {"action": "suspend_24h", "message": "Excessive cancellations. Your booking is suspended for 24 hours."},
+            1: {"action": "warning", "message": "⚠️ Cancelling trips wastes drivers' time and fuel. Book when you're ready."},
+            4: {"action": "warning", "message": "⚠️ You've cancelled 4 rides in the last 24 hours. At 7 cancellations, booking pauses for 1 hour."},
+            6: {"action": "warning", "message": "⚠️ You've cancelled 6 rides in the last 24 hours. One more cancellation will pause booking for 1 hour."},
+            7: {"action": "booking_block_1h", "message": "🚫 Booking paused for 1 hour. You've reached 7 ride cancellations in the last 24 hours. Please book only when you're ready to travel."},
         },
         "role": "rider",
     },
@@ -68,10 +69,10 @@ VIOLATION_CONFIG = {
         "description": "Driver refused to return rider's lost item",
         "threshold": 1,
         "window_hours": 0,
-        "penalty": "suspend_7d",
+        "penalty": "suspend_24h",
         "strikes": 3,
         "escalation": {
-            1: {"action": "suspend_7d", "message": "Refusing to return a rider's lost item is a serious violation. Your account is suspended for 7 days."},
+            1: {"action": "suspend_24h", "message": "Refusing to return a rider's lost item is a serious violation. Your account is suspended for 24 hours."},
             2: {"action": "deactivate", "message": "Repeated refusal to return lost items. Your account has been permanently deactivated."},
         },
         "role": "driver",
@@ -84,7 +85,7 @@ VIOLATION_CONFIG = {
         "strikes": 2,
         "escalation": {
             1: {"action": "warning", "message": "Requesting offline payments violates NEXRYDE policy. This disables safety features for riders."},
-            2: {"action": "suspend_7d", "message": "Second offline payment violation. Account suspended for 7 days."},
+            2: {"action": "suspend_24h", "message": "Second offline payment violation. Account suspended for 24 hours."},
             3: {"action": "deactivate", "message": "Repeated offline payment requests. Account permanently deactivated."},
         },
         "role": "driver",
@@ -98,7 +99,7 @@ VIOLATION_CONFIG = {
         "escalation": {
             2: {"action": "warning", "message": "Multiple behavior complaints received. Please maintain professional conduct."},
             4: {"action": "suspend_24h", "message": "Continued behavior complaints. Account suspended for 24 hours."},
-            6: {"action": "suspend_7d", "message": "Repeated behavior issues. Account suspended for 7 days. Mandatory review required."},
+            6: {"action": "suspend_24h", "message": "Repeated behavior issues. Account suspended for 24 hours. Please improve your conduct."},
         },
         "role": "both",
     },
@@ -130,10 +131,10 @@ VIOLATION_CONFIG = {
         "description": "GPS spoofing or impossible route manipulation detected",
         "threshold": 1,
         "window_hours": 24 * 365,
-        "penalty": "suspend_7d",
+        "penalty": "suspend_24h",
         "strikes": 3,
         "escalation": {
-            1: {"action": "suspend_7d", "message": "GPS spoofing was detected on your account. Your driver account is suspended pending investigation."},
+            1: {"action": "suspend_24h", "message": "GPS spoofing was detected on your account. Your driver account is suspended for 24 hours pending investigation."},
         },
         "role": "driver",
     },
@@ -280,6 +281,11 @@ async def apply_penalty(user_id: str, action: str, message: str, violation_type:
         await db.users.update_one({"id": user_id}, {"$set": {"booking_blocked_until": until.isoformat(), "block_reason": violation_type}})
         return {"action": "cooldown", "message": message, "blocked_until": until.isoformat()}
 
+    elif action == "booking_block_1h":
+        until = now + timedelta(hours=1)
+        await db.users.update_one({"id": user_id}, {"$set": {"booking_blocked_until": until.isoformat(), "block_reason": violation_type}})
+        return {"action": "booking_blocked", "message": message, "blocked_until": until.isoformat(), "blocked_seconds": 3600}
+
     elif action == "timeout_1h":
         until = now + timedelta(hours=1)
         await db.users.update_one({"id": user_id}, {"$set": {"forced_offline_until": until.isoformat(), "block_reason": violation_type}})
@@ -298,8 +304,9 @@ async def apply_penalty(user_id: str, action: str, message: str, violation_type:
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
 
-    elif action == "suspend_7d":
-        until = now + timedelta(days=7)
+    elif action in ("suspend_3d", "suspend_7d"):
+        # Driver suspensions are capped at 24 hours — longer bans require admin review
+        until = now + timedelta(hours=24)
         await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
@@ -348,11 +355,12 @@ async def check_user_status(user_id: str):
                 "can_go_online": False,
                 "message": "Complete document verification and approval before going online.",
             }
-        if profile.get("suspended_reason") in {"expired_documents", "monthly_verification_overdue", "verification_recheck_required"}:
+        # Only hard-block if actual documents are expired — monthly re-uploads are soft reminders only
+        if profile.get("suspended_reason") in {"expired_documents"}:
             return {
                 "allowed": True,
                 "can_go_online": False,
-                "message": "Your account is restricted pending compliance update.",
+                "message": "Your account is restricted: one or more documents have expired. Please renew them.",
             }
 
     suspended_until = user.get("suspended_until")
@@ -361,8 +369,13 @@ async def check_user_status(user_id: str):
             until_dt = datetime.fromisoformat(suspended_until.replace("Z", "+00:00"))
             if datetime.now(timezone.utc) < until_dt:
                 remaining = until_dt - datetime.now(timezone.utc)
-                hours = int(remaining.total_seconds() / 3600)
-                return {"allowed": False, "reason": "Account suspended", "message": f"Your account is suspended. {hours} hours remaining.", "suspended_until": suspended_until}
+                total_hours = int(remaining.total_seconds() / 3600)
+                if total_hours >= 48:
+                    days = round(remaining.total_seconds() / 86400, 1)
+                    time_str = f"{days} days" if days != int(days) else f"{int(days)} days"
+                else:
+                    time_str = f"{total_hours} hours"
+                return {"allowed": False, "reason": "Account suspended", "message": f"Your account is suspended. {time_str} remaining.", "suspended_until": suspended_until}
             else:
                 await db.users.update_one({"id": user_id}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
         except (ValueError, TypeError):
@@ -385,10 +398,20 @@ async def check_user_status(user_id: str):
     if booking_blocked and user.get("role") == "rider":
         try:
             until_dt = datetime.fromisoformat(booking_blocked.replace("Z", "+00:00"))
-            if datetime.now(timezone.utc) < until_dt:
-                remaining = until_dt - datetime.now(timezone.utc)
-                mins = int(remaining.total_seconds() / 60)
-                return {"allowed": True, "can_book": False, "message": f"Booking is temporarily disabled for {mins} more minutes."}
+            now_utc = datetime.now(timezone.utc)
+            if now_utc < until_dt:
+                remaining = until_dt - now_utc
+                total_secs = int(remaining.total_seconds())
+                mins = total_secs // 60
+                secs = total_secs % 60
+                return {
+                    "allowed": True,
+                    "can_book": False,
+                    "reason": "booking_blocked",
+                    "message": f"Booking suspended. {mins}m {secs:02d}s remaining.",
+                    "booking_blocked_until": until_dt.isoformat(),
+                    "booking_blocked_seconds_remaining": total_secs,
+                }
             else:
                 await db.users.update_one({"id": user_id}, {"$unset": {"booking_blocked_until": "", "block_reason": ""}})
         except (ValueError, TypeError):
@@ -418,6 +441,36 @@ async def report_violation(request: ReportViolationRequest):
 async def get_enforcement_status(user_id: str):
     """Check if user is allowed to use the app."""
     return await check_user_status(user_id)
+
+
+@enforcement_router.get("/enforcement/book-status/{user_id}")
+async def get_book_status(user_id: str):
+    """Lightweight check — can this rider book right now? Returns countdown seconds if blocked."""
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "booking_blocked_until": 1, "block_reason": 1, "is_deactivated": 1, "suspended_until": 1})
+    if not user:
+        return {"can_book": True}
+    if user.get("is_deactivated"):
+        return {"can_book": False, "reason": "deactivated", "message": "Account deactivated."}
+    suspended_until = user.get("suspended_until")
+    if suspended_until:
+        try:
+            until_dt = datetime.fromisoformat(suspended_until.replace("Z", "+00:00"))
+            if datetime.now(timezone.utc) < until_dt:
+                remaining = until_dt - datetime.now(timezone.utc)
+                return {"can_book": False, "reason": "suspended", "message": f"Account suspended. {int(remaining.total_seconds() // 3600)}h remaining.", "seconds_remaining": int(remaining.total_seconds())}
+        except (ValueError, TypeError):
+            pass
+    booking_blocked = user.get("booking_blocked_until")
+    if booking_blocked:
+        try:
+            until_dt = datetime.fromisoformat(booking_blocked.replace("Z", "+00:00"))
+            now_utc = datetime.now(timezone.utc)
+            if now_utc < until_dt:
+                secs = int((until_dt - now_utc).total_seconds())
+                return {"can_book": False, "reason": "booking_blocked", "message": "Too many cancellations today. Booking is temporarily suspended.", "seconds_remaining": secs, "blocked_until": until_dt.isoformat()}
+        except (ValueError, TypeError):
+            pass
+    return {"can_book": True}
 
 
 @enforcement_router.get("/enforcement/history/{user_id}")

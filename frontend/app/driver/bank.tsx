@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAppStore } from '@/src/store/appStore';
 import {
   BACKEND_URL,
@@ -63,13 +64,14 @@ function ProgressBar({ step, total }: { step: number; total: number }) {
   );
 }
 const pb = StyleSheet.create({
-  track: { height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, overflow: 'hidden', marginHorizontal: SPACING.lg, marginBottom: SPACING.sm },
+  track: { height: 4, backgroundColor: '#E2E8F0', borderRadius: 2, overflow: 'hidden', marginBottom: SPACING.sm },
   fill: { height: '100%', backgroundColor: '#00D46A', borderRadius: 2 },
 });
 
 export default function BankDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
   const { user } = useAppStore();
 
   // Bank form state
@@ -340,7 +342,7 @@ export default function BankDetailsScreen() {
     <View style={styles.root}>
       <SafeAreaView style={{ flex: 1 }} edges={['top']}>
         {/* ── Header ── */}
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
             <Ionicons name="arrow-back" size={24} color="#0F172A" />
           </TouchableOpacity>
@@ -356,7 +358,9 @@ export default function BankDetailsScreen() {
         </View>
 
         {/* ── Progress bar ── */}
+        <View style={{ paddingHorizontal: flow.padH, marginBottom: SPACING.sm }}>
         <ProgressBar step={formStep} total={3} />
+        </View>
 
         <KeyboardAvoidingView
           style={{ flex: 1 }}
@@ -364,12 +368,42 @@ export default function BankDetailsScreen() {
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <ScrollView
-            contentContainerStyle={[styles.scroll, { paddingBottom: Math.max(insets.bottom, 16) + 24 }]}
+            contentContainerStyle={[
+              styles.scroll,
+              {
+                paddingHorizontal: flow.padH,
+                paddingTop: flow.sectionGap * 0.65,
+                paddingBottom: Math.max(insets.bottom, 16) + 24,
+              },
+            ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* ── Status banner ── */}
-            <View style={[styles.statusBanner, payoutReady ? styles.statusBannerReady : styles.statusBannerPending]}>
+        {/* ── Quick withdraw CTA ── */}
+        {payoutReady && vaultSpendable >= 500 && (
+          <TouchableOpacity
+            style={styles.withdrawCta}
+            onPress={() => router.push('/driver/withdrawal' as any)}
+            activeOpacity={0.88}
+          >
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+              <View style={styles.withdrawCtaIcon}>
+                <Ionicons name="arrow-up-circle" size={20} color="#22c55e" />
+              </View>
+              <View>
+                <Text style={styles.withdrawCtaTitle}>Wallet Balance</Text>
+                <Text style={styles.withdrawCtaAmount}>₦{Math.floor(vaultSpendable).toLocaleString()} ready to withdraw</Text>
+              </View>
+            </View>
+            <View style={styles.withdrawCtaBtn}>
+              <Text style={styles.withdrawCtaBtnText}>Withdraw</Text>
+              <Ionicons name="chevron-forward" size={14} color="#022C22" />
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* ── Status banner ── */}
+        <View style={[styles.statusBanner, payoutReady ? styles.statusBannerReady : styles.statusBannerPending]}>
               <View style={[styles.statusIcon, { backgroundColor: payoutReady ? '#D1FAE5' : '#FEF3C7' }]}>
                 <Ionicons
                   name={payoutReady ? 'shield-checkmark' : 'alert-circle'}
@@ -771,7 +805,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.sm,
-    paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.md,
     backgroundColor: '#FFF',
     borderBottomWidth: 1,
@@ -787,7 +820,7 @@ const styles = StyleSheet.create({
     borderRadius: 999, borderWidth: 1, borderColor: '#BBF7D0',
   },
   payoutReadyText: { fontSize: 12, fontWeight: '800', color: '#16A34A' },
-  scroll: { paddingHorizontal: SPACING.lg, paddingTop: SPACING.md },
+  scroll: { paddingTop: SPACING.md },
   statusBanner: {
     flexDirection: 'row', alignItems: 'center', gap: SPACING.md,
     padding: SPACING.md, borderRadius: 14, marginBottom: SPACING.lg,
@@ -930,6 +963,17 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: '#BBF7D0',
   },
   savedConfirmText: { fontSize: FONT_SIZE.md, fontWeight: '800', color: '#16A34A' },
+  // Withdraw CTA
+  withdrawCta: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: '#052e16', borderRadius: 16, padding: SPACING.md,
+    marginBottom: SPACING.md, borderWidth: 1, borderColor: 'rgba(34,197,94,0.35)',
+  },
+  withdrawCtaIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: 'rgba(34,197,94,0.12)', alignItems: 'center', justifyContent: 'center' },
+  withdrawCtaTitle: { fontSize: 11, fontWeight: '800', color: '#86efac', letterSpacing: 0.5 },
+  withdrawCtaAmount: { fontSize: 14, fontWeight: '900', color: '#22c55e' },
+  withdrawCtaBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#22c55e', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  withdrawCtaBtnText: { fontSize: 13, fontWeight: '900', color: '#022C22' },
   // Bank picker modal
   modalRoot: { flex: 1, backgroundColor: '#F8FAFC' },
   modalHeader: {

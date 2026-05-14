@@ -11,6 +11,8 @@ export interface User {
   is_verified: boolean;
   profile_image: string | null;
   rating: number;
+  /** How many trips include a driver→rider rating; used for trust / achievements. */
+  rider_reputation_trip_count?: number;
   total_trips: number;
   trips_completed: number;
   completion_rate: number;
@@ -33,6 +35,7 @@ export interface DriverProfile {
   vehicle_type: string | null;
   vehicle_model: string | null;
   vehicle_plate: string | null;
+  vehicle_color?: string | null;
   is_online: boolean;
   current_location: { lat: number; lng: number } | null;
   completion_rate: number;
@@ -68,6 +71,8 @@ export interface Trip {
   driver_rating: number | null;
   created_at: string;
   accepted_at: string | null;
+  /** Driver tapped "I've arrived" — waiting timer / rider notification */
+  arrived_at?: string | null;
   started_at: string | null;
   completed_at: string | null;
   /** Rider estate gate auto-share (driver trip UI). */

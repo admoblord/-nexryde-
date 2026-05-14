@@ -42,6 +42,7 @@ import {
   parsePendingCheckoutConflict,
 } from '@/src/services/walletCheckoutSession';
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const C = {
@@ -81,6 +82,7 @@ type TopupState =
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
 
   const [balance, setBalance] = useState(0);
   const [promoCreditBalance, setPromoCreditBalance] = useState(0);
@@ -405,13 +407,23 @@ export default function RiderWalletScreen() {
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       <ScrollView
-        contentContainerStyle={[s.scroll, { paddingBottom: tabPad }]}
+        contentContainerStyle={[
+          s.scroll,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: tabPad,
+            gap: Math.round(flow.sectionGap * 0.25),
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+          },
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={C.green} />}
         showsVerticalScrollIndicator={false}
       >
 
         {/* ── HERO BALANCE CARD ──────────────────────────────────────────── */}
-        <LinearGradient colors={['#0F172A', '#1E3A5F', '#0F172A']} style={s.heroCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+        <LinearGradient colors={['#0F172A', '#1E3A5F', '#0F172A']} style={[s.heroCard, { paddingHorizontal: flow.cardPad }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           {/* Glow orb */}
           <View style={s.heroGlow} />
 
@@ -892,14 +904,14 @@ const s = StyleSheet.create({
   heroFooterText: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600' },
 
   // Success
-  successBanner: { marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
+  successBanner: { marginTop: 16, borderRadius: 16, overflow: 'hidden' },
   successBannerGrad: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
   successIconWrap: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(21,128,61,0.1)', alignItems: 'center', justifyContent: 'center' },
   successTitle: { fontSize: 16, fontWeight: '900', color: '#14532D' },
   successSub: { fontSize: 13, fontWeight: '600', color: C.greenDark, marginTop: 2 },
 
   // Pending
-  pendingCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 16, overflow: 'hidden' },
+  pendingCard: { marginTop: 16, borderRadius: 16, overflow: 'hidden' },
   pendingGrad: { padding: 16 },
   pendingHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   pendingIconWrap: { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' },
@@ -912,7 +924,7 @@ const s = StyleSheet.create({
   pendingVerifyText: { color: C.white, fontSize: 13, fontWeight: '800' },
 
   // Section
-  section: { backgroundColor: C.white, marginHorizontal: 16, marginTop: 16, borderRadius: 20, padding: 20, shadowColor: C.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 3 },
+  section: { backgroundColor: C.white, marginTop: 16, borderRadius: 20, padding: 20, shadowColor: C.shadow, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 1, shadowRadius: 8, elevation: 3 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   sectionIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#DCFCE7', alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { fontSize: 17, fontWeight: '900', color: C.gray900 },
@@ -958,7 +970,7 @@ const s = StyleSheet.create({
   rewardBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
   rewardBadgeText: { fontSize: 13, fontWeight: '900', color: '#92400E' },
   // Referral card (replaces old referralRow/shareBtn/codeInput)
-  referralCard: { marginHorizontal: 16, marginTop: 12, borderRadius: 20, padding: 20, overflow: 'hidden', position: 'relative' },
+  referralCard: { marginTop: 12, borderRadius: 20, padding: 20, overflow: 'hidden', position: 'relative' },
   referralGlow: { position: 'absolute', top: -40, right: -40, width: 160, height: 160, borderRadius: 80, backgroundColor: '#7C3AED', opacity: 0.18 },
   referralHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   referralIconBig: { width: 48, height: 48, borderRadius: 14, backgroundColor: 'rgba(167,139,250,0.2)', alignItems: 'center', justifyContent: 'center' },
@@ -1007,7 +1019,7 @@ const s = StyleSheet.create({
   txAmt: { fontSize: 15, fontWeight: '900', flexShrink: 0 },
 
   // Coming soon
-  futureCard: { marginHorizontal: 16, marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#A5F3FC' },
+  futureCard: { marginTop: 16, borderRadius: 20, padding: 20, borderWidth: 1, borderColor: '#A5F3FC' },
   futureHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
   futureTitle: { fontSize: 15, fontWeight: '900', color: C.gray900 },
   futureSub: { fontSize: 12, fontWeight: '600', color: C.gray600, marginTop: 2 },

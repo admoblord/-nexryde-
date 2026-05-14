@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { AxiosHeaders } from 'axios';
 import Constants from 'expo-constants';
 import { SECURITY_HEADERS, validateApiUrl } from './securityConfig';
 
@@ -21,6 +21,16 @@ const getApiUrl = () => {
 
 const API_URL = getApiUrl();
 
+function generateClientRequestId(): string {
+  try {
+    const c = globalThis.crypto as Crypto | undefined;
+    if (c?.randomUUID) return c.randomUUID();
+  } catch {
+    /* ignore */
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
 // Export for other components to use
 export const BACKEND_URL = API_URL;
 
@@ -39,6 +49,23 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   if (config.baseURL && !validateApiUrl(config.baseURL)) {
     return Promise.reject(new Error('Security: Invalid API endpoint'));
+  }
+  const headers = config.headers;
+  if (headers) {
+    const ax = headers as AxiosHeaders;
+    const existing =
+      typeof ax.get === 'function'
+        ? ax.get('X-Request-Id') ?? ax.get('x-request-id')
+        : (headers as Record<string, string>)['X-Request-Id'] ??
+          (headers as Record<string, string>)['x-request-id'];
+    if (!existing) {
+      const rid = generateClientRequestId();
+      if (typeof ax.set === 'function') {
+        ax.set('X-Request-Id', rid);
+      } else {
+        (headers as Record<string, string>)['X-Request-Id'] = rid;
+      }
+    }
   }
   return config;
 });
@@ -156,6 +183,15 @@ export function messageFromAxiosError(e: unknown, fallback: string): string {
     const st = e.response.status;
     if (st === 401) {
       return 'Session expired — please sign in again.';
+    }
+    if (st === 502 || st === 503) {
+      return 'Service temporarily unavailable. Please try again in a moment.';
+    }
+    if (st === 504) {
+      return 'The server took too long to respond. Check your connection and try again.';
+    }
+    if (st === 429) {
+      return 'Too many requests. Please wait a moment and try again.';
     }
     if (typeof raw === 'string' && raw.trim()) {
       const t = raw.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240);
@@ -301,8 +337,23 @@ export const getBlockedRiders = (driverId: string) => api.get(`/users/${driverId
 export const switchRole = (userId: string) => 
   api.put(`/users/${userId}/switch-role`);
 
-export const registerPushToken = (userId: string, pushToken: string) =>
-  api.post(`/users/${userId}/push-token`, { push_token: pushToken });
+export const registerPushToken = (
+  userId: string,
+  pushToken: string,
+  extra?: { platform?: string; provider?: string; device_id?: string }
+) =>
+  api.post(`/users/${userId}/push-token`, {
+    push_token: pushToken,
+    ...(extra?.platform ? { platform: extra.platform } : {}),
+    ...(extra?.provider ? { provider: extra.provider } : {}),
+    ...(extra?.device_id ? { device_id: extra.device_id } : {}),
+  });
+
+/** Report tap/open for analytics (`nid` comes from push `data`, set by the backend). */
+export const reportNotificationOpened = (
+  userId: string,
+  payload: { nid?: string; notification_id?: string }
+) => api.post(`/users/${userId}/notification-opened`, payload);
 
 // Driver APIs
 export const getDriverProfile = (userId: string) => 
@@ -363,37 +414,155 @@ export interface FareEstimateRequest {
   dropoff_lng: number;
   service_type?: string;
   city?: string;
+  rider_id?: string;
+  /** When set and this driver is in the rider's favourites, estimate may reflect the favourite perk. */
+  preferred_driver_id?: string;
+  demand_ratio?: number;
+  rain?: boolean;
+  pickup_address?: string;
+  dropoff_address?: string;
+  /** Leg from Google Directions on device — used when server route is haversine-only. */
+  google_route_distance_meters?: number;
+  google_route_duration_seconds?: number;
 }
 
+export interface FareEstimateSurgeFactor {
+  label: string;
+  multiplier?: number;
+}
+
+/**
+ * Lagos distance-pricing audit payload (`build_lagride_profile_payload` + estimate merges).
+ * `service_key` is the API tier (`economy` = Standard, `comfort`, `xl`, `premium`; `pro` is normalized to premium server-side).
+ */
+export interface LagrideProfilePayload {
+  spec_id?: string;
+  /** Rider-facing value line from backend (Lagos distance pricing). */
+  rider_value_summary?: string;
+  formula?: string;
+  no_base_fare?: boolean;
+  pure_distance_based?: boolean;
+  pickup_tier?: number;
+  pickup_zone_key?: string;
+  distance_band?: string;
+  area_rate_ngn_per_km?: number;
+  rate_source?: string;
+  service_key?: string;
+  service_multiplier?: number;
+  surge_multiplier?: number;
+  demand_ratio?: number;
+  fare_bucket?: string;
+  total_fare_computed?: number;
+  pickup_coordinates_resolved?: boolean;
+  dropoff_coordinates_resolved?: boolean;
+  implementation_checklist?: Array<Record<string, unknown>>;
+  route_metrics_source?: string;
+  road_route_ok?: boolean;
+  first_ride_discount_applied?: boolean;
+  rider_total_after_discount?: number;
+  [key: string]: unknown;
+}
+
+/** Matches `POST /fare/estimate` payload from `backend/routers/payments.py`. */
 export interface FareEstimateResponse {
   estimate_id: string;
   distance_km: number;
   duration_min: number;
+  estimated_time_minutes?: number;
+  traffic_duration_min?: number;
+  /** Minutes used in ₦/min line item (max of base vs traffic ETA when available). */
+  pricing_route_minutes?: number | null;
   base_fare: number;
   distance_fee: number;
   time_fee: number;
   traffic_fee: number;
+  booking_fee?: number;
+  subtotal?: number;
+  location_multiplier?: number | null;
+  location_zone?: string | null;
+  service_multiplier?: number | null;
   total_fare: number;
-  multiplier: number;
+  /** Alternate keys some gateways expose */
+  fare?: number;
+  total?: number;
+  /** Legacy alias for minute-based ETA */
+  duration_mins?: number;
+  /** Legacy clients only — prefer `surge_multiplier`. */
+  multiplier?: number;
+  base_price?: number;
+  min_price?: number;
+  max_price?: number;
+  smart_pricing_note?: string;
+  first_ride_discount_applied?: boolean;
+  original_total_fare?: number | null;
+  favorite_driver_discount_applied?: boolean;
+  /** Decimal fraction e.g. 0.05 for 5%. */
+  favorite_driver_discount_pct?: number | null;
+  surge_multiplier?: number;
+  surge_uncapped?: number;
+  surge_factors?: FareEstimateSurgeFactor[];
+  surge_details?: Record<string, unknown>;
+  demand_ratio?: number;
+  demand_ratio_source?: string;
+  rain_applied?: boolean;
+  rain_multiplier?: number;
   is_peak: boolean;
+  is_weekend?: boolean;
+  peak_type?: string | null;
   currency: string;
   min_fare: number;
+  cancellation_fee?: number;
+  fare_bucket?: string | null;
+  short_trip_threshold_km?: number | null;
   service_type: string;
+  city?: string;
   polyline: string | null;
-  pickup_address: string;
-  dropoff_address: string;
+  pickup_address?: string;
+  dropoff_address?: string;
+  price_breakdown?: string;
+  route_preview_coordinates?: unknown[];
+  map_preview_region?: unknown;
+  area_summary_line?: string;
   price_valid_until: string;
   price_lock_minutes: number;
+  is_insured?: boolean;
+  /** google_routes_api | google_directions_api | haversine | client_google_directions | … */
+  route_metrics_source?: string;
+  road_route_ok?: boolean;
+  fare_rate_model?: string | null;
+  lagride_profile?: LagrideProfilePayload | null;
+  /** Nationwide premium (non-Lagos) — marketing / education from `fare_config`. */
+  competitive_positioning_summary?: string | null;
+  competitive_positioning_bullets?: string[] | null;
+  /** Backend surge identifier, e.g. `max_of_factors`. */
+  surge_model?: string | null;
+  driver_payout_policy_note?: string | null;
 }
 
-export const estimateFare = (data: FareEstimateRequest) => 
+export const estimateFare = (data: FareEstimateRequest) =>
   api.post<FareEstimateResponse>('/fare/estimate', {
     pickup_lat: data.pickup_lat,
     pickup_lng: data.pickup_lng,
     dropoff_lat: data.dropoff_lat,
     dropoff_lng: data.dropoff_lng,
     service_type: data.service_type || 'economy',
-    city: data.city || 'lagos'
+    city: data.city || 'default',
+    ...(data.pickup_address ? { pickup_address: data.pickup_address } : {}),
+    ...(data.dropoff_address ? { dropoff_address: data.dropoff_address } : {}),
+    ...(data.rider_id != null && String(data.rider_id).trim() !== ''
+      ? { rider_id: String(data.rider_id).trim() }
+      : {}),
+    ...(data.demand_ratio != null && Number.isFinite(data.demand_ratio) ? { demand_ratio: data.demand_ratio } : {}),
+    ...(data.rain != null ? { rain: data.rain } : {}),
+    ...(data.google_route_distance_meters != null &&
+    data.google_route_duration_seconds != null &&
+    Number.isFinite(data.google_route_distance_meters) &&
+    Number.isFinite(data.google_route_duration_seconds)
+      ? {
+          google_route_distance_meters: data.google_route_distance_meters,
+          google_route_duration_seconds: data.google_route_duration_seconds,
+        }
+      : {}),
   });
 
 // Trip APIs
@@ -407,6 +576,8 @@ export const requestTrip = (riderId: string, data: {
   service_type?: string;
   payment_method?: string;
   fare_estimate_id?: string;
+  demand_ratio?: number;
+  rain?: boolean;
 }) => api.post(`/trips/request?rider_id=${riderId}`, data);
 
 export const getPendingTrips = (driverLat: number, driverLng: number, driverId?: string) =>
@@ -580,6 +751,34 @@ export const getDriverBankDetails = (driverId: string) =>
     payment_model: string;
     message: string;
   }>(`/drivers/${driverId}/bank-details`);
+
+export type WithdrawalRecord = {
+  id: string;
+  reference: string;
+  amount: number;
+  status: 'pending_settlement' | 'processing' | 'paid' | 'failed' | string;
+  bank_name: string;
+  account_number: string;
+  account_name: string;
+  provider_reference?: string | null;
+  settlement_reason?: string | null;
+  created_at: string;
+  settled_at?: string | null;
+  reversed_to_wallet?: boolean;
+};
+
+export const getDriverWithdrawals = (driverId: string, params?: { limit?: number; skip?: number }) => {
+  const qs = params ? `?limit=${params.limit ?? 30}&skip=${params.skip ?? 0}` : '';
+  return api.get<{
+    success: boolean;
+    wallet_balance: number;
+    earnings_frozen: boolean;
+    bank_ready: boolean;
+    bank: { bank_name: string; account_number: string; account_name: string };
+    withdrawals: WithdrawalRecord[];
+    total: number;
+  }>(`/drivers/${driverId}/withdrawals${qs}`);
+};
 
 export const withdrawDriverEarningsWithBiometric = (
   driverId: string,

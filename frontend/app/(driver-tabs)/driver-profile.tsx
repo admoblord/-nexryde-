@@ -30,6 +30,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
 const { width: W } = Dimensions.get('window');
 const TILE_W = (W - 48 - 12) / 2;
@@ -309,6 +310,7 @@ export default function DriverProfileScreen() {
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#060C14" />
+      <TabBrandStrip role="driver" />
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={[s.scroll, { paddingBottom: tabPad + 24 }]}>
 
         {/* ── HERO ── */}

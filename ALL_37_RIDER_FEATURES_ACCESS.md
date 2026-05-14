@@ -21,7 +21,7 @@
 11. ✅ **Trip Receipts**
 12. ✅ **Split Fare**
 13. ✅ **Share Trip**
-14. ✅ **Family Mode** (KODA Family)
+14. ✅ **Family Mode** (Nexryde Family)
 15. ✅ **Ride Recording**
 16. ✅ **Security Code**
 17. ✅ **Safety Center**

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Constants from 'expo-constants';
 import {
   View,
@@ -12,7 +12,6 @@ import {
   Image,
   Animated,
   UIManager,
-  Dimensions,
   StatusBar,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,12 +19,19 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
-import { deleteUserAccount, getUserTrustSummary, updateUser } from '@/src/services/api';
+import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders, updateUser } from '@/src/services/api';
+import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
+import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
+import {
+  buildAchievementWhatsAppMessage,
+  computeEarnedRiderBadgeIds,
+  RIDER_BADGE_META,
+  type RiderBadgeId,
+} from '@/src/utils/riderAchievementBadges';
 import * as ImagePicker from 'expo-image-picker';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
-
-const { width: W } = Dimensions.get('window');
-const TILE_W = (W - 48 - 12) / 2;
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -47,11 +53,13 @@ function ActionTile({
   label,
   gradColors,
   onPress,
+  tileWidth,
 }: {
   icon: React.ComponentProps<typeof Ionicons>['name'];
   label: string;
   gradColors: [string, string];
   onPress: () => void;
+  tileWidth: number;
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   const press = () => {
@@ -62,7 +70,7 @@ function ActionTile({
     onPress();
   };
   return (
-    <Animated.View style={{ transform: [{ scale }], width: TILE_W }}>
+    <Animated.View style={{ transform: [{ scale }], width: tileWidth }}>
       <TouchableOpacity style={s.actionTile} onPress={press} activeOpacity={1}>
         <LinearGradient colors={gradColors} style={s.actionTileIcon} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
           <Ionicons name={icon} size={22} color="#FFF" />
@@ -141,12 +149,25 @@ export default function RiderProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(16);
+  const flow = useFlowLayout();
+  const actionTileW = useMemo(
+    () => Math.max(120, Math.floor((flow.width - flow.padH * 2 - 12) / 2)),
+    [flow.padH, flow.width],
+  );
   const { user, logout, setUser } = useAppStore();
 
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showDriverModal, setShowDriverModal] = useState(false);
   const [trustSummary, setTrustSummary] = useState<any>(null);
   const [loadingTrust, setLoadingTrust] = useState(false);
+  const [achievementStats, setAchievementStats] = useState<{
+    totalTrips: number;
+    rating: number;
+    riderReputationTripCount?: number;
+  } | null>(null);
+  const [referralInviteUrl, setReferralInviteUrl] = useState('');
+  const [referralUsername, setReferralUsername] = useState('');
+  const [referralCode, setReferralCode] = useState('');
 
   const avatarScale = useRef(new Animated.Value(0.85)).current;
   const fadeIn = useRef(new Animated.Value(0)).current;
@@ -163,14 +184,51 @@ export default function RiderProfileScreen() {
     const load = async () => {
       if (!user?.id) return;
       setLoadingTrust(true);
+
       try {
-        const res = await getUserTrustSummary(user.id);
-        if (mounted) setTrustSummary(res.data);
+        const trustRes = await getUserTrustSummary(user.id);
+        if (mounted) setTrustSummary(trustRes.data);
       } catch { /* non-critical */ }
-      finally { if (mounted) setLoadingTrust(false); }
+
+      try {
+        const userRes = await getUser(user.id);
+        if (mounted && userRes?.data) {
+          const d = userRes.data as Record<string, unknown>;
+          setAchievementStats({
+            totalTrips: Number(d.total_trips ?? user?.total_trips ?? 0),
+            rating: Number(d.rating ?? user?.rating ?? 5),
+            riderReputationTripCount:
+              d.rider_reputation_trip_count != null
+                ? Number(d.rider_reputation_trip_count)
+                : undefined,
+          });
+        }
+      } catch { /* non-critical — fall back to store for badges */ }
+
+      if (mounted) setLoadingTrust(false);
     };
     void load();
     return () => { mounted = false; };
+  }, [user?.id, user?.rating, user?.total_trips]);
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user?.id) return undefined;
+    void (async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: getAuthHeaders() });
+        const data = await res.json().catch(() => ({}));
+        if (!mounted || !res.ok) return;
+        setReferralInviteUrl(typeof data.invite_url === 'string' ? data.invite_url : '');
+        setReferralUsername(typeof data.username === 'string' ? data.username : '');
+        setReferralCode(typeof data.referral_code === 'string' ? data.referral_code : '');
+      } catch {
+        /* non-critical */
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
   }, [user?.id]);
 
   const saveProfileImage = async (uri: string) => {
@@ -234,16 +292,61 @@ export default function RiderProfileScreen() {
   const initial = (user?.name?.[0] ?? 'R').toUpperCase();
   const displayName = user?.name || 'Rider';
   const memberYear = user?.created_at ? new Date(user.created_at).getFullYear() : '—';
-  const rating = (user?.rating ?? 5).toFixed(1);
-  const trips = user?.total_trips ?? 0;
+  const tripsFallback = user?.total_trips ?? 0;
   const isVerified = Boolean(user?.is_verified);
+
+  const badgeStats = achievementStats ?? {
+    totalTrips: tripsFallback,
+    rating: Number(user?.rating ?? 5),
+    riderReputationTripCount: user?.rider_reputation_trip_count,
+  };
+  const earnedBadgeIds = computeEarnedRiderBadgeIds(badgeStats);
+  const earnedBadges = RIDER_BADGE_META.filter((b) => earnedBadgeIds.has(b.id));
+
+  const resolvedInviteUrl =
+    referralInviteUrl.trim() ||
+    (referralCode ? buildInviteUrl(referralUsername || undefined, referralCode) : '');
+
+  const shareAchievementWhatsApp = (badgeId: RiderBadgeId) => {
+    if (!referralCode) {
+      Alert.alert(
+        'Invite link',
+        'Your referral link is still loading. Open Wallet → Invite friends, or try again in a moment.',
+      );
+      return;
+    }
+    const msg = buildAchievementWhatsAppMessage(badgeId, {
+      displayName: displayName,
+      tripCount: badgeStats.totalTrips,
+      inviteUrl: resolvedInviteUrl,
+    });
+    void shareTextViaWhatsApp(msg);
+  };
+
+  const shareReferralWhatsApp = () => {
+    if (!referralCode) {
+      Alert.alert('Invite link', 'Open Wallet → Invite friends to see your link.');
+      return;
+    }
+    void shareTextViaWhatsApp(buildShareMessage(referralUsername || undefined, referralCode, displayName || undefined));
+  };
 
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#080E17" />
+      <TabBrandStrip role="rider" />
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={[s.scroll, { paddingBottom: tabPad + 24 }]}
+        contentContainerStyle={[
+          s.scroll,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: tabPad + 24,
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+          },
+        ]}
       >
         {/* ── HERO ── */}
         <LinearGradient colors={['#0A0F1A', '#111827', '#0A1628']} style={s.hero}>
@@ -288,11 +391,70 @@ export default function RiderProfileScreen() {
 
             {/* Stats row */}
             <View style={s.statsRow}>
-              <StatChip value={String(trips)} label="Trips" color="#00D46A" />
+              <StatChip value={String(badgeStats.totalTrips)} label="Trips" color="#00D46A" />
               <View style={s.statsDivider} />
-              <StatChip value={`${rating}★`} label="Rating" color="#FBBF24" />
+              <StatChip value={`${badgeStats.rating.toFixed(1)}★`} label="Rating" color="#FBBF24" />
               <View style={s.statsDivider} />
               <StatChip value={String(memberYear)} label="Member" color="#60A5FA" />
+            </View>
+
+            {/* Achievement badges */}
+            <View style={s.achievementsInHero}>
+              <Text style={s.achievementsLabel}>Achievement badges</Text>
+              {earnedBadges.length === 0 ? (
+                <Text style={s.achievementsEmpty}>
+                  Ride with Nexryde to unlock badges like First Ride, 100 Rides, and 5★ Rider.
+                </Text>
+              ) : (
+                <ScrollView
+                  horizontal
+                  nestedScrollEnabled
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={s.badgesRow}
+                >
+                  {earnedBadges.map((b) => (
+                    <LinearGradient
+                      key={b.id}
+                      colors={[`${b.accent}26`, 'rgba(15,23,42,0.4)']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={s.badgeCard}
+                    >
+                      <View style={[s.badgeIconRing, { borderColor: `${b.accent}55` }]}>
+                        <Ionicons name={b.icon} size={17} color={b.accent} />
+                      </View>
+                      <View style={s.badgeTextCol}>
+                        <Text style={s.badgeTitle}>{b.title}</Text>
+                        <Text style={s.badgeSub} numberOfLines={2}>
+                          {b.description}
+                        </Text>
+                      </View>
+                      <TouchableOpacity
+                        style={s.badgeWaBtn}
+                        onPress={() => shareAchievementWhatsApp(b.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Share ${b.title} on WhatsApp`}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+                      >
+                        <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
+                      </TouchableOpacity>
+                    </LinearGradient>
+                  ))}
+                </ScrollView>
+              )}
+              {referralCode ? (
+                <TouchableOpacity
+                  style={s.referralWaRow}
+                  onPress={shareReferralWhatsApp}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Share referral link on WhatsApp"
+                >
+                  <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+                  <Text style={s.referralWaText}>Share referral link on WhatsApp</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#64748B" />
+                </TouchableOpacity>
+              ) : null}
             </View>
           </Animated.View>
         </LinearGradient>
@@ -301,12 +463,12 @@ export default function RiderProfileScreen() {
         <View style={s.gridSection}>
           <Text style={s.gridTitle}>QUICK ACCESS</Text>
           <View style={s.grid}>
-            <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} onPress={() => router.push('/edit-profile')} />
-            <ActionTile icon="time" label="Ride History" gradColors={['#5B21B6', '#7C3AED']} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
-            <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} onPress={() => router.push('/saved-places')} />
-            <ActionTile icon="heart" label="Fav Drivers" gradColors={['#9D174D', '#EC4899']} onPress={() => router.push('/rider/favorite-drivers')} />
-            <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
-            <ActionTile icon="notifications" label="Alerts" gradColors={['#7C2D12', '#EA580C']} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
+            <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
+            <ActionTile icon="time" label="Ride History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
+            <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/saved-places')} />
+            <ActionTile icon="heart" label="Fav Drivers" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
+            <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
+            <ActionTile icon="notifications" label="Alerts" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>
         </View>
 
@@ -543,8 +705,73 @@ const s = StyleSheet.create({
   statLabel: { fontSize: 11, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   statsDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.07)' },
 
+  achievementsInHero: {
+    alignSelf: 'stretch',
+    marginTop: 20,
+    paddingHorizontal: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.06)',
+    paddingTop: 14,
+  },
+  achievementsLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#475569',
+    letterSpacing: 1.2,
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  achievementsEmpty: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 17,
+    paddingHorizontal: 8,
+  },
+  badgesRow: { gap: 10, paddingBottom: 2, justifyContent: 'center', flexGrow: 1 },
+  badgeCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderRadius: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    maxWidth: 220,
+    minWidth: 168,
+  },
+  badgeIconRing: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  badgeTextCol: { flex: 1, gap: 2 },
+  badgeTitle: { fontSize: 12, fontWeight: '900', color: '#F1F5F9' },
+  badgeSub: { fontSize: 10, fontWeight: '600', color: '#94A3B8', lineHeight: 14 },
+  badgeWaBtn: { padding: 4, justifyContent: 'center' },
+  referralWaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+    marginHorizontal: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(37,211,102,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37,211,102,0.22)',
+  },
+  referralWaText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
+
   /* Grid */
-  gridSection: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 4 },
+  gridSection: { paddingTop: 24, paddingBottom: 4 },
   gridTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionTile: {
@@ -566,7 +793,7 @@ const s = StyleSheet.create({
   actionTileLabel: { fontSize: 12, fontWeight: '700', color: '#CBD5E1' },
 
   /* Section */
-  section: { paddingHorizontal: 20, paddingTop: 24 },
+  section: { paddingTop: 24 },
   sectionTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
   sectionCard: {
     backgroundColor: 'rgba(255,255,255,0.03)',

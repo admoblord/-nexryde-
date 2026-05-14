@@ -306,7 +306,9 @@ export default function FavoriteDriversScreen() {
       {favoriteDrivers.length > 0 && (
         <View style={s.infoStrip}>
           <Ionicons name="flash" size={14} color={C.green} />
-          <Text style={s.infoStripText}>Tap "Book Now" to skip the queue and request your favourite directly</Text>
+          <Text style={s.infoStripText}>
+            Tap Book Now for priority matching. Favourite riders get ~5% off when that driver accepts.
+          </Text>
         </View>
       )}
 
@@ -351,7 +353,7 @@ export default function FavoriteDriversScreen() {
             </LinearGradient>
             <Text style={s.emptyTitle}>No Favourites Yet</Text>
             <Text style={s.emptyText}>
-              After a great ride, tap the heart icon on the receipt to save a driver. You can then request them directly — skipping the normal queue.
+              After a great ride, tap the heart icon on the receipt to save a driver. Request them with priority matching, and ~5% off the fare when they accept.
             </Text>
             <TouchableOpacity style={s.emptyBtn} onPress={() => router.push('/rider/book')} accessibilityRole="button">
               <LinearGradient colors={[C.green, '#16A34A']} style={s.emptyBtnGrad}>

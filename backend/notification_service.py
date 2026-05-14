@@ -1,0 +1,353 @@
+"""
+Unified push delivery: Expo Push (default) + optional FCM native tokens.
+Analytics events stored in ``notification_events``. Used by trips + admin broadcasts.
+"""
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import logging
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import httpx
+
+from database import db
+from notification_catalog import enrich_push_data
+
+logger = logging.getLogger(__name__)
+
+EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
+
+_fcm_app_initialized = False
+
+
+def _is_expo_token(token: str) -> bool:
+    t = (token or "").strip()
+    return t.startswith("ExponentPushToken[") or t.startswith("ExpoPushToken")
+
+
+def _ensure_fcm_app() -> bool:
+    """Initialize Firebase app once; returns True if native FCM sends are possible."""
+    global _fcm_app_initialized
+    if _fcm_app_initialized:
+        return True
+    try:
+        import firebase_admin
+        from firebase_admin import credentials
+
+        cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
+        if not cred_path or not os.path.isfile(cred_path):
+            logger.info("FCM: GOOGLE_APPLICATION_CREDENTIALS not set — native FCM sends disabled")
+            return False
+        try:
+            firebase_admin.get_app()
+        except ValueError:
+            firebase_admin.initialize_app(credentials.Certificate(cred_path))
+        _fcm_app_initialized = True
+        logger.info("FCM: firebase_admin initialized for native FCM tokens")
+        return True
+    except ImportError:
+        logger.info("FCM: firebase_admin not installed — add `firebase-admin` for native FCM")
+        return False
+    except Exception as e:
+        logger.warning("FCM init failed: %s", e)
+        return False
+
+
+def _flatten_data_for_expo(data: Optional[dict]) -> Optional[dict]:
+    """Expo requires string values in `data` (dict/list JSON-encoded)."""
+    if not data:
+        return None
+    out: dict[str, str] = {}
+    for k, v in data.items():
+        if v is None:
+            continue
+        key = str(k)
+        if isinstance(v, (dict, list)):
+            out[key] = json.dumps(v)
+        else:
+            out[key] = str(v)
+    return out
+
+
+async def _send_expo_push(token: str, title: str, body: str, data: Optional[dict]) -> tuple[bool, bool]:
+    """Returns (success, should_invalidate_token)."""
+    payload: dict = {
+        "to": token,
+        "title": title,
+        "body": body,
+        "sound": "default",
+        "priority": "high",
+    }
+    if data:
+        ch = data.get("channel_id") or data.get("android_channel")
+        if ch:
+            payload["channelId"] = str(ch)
+        flat = _flatten_data_for_expo(data)
+        if flat:
+            payload["data"] = flat
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(EXPO_PUSH_URL, json=payload, timeout=15)
+            if resp.status_code != 200:
+                logger.warning("Expo push HTTP %s: %s", resp.status_code, resp.text[:200])
+                return False, False
+            body_json = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            ticket_data = body_json.get("data") if isinstance(body_json, dict) else None
+            ticket = ticket_data if isinstance(ticket_data, dict) else {}
+            ticket_status = str(ticket.get("status") or "").lower()
+            ticket_details = ticket.get("details") if isinstance(ticket.get("details"), dict) else {}
+            if ticket_status == "error":
+                err = str(ticket.get("message") or "")
+                code = str(ticket_details.get("error") or "")
+                logger.warning("Expo ticket error: %s %s", err, code)
+                inv = code in {"DeviceNotRegistered", "InvalidCredentials"}
+                return False, inv
+            return True, False
+    except Exception as e:
+        logger.warning("Expo push error: %s", e)
+        return False, False
+
+
+async def _send_fcm_native(token: str, title: str, body: str, data: Optional[dict]) -> bool:
+    if not _ensure_fcm_app():
+        return False
+    try:
+        import firebase_admin.messaging as messaging
+
+        data_str = {str(k): str(v) for k, v in (data or {}).items() if v is not None}
+        ch = None
+        if data:
+            ch = data.get("channel_id") or data.get("android_channel")
+        android_cfg = None
+        if ch:
+            android_cfg = messaging.AndroidConfig(
+                notification=messaging.AndroidNotification(
+                    title=title,
+                    body=body,
+                    channel_id=str(ch),
+                ),
+            )
+        msg = messaging.Message(
+            notification=messaging.Notification(title=title, body=body),
+            data=data_str,
+            token=token,
+            android=android_cfg,
+        )
+
+        await asyncio.to_thread(messaging.send, msg)
+        return True
+    except Exception as e:
+        logger.warning("FCM send failed: %s", e)
+        return False
+
+
+async def _invalidate_user_push_token(user_id: str, token: str) -> None:
+    await db.users.update_one(
+        {"id": user_id, "push_token": token},
+        {"$unset": {"push_token": ""}, "$set": {"push_token_invalidated_at": datetime.utcnow()}},
+    )
+
+
+async def send_to_token(
+    user_id: str,
+    token: str,
+    provider_hint: Optional[str],
+    title: str,
+    body: str,
+    data: Optional[dict],
+) -> tuple[bool, str]:
+    """Returns (success, channel_used)."""
+    prov = (provider_hint or "").lower()
+    use_fcm = prov == "fcm" or (not _is_expo_token(token) and len((token or "").strip()) > 60)
+    if use_fcm:
+        ok = await _send_fcm_native(token, title, body, data)
+        return ok, "fcm"
+    ok, inv = await _send_expo_push(token, title, body, data)
+    if not ok and inv and token:
+        await _invalidate_user_push_token(user_id, token)
+    return ok, "expo"
+
+
+async def _record_event(
+    user_id: str,
+    title: str,
+    body: str,
+    channel: str,
+    status: str,
+    source: str,
+    extra: Optional[dict] = None,
+) -> None:
+    try:
+        doc = {
+            "id": str(uuid.uuid4()),
+            "user_id": user_id,
+            "channel": channel,
+            "title": title,
+            "body_preview": (body or "")[:160],
+            "status": status,
+            "source": source,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            doc.update({k: v for k, v in extra.items() if v is not None})
+        await db.notification_events.insert_one(doc)
+    except Exception as e:
+        logger.debug("notification_events insert skipped: %s", e)
+
+
+async def send_push_notification(
+    user_id: str,
+    title: str,
+    body: str,
+    data: Optional[dict] = None,
+    *,
+    source: str = "trip",
+    experiment_key: Optional[str] = None,
+    variant: Optional[str] = None,
+) -> bool:
+    """Send to all registered tokens for user (legacy push_token + push_devices).
+
+    Injects ``nid`` (correlation id) into the data payload for analytics / open tracking.
+    """
+    merged: dict = enrich_push_data(data)
+    nid = str(uuid.uuid4())
+    merged["nid"] = nid
+    if merged.get("type") is not None:
+        merged["type"] = str(merged["type"])
+
+    user = await db.users.find_one(
+        {"id": user_id},
+        {"push_token": 1, "push_devices": 1},
+    )
+    if not user:
+        await _record_event(
+            user_id,
+            title,
+            body,
+            "none",
+            "no_user",
+            source,
+            {"nid": nid, **({"experiment_key": experiment_key} if experiment_key else {}), **({"variant": variant} if variant else {})},
+        )
+        return False
+
+    tokens_todo: list[tuple[str, Optional[str]]] = []
+    seen: set[str] = set()
+
+    pt = user.get("push_token")
+    if pt and isinstance(pt, str) and pt not in seen:
+        seen.add(pt)
+        tokens_todo.append((pt, "expo" if _is_expo_token(pt) else None))
+
+    for d in user.get("push_devices") or []:
+        if not isinstance(d, dict):
+            continue
+        t = d.get("token")
+        if not t or t in seen:
+            continue
+        seen.add(t)
+        tokens_todo.append((str(t), d.get("provider")))
+
+    if not tokens_todo:
+        await _record_event(
+            user_id,
+            title,
+            body,
+            "none",
+            "no_token",
+            source,
+            {"nid": nid, **({"experiment_key": experiment_key} if experiment_key else {}), **({"variant": variant} if variant else {})},
+        )
+        return False
+
+    extra: dict[str, Any] = {"nid": nid}
+    if experiment_key:
+        extra["experiment_key"] = experiment_key
+    if variant:
+        extra["variant"] = variant
+
+    any_ok = False
+    for token, prov in tokens_todo:
+        ok, channel = await send_to_token(user_id, token, prov, title, body, merged)
+        if ok:
+            any_ok = True
+        await _record_event(
+            user_id,
+            title,
+            body,
+            channel,
+            "sent" if ok else "failed",
+            source,
+            extra,
+        )
+    return any_ok
+
+
+def assign_ab_variant(user_id: str, experiment_key: str, variant_keys: list[str]) -> str:
+    """Deterministic bucket from user id (stateless; same user always same variant)."""
+    if not variant_keys:
+        return "control"
+    h = hashlib.sha256(f"{experiment_key}:{user_id}".encode()).hexdigest()
+    idx = int(h[:12], 16) % len(variant_keys)
+    return variant_keys[idx]
+
+
+async def get_user_ids_for_broadcast_target(target: str) -> list[str]:
+    """Admin broadcast audience selection (same semantics as admin panel)."""
+    t = (target or "all").lower()
+    if t == "drivers":
+        cur = await db.users.find({"role": "driver"}, {"id": 1}).to_list(50_000)
+        return [u["id"] for u in cur]
+    if t == "riders":
+        cur = await db.users.find({"role": "rider"}, {"id": 1}).to_list(50_000)
+        return [u["id"] for u in cur]
+    if t == "verified_drivers":
+        cur = await db.users.find({"role": "driver", "is_verified": True}, {"id": 1}).to_list(50_000)
+        return [u["id"] for u in cur]
+    if t == "online_drivers":
+        profs = await db.driver_profiles.find({"is_online": True}, {"user_id": 1}).to_list(20_000)
+        return list({p["user_id"] for p in profs if p.get("user_id")})
+    cur = await db.users.find({}, {"id": 1}).to_list(100_000)
+    return [u["id"] for u in cur]
+
+
+async def record_notification_open(user_id: str, notification_id: Optional[str] = None) -> None:
+    """Client calls when user opens a push (optional analytics).
+
+    Pass ``nid`` from the push payload (preferred); legacy ``notification_events.id`` still works.
+    """
+    ts = datetime.now(timezone.utc).isoformat()
+    try:
+        if notification_id:
+            res = await db.notification_events.update_many(
+                {"user_id": user_id, "nid": notification_id},
+                {"$set": {"opened_at": ts}},
+            )
+            if res.modified_count:
+                return
+            res2 = await db.notification_events.update_one(
+                {"user_id": user_id, "id": notification_id},
+                {"$set": {"opened_at": ts}},
+            )
+            if res2.matched_count:
+                return
+        await db.notification_events.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "user_id": user_id,
+                "status": "opened",
+                "channel": "client",
+                "source": "client_open",
+                "related_notification_id": notification_id,
+                "nid": notification_id,
+                "created_at": ts,
+                "opened_at": ts,
+            }
+        )
+    except Exception:
+        pass

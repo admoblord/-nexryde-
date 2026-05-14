@@ -18,7 +18,7 @@
 ### **Social & Sharing (3 features)**
 8. ✅ **Split Fare** - `/rider/split-fare.tsx` - Share ride costs with friends
 9. ✅ **Share Trip** - `/rider/share-trip.tsx` - Share live trip with contacts
-10. ✅ **KODA Family** - `/rider/family.tsx` - Family account management
+10. ✅ **Nexryde Family** - `/rider/family.tsx` - Family account management
 
 ### **Safety & Security (3 features)**
 11. ✅ **Security Code** - `/rider/security-code.tsx` - 4-digit verification code

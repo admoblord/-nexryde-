@@ -14,7 +14,7 @@ import {
   Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useGlobalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
@@ -39,11 +39,20 @@ interface Message {
 
 type ChatTab = 'driver' | 'ai';
 
+function pickTripIdParam(v: string | string[] | undefined): string {
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (Array.isArray(v) && typeof v[0] === 'string' && v[0].trim()) return v[0].trim();
+  return '';
+}
+
 export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const globalParams = useGlobalSearchParams();
   const { user, token, currentTrip } = useAppStore();
-  const tripId = params.tripId as string;
+  const tripId =
+    pickTripIdParam(params.tripId as string | string[] | undefined) ||
+    pickTripIdParam(globalParams.tripId as string | string[] | undefined);
   const driverName = (params.driverName as string) || 'Driver';
   const flatListRef = useRef<FlatList>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -59,7 +68,7 @@ export default function ChatScreen() {
   const [wsConnected, setWsConnected] = useState(false);
   const [otherTyping, setOtherTyping] = useState(false);
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const effectiveTripId = tripId || (currentTrip?.id as string) || '';
+  const effectiveTripId = tripId || (typeof currentTrip?.id === 'string' ? currentTrip.id : '') || '';
 
   // Driver messages
   const [driverMessages, setDriverMessages] = useState<Message[]>([]);

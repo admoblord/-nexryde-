@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect, Form, File, UploadFile, Body
+from fastapi import FastAPI, APIRouter, HTTPException, status, Response, Request, WebSocket, WebSocketDisconnect, Form, File, UploadFile, Body, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse as FJSONResponse
 from dotenv import load_dotenv
@@ -25,6 +25,15 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.middleware import SlowAPIMiddleware
 from rate_limit import limiter
+from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
+from nexryde_pricing import (
+    core_components_from_rate_card,
+    nexryde_route_location_multiplier,
+    nexryde_route_time_minutes,
+    nexryde_service_multiplier,
+)
+from surge_pricing import compute_max_style_surge_multiplier
+from lagride_lagos_pricing import build_lagos_lagride_fare_breakdown
 
 # LLM Chat disabled - emergentintegrations removed
 # from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -59,7 +68,8 @@ from smart_mode_ai import router as smart_mode_router
 from routers.community import community_router, seed_community_groups, seed_community_content, cleanup_test_community_events
 from routers.safety import safety_router, seed_danger_zones
 from routers.ai_features import ai_router
-from routers.admin import admin_router
+from routers.admin import admin_router, require_admin_access
+from routers.admin_notifications import admin_notifications_router
 from routers.trips import trips_router, set_fare_estimate_store, set_shared_functions
 from routers.auth import auth_router, send_otp as router_send_otp, ensure_otp_indexes
 from routers.bidding import bidding_router
@@ -117,9 +127,7 @@ async def service_health_liveness():
 # ── Android App Links verification ────────────────────────────────────────────
 # Serves the Digital Asset Links file so Android can verify that
 # https://nexryde.app/invite/* links open Nexryde directly without a chooser.
-# SHA-256 fingerprint is fetched from EAS / Google Play App Signing.
-# Replace the placeholder below with the real cert fingerprint from:
-#   Google Play Console → Release → Setup → App signing → SHA-256 certificate fingerprint
+# SHA-256 fingerprint: Google Play Console → Release → Setup → App signing
 _ASSETLINKS_SHA256 = os.environ.get("ANDROID_SHA256_CERT", "")
 
 @app.get("/.well-known/assetlinks.json", include_in_schema=False)
@@ -138,6 +146,48 @@ async def assetlinks():
     return FJSONResponse(content=links, headers={"Cache-Control": "public, max-age=86400"})
 
 
+# ── iOS Universal Links verification ──────────────────────────────────────────
+# Apple fetches this file to verify that nexryde.app links should open the app.
+# Team ID and bundle ID come from Apple Developer Portal / EAS credentials.
+# Set IOS_TEAM_ID env var in Cloud Run to enable real verification.
+_IOS_TEAM_ID     = os.environ.get("IOS_TEAM_ID", "")      # e.g. "ABCDE12345"
+_IOS_BUNDLE_ID   = "com.nexryde.app"
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+async def apple_app_site_association():
+    """
+    iOS Universal Links verification.
+    Apple CDN fetches this at app install / update to verify the domain.
+    """
+    aasa: dict = {
+        "applinks": {
+            "apps": [],
+            "details": [
+                {
+                    "appID": f"{_IOS_TEAM_ID}.{_IOS_BUNDLE_ID}" if _IOS_TEAM_ID else _IOS_BUNDLE_ID,
+                    "paths": [
+                        "/invite/*",
+                        "/referral/*",
+                        "/join/*",
+                    ],
+                }
+            ],
+        },
+        "webcredentials": {
+            "apps": [
+                f"{_IOS_TEAM_ID}.{_IOS_BUNDLE_ID}" if _IOS_TEAM_ID else _IOS_BUNDLE_ID
+            ]
+        },
+    }
+    return FJSONResponse(
+        content=aasa,
+        headers={
+            "Content-Type": "application/json",
+            "Cache-Control": "public, max-age=3600",
+        },
+    )
+
+
 # ── Referral invite redirect page ─────────────────────────────────────────────
 # When someone taps a nexryde.app/invite/{slug} link:
 #   • If Nexryde is installed → Android intent URL opens the app directly.
@@ -145,72 +195,121 @@ async def assetlinks():
 # This page also stores the referral identifier in the URL so the app can
 # read it from Linking.getInitialURL() on cold-start.
 
+_PLAY_STORE_URL  = "https://play.google.com/store/apps/details?id=com.nexryde.app"
+_APP_STORE_URL   = "https://apps.apple.com/app/nexryde/id6766440778"
+
 _INVITE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0D1420">
 <title>Join Nexryde — Nigeria's Smartest Ride App</title>
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
-  body{{background:#0D1420;color:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}}
-  .card{{background:#111827;border-radius:20px;padding:40px 28px;max-width:400px;width:100%;text-align:center;box-shadow:0 8px 40px rgba(0,0,0,.6)}}
-  .logo{{font-size:48px;margin-bottom:12px}}
-  h1{{font-size:24px;font-weight:800;margin-bottom:8px}}
-  .sub{{color:#94A3B8;font-size:15px;margin-bottom:28px;line-height:1.5}}
-  .reward{{background:linear-gradient(135deg,#7C3AED,#5B21B6);border-radius:12px;padding:16px;margin-bottom:28px}}
-  .reward-title{{font-size:13px;color:#C4B5FD;font-weight:600;text-transform:uppercase;letter-spacing:.5px}}
-  .reward-amount{{font-size:32px;font-weight:900;color:#fff;margin-top:4px}}
-  .btn{{display:block;background:#7C3AED;color:#fff;text-decoration:none;border-radius:14px;padding:16px;font-size:16px;font-weight:800;margin-bottom:12px}}
-  .btn-secondary{{background:#1e293b;color:#94A3B8;font-size:14px;padding:12px;margin-bottom:0}}
-  .note{{font-size:12px;color:#475569;margin-top:20px}}
+  body{{background:#0D1420;color:#F8FAFC;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;padding-bottom:env(safe-area-inset-bottom,24px)}}
+  .card{{background:#111827;border-radius:24px;padding:36px 24px;max-width:420px;width:100%;text-align:center;box-shadow:0 8px 60px rgba(0,0,0,.7);border:1px solid #1e293b}}
+  .logo{{font-size:52px;margin-bottom:14px}}
+  .brand{{font-size:13px;font-weight:800;color:#22C55E;letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}}
+  h1{{font-size:22px;font-weight:900;margin-bottom:8px;line-height:1.3}}
+  .sub{{color:#94A3B8;font-size:14px;margin-bottom:24px;line-height:1.6}}
+  .reward{{background:linear-gradient(135deg,#3B0764,#6D28D9);border-radius:14px;padding:16px 20px;margin-bottom:24px;border:1px solid rgba(139,92,246,.3)}}
+  .reward-label{{font-size:11px;color:#C4B5FD;font-weight:700;text-transform:uppercase;letter-spacing:.8px}}
+  .reward-amount{{font-size:36px;font-weight:900;color:#fff;margin-top:4px}}
+  .reward-sub{{font-size:12px;color:#A78BFA;margin-top:4px}}
+  .btn{{display:flex;align-items:center;justify-content:center;gap:8px;background:#22C55E;color:#022C22;text-decoration:none;border-radius:14px;padding:16px;font-size:16px;font-weight:900;margin-bottom:10px;transition:opacity .15s}}
+  .btn:active{{opacity:.85}}
+  .btn-android{{background:#22C55E}}
+  .btn-ios{{background:#0ea5e9;color:#fff}}
+  .btn-secondary{{background:#1e293b;color:#94A3B8;font-size:14px;padding:13px;border:1px solid #334155}}
+  .store-btns{{display:none}}
+  .divider{{display:flex;align-items:center;gap:8px;margin:16px 0;color:#334155;font-size:12px}}
+  .divider::before,.divider::after{{content:'';flex:1;height:1px;background:#1e293b}}
+  .note{{font-size:12px;color:#475569;margin-top:16px;line-height:1.5}}
+  .badge{{display:inline-block;background:rgba(34,197,94,.1);color:#22C55E;font-size:11px;font-weight:800;border-radius:999px;padding:3px 10px;margin-bottom:14px;border:1px solid rgba(34,197,94,.25)}}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">🚗</div>
-  <h1>You've been invited to Nexryde!</h1>
-  <p class="sub">Your friend is inviting you to join Nigeria's smartest ride-hailing app.</p>
+  <div class="brand">NEXRYDE</div>
+  <div class="badge">You've been invited</div>
+  <h1>Nigeria's Smartest Ride App</h1>
+  <p class="sub">Your friend invited you to join Nexryde — book rides in seconds, keep 100% of your fare as a driver.</p>
   <div class="reward">
-    <div class="reward-title">New rider bonus</div>
+    <div class="reward-label">New rider welcome bonus</div>
     <div class="reward-amount">₦500 FREE</div>
+    <div class="reward-sub">Applied automatically on your first ride</div>
   </div>
-  <a class="btn" id="openBtn" href="{intent_url}">Open Nexryde App</a>
-  <a class="btn btn-secondary" id="storeBtn" href="https://play.google.com/store/apps/details?id=com.nexryde.app">Download on Play Store</a>
-  <p class="note">Already installed? Tap "Open Nexryde App" above.</p>
+  <a class="btn btn-android" id="openBtn" href="{intent_url}">
+    <span>🚀</span> Open Nexryde App
+  </a>
+  <div class="store-btns" id="storeBtns">
+    <div class="divider">Download the app</div>
+    <a class="btn btn-android" href="{play_store_url}">📱 Get it on Play Store</a>
+    <a class="btn btn-ios" href="{app_store_url}">🍎 Download on App Store</a>
+  </div>
+  <p class="note" id="note">Already installed? Tap "Open Nexryde App" above.</p>
 </div>
 <script>
-  (function(){{
-    var deeplink = "{deeplink_url}";
-    var intent   = "{intent_url}";
-    var store    = "https://play.google.com/store/apps/details?id=com.nexryde.app";
-    // Try deep-link immediately; if browser can't handle it, show the store after 2 s
-    setTimeout(function(){{
-      window.location = store;
-    }}, 2500);
+(function(){{
+  var ua        = navigator.userAgent || '';
+  var isIOS     = /iPad|iPhone|iPod/.test(ua) && !window.MSStream;
+  var isAndroid = /Android/.test(ua);
+  var deeplink  = "{deeplink_url}";
+  var intent    = "{intent_url}";
+  var playStore = "{play_store_url}";
+  var appStore  = "{app_store_url}";
+
+  var openBtn   = document.getElementById('openBtn');
+  var storeBtns = document.getElementById('storeBtns');
+  var note      = document.getElementById('note');
+
+  if (isIOS) {{
+    // iOS: use universal link / custom scheme; fall back to App Store
+    openBtn.href    = deeplink;
+    openBtn.innerHTML = '<span>🍎</span> Open Nexryde on iPhone';
+    openBtn.className = 'btn btn-ios';
+    note.textContent  = 'If the app is not installed, you will be redirected to the App Store.';
+    var timer = setTimeout(function(){{ window.location = appStore; }}, 2500);
+    openBtn.addEventListener('click', function(){{ clearTimeout(timer); }});
     window.location = deeplink;
-  }})();
+  }} else if (isAndroid) {{
+    // Android: intent URL opens app with Play Store fallback
+    openBtn.href = intent;
+    var timer = setTimeout(function(){{ window.location = playStore; }}, 2500);
+    openBtn.addEventListener('click', function(){{ clearTimeout(timer); }});
+    window.location.href = deeplink;
+  }} else {{
+    // Desktop / unknown: show both store buttons
+    openBtn.style.display = 'none';
+    storeBtns.style.display = 'block';
+    note.textContent = 'Scan the QR code or search "Nexryde" in your device's app store.';
+  }}
+}})();
 </script>
 </body>
 </html>"""
 
 @app.get("/invite/{identifier}", response_class=HTMLResponse, include_in_schema=False)
 async def invite_redirect(identifier: str):
-    """Smart invite landing page — opens the Nexryde app or redirects to Play Store."""
+    """Smart invite landing page — opens the Nexryde app on Android or iOS, or shows store buttons."""
     slug = identifier.strip()
     deeplink_url = f"nexryde://invite/{slug}"
-    # Android Intent URL: opens app if installed, falls back to Play Store
     intent_url = (
         f"intent://invite/{slug}"
         "#Intent;"
         "scheme=nexryde;"
         "package=com.nexryde.app;"
-        f"S.browser_fallback_url=https%3A%2F%2Fplay.google.com%2Fstore%2Fapps%2Fdetails%3Fid%3Dcom.nexryde.app;"
+        f"S.browser_fallback_url={_PLAY_STORE_URL};"
         "end"
     )
     html = _INVITE_HTML.format(
         deeplink_url=deeplink_url,
         intent_url=intent_url,
+        play_store_url=_PLAY_STORE_URL,
+        app_store_url=_APP_STORE_URL,
     )
     return HTMLResponse(content=html)
 
@@ -227,185 +326,7 @@ logger = logging.getLogger(__name__)
 
 # ==================== CONFIGURATION ====================
 
-# ==================== NIGERIAN MARKET FARE CONFIGURATION ====================
-# Comprehensive pricing for Nigerian ride-hailing market
-# Based on inDrive, Bolt, and Lag Ride competitive analysis
-FARE_CONFIG = {
-    "lagos": {
-        "economy": {
-            "base_fare": 400,           # ₦400 flat fee to start
-            "per_km": 400,              # ₦400 per kilometer
-            "per_min": 80,              # ₦80 per minute (for traffic/waiting)
-            "booking_fee": 0,           # Platform service fee
-            "min_fare": 0,              # Minimum fare
-            "max_multiplier": 2.5,      # Max 2.5x surge pricing
-            "cancellation_fee": 300,    # ₦300 if rider cancels after driver accepts
-        },
-        "comfort": {
-            "base_fare": 600,           # ₦600 flat fee to start
-            "per_km": 500,              # ₦500 per kilometer
-            "per_min": 100,             # ₦100 per minute
-            "booking_fee": 0,           # Platform service fee
-            "min_fare": 0,              # Minimum fare
-            "max_multiplier": 2.5,
-            "cancellation_fee": 400,
-        },
-        "xl": {
-            "base_fare": 500,           # ₦500 flat fee to start
-            "per_km": 450,              # ₦450 per kilometer
-            "per_min": 90,              # ₦90 per minute
-            "booking_fee": 0,           # Platform service fee
-            "min_fare": 0,              # Minimum fare
-            "max_multiplier": 2.5,
-            "cancellation_fee": 450,
-        },
-        "premium": {
-            "base_fare": 800,           # ₦800 flat fee to start
-            "per_km": 600,              # ₦600 per kilometer
-            "per_min": 120,             # ₦120 per minute
-            "booking_fee": 0,           # Platform service fee
-            "min_fare": 0,              # Minimum fare
-            "max_multiplier": 3.0,      # Premium can surge up to 3x
-            "cancellation_fee": 500,
-        },
-    },
-    "abuja": {
-        "economy": {
-            "base_fare": 400,
-            "per_km": 130,
-            "per_min": 20,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 250,
-        },
-        "comfort": {
-            "base_fare": 600,
-            "per_km": 180,
-            "per_min": 30,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 350,
-        },
-        "premium": {
-            "base_fare": 900,
-            "per_km": 300,
-            "per_min": 45,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 3.0,
-            "cancellation_fee": 450,
-        },
-        "xl": {
-            "base_fare": 700,
-            "per_km": 220,
-            "per_min": 35,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 400,
-        },
-    },
-    "port_harcourt": {
-        "economy": {
-            "base_fare": 450,
-            "per_km": 140,
-            "per_min": 22,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 280,
-        },
-        "comfort": {
-            "base_fare": 650,
-            "per_km": 190,
-            "per_min": 32,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 380,
-        },
-        "premium": {
-            "base_fare": 950,
-            "per_km": 320,
-            "per_min": 48,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 3.0,
-            "cancellation_fee": 480,
-        },
-        "xl": {
-            "base_fare": 750,
-            "per_km": 230,
-            "per_min": 38,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 420,
-        },
-    },
-    "default": {
-        "economy": {
-            "base_fare": 500,
-            "per_km": 150,
-            "per_min": 25,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 300,
-        },
-        "comfort": {
-            "base_fare": 700,
-            "per_km": 200,
-            "per_min": 35,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 400,
-        },
-        "premium": {
-            "base_fare": 1000,
-            "per_km": 350,
-            "per_min": 50,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 3.0,
-            "cancellation_fee": 500,
-        },
-        "xl": {
-            "base_fare": 800,
-            "per_km": 250,
-            "per_min": 40,
-            "booking_fee": 0,
-            "min_fare": 0,
-            "max_multiplier": 2.5,
-            "cancellation_fee": 450,
-        },
-    }
-}
-
-# Surge Pricing Configuration — moderate caps, Nigeria WAT hours
-SURGE_CONFIG = {
-    "enabled": True,
-    "base_multiplier": 1.0,
-    "max_multiplier": 1.30,   # Hard cap: max 30% extra for drivers
-    "high_demand_threshold": 0.70,
-    "very_high_demand_threshold": 0.85,
-    "critical_demand_threshold": 0.95,
-    "surge_levels": {
-        "normal":    1.0,
-        "peak":      1.15,
-        "high":      1.20,
-        "very_high": 1.25,
-        "critical":  1.30,
-    },
-    "peak_hours": {
-        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
-        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
-    },
-    "rain_multiplier": 1.10,   # Wet season bonus (WAT Apr-Oct)
-}
+# FARE_CONFIG: fare_config.py · surge rules: surge_pricing.py (used by calculate_fare).
 
 # Driver Certification Levels
 DRIVER_CERTIFICATION_LEVELS = {
@@ -452,7 +373,7 @@ route_cache: Dict[str, Dict[str, Any]] = {}
 CACHE_TTL_SECONDS = 300          # L1 in-memory: 5 minutes
 PERSISTENT_CACHE_TTL_HOURS = 24  # L2 MongoDB: 24 hours
 # Fare lock duration
-FARE_LOCK_MINUTES = 3
+FARE_LOCK_MINUTES = 10
 # OTP storage
 otp_store = {}
 # Fare estimate storage
@@ -469,30 +390,6 @@ SUBSCRIPTION_CONFIG = {
         "mode": "virtual_account_only",
         "message": "Virtual account is generated per driver. No manual company transfer account.",
     }
-}
-
-# ==================== SURGE PRICING CONFIG ====================
-# Duplicate kept for compatibility with calculate_fare() in this file.
-# Single source of truth is routers/payments.py SURGE_CONFIG.
-SURGE_CONFIG = {
-    "enabled": True,
-    "base_multiplier": 1.0,
-    "max_multiplier": 1.30,
-    "peak_hours": {
-        "morning_rush": {"start": 6, "end": 10, "multiplier": 1.15, "label": "Morning Rush"},
-        "evening_peak": {"start": 17, "end": 21, "multiplier": 1.20, "label": "Evening Peak"},
-    },
-    "high_demand_threshold": 0.70,
-    "very_high_demand_threshold": 0.85,
-    "critical_demand_threshold": 0.95,
-    "surge_levels": {
-        "normal":    1.0,
-        "peak":      1.15,
-        "high":      1.20,
-        "very_high": 1.25,
-        "critical":  1.30,
-    },
-    "rain_multiplier": 1.10,
 }
 
 # ==================== RIDE TYPES CONFIG ====================
@@ -546,7 +443,7 @@ class User(BaseModel):
     blocked_riders: List[str] = []  # List of rider IDs (for drivers)
     streaks: dict = Field(default_factory=lambda: {"current": 0, "best": 0, "last_date": None})
     badges: List[str] = []
-    # KODA Family
+    # NEXRYDE Family
     family_id: Optional[str] = None  # Family group ID
     family_role: Optional[str] = None  # "owner" or "member"
     trust_score: float = 100.0  # Trust score (inheritable)
@@ -946,7 +843,7 @@ class LostItem(BaseModel):
 # Tier System Configuration
 TIER_CONFIG = {
     "basic": {
-        "name": "KODA Basic",
+        "name": "Nexryde Basic",
         "monthly_fee": 18000,
         "earning_per_ride": {"min": 200, "max": 300},
         "requirements": {
@@ -958,7 +855,7 @@ TIER_CONFIG = {
         "color": "#C9A9A6"  # Rose gold
     },
     "premium": {
-        "name": "KODA Premium", 
+        "name": "Nexryde Premium", 
         "monthly_fee": 18000,  # Same fee!
         "earning_per_ride": {"min": 300, "max": 450},
         "requirements": {
@@ -1075,8 +972,14 @@ class LostItemResponseRequest(BaseModel):
 
 # ==================== HELPER FUNCTIONS ====================
 
+ROUTE_ESTIMATE_VERSION = "v_last_month"
+
 def get_cache_key(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> str:
-    key_str = f"{round(pickup_lat, 4)},{round(pickup_lng, 4)}-{round(dropoff_lat, 4)},{round(dropoff_lng, 4)}"
+    key_str = (
+        f"{ROUTE_ESTIMATE_VERSION}:"
+        f"{round(pickup_lat, 4)},{round(pickup_lng, 4)}-"
+        f"{round(dropoff_lat, 4)},{round(dropoff_lng, 4)}"
+    )
     return hashlib.md5(key_str.encode()).hexdigest()
 
 def is_cache_valid(cache_entry: dict) -> bool:
@@ -1167,7 +1070,37 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
     if not GOOGLE_MAPS_API_KEY:
         return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
 
-    # L3: Google Routes API (primary — costs money)
+    # L3: Google Directions API (primary for fare — road distance + traffic-aware ETA when available)
+    try:
+        url = "https://maps.googleapis.com/maps/api/directions/json"
+        params = {
+            "origin": f"{pickup_lat},{pickup_lng}",
+            "destination": f"{dropoff_lat},{dropoff_lng}",
+            "mode": "driving",
+            "key": GOOGLE_MAPS_API_KEY,
+            "departure_time": "now",
+        }
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=10.0)
+            data = response.json()
+
+        if data.get("status") == "OK":
+            route = data["routes"][0]
+            leg = route["legs"][0]
+            result = {
+                "distance_meters": leg["distance"]["value"],
+                "duration_seconds": leg["duration"]["value"],
+                "duration_in_traffic_seconds": leg.get("duration_in_traffic", {}).get("value", leg["duration"]["value"]),
+                "polyline": route["overview_polyline"]["points"],
+                "source": "google_directions_api",
+            }
+            route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
+            await _store_route_in_db(cache_key, result)
+            return result
+    except Exception as e:
+        logger.warning(f"Directions API failed: {e}")
+
+    # L4: Google Routes API v2 (fallback — also driving-distance based)
     try:
         url = "https://routes.googleapis.com/directions/v2:computeRoutes"
         headers = {
@@ -1203,115 +1136,135 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
     except Exception as e:
         logger.warning(f"Routes API failed: {e}")
 
-    # L4: Google Directions API (fallback — costs money)
-    try:
-        url = "https://maps.googleapis.com/maps/api/directions/json"
-        params = {
-            "origin": f"{pickup_lat},{pickup_lng}",
-            "destination": f"{dropoff_lat},{dropoff_lng}",
-            "key": GOOGLE_MAPS_API_KEY,
-            "departure_time": "now"
-        }
-        async with httpx.AsyncClient() as client:
-            response = await client.get(url, params=params, timeout=10.0)
-            data = response.json()
-
-        if data.get("status") == "OK":
-            route = data["routes"][0]
-            leg = route["legs"][0]
-            result = {
-                "distance_meters": leg["distance"]["value"],
-                "duration_seconds": leg["duration"]["value"],
-                "duration_in_traffic_seconds": leg.get("duration_in_traffic", {}).get("value", leg["duration"]["value"]),
-                "polyline": route["overview_polyline"]["points"],
-                "source": "google_directions_api",
-            }
-            route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
-            await _store_route_in_db(cache_key, result)
-            return result
-    except Exception as e:
-        logger.warning(f"Directions API failed: {e}")
-
     # L5: Haversine fallback (free, always works)
     return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
 
-def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: int, service_type: str = "economy", city: str = "lagos", is_surge: bool = False, surge_multiplier: float = 1.0) -> dict:
+def calculate_fare(
+    distance_km: float,
+    duration_min: int,
+    traffic_duration_min: int,
+    service_type: str = "economy",
+    city: str = "lagos",
+    demand_ratio: float = 0.0,
+    is_raining: bool = False,
+    pickup_lat: float | None = None,
+    pickup_lng: float | None = None,
+    dropoff_lat: float | None = None,
+    dropoff_lng: float | None = None,
+) -> dict:
     """
-    Calculate fare for Nigerian market with comprehensive pricing formula:
-    Total Fare = (Base Fare + (Distance × Rate/km) + (Time × Rate/min) + Traffic Fee + Booking Fee) × Surge Multiplier
+    **Lagos** — NEXRYDE exact Lagride-style (see ``lagride_lagos_pricing``):
+
+    ``Price = Distance × Area_Rate × Service_Multiplier × Surge_Multiplier`` (and
+    ``× Lagos_Market_Multiplier`` when that factor is not 1.0).
+
+    Road-route ``Distance`` only; no base fare / no time line item. Lagos market multiplier: ``LAGOS_MARKET_WIDE_FARE_MULTIPLIER`` in ``lagride_lagos_pricing``.
+
+    **Other cities**: (Base + Distance×PerKm + Time×PerMin) × RouteLocation × Service × Surge
+    with short/long rate cards from ``fare_config``.
     """
-    city_key = (city or "default").lower()
+    city_key = normalize_fare_city_key(city)
     city_config = FARE_CONFIG.get(city_key, FARE_CONFIG["default"])
     service_key = (service_type or "economy").lower()
     # "Standard" in UI is the same tier as "economy" in backend pricing.
     if service_key == "standard":
         service_key = "economy"
+    if service_key == "pro":
+        service_key = "premium"
     config = city_config.get(service_key, city_config.get("economy", FARE_CONFIG["default"]["economy"]))
-    
-    # Extract pricing components
-    base_fare = config.get("base_fare", 500)
-    per_km = config.get("per_km", 150)
-    per_min = config.get("per_min", 25)
-    booking_fee = config.get("booking_fee", 100)
-    min_fare = config.get("min_fare", 800)
+
+    booking_fee = 0.0
+    min_fare = float(config.get("min_fare", 0))
     max_multiplier = config.get("max_multiplier", 2.5)
     cancellation_fee = config.get("cancellation_fee", 300)
-    
-    # Step 1: Calculate distance fee
-    distance_fee = round(distance_km * per_km, 2)
-    
-    # Step 2: Calculate time fee (for time spent in traffic/waiting)
-    time_fee = round(duration_min * per_min, 2)
-    
-    # Step 3: Calculate extra traffic fee (when traffic time exceeds normal duration)
-    extra_traffic_min = max(0, traffic_duration_min - duration_min)
-    traffic_fee = round(min(extra_traffic_min * per_min, base_fare * 0.5), 2)  # Cap at 50% of base fare
-    
-    # Step 4: Calculate subtotal before surge
-    subtotal = base_fare + distance_fee + time_fee + traffic_fee + booking_fee
-    
-    # Step 5: Calculate surge/dynamic pricing — all hours in Nigeria WAT (UTC+1)
-    current_hour = datetime.utcnow().hour + 1  # WAT = UTC+1
+
+    if city_key == "lagos":
+        return build_lagos_lagride_fare_breakdown(
+            distance_km=float(distance_km),
+            duration_min=int(duration_min),
+            traffic_duration_min=int(traffic_duration_min),
+            service_key=service_key,
+            demand_ratio=float(demand_ratio),
+            is_raining=bool(is_raining),
+            pickup_lat=pickup_lat,
+            pickup_lng=pickup_lng,
+            max_multiplier=float(max_multiplier),
+            cancellation_fee=float(cancellation_fee),
+            min_fare=min_fare,
+            short_trip_threshold_km=float(SHORT_TRIP_KM_THRESHOLD),
+            dropoff_lat=dropoff_lat,
+            dropoff_lng=dropoff_lng,
+        )
+
+    fare_bucket = "short" if float(distance_km) < SHORT_TRIP_KM_THRESHOLD else "standard"
+
+    route_time_min = nexryde_route_time_minutes(duration_min, traffic_duration_min)
+    rate_card = resolve_fare_rate_card(city_key, service_key, fare_bucket)
+    line = core_components_from_rate_card(
+        rate_card["base_fare"],
+        rate_card["per_km"],
+        rate_card["per_min"],
+        distance_km,
+        route_time_min,
+    )
+    base_fare = line["base_fare"]
+    distance_fee = line["distance_fee"]
+    time_fee = line["time_fee"]
+    traffic_fee = 0.0
+
+    location_mult, location_zone = nexryde_route_location_multiplier(
+        city_key, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+    )
+    service_mult = nexryde_service_multiplier(service_key)
+
+    core_before_adjust = float(line["core_presurge_pres_adjustment"])
+    subtotal = round(core_before_adjust * location_mult * service_mult, 2)
+
+    # Step 6–7: Max-style surge (WAT) — max of normal / high demand / rain / peak; tier cap from FARE_CONFIG
+    wat_now = datetime.utcnow() + timedelta(hours=1)
+    current_hour = wat_now.hour
     if current_hour >= 24:
         current_hour -= 24
-    is_weekend = datetime.utcnow().weekday() >= 5
-
-    # Peak hours aligned with updated SURGE_CONFIG (WAT)
-    is_morning_peak = 6 <= current_hour < 10
-    is_evening_peak = 17 <= current_hour < 21
+    is_weekend = wat_now.weekday() >= 5
+    is_morning_peak = 7 <= current_hour < 9
+    is_evening_peak = 17 <= current_hour < 20
     is_peak = is_morning_peak or is_evening_peak
-    
-    # Calculate dynamic multiplier using live surge config
-    dynamic_multiplier = 1.0
-    if is_surge and surge_multiplier > 1.0:
-        dynamic_multiplier = min(surge_multiplier, max_multiplier)
-    elif is_peak:
-        peak_config = SURGE_CONFIG.get("peak_hours", {})
-        if is_morning_peak:
-            dynamic_multiplier = peak_config.get("morning_rush", {}).get("multiplier", 1.15)
-        elif is_evening_peak:
-            dynamic_multiplier = peak_config.get("evening_peak", {}).get("multiplier", 1.20)
 
-    # Cap to global max — never exceeds 1.3x
-    dynamic_multiplier = min(dynamic_multiplier, SURGE_CONFIG.get("max_multiplier", 1.30))
-    
-    # Step 7: Calculate final fare
+    surge_meta = compute_max_style_surge_multiplier(
+        demand_ratio=demand_ratio,
+        is_raining=is_raining,
+        service_max_multiplier=max_multiplier,
+    )
+    dynamic_multiplier = float(surge_meta["multiplier"])
+
+    # Step 8: final fare — short trips use ₦10 granularity (exact table feel); long trips ₦50
     total_fare = round(subtotal * dynamic_multiplier, 2)
-    
-    # Round to nearest ₦50 for cleaner prices
-    total_fare = round(total_fare / 50) * 50
-    
+    _step = 10.0 if fare_bucket == "short" else 50.0
+    _floor = 200.0 if fare_bucket == "short" else 500.0
+    total_fare = max(_floor, round(total_fare / _step) * _step)
+    if min_fare > 0:
+        total_fare = max(total_fare, min_fare)
+
+    bucket_note = " · Short · city table" if fare_bucket == "short" else " · Long · Lagride-style"
+    fare_rate_model = "short_city_table" if fare_bucket == "short" else "long_lagride_style"
+
     return {
         "base_fare": base_fare,
         "distance_km": round(distance_km, 2),
         "distance_fee": distance_fee,
         "duration_min": duration_min,
+        "pricing_route_minutes": route_time_min,
         "time_fee": time_fee,
         "traffic_duration_min": traffic_duration_min,
         "traffic_fee": traffic_fee,
         "booking_fee": booking_fee,
         "subtotal": round(subtotal, 2),
+        "location_multiplier": round(location_mult, 2),
+        "location_zone": location_zone,
+        "service_multiplier": round(service_mult, 2),
         "surge_multiplier": round(dynamic_multiplier, 2),
+        "surge_uncapped": surge_meta.get("uncapped_multiplier"),
+        "surge_factors": surge_meta.get("factors"),
         "total_fare": total_fare,
         "min_fare": min_fare,
         "cancellation_fee": cancellation_fee,
@@ -1322,7 +1275,13 @@ def calculate_fare(distance_km: float, duration_min: int, traffic_duration_min: 
         "service_type": service_key,
         "city": city_key,
         "currency": "NGN",
-        "price_breakdown": f"₦{base_fare} base + ₦{distance_fee} ({distance_km}km) + ₦{time_fee} ({duration_min}min) + ₦{traffic_fee} traffic + ₦{booking_fee} booking"
+        "fare_bucket": fare_bucket,
+        "fare_rate_model": fare_rate_model,
+        "short_trip_threshold_km": SHORT_TRIP_KM_THRESHOLD,
+        "price_breakdown": (
+            f"₦{int(base_fare)} + ₦{int(distance_fee)} ({round(distance_km,2)}km) + ₦{int(time_fee)} ({route_time_min}min)"
+            f" × loc {round(location_mult,2)} ({location_zone}) × tier {round(service_mult,2)}{bucket_note}"
+        ),
     }
 
 def generate_otp() -> str:
@@ -1443,11 +1402,11 @@ async def get_active_trip(user_id: str, request: Request):
 
 @api_router.get("/")
 async def root():
-    return {"message": "KODA API is running", "version": "2.0.0"}
+    return {"service": "nexryde-api", "message": "NEXRYDE API is running", "version": "2.0.0", "docs": "/docs"}
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "healthy", "service": "nexryde-api", "timestamp": datetime.utcnow().isoformat()}
 
 
 @api_router.get("/health/ready")
@@ -1510,10 +1469,20 @@ async def route_cache_stats():
 
 @app.get("/admin/")
 async def serve_admin():
-    """Serve admin panel"""
+    """Serve admin panel — always fresh, never cached."""
+    from fastapi.responses import Response as _Resp
     admin_file = ADMIN_DIR / "index.html"
     if admin_file.exists():
-        return FileResponse(admin_file, media_type="text/html")
+        content = admin_file.read_bytes()
+        return _Resp(
+            content=content,
+            media_type="text/html",
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
     raise HTTPException(status_code=404, detail="Admin panel not found")
 
 @app.get("/admin/subscription-management.html")
@@ -1547,6 +1516,7 @@ app.include_router(safety_router)
 app.include_router(safety_data_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+app.include_router(admin_notifications_router, dependencies=[Depends(require_admin_access)])
 app.include_router(trips_router)
 app.include_router(auth_router)
 app.include_router(bidding_router)
@@ -1653,11 +1623,6 @@ async def _deferred_startup():
             await db.route_cache_v2.create_index("cached_at", expireAfterSeconds=48 * 3600)
         except Exception:
             pass
-        # Wire up shared functions for trips router
-        set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
-        set_fare_estimate_store(fare_estimate_store)
-        set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
-        set_payments_fare_estimate_store(fare_estimate_store)
         # Start periodic cleanup for masked call relay sessions.
         start_call_session_cleanup_task()
         # Start recurring driver compliance checks.
@@ -1666,7 +1631,29 @@ async def _deferred_startup():
         from db_indexes import ensure_indexes
 
         await ensure_indexes(db)
+        from notification_scheduler import start_notification_scheduler
+
+        start_notification_scheduler()
         asyncio.create_task(_squad_webhook_dlq_autoreplay_loop())
+        # One-time migration: lift all monthly_verification_overdue suspensions
+        # so verified drivers are never hard-blocked by this soft reminder system
+        try:
+            from database import db as _db
+            dp_r = await _db.driver_profiles.update_many(
+                {"suspended_reason": "monthly_verification_overdue"},
+                {"$unset": {"suspended_reason": ""}, "$set": {"monthly_verification_complete": True}}
+            )
+            u_r = await _db.users.update_many(
+                {"suspension_reason": "monthly_verification_overdue"},
+                {"$unset": {"suspension_reason": "", "suspended_until": ""}}
+            )
+            if dp_r.modified_count or u_r.modified_count:
+                logger.info(
+                    f"Startup migration: cleared monthly_verification_overdue from "
+                    f"{dp_r.modified_count} driver profiles, {u_r.modified_count} users."
+                )
+        except Exception:
+            logger.warning("Startup migration for monthly suspensions failed (non-fatal)")
         logger.info("Deferred startup completed successfully")
     except Exception:
         logger.exception("Deferred startup failed")
@@ -1675,6 +1662,12 @@ async def _deferred_startup():
 @app.on_event("startup")
 async def seed_promo_codes():
     """Schedule heavy startup work; return immediately so the server can bind to PORT."""
+    # Wire pricing + directions before any deferred DB seeding so POST /api/fare/estimate
+    # never 500s if seeding fails or on cold-start races.
+    set_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+    set_fare_estimate_store(fare_estimate_store)
+    set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
+    set_payments_fare_estimate_store(fare_estimate_store)
     asyncio.create_task(_deferred_startup())
 
 # Browser CORS: default deny-all-open; set CORS_ORIGINS=* for local dev, or comma-separated list.
@@ -1726,12 +1719,15 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     payload = verify_jwt_token(raw_token)
                     request.state.user_id = payload.get("sub")
                     request.state.user_role = payload.get("role")
+                    return await call_next(request)
                 except Exception:
+                    # Admin session tokens are Bearer but are not JWTs — let /api/admin/* handlers validate.
+                    if admin_ns:
+                        return await call_next(request)
                     return JSONResponse(
                         status_code=401,
                         content={"detail": "Token expired or invalid"},
                     )
-                return await call_next(request)
             if admin_ns:
                 return await call_next(request)
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})

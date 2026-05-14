@@ -27,6 +27,8 @@ import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
 import policeContacts from '@/src/data/policeContacts';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 
 type PoliceContact = { state: string; aliases: string[]; phone: string };
 const POLICE: PoliceContact[] = policeContacts as PoliceContact[];
@@ -179,6 +181,7 @@ export default function RiderSafetyScreen() {
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
   const [sosModalVisible, setSosModalVisible] = useState(false);
   const [sendingSos, setSendingSos] = useState(false);
   const sosPulse = useRef(new Animated.Value(1)).current;
@@ -313,12 +316,26 @@ export default function RiderSafetyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <View style={styles.hero}>
+      <TabBrandStrip role="rider" />
+      <View style={[styles.hero, { paddingHorizontal: flow.padH }]}>
         <Text style={styles.heroTitle}>Safety Center</Text>
         <Text style={styles.heroSub}>Verification, emergencies, and trip protection — organized in one screen.</Text>
       </View>
 
-      <ScrollView contentContainerStyle={[styles.scroll, { paddingBottom: tabPad }]} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.scroll,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: tabPad,
+            maxWidth: flow.maxContentWidth,
+            alignSelf: 'center',
+            width: '100%',
+            gap: Math.round(flow.sectionGap * 0.35),
+          },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
@@ -489,7 +506,6 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.gray50,
   },
   hero: {
-    paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.lg,
     backgroundColor: BRAND.navyDeep,
@@ -509,7 +525,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   scroll: {
-    padding: SPACING.lg,
+    paddingTop: SPACING.md,
   },
   quickLabel: {
     fontSize: FONT_SIZE.xs,

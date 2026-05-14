@@ -13,7 +13,6 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
-import { BiometricScanner } from '@/src/components/tier1';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 
 type DocKey = 'nin' | 'drivers_license' | 'passport_photo' | 'vehicle_registration'
@@ -42,7 +41,6 @@ const DOCUMENTS: DocItem[] = [
   { key: 'vehicle_ac', label: 'AC System Photo (LIVE camera only)', icon: 'snow', required: true, hasExpiry: false },
 ];
 
-const BIOMETRIC_CONFIRMATION_TTL_MS = 15 * 60 * 1000;
 const CAMERA_RESUME_TTL_MS = 10 * 60 * 1000;
 const DRAFT_VERSION = 1;
 const CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
@@ -78,7 +76,6 @@ export default function DriverDocumentsScreen() {
   const [expiry, setExpiry] = useState<Record<string, string>>({});
   const [ninNumber, setNinNumber] = useState('');
   const [verifying, setVerifying] = useState(false);
-  const [biometricVerified, setBiometricVerified] = useState(false);
   const [draftLoaded, setDraftLoaded] = useState(false);
   const [activePickerKey, setActivePickerKey] = useState<DocKey | null>(null);
 
@@ -92,11 +89,6 @@ export default function DriverDocumentsScreen() {
     () => `@driver_documents_pending_picker_${driverId || String(params.phone || 'unknown')}`,
     [driverId, params.phone],
   );
-  const biometricCacheKey = useMemo(
-    () => `@driver_documents_biometric_confirmed_${driverId || 'unknown'}`,
-    [driverId],
-  );
-
   const persistableDocUri = async (key: DocKey, uri: string) => {
     if (!uri || !FileSystem.documentDirectory) return uri;
     if (uri.startsWith(FileSystem.documentDirectory)) return uri;
@@ -205,35 +197,6 @@ export default function DriverDocumentsScreen() {
     };
   }, [pendingPickerKey]);
 
-  useEffect(() => {
-    let mounted = true;
-    const restoreBiometricConfirmation = async () => {
-      if (!driverId) return;
-      try {
-        const raw = await AsyncStorage.getItem(biometricCacheKey);
-        const confirmedAt = raw ? Number(raw) : 0;
-        if (mounted && confirmedAt && Date.now() - confirmedAt < BIOMETRIC_CONFIRMATION_TTL_MS) {
-          setBiometricVerified(true);
-        }
-      } catch {
-        // A failed cache read should not block onboarding.
-      }
-    };
-    void restoreBiometricConfirmation();
-    return () => {
-      mounted = false;
-    };
-  }, [biometricCacheKey, driverId]);
-
-  const rememberBiometricConfirmation = async () => {
-    setBiometricVerified(true);
-    try {
-      await AsyncStorage.setItem(biometricCacheKey, String(Date.now()));
-    } catch {
-      // The in-memory confirmation is enough for the current screen.
-    }
-  };
-
   const pickImage = (key: DocKey) => {
     if (CAMERA_ONLY_KEYS.includes(key)) {
       Alert.alert(
@@ -320,7 +283,7 @@ export default function DriverDocumentsScreen() {
     return Boolean(getExpiryValidationMessage(expiry[d.key]));
   });
   const allRequiredExpiriesFilled = missingRequiredExpiryDocs.length === 0;
-  const canSubmit = allRequiredUploaded && allRequiredExpiriesFilled && biometricVerified;
+  const canSubmit = allRequiredUploaded && allRequiredExpiriesFilled;
 
   const handleSubmit = async () => {
     const missing = requiredDocs.filter((d) => {
@@ -344,11 +307,6 @@ export default function DriverDocumentsScreen() {
       );
       return;
     }
-    if (!biometricVerified) {
-      Alert.alert('Biometric confirmation required', 'Confirm your device biometrics before submitting driver verification.');
-      return;
-    }
-
     setVerifying(true);
     try {
       const formData = new FormData();
@@ -386,7 +344,6 @@ export default function DriverDocumentsScreen() {
 
       if (response.ok && data.verification_status === 'approved') {
         await AsyncStorage.removeItem(draftCacheKey);
-        await AsyncStorage.removeItem(biometricCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
           'Documents approved',
@@ -410,7 +367,6 @@ export default function DriverDocumentsScreen() {
         );
       } else if (data.verification_status === 'pending' || data.verification_status === 'pending_review') {
         await AsyncStorage.removeItem(draftCacheKey);
-        await AsyncStorage.removeItem(biometricCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
           'Documents Submitted',
@@ -465,7 +421,7 @@ export default function DriverDocumentsScreen() {
             <Text style={st.infoTitle}>Documents and checks</Text>
             <Text style={st.infoText}>
               Use bright, glare-free light. Expiry fields use MM/YYYY for required documents that have expiry.
-              Once required rows are complete and biometrics are confirmed, submit.
+              Once all required documents are uploaded and expiry dates are filled, you can submit.
             </Text>
           </View>
 
@@ -542,20 +498,6 @@ export default function DriverDocumentsScreen() {
             <Text style={st.noteText}>Your documents are stored securely and only used for verification</Text>
           </View>
 
-          <View style={st.biometricCard}>
-            <BiometricScanner
-              title="Confirm biometrics before submission"
-              subtitle={biometricVerified
-                ? 'Face or fingerprint confirmation is remembered for this secure submission session.'
-                : 'Use your device face unlock or fingerprint to protect your driver account setup.'}
-              confirmLabel={biometricVerified ? 'Biometric confirmed' : 'Verify face or fingerprint'}
-              onSuccess={() => {
-                void rememberBiometricConfirmation();
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              }}
-              onFailure={(msg) => Alert.alert('Biometric check', msg)}
-            />
-          </View>
         </ScrollView>
 
         <View style={st.bottom}>
@@ -644,9 +586,6 @@ const st = StyleSheet.create({
     marginTop: SPACING.lg, gap: SPACING.xs,
   },
   noteText: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextSecondary },
-  biometricCard: {
-    marginTop: SPACING.lg,
-  },
   bottom: {
     backgroundColor: COLORS.white, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.lg,
     borderTopWidth: 1, borderTopColor: COLORS.lightBorder,

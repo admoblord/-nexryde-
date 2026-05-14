@@ -41,6 +41,7 @@ export function buildDriverToolFeatures(t: {
   const vehicleLabel = t.verification.vehicleVerified.split(' ')[0] || 'Vehicle';
   const docLabel = t.verification.uploadDocuments.split(' ')[0] || 'Documents';
   return [
+    { id: 'destination', label: 'Towards Destination', icon: 'flag', route: '/driver/destination', color: '#22E5A0' },
     { id: 'vehicle', label: vehicleLabel, icon: 'car-sport', route: '/driver/vehicle', color: COLORS.accentGreen },
     { id: 'documents', label: docLabel, icon: 'document-text', route: '/driver/documents', color: COLORS.warning },
     { id: 'performance', label: t.driver.rating, icon: 'analytics', route: '/driver/performance', color: HOME_PALETTE.accentIndigo },

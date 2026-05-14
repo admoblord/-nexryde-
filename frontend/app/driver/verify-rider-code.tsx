@@ -1,8 +1,6 @@
 /**
- * Pick-Up Code Verification Screen — Driver Side
- * Auto-triggered when driver arrives at pickup (<= 100m).
- * Driver enters the 4-digit code shown on the rider's screen.
- * On success → trip starts immediately. No biometric, no extra steps.
+ * Pick-up code verification — driver enters the 4-digit code from the rider's Nexryde app.
+ * On success → trip is marked verified; driver returns to the live map to review route and tap **Start trip**.
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -21,12 +19,14 @@ import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders, getTrip } from '@/src/services/api';
+import { useAppStore, type Trip } from '@/src/store/appStore';
 
 const CODE_LENGTH = 4;
 
 export default function VerifyRiderCodeScreen() {
   const router = useRouter();
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const { trip_id, driver_id, auto } = useLocalSearchParams<{
     trip_id: string;
     driver_id: string;
@@ -97,25 +97,23 @@ export default function VerifyRiderCodeScreen() {
       if (res.ok && data.verified) {
         // ── SUCCESS ──
         setSuccess(true);
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        Animated.spring(successAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 6 }).start();
-        // Start trip immediately
-        const startRes = await fetch(`${BACKEND_URL}/api/trips/${trip_id}/start`, {
-          method: 'PUT',
-          headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-          body: JSON.stringify({ driver_id }),
-        });
-        if (startRes.ok) {
-          setTimeout(() => router.replace('/driver/trips' as any), 900);
-        } else {
-          // Code verified, start failed (may need face) — just go back
-          setTimeout(() => router.back(), 900);
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         }
+        Animated.spring(successAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 6 }).start();
+        try {
+          const tripRes = await getTrip(String(trip_id));
+          setCurrentTrip(tripRes.data as Trip);
+        } catch {
+          /* trip poll on home will catch up */
+        }
+        setTimeout(() => router.replace('/(driver-tabs)/driver-home'), 720);
       } else {
-        const newAttempts = attempts + 1;
-        setAttempts(newAttempts);
+        setAttempts((prev) => prev + 1);
         shake();
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+        }
         setError(data?.detail || 'Invalid code. Try again.');
         setDigits(Array(CODE_LENGTH).fill(''));
         setTimeout(() => inputRefs.current[0]?.focus(), 100);
@@ -127,30 +125,34 @@ export default function VerifyRiderCodeScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [trip_id, driver_id, submitting, attempts, router]);
+  }, [trip_id, driver_id, submitting, router, setCurrentTrip]);
 
   const filled = digits.filter(Boolean).length;
 
   return (
     <View style={styles.root}>
       <LinearGradient
-        colors={['#0F172A', '#1E3A5F']}
+        colors={['#020617', '#0a0f1e', '#0f172a']}
         style={StyleSheet.absoluteFill}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0.4, y: 1 }}
+        start={{ x: 0.5, y: 0 }}
+        end={{ x: 0.5, y: 1 }}
       />
 
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
-        {/* Header */}
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
-            <Ionicons name="chevron-down" size={26} color="rgba(255,255,255,0.7)" />
+          <TouchableOpacity
+            style={styles.backBtn}
+            onPress={() => router.back()}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={24} color="#E2E8F0" />
           </TouchableOpacity>
-          <View style={styles.autoChip}>
-            <View style={styles.autoChipDot} />
-            <Text style={styles.autoChipText}>
-              {auto === '1' ? 'Auto-triggered · arrived' : 'Verify Rider'}
-            </Text>
+          <View style={styles.headerCenter}>
+            <View style={styles.headerPill}>
+              <Ionicons name="shield-checkmark" size={12} color="#86EFAC" />
+              <Text style={styles.headerPillTxt}>SECURE START</Text>
+            </View>
           </View>
           <View style={{ width: 44 }} />
         </View>
@@ -158,110 +160,148 @@ export default function VerifyRiderCodeScreen() {
         <Animated.View style={[styles.body, { opacity: fadeIn }]}>
           {!success ? (
             <>
-              {/* Icon + title */}
               <View style={styles.iconWrap}>
                 <LinearGradient
-                  colors={['#00D46A', '#0070F3']}
+                  colors={['#34F5B8', '#22E5A0', '#0D9F6E']}
                   style={styles.iconGrad}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
-                  <Ionicons name="keypad" size={36} color="#FFF" />
+                  <Ionicons name="keypad" size={34} color="#022C22" />
                 </LinearGradient>
               </View>
-              <Text style={styles.title}>Verify Rider</Text>
-              <Text style={styles.subtitle}>Enter the 4-digit code shown on the rider's screen</Text>
+              <Text style={styles.eyebrow}>{auto === '1' ? 'Arrived · verify' : 'Before you start'}</Text>
+              <Text style={styles.title}>Enter pickup code</Text>
 
-              {/* PIN boxes */}
-              <Animated.View style={[styles.pinRow, { transform: [{ translateX: shakeAnim }] }]}>
+              <View style={styles.flowCard}>
+                <Text style={styles.subtitle}>
+                  Ask your rider to open Nexryde — they will see a 4-digit code. Enter it to confirm identity, then
+                  return to the map to start the trip when everyone is ready.
+                </Text>
+
+                <Animated.View style={[styles.pinRow, { transform: [{ translateX: shakeAnim }] }]}>
                 {digits.map((d, i) => (
                   <TouchableOpacity
                     key={i}
                     activeOpacity={1}
                     onPress={() => inputRefs.current[i]?.focus()}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Digit ${i + 1}`}
                   >
-                    <View style={[
-                      styles.pinBox,
-                      d ? styles.pinBoxFilled : null,
-                      error && !d ? styles.pinBoxError : null,
-                    ]}>
+                    <View
+                      style={[
+                        styles.pinBox,
+                        d ? styles.pinBoxFilled : null,
+                        error ? styles.pinBoxError : null,
+                      ]}
+                    >
                       <TextInput
-                        ref={r => { inputRefs.current[i] = r; }}
+                        ref={(r) => {
+                          inputRefs.current[i] = r;
+                        }}
                         style={styles.pinInput}
                         value={d}
-                        onChangeText={v => handleDigit(v.slice(-1), i)}
-                        onKeyPress={e => handleBackspace(e, i)}
+                        onChangeText={(v) => handleDigit(v.slice(-1), i)}
+                        onKeyPress={(e) => handleBackspace(e, i)}
                         keyboardType="number-pad"
                         maxLength={1}
                         selectTextOnFocus
                         caretHidden
                       />
-                      {!d && <Text style={styles.pinPlaceholder}>—</Text>}
+                      {!d ? (
+                        <Text style={styles.pinPlaceholder} pointerEvents="none">
+                          —
+                        </Text>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 ))}
               </Animated.View>
 
-              {/* Error state */}
               {error ? (
-                <View style={styles.errorRow}>
-                  <Ionicons name="alert-circle" size={16} color="#EF4444" />
+                <View style={styles.errorBanner}>
+                  <Ionicons name="alert-circle" size={18} color="#FCA5A5" />
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : (
                 <Text style={styles.hint}>
-                  {filled === 0 ? 'Ask the rider to open their NEXRYDE app' : `${filled} of ${CODE_LENGTH} digits entered`}
+                  {filled === 0
+                    ? 'Code updates live on the rider app.'
+                    : `${filled} of ${CODE_LENGTH} digits`}
                 </Text>
               )}
 
-              {/* Attempts indicator */}
-              {attempts > 0 && (
+              {attempts > 0 ? (
                 <View style={styles.attemptsRow}>
                   {Array.from({ length: 5 }).map((_, i) => (
-                    <View
-                      key={i}
-                      style={[styles.attemptDot, i < attempts ? styles.attemptDotUsed : null]}
-                    />
+                    <View key={i} style={[styles.attemptDot, i < attempts ? styles.attemptDotUsed : null]} />
                   ))}
-                  <Text style={styles.attemptsText}>{5 - attempts} attempts left</Text>
+                  <Text style={styles.attemptsText}>{Math.max(0, 5 - attempts)} tries left</Text>
                 </View>
-              )}
+              ) : null}
 
-              {/* Manual confirm button (if auto-submit didn't trigger) */}
               <TouchableOpacity
-                style={[styles.confirmBtn, (filled < CODE_LENGTH || submitting) && styles.confirmBtnDisabled]}
+                style={styles.confirmBtnOuter}
                 onPress={() => submitCode(digits.join(''))}
                 disabled={filled < CODE_LENGTH || submitting}
-                activeOpacity={0.88}
+                activeOpacity={0.9}
               >
-                {submitting ? (
-                  <ActivityIndicator color="#FFF" />
-                ) : (
-                  <>
-                    <Ionicons name="checkmark-circle" size={20} color="#FFF" />
-                    <Text style={styles.confirmBtnText}>Confirm</Text>
-                  </>
-                )}
+                <LinearGradient
+                  colors={
+                    filled < CODE_LENGTH || submitting
+                      ? ['rgba(51,65,85,0.9)', 'rgba(30,41,59,0.95)']
+                      : ['#34F5B8', '#22E5A0', '#0D9F6E']
+                  }
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={[styles.confirmBtnGrad, (filled < CODE_LENGTH || submitting) && styles.confirmBtnGradMuted]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color={filled >= CODE_LENGTH ? '#022C22' : '#94A3B8'} />
+                  ) : (
+                    <>
+                      <Ionicons name="shield-checkmark" size={20} color={filled < CODE_LENGTH ? '#94A3B8' : '#022C22'} />
+                      <Text
+                        style={[
+                          styles.confirmBtnText,
+                          filled < CODE_LENGTH && styles.confirmBtnTextMuted,
+                        ]}
+                      >
+                        Verify pickup code
+                      </Text>
+                    </>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.cancelBtn} onPress={() => router.back()}>
-                <Text style={styles.cancelBtnText}>Cancel</Text>
+                <Text style={styles.cancelBtnText}>Not now</Text>
               </TouchableOpacity>
+              </View>
             </>
           ) : (
-            /* ── Success state ── */
-            <Animated.View style={[styles.successWrap, { transform: [{ scale: successAnim }], opacity: successAnim }]}>
+            <Animated.View
+              style={[
+                styles.successWrap,
+                {
+                  transform: [{ scale: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1] }) }],
+                  opacity: successAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] }),
+                },
+              ]}
+            >
               <LinearGradient
-                colors={['#00D46A', '#00A854']}
+                colors={['#34F5B8', '#22E5A0', '#0D9F6E']}
                 style={styles.successIconWrap}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <Ionicons name="checkmark" size={52} color="#FFF" />
+                <Ionicons name="checkmark" size={48} color="#022C22" />
               </LinearGradient>
-              <Text style={styles.successTitle}>Rider Confirmed</Text>
-              <Text style={styles.successSub}>Starting trip…</Text>
-              <ActivityIndicator color="#00D46A" style={{ marginTop: 20 }} />
+              <Text style={styles.successTitle}>Code verified</Text>
+              <Text style={styles.successSub}>
+                Opening your live map — review the route, then tap Start trip when the rider is in the vehicle.
+              </Text>
+              <ActivityIndicator color="#22E5A0" style={{ marginTop: 22 }} size="small" />
             </Animated.View>
           )}
         </Animated.View>
@@ -277,184 +317,278 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'android' ? 8 : 4,
-    paddingBottom: 8,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'android' ? 6 : 2,
+    paddingBottom: 10,
+  },
+  headerCenter: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   backBtn: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(15,23,42,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.25)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  autoChip: {
+  headerPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(0,212,106,0.18)',
     paddingHorizontal: 14,
     paddingVertical: 7,
     borderRadius: 999,
+    backgroundColor: 'rgba(34,229,160,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(0,212,106,0.3)',
+    borderColor: 'rgba(34,229,160,0.28)',
   },
-  autoChipDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#00D46A',
+  headerPillTxt: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#86EFAC',
+    letterSpacing: 1.1,
   },
-  autoChipText: { fontSize: 12, fontWeight: '700', color: '#00D46A' },
   body: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 32,
+    paddingHorizontal: 28,
+    maxWidth: 420,
+    alignSelf: 'center',
+    width: '100%',
   },
-  iconWrap: { marginBottom: 24 },
+  iconWrap: { marginBottom: 20 },
   iconGrad: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
+    width: 88,
+    height: 88,
+    borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#00D46A',
-    shadowOffset: { width: 0, height: 8 },
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 12,
+  },
+  flowCard: {
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+    marginTop: 4,
+    borderRadius: 26,
+    paddingHorizontal: 20,
+    paddingTop: 22,
+    paddingBottom: 22,
+    backgroundColor: 'rgba(15,23,42,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,245,184,0.16)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.45,
-    shadowRadius: 16,
-    elevation: 10,
+    shadowRadius: 28,
+    elevation: 14,
+  },
+  eyebrow: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#64748B',
+    letterSpacing: 1.05,
+    textTransform: 'uppercase',
+    marginBottom: 8,
   },
   title: {
-    fontSize: 30,
+    fontSize: 28,
     fontWeight: '900',
-    color: '#FFF',
+    color: '#F8FAFC',
     textAlign: 'center',
-    letterSpacing: 0.3,
-    marginBottom: 8,
+    letterSpacing: -0.75,
+    marginBottom: 12,
   },
   subtitle: {
     fontSize: 15,
-    color: 'rgba(255,255,255,0.6)',
+    fontWeight: '600',
+    color: '#94A3B8',
     textAlign: 'center',
     lineHeight: 22,
-    marginBottom: 36,
+    marginBottom: 24,
+    paddingHorizontal: 2,
   },
   pinRow: {
     flexDirection: 'row',
-    gap: 14,
-    marginBottom: 20,
+    gap: 12,
+    marginBottom: 22,
+    justifyContent: 'center',
   },
   pinBox: {
     width: 64,
-    height: 72,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    height: 76,
+    borderRadius: 20,
+    backgroundColor: 'rgba(2,6,23,0.55)',
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.15)',
+    borderColor: 'rgba(51,65,85,0.55)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   pinBoxFilled: {
-    backgroundColor: 'rgba(0,212,106,0.15)',
-    borderColor: '#00D46A',
+    backgroundColor: 'rgba(34,229,160,0.1)',
+    borderColor: '#22E5A0',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 4,
   },
   pinBoxError: {
-    borderColor: 'rgba(239,68,68,0.7)',
-    backgroundColor: 'rgba(239,68,68,0.08)',
+    borderColor: 'rgba(248,113,113,0.85)',
+    backgroundColor: 'rgba(127,29,29,0.2)',
   },
   pinInput: {
     position: 'absolute',
     width: '100%',
     height: '100%',
     textAlign: 'center',
-    fontSize: 32,
+    fontSize: 28,
     fontWeight: '900',
-    color: '#FFF',
-    opacity: 1,
+    color: '#F8FAFC',
   },
   pinPlaceholder: {
-    fontSize: 24,
-    color: 'rgba(255,255,255,0.2)',
-    fontWeight: '300',
+    fontSize: 22,
+    color: 'rgba(148,163,184,0.35)',
+    fontWeight: '400',
   },
   hint: {
     fontSize: 13,
-    color: 'rgba(255,255,255,0.45)',
-    marginBottom: 28,
+    fontWeight: '600',
+    color: 'rgba(148,163,184,0.9)',
+    marginBottom: 22,
     textAlign: 'center',
+    minHeight: 20,
   },
-  errorRow: {
+  errorBanner: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginBottom: 20,
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 18,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(127,29,29,0.25)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    width: '100%',
   },
   errorText: {
+    flex: 1,
     fontSize: 14,
     fontWeight: '700',
-    color: '#EF4444',
-    textAlign: 'center',
+    color: '#FECACA',
+    lineHeight: 20,
   },
   attemptsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   attemptDot: {
-    width: 8,
-    height: 8,
+    width: 7,
+    height: 7,
     borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(51,65,85,0.9)',
   },
-  attemptDotUsed: { backgroundColor: '#EF4444' },
-  attemptsText: { fontSize: 12, color: 'rgba(255,255,255,0.5)', marginLeft: 4 },
-  confirmBtn: {
+  attemptDotUsed: { backgroundColor: '#F87171' },
+  attemptsText: { fontSize: 12, fontWeight: '700', color: '#64748B', marginLeft: 6 },
+  confirmBtnOuter: {
+    width: '100%',
+    borderRadius: 18,
+    overflow: 'hidden',
+    marginTop: 8,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(34,229,160,0.25)',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  confirmBtnGrad: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: '#00D46A',
-    width: '100%',
-    paddingVertical: 18,
-    borderRadius: 18,
-    shadowColor: '#00D46A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 14,
-    elevation: 8,
-    marginBottom: 14,
+    paddingVertical: 17,
+    paddingHorizontal: 20,
+    minHeight: 56,
   },
-  confirmBtnDisabled: { backgroundColor: 'rgba(255,255,255,0.12)', shadowOpacity: 0 },
-  confirmBtnText: { fontSize: 17, fontWeight: '900', color: '#FFF', letterSpacing: 0.3 },
+  confirmBtnGradMuted: {
+    borderColor: 'transparent',
+  },
+  confirmBtnText: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#022C22',
+    letterSpacing: 0.15,
+  },
+  confirmBtnTextMuted: {
+    color: '#94A3B8',
+  },
   cancelBtn: {
-    paddingVertical: 12,
-    paddingHorizontal: 32,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(71,85,105,0.55)',
+    backgroundColor: 'rgba(2,6,23,0.35)',
+    alignItems: 'center',
+    alignSelf: 'center',
+    minWidth: '88%',
   },
   cancelBtnText: {
     fontSize: 15,
     fontWeight: '700',
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(148,163,184,0.85)',
   },
-  // Success state
   successWrap: {
     alignItems: 'center',
-    gap: 16,
+    gap: 12,
+    paddingHorizontal: 12,
   },
   successIconWrap: {
-    width: 100,
-    height: 100,
-    borderRadius: 28,
+    width: 104,
+    height: 104,
+    borderRadius: 32,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#00D46A',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
-    elevation: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 14,
   },
-  successTitle: { fontSize: 28, fontWeight: '900', color: '#FFF' },
-  successSub: { fontSize: 15, color: 'rgba(255,255,255,0.6)' },
+  successTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.4,
+    marginTop: 8,
+  },
+  successSub: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
 });

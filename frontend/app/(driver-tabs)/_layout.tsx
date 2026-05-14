@@ -27,7 +27,7 @@ function DriverNotifIcon({ color, focused, count }: { color: string; focused: bo
 
 export default function DriverTabLayout() {
   const { t } = useLanguage();
-  const { user, token } = useAppStore();
+  const { user, token, isOnline: isDriverOnline } = useAppStore();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();
   useActiveTripCoordinator();
@@ -37,7 +37,7 @@ export default function DriverTabLayout() {
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/notifications/${user.id}?unread_only=true&limit=1`, {
+        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/notifications?unread_only=true&limit=1`, {
           headers: getAuthHeaders(),
         });
         if (res.ok) {
@@ -59,15 +59,18 @@ export default function DriverTabLayout() {
           headerShown: false,
           tabBarActiveTintColor: BRAND.primaryNeon,
           tabBarInactiveTintColor: '#94A3B8',
-        tabBarStyle: {
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 1,
-          borderTopColor: '#E2E8F0',
-          height: TAB_BAR_HEIGHT + insets.bottom,
-          paddingBottom: insets.bottom + 4,
-          paddingTop: 8,
-          ...SHADOWS.lg,
-        },
+          tabBarHideOnKeyboard: true,
+          tabBarStyle: isDriverOnline
+            ? { display: 'none' }
+            : {
+                backgroundColor: COLORS.surface,
+                borderTopWidth: 1,
+                borderTopColor: 'rgba(51,65,85,0.55)',
+                height: TAB_BAR_HEIGHT + insets.bottom,
+                paddingBottom: insets.bottom + 4,
+                paddingTop: 8,
+                ...SHADOWS.lg,
+              },
           tabBarLabelStyle: {
             fontSize: FONT_SIZE.xxs,
             fontWeight: '700',

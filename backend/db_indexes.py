@@ -120,6 +120,19 @@ async def ensure_indexes(db):
         # Appeals
         await db.appeals.create_index("user_id")
 
+        # Push analytics, schedules, A/B (admin notifications platform)
+        await db.notification_events.create_index([("user_id", 1), ("created_at", -1)])
+        await db.notification_events.create_index([("created_at", -1)])
+        await db.notification_events.create_index([("user_id", 1), ("nid", 1)])
+        await db.notification_events.create_index("nid", sparse=True)
+        await db.notification_events.create_index("status")
+        await db.scheduled_notifications.create_index([("sent_at", 1), ("run_at", 1)])
+        await db.ab_assignments.create_index([("user_id", 1), ("experiment_key", 1)], unique=True)
+        await db.ab_experiments.create_index("key", unique=True)
+        await db.admin_broadcasts.create_index([("created_at", -1)])
+
+        await db.daily_notification_slot_log.create_index([("day", 1), ("slot_id", 1)], unique=True)
+
         # NEXRYDE Shield — disputes & encrypted trip audio (48h TTL)
         await db.shield_disputes.create_index("id", unique=True)
         await db.shield_disputes.create_index("trip_id")
@@ -128,6 +141,13 @@ async def ensure_indexes(db):
         await db.shield_trip_audio.create_index([("trip_id", 1), ("uploaded_by", 1)], unique=True)
         try:
             await db.shield_trip_audio.create_index("expires_at", expireAfterSeconds=0)
+        except Exception:
+            pass
+
+        # Cross-instance fare lock snapshots (POST /fare/estimate → POST /trips/request)
+        await db.fare_lock_estimates.create_index("id", unique=True)
+        try:
+            await db.fare_lock_estimates.create_index("expires_at", expireAfterSeconds=0)
         except Exception:
             pass
         

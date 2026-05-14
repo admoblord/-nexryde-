@@ -69,6 +69,11 @@ react {
  */
 def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
 
+/** True when running `./gradlew signingReport` so project configures without upload keystore vars. */
+def isGradleSigningReport = gradle.startParameter.taskNames.any { name ->
+    name.toLowerCase().contains('signingreport')
+}
+
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
  *
@@ -93,8 +98,8 @@ android {
         applicationId 'com.nexryde.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-versionCode 26
-            versionName "1.3.6"
+        versionCode 70
+        versionName "1.3.21"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
     }
@@ -127,8 +132,13 @@ versionCode 26
         release {
             def isEasBuild = (System.getenv("EAS_BUILD") ?: "").toLowerCase() == "true"
             if (!signingConfigs.release.storeFile) {
-                if (isEasBuild) {
-                    logger.warn("Release keystore not resolved; falling back to debug keystore for EAS preview/internal build.")
+                if (isEasBuild || isGradleSigningReport) {
+                    if (isGradleSigningReport && !isEasBuild) {
+                        logger.lifecycle("signingReport: release keystore not set — release variant fingerprints match debug unless NEXRYDE_UPLOAD_* is set. Add Play/EAS upload keystore SHA-1 in Google Cloud for store builds.")
+                    }
+                    if (isEasBuild) {
+                        logger.warn("Release keystore not resolved; falling back to debug keystore for EAS preview/internal build.")
+                    }
                     signingConfig signingConfigs.debug
                 } else {
                     throw new GradleException("Release signing is required. Set NEXRYDE_UPLOAD_* properties locally, or provide android.injected.signing.* properties in CI/EAS.")

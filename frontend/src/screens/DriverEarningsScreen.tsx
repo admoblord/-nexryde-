@@ -12,9 +12,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
+import { useFlowLayout } from '@/src/constants/flowLayout';
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import { getDriverBankDetails, getDriverEarningsDashboard } from '@/src/services/api';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
 type Period = 'today' | 'week' | 'month';
 
@@ -24,6 +26,7 @@ export default function DriverEarningsScreen() {
   const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(true);
   const tabPad = useTabBottomPad(8);
+  const flow = useFlowLayout();
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState<any>(null);
   const [bankReady, setBankReady] = useState(false);
@@ -88,14 +91,50 @@ export default function DriverEarningsScreen() {
     return 'This Month';
   }, [period]);
 
+  const surgeExtras = useMemo(() => {
+    if (!surge) return null;
+    const ctx = surge.surge_context || {};
+    const factors = Array.isArray(surge.factors) ? surge.factors : [];
+    const dr = Number(ctx.demand_ratio_estimate ?? 0);
+    const gps = Boolean(ctx.gps_based_demand);
+    const rawCity = typeof ctx.city === 'string' ? ctx.city : '';
+    const cityLabel =
+      (typeof ctx.city_label === 'string' && ctx.city_label.trim()) ||
+      (rawCity ? rawCity.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase()) : '');
+    const svcRaw = ctx.service_label || ctx.service_type || 'economy';
+    const serviceLabel = String(svcRaw).charAt(0).toUpperCase() + String(svcRaw).slice(1).toLowerCase();
+    const capRaw = ctx.tier_surge_cap;
+    const tierCap = capRaw != null && !Number.isNaN(Number(capRaw)) ? Number(capRaw) : null;
+    return {
+      cityLabel: cityLabel.trim() || 'Your area',
+      serviceLabel,
+      gps,
+      demandPct: Math.max(0, Math.min(100, Math.round(dr * 100))),
+      demandBandLabel: typeof ctx.demand_band_label === 'string' ? ctx.demand_band_label : '',
+      tierCap,
+      factors,
+      windowEnds: typeof surge.window_ends_label === 'string' ? surge.window_ends_label : '',
+      accent: typeof surge.tier_color === 'string' ? surge.tier_color : '#22C55E',
+    };
+  }, [surge]);
+
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <TabBrandStrip role="driver" />
+      <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <Text style={styles.headerTitle}>Earnings</Text>
         <Text style={styles.headerSubtext}>Keep 100% of your earnings</Text>
       </View>
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingBottom: tabPad }]}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: flow.padH,
+            paddingTop: Math.round(flow.sectionGap * 0.85),
+            paddingBottom: tabPad,
+            gap: Math.round(flow.sectionGap * 0.55),
+          },
+        ]}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); load(); }} />}
       >
         {loadError && !refreshing && (
@@ -155,39 +194,132 @@ export default function DriverEarningsScreen() {
           </View>
         </View>
 
-        {/* ── Live Surge Status ─────────────────────────────────────────── */}
-        {surge && (
-          <View style={[
-            styles.surgeCard,
-            surge.is_surge ? styles.surgeCardActive : styles.surgeCardNormal,
-          ]}>
-            <View style={styles.surgeCardHeader}>
-              <View style={[styles.surgeIconWrap, { backgroundColor: (surge.tier_color || '#16A34A') + '22' }]}>
-                <Ionicons
-                  name={surge.is_surge ? 'flash' : 'checkmark-circle-outline'}
-                  size={22}
-                  color={surge.tier_color || '#16A34A'}
-                />
-              </View>
-              <View style={styles.guaranteeHeaderText}>
-                <Text style={[styles.guaranteeTitle, { color: surge.tier_color || '#16A34A' }]}>
-                  {surge.is_surge ? `⚡ ${surge.tier_label || 'Surge Active'} — ${surge.multiplier}x` : 'Normal Pricing'}
-                </Text>
-                <Text style={styles.guaranteeSubtitle}>
-                  {surge.reasons?.join(' · ') || 'Standard fares right now'}
-                </Text>
-              </View>
-              {surge.is_surge && (
-                <View style={[styles.surgePctBadge, { backgroundColor: surge.tier_color || '#F59E0B' }]}>
-                  <Text style={styles.surgePctText}>+{surge.pct_extra || 0}%</Text>
+        {/* ── Live area pricing (hybrid surge) ───────────────────────────── */}
+        {surge && surgeExtras && (
+          <View style={styles.surgeSection}>
+            <Text style={styles.surgeEyebrow}>Live area pricing</Text>
+            <View
+              style={[
+                styles.surgeCardOuter,
+                surge.is_surge ? styles.surgeCardOuterActive : null,
+              ]}
+            >
+              <View style={[styles.surgeAccentBar, { backgroundColor: surgeExtras.accent }]} />
+              <View style={styles.surgeCardInner}>
+                <View style={styles.surgeTopRow}>
+                  <View style={[styles.surgeIconWrap, { backgroundColor: `${surgeExtras.accent}22` }]}>
+                    <Ionicons
+                      name={surge.is_surge ? 'flash' : 'checkmark-circle-outline'}
+                      size={22}
+                      color={surgeExtras.accent}
+                    />
+                  </View>
+                  <View style={styles.surgeTitleBlock}>
+                    <Text style={[styles.surgeHeadline, { color: surgeExtras.accent }]}>
+                      {surge.is_surge ? surge.tier_label || 'Surge active' : 'Standard pricing'}
+                    </Text>
+                    <Text style={styles.surgeReasons} numberOfLines={3}>
+                      {Array.isArray(surge.reasons) && surge.reasons.length > 0
+                        ? surge.reasons.join(' · ')
+                        : 'No surge extras right now — fares follow base rates.'}
+                    </Text>
+                    {surgeExtras.windowEnds ? (
+                      <Text style={styles.surgeWindowHint}>Peak window ends ~ {surgeExtras.windowEnds}</Text>
+                    ) : null}
+                  </View>
+                  <View style={styles.surgeMultColumn}>
+                    <Text style={[styles.surgeMultValue, { color: surgeExtras.accent }]}>
+                      {Number(surge.multiplier ?? 1).toFixed(2)}×
+                    </Text>
+                    <Text style={styles.surgeMultCaption}>multiplier</Text>
+                    {surge.is_surge ? (
+                      <View style={[styles.surgePctBadge, { backgroundColor: surgeExtras.accent }]}>
+                        <Text style={styles.surgePctText}>+{surge.pct_extra ?? 0}%</Text>
+                      </View>
+                    ) : null}
+                  </View>
                 </View>
-              )}
+
+                <View style={styles.surgeChipRow}>
+                  <View style={styles.surgeChip}>
+                    <Ionicons name="location-outline" size={14} color="#475569" />
+                    <Text style={styles.surgeChipText} numberOfLines={1}>
+                      {surgeExtras.cityLabel}
+                    </Text>
+                  </View>
+                  <View style={styles.surgeChip}>
+                    <Ionicons name="car-sport-outline" size={14} color="#475569" />
+                    <Text style={styles.surgeChipText} numberOfLines={1}>
+                      {surgeExtras.serviceLabel}
+                    </Text>
+                  </View>
+                  <View style={[styles.surgeChip, surgeExtras.gps ? styles.surgeChipGood : styles.surgeChipWarn]}>
+                    <Ionicons name={surgeExtras.gps ? 'pulse' : 'warning-outline'} size={14} color={surgeExtras.gps ? '#047857' : '#B45309'} />
+                    <Text
+                      style={[styles.surgeChipText, surgeExtras.gps ? styles.surgeChipTextGood : styles.surgeChipTextWarn]}
+                      numberOfLines={1}
+                    >
+                      {surgeExtras.gps ? 'Live demand' : 'GPS off'}
+                    </Text>
+                  </View>
+                </View>
+
+                {surgeExtras.gps ? (
+                  <View style={styles.surgeDemandBlock}>
+                    <View style={styles.surgeDemandHeader}>
+                      <Text style={styles.surgeDemandLabel}>Area demand signal</Text>
+                      <Text style={styles.surgeDemandBand}>{surgeExtras.demandBandLabel || 'Balanced supply'}</Text>
+                    </View>
+                    <View style={styles.surgeDemandTrack}>
+                      <View
+                        style={[
+                          styles.surgeDemandFill,
+                          {
+                            width: `${surgeExtras.demandPct}%`,
+                            backgroundColor: surgeExtras.accent,
+                          },
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.surgeDemandFoot}>{surgeExtras.demandPct}% estimated pressure near you</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.surgeGpsHint}>
+                    Share location while online so we can estimate ride demand in your bubble — rush and weekend pricing still apply.
+                  </Text>
+                )}
+
+                {surgeExtras.tierCap != null ? (
+                  <Text style={styles.surgeCapLine}>
+                    Tier cap on fares: up to {surgeExtras.tierCap.toFixed(1)}× for {surgeExtras.serviceLabel}.
+                  </Text>
+                ) : null}
+
+                {surgeExtras.factors.length > 0 ? (
+                  <View style={styles.surgeFactorsBlock}>
+                    <Text style={styles.surgeFactorsTitle}>What's included</Text>
+                    <View style={styles.surgeFactorsRow}>
+                      {surgeExtras.factors.map((row: { label?: string; multiplier?: number }, idx: number) => (
+                        <View key={`${row.label}-${idx}`} style={styles.surgeFactorPill}>
+                          <Text style={styles.surgeFactorPillText} numberOfLines={1}>
+                            {row.label || 'Factor'}{' '}
+                            <Text style={styles.surgeFactorPillMul}>×{Number(row.multiplier ?? 1).toFixed(2)}</Text>
+                          </Text>
+                        </View>
+                      ))}
+                    </View>
+                  </View>
+                ) : null}
+
+                <Text style={styles.surgeFootnote}>
+                  {typeof surge.driver_message === 'string' && surge.driver_message.trim().length > 0
+                    ? surge.driver_message
+                    : surge.is_surge
+                      ? `Typical bump right now: about +${surge.pct_extra ?? 0}% vs base fare before your tier cap.`
+                      : 'Stay online — pricing can rise during rush hours, weekends, holidays, tight supply near you, and flagged rain.'}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.guaranteeFootnote}>
-              {surge.driver_message || (surge.is_surge
-                ? `You earn ${surge.pct_extra}% more per trip during this period.`
-                : 'Stay online — surge pricing activates during peak demand and wet season.')}
-            </Text>
           </View>
         )}
 
@@ -302,7 +434,7 @@ const styles = StyleSheet.create({
   },
   headerTitle: { fontSize: FONT_SIZE.xxl, fontWeight: '900', color: COLORS.white, letterSpacing: -0.5 },
   headerSubtext: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.accent, marginTop: SPACING.xs },
-  content: { padding: SPACING.lg },
+  content: { flexGrow: 1 },
   errorCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -339,13 +471,94 @@ const styles = StyleSheet.create({
   commissionContent: { flex: 1 },
   commissionTitle: { fontSize: FONT_SIZE.md, fontWeight: '900', color: COLORS.success },
   commissionText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.success, opacity: 0.9 },
-  surgeCard: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg, ...SHADOWS.sm },
-  surgeCardActive: { backgroundColor: '#FFFBEB', borderWidth: 1.5, borderColor: '#FCD34D' },
-  surgeCardNormal: { backgroundColor: '#F0FDF4', borderWidth: 1.5, borderColor: '#86EFAC' },
-  surgeCardHeader: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md, marginBottom: SPACING.sm },
+  surgeSection: { marginBottom: SPACING.lg },
+  surgeEyebrow: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginBottom: SPACING.sm,
+    marginLeft: 2,
+  },
+  surgeCardOuter: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    overflow: 'hidden',
+    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  surgeCardOuterActive: {
+    ...SHADOWS.md,
+    borderColor: '#FDE68A',
+  },
+  surgeAccentBar: { width: 5 },
+  surgeCardInner: { flex: 1, padding: SPACING.lg },
+  surgeTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: SPACING.md },
   surgeIconWrap: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  surgePctBadge: { borderRadius: BORDER_RADIUS.full, paddingHorizontal: 10, paddingVertical: 5, alignItems: 'center', justifyContent: 'center' },
-  surgePctText: { color: '#FFF', fontSize: FONT_SIZE.sm, fontWeight: '900' },
+  surgeTitleBlock: { flex: 1, minWidth: 0 },
+  surgeHeadline: { fontSize: FONT_SIZE.md, fontWeight: '900', letterSpacing: -0.2 },
+  surgeReasons: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: '#475569', marginTop: 6, lineHeight: 20 },
+  surgeWindowHint: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: '#64748B', marginTop: 6 },
+  surgeMultColumn: { alignItems: 'flex-end', minWidth: 72 },
+  surgeMultValue: { fontSize: 28, fontWeight: '900', letterSpacing: -0.5 },
+  surgeMultCaption: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: '#94A3B8', marginTop: -2 },
+  surgeChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm, marginTop: SPACING.md },
+  surgeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 7,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: '#F1F5F9',
+    maxWidth: '100%',
+  },
+  surgeChipGood: { backgroundColor: '#ECFDF5' },
+  surgeChipWarn: { backgroundColor: '#FFFBEB' },
+  surgeChipText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: '#334155', flexShrink: 1 },
+  surgeChipTextGood: { color: '#047857' },
+  surgeChipTextWarn: { color: '#B45309' },
+  surgeDemandBlock: { marginTop: SPACING.md },
+  surgeDemandHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  surgeDemandLabel: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 },
+  surgeDemandBand: { fontSize: FONT_SIZE.xs, fontWeight: '900', color: '#0F172A' },
+  surgeDemandTrack: { height: 8, borderRadius: BORDER_RADIUS.full, backgroundColor: '#E2E8F0', overflow: 'hidden' },
+  surgeDemandFill: { height: '100%', borderRadius: BORDER_RADIUS.full },
+  surgeDemandFoot: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#64748B', marginTop: 6 },
+  surgeGpsHint: {
+    marginTop: SPACING.md,
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: '#92400E',
+    lineHeight: 20,
+    backgroundColor: '#FFFBEB',
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1,
+    borderColor: '#FDE68A',
+  },
+  surgeCapLine: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: '#64748B', marginTop: SPACING.md },
+  surgeFactorsBlock: { marginTop: SPACING.md },
+  surgeFactorsTitle: { fontSize: FONT_SIZE.xs, fontWeight: '900', color: '#64748B', marginBottom: SPACING.sm, textTransform: 'uppercase', letterSpacing: 0.6 },
+  surgeFactorsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: SPACING.sm },
+  surgeFactorPill: {
+    paddingHorizontal: SPACING.sm,
+    paddingVertical: 6,
+    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    maxWidth: '100%',
+  },
+  surgeFactorPillText: { fontSize: FONT_SIZE.xs, fontWeight: '700', color: '#334155' },
+  surgeFactorPillMul: { fontWeight: '900', color: '#0F172A' },
+  surgeFootnote: { fontSize: FONT_SIZE.sm, fontWeight: '600', color: '#475569', marginTop: SPACING.md, lineHeight: 21 },
+  surgePctBadge: { borderRadius: BORDER_RADIUS.full, paddingHorizontal: 10, paddingVertical: 5, alignItems: 'center', justifyContent: 'center', marginTop: SPACING.sm },
+  surgePctText: { color: '#FFF', fontSize: FONT_SIZE.xs, fontWeight: '900' },
   salaryModeCard: { borderRadius: BORDER_RADIUS.xl, padding: SPACING.lg, marginBottom: SPACING.lg, ...SHADOWS.sm },
   salaryModeCardBehind: { backgroundColor: COLORS.accentPurpleSoft },
   salaryModeCardOnTrack: { backgroundColor: COLORS.successSoft },

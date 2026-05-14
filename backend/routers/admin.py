@@ -8,6 +8,7 @@ from pathlib import Path
 import hashlib
 import logging
 import os
+import re
 import secrets
 import uuid
 
@@ -30,7 +31,7 @@ if not _admin_password:
     _admin_password = _secrets.token_urlsafe(24)
     logger.info(f"Generated admin password (set ADMIN_PASSWORD env var to override): {_admin_password}")
 ADMIN_CREDENTIALS = {_admin_email: _admin_password}
-ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "8"))
+ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "72"))
 
 
 def _extract_admin_token(request: Request) -> str:
@@ -181,9 +182,12 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
         {"$sort": {"created_at": -1}},
         {"$skip": skip},
         {"$limit": limit},
-        # Strip heavy base64 blobs from the list response
-        {"$project": {
-            "_id": 0, "face_image": 0, "profile_image": 0,
+        # Strip heavy base64 blobs from list (available via /identity endpoint).
+        # NOTE: MongoDB forbids mixing exclusion projection with computed/inclusion fields.
+        {"$project": {"_id": 0, "face_image": 0, "profile_image": 0}},
+        {"$addFields": {
+            "has_nin": {"$gt": [{"$strLenCP": {"$ifNull": ["$nin", ""]}}, 0]},
+            "has_face_image": {"$gt": [{"$strLenCP": {"$ifNull": ["$face_image", ""]}}, 0]},
         }},
         # Single $lookup for trip counts — one round-trip instead of N
         {"$lookup": {
@@ -203,6 +207,64 @@ async def admin_get_riders(limit: int = 200, skip: int = 0, search: str = ""):
 
     riders = await db.users.aggregate(pipeline).to_list(limit)
     return {"riders": riders, "total": total, "skip": skip, "page_size": limit}
+
+
+@admin_router.get("/admin/riders/{rider_id}/identity")
+async def admin_get_rider_identity(rider_id: str, request: Request):
+    """
+    SECURITY endpoint — returns rider's NIN + face verification photo + profile image.
+    Used by admin panel to verify identity before/after trips.
+    Access logged for audit trail.
+    """
+    admin_email = getattr(request.state, "admin_email", "unknown")
+    rider = await db.users.find_one(
+        {"id": rider_id},
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "nin": 1,
+         "face_image": 1, "profile_image": 1, "face_verified": 1,
+         "nin_verified": 1, "address": 1, "gender": 1, "created_at": 1,
+         "is_verified": 1, "suspended_until": 1, "blocked": 1,
+         "referral_code": 1, "username": 1},
+    )
+    if not rider:
+        raise HTTPException(status_code=404, detail="Rider not found")
+
+    # Audit log: track who accessed sensitive identity data
+    await db.admin_identity_access_log.insert_one({
+        "accessed_by": admin_email,
+        "rider_id": rider_id,
+        "rider_name": rider.get("name"),
+        "accessed_at": datetime.now(timezone.utc).isoformat(),
+        "action": "view_identity",
+    })
+
+    def _mask_nin(nin_val: str | None) -> str:
+        if not nin_val or len(nin_val) < 5:
+            return nin_val or ""
+        return nin_val[:3] + "****" + nin_val[-2:]
+
+    return {
+        "id":              rider.get("id"),
+        "name":            rider.get("name"),
+        "email":           rider.get("email"),
+        "phone":           rider.get("phone"),
+        "address":         rider.get("address"),
+        "gender":          rider.get("gender"),
+        "created_at":      rider.get("created_at"),
+        "is_verified":     rider.get("is_verified"),
+        "face_verified":   rider.get("face_verified"),
+        "nin_verified":    rider.get("nin_verified"),
+        "nin":             rider.get("nin"),            # Full NIN for admin
+        "nin_masked":      _mask_nin(rider.get("nin")), # Masked for display
+        "has_nin":         bool(rider.get("nin")),
+        "face_image":      rider.get("face_image"),     # Base64 face-ID capture
+        "profile_image":   rider.get("profile_image"),  # Profile photo
+        "has_face_image":  bool(rider.get("face_image")),
+        "has_profile_image": bool(rider.get("profile_image")),
+        "suspended_until": rider.get("suspended_until"),
+        "blocked":         rider.get("blocked", False),
+        "referral_code":   rider.get("referral_code"),
+        "username":        rider.get("username"),
+    }
 
 
 @admin_router.get("/admin/riders/{rider_id}")
@@ -255,8 +317,20 @@ async def admin_get_rider_profile(rider_id: str):
         )
     )
 
+    def _mask_nin(nin_val: str | None) -> str:
+        if not nin_val or len(nin_val) < 5:
+            return nin_val or ""
+        return nin_val[:3] + "****" + nin_val[-2:]
+
     return {
-        "rider": rider,
+        "rider": {
+            **rider,
+            "nin_masked":       _mask_nin(rider.get("nin")),
+            "has_nin":          bool(rider.get("nin")),
+            "nin_verified":     rider.get("nin_verified", False),
+            "face_verified":    rider.get("face_verified", False),
+            "is_verified":      rider.get("is_verified", False),
+        },
         "wallet_balance": wallet_balance,
         "stats": {
             "total_trips": total_trips,
@@ -1578,6 +1652,298 @@ async def get_api_usage(days: int = 7, http_request: Request = None):
         "cache_hit_rate_pct": cache_hit_rate,
         "estimated_cost_ngn": estimated_cost_ngn,
         "daily_breakdown": rows,
+    }
+
+
+class UnsuspendByEmailBody(BaseModel):
+    email: str
+
+
+async def _perform_admin_unsuspend(user_id: str, *, pardoned_by: str) -> dict:
+    """Shared unsuspend: users + violations + driver_profiles."""
+    now_iso = datetime.utcnow().isoformat()
+    result = await db.users.update_one(
+        {"id": user_id},
+        {
+            "$unset": {
+                "suspended_until": "",
+                "suspension_reason": "",
+                "booking_blocked_until": "",
+                "block_reason": "",
+                "forced_offline_until": "",
+                "deactivated_at": "",
+                "deactivation_reason": "",
+            },
+            "$set": {
+                "is_deactivated": False,
+                "unsuspended_at": now_iso,
+                "unsuspended_by": pardoned_by,
+            },
+        },
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.violations.update_many(
+        {"user_id": user_id, "status": "active"},
+        {"$set": {"status": "pardoned", "pardoned_at": now_iso, "pardoned_by": pardoned_by}},
+    )
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$unset": {"forced_offline_until": "", "suspended_reason": ""}},
+    )
+    return {
+        "success": True,
+        "message": "User fully reactivated and all violations cleared.",
+        "user_id": user_id,
+    }
+
+
+@admin_router.post("/admin/users/{user_id}/unsuspend")
+async def admin_unsuspend_user(user_id: str, request: Request):
+    """Admin: fully reactivate a user — clears suspension, deactivation, bans,
+    booking blocks, forced-offline, and all active violations."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+    return await _perform_admin_unsuspend(user_id, pardoned_by="admin")
+
+
+@admin_router.post("/admin/users/unsuspend-by-email")
+async def admin_unsuspend_by_email(request: Request, body: UnsuspendByEmailBody):
+    """Admin: same as ``/unsuspend`` but lookup by email (case-insensitive)."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+    raw = (body.email or "").strip()
+    if not raw or "@" not in raw:
+        raise HTTPException(status_code=400, detail="Valid email required")
+    safe = re.escape(raw.lower())
+    user = await db.users.find_one({"email": {"$regex": f"^{safe}$", "$options": "i"}})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    uid = user["id"]
+    out = await _perform_admin_unsuspend(uid, pardoned_by="admin")
+    out["email"] = user.get("email")
+    return out
+
+
+@admin_router.post("/admin/create-test-driver")
+async def admin_create_test_driver(request: Request):
+    """Admin: create a fully ready test driver account (approved docs, no SIM lock).
+    Accepts optional JSON body: {"email": "you@gmail.com", "name": "Test Driver"}
+    Returns email and user_id so you can log in immediately via email OTP."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+
+    import uuid as _uuid
+    now_iso = datetime.utcnow().isoformat()
+    user_id = str(_uuid.uuid4())
+
+    body = {}
+    try:
+        body = await request.json()
+    except Exception:
+        pass
+
+    test_email = (body.get("email") or "testdriver@nexryde.app").strip().lower()
+    test_name  = (body.get("name")  or "Test Driver").strip()
+    test_phone = "+2340000000001"
+
+    existing = await db.users.find_one({"$or": [{"email": test_email}, {"phone": test_phone}]})
+    if existing:
+        # Update email on existing account in case it changed
+        await db.users.update_one(
+            {"id": existing["id"]},
+            {
+                "$unset": {"suspended_until": "", "suspension_reason": ""},
+                "$set": {
+                    "email": test_email,
+                    "name": test_name,
+                    "verification_status": "approved",
+                    "documents_verified": True,
+                    "is_verified": True,
+                    "fortress_exempt": True,
+                },
+            },
+        )
+        await db.driver_profiles.update_one(
+            {"user_id": existing["id"]},
+            {"$set": {"verification_status": "approved", "documents_verified": True}},
+        )
+        return {
+            "success": True,
+            "message": "Test driver account updated",
+            "user_id": existing["id"],
+            "email": test_email,
+            "name": test_name,
+            "note": "Open the app, enter this email, get OTP in your inbox, log in.",
+        }
+
+    user = {
+        "id": user_id,
+        "phone": test_phone,
+        "name": test_name,
+        "email": test_email,
+        "role": "driver",
+        "gender": "male",
+        "created_at": now_iso,
+        "is_verified": True,
+        "face_verified": True,
+        "face_image": None,
+        "profile_image": None,
+        "google_id": None,
+        "rating": 5.0,
+        "total_trips": 0,
+        "behavior_score": 100.0,
+        "nexryde_score": 100.0,
+        "verification_status": "approved",
+        "documents_verified": True,
+        "fortress_exempt": True,
+        "force_approved_at": now_iso,
+    }
+    await db.users.insert_one(user)
+
+    # Wallet
+    await db.wallets.insert_one({
+        "id": str(_uuid.uuid4()),
+        "user_id": user_id,
+        "balance": 5000.0,
+        "currency": "NGN",
+        "transactions": [],
+        "created_at": now_iso,
+    })
+
+    # Driver profile — approved
+    await db.driver_profiles.insert_one({
+        "id": str(_uuid.uuid4()),
+        "user_id": user_id,
+        "verification_status": "approved",
+        "documents_verified": True,
+        "nin_verified": True,
+        "license_uploaded": True,
+        "vehicle_docs_uploaded": True,
+        "selfie_verified": True,
+        "vehicle_type": "sedan",
+        "vehicle_make": "Toyota",
+        "vehicle_model": "Corolla",
+        "vehicle_year": "2020",
+        "vehicle_color": "Black",
+        "vehicle_plate_number": "TEST-001",
+        "approved_at": now_iso,
+        "approved_by": "admin_test_account",
+        "created_at": now_iso,
+    })
+
+    return {
+        "success": True,
+        "message": "Test driver account created successfully",
+        "user_id": user_id,
+        "email": test_email,
+        "name": test_name,
+        "note": "Open the app, enter this email, get OTP in your inbox, log in as driver.",
+    }
+
+
+@admin_router.post("/admin/drivers/{driver_id}/force-approve")
+async def admin_force_approve_driver(driver_id: str, request: Request):
+    """Admin: force-approve a driver's documents and clear all suspension locks,
+    allowing them to go online immediately. SIM swap lock is intentionally NOT cleared
+    here — use /admin/drivers/{id}/clear-sim-swap to lift that separately.
+    Useful for test accounts and emergency unblocks."""
+    from admin_guard import require_admin_request
+    require_admin_request(request)
+
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "role": 1})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.get("role") != "driver":
+        raise HTTPException(status_code=400, detail="User is not a driver")
+
+    now_iso = datetime.utcnow().isoformat()
+
+    # Approve documents and clear any active suspension — SIM swap lock is intentionally left untouched
+    await db.users.update_one(
+        {"id": driver_id},
+        {
+            "$unset": {"suspended_until": "", "suspension_reason": ""},
+            "$set": {
+                "verification_status": "approved",
+                "documents_verified": True,
+                "force_approved_at": now_iso,
+            },
+        },
+    )
+
+    # Approve the driver profile documents only
+    await db.driver_profiles.update_one(
+        {"user_id": driver_id},
+        {
+            "$set": {
+                "verification_status": "approved",
+                "documents_verified": True,
+                "profile_completed": True,
+                "subscription_active": True,
+                "approved_at": now_iso,
+                "approved_by": "admin_force_approve",
+            },
+        },
+        upsert=True,
+    )
+
+    # Auto-create a lifetime trial subscription so the driver can go online immediately
+    # without having to activate separately — critical for test accounts.
+    import uuid as _uuid
+    existing_sub = await db.subscriptions.find_one(
+        {"driver_id": driver_id, "status": {"$in": ["active", "trial", "grace_period"]}}
+    )
+    if not existing_sub:
+        trial_end = (datetime.utcnow() + timedelta(days=3650)).isoformat()  # 10-year trial for test accounts
+        await db.subscriptions.insert_one({
+            "id": str(_uuid.uuid4()),
+            "driver_id": driver_id,
+            "status": "trial",
+            "plan": "force_approved_trial",
+            "trial_trips_completed": 0,
+            "trial_trips_target": 20,
+            "start_date": now_iso,
+            "end_date": trial_end,
+            "created_at": now_iso,
+            "notes": "Auto-created by admin force-approve",
+        })
+        await db.users.update_one(
+            {"id": driver_id},
+            {"$set": {"subscription_active": True}},
+        )
+
+    return {
+        "success": True,
+        "message": f"Driver '{user.get('name', driver_id)}' force-approved with active trial. They can go online immediately.",
+        "driver_id": driver_id,
+        "approved_at": now_iso,
+    }
+
+
+@admin_router.post("/admin/drivers/clear-monthly-suspensions")
+async def clear_monthly_verification_suspensions(http_request: Request):
+    """One-shot: unblock all drivers suspended solely for monthly_verification_overdue.
+    Verified drivers should never be hard-blocked by monthly photo reminders."""
+    from admin_guard import require_admin_request
+    require_admin_request(http_request)
+    now_iso = datetime.utcnow().isoformat()
+
+    # Clear from driver_profiles
+    dp_result = await db.driver_profiles.update_many(
+        {"suspended_reason": "monthly_verification_overdue"},
+        {"$unset": {"suspended_reason": ""}, "$set": {"monthly_verification_complete": True, "unblocked_at": now_iso}}
+    )
+    # Clear from users
+    u_result = await db.users.update_many(
+        {"suspension_reason": "monthly_verification_overdue"},
+        {"$unset": {"suspension_reason": "", "suspended_until": ""}}
+    )
+    return {
+        "success": True,
+        "driver_profiles_cleared": dp_result.modified_count,
+        "users_cleared": u_result.modified_count,
+        "message": "All monthly-verification suspensions lifted. Drivers may go online again.",
     }
 
 

@@ -29,7 +29,7 @@ import os
 
 JWT_SECRET = os.environ.get("JWT_SECRET", "").strip()
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRY_HOURS = 24
+JWT_EXPIRY_HOURS = 168  # 7 days — prevents token expiry during onboarding
 
 if not JWT_SECRET:
     if os.environ.get("ALLOW_INSECURE_JWT_FOR_TESTS", "").lower() in ("1", "true", "yes"):

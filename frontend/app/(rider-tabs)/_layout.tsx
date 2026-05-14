@@ -38,7 +38,7 @@ export default function RiderTabLayout() {
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/notifications/${user.id}?unread_only=true&limit=1`, {
+        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/notifications?unread_only=true&limit=1`, {
           headers: getAuthHeaders(),
         });
         if (res.ok) {
@@ -59,10 +59,11 @@ export default function RiderTabLayout() {
         headerShown: false,
         tabBarActiveTintColor: BRAND.primaryNeon,
         tabBarInactiveTintColor: '#94A3B8',
+        tabBarHideOnKeyboard: true,
         tabBarStyle: {
-          backgroundColor: '#FFFFFF',
+          backgroundColor: COLORS.surface,
           borderTopWidth: 1,
-          borderTopColor: '#E2E8F0',
+          borderTopColor: 'rgba(51,65,85,0.55)',
           height: TAB_BAR_HEIGHT + insets.bottom,
           paddingBottom: insets.bottom + 4,
           paddingTop: 8,
@@ -119,10 +120,10 @@ export default function RiderTabLayout() {
           ),
         }}
       />
-      <Tabs.Screen
+        <Tabs.Screen
         name="rider-notifications"
         options={{
-          title: 'Updates',
+          title: t.tabs.updates,
           tabBarIcon: ({ color, focused }) => (
             <NotifIcon color={color} focused={focused} count={unreadCount} />
           ),
