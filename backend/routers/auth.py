@@ -24,7 +24,12 @@ from face_match import (
     FACE_TEMPLATE_SIMSWAP_MIN,
 )
 from security_advanced import create_jwt_token, auth_limiter, otp_limiter, check_brute_force, record_failed_login, clear_login_attempts
-from services.brevo_transactional_mail import BrevoMailError, brevo_send_transactional, brevo_simple_notification_html
+from services.brevo_transactional_mail import (
+    BrevoMailError,
+    brevo_is_configured,
+    brevo_send_transactional,
+    brevo_simple_notification_html,
+)
 from services.nexryde_brevo_unified_otp import (
     request_otp as brevo_unified_request_otp,
     verify_otp as brevo_unified_verify_otp,
@@ -482,14 +487,23 @@ async def increment_email_otp_attempts(email: str) -> int:
     return result.get("attempts", 0) if result else OTP_MAX_ATTEMPTS
 
 
+def _smtp_config_valid() -> bool:
+    host = (os.environ.get("SMTP_HOST") or "").strip()
+    if not host or host in ("...", "…") or "." not in host:
+        return False
+    user = (os.environ.get("SMTP_USER") or "").strip()
+    password = (os.environ.get("SMTP_PASSWORD") or "").strip()
+    from_email = (os.environ.get("EMAIL_OTP_FROM") or user).strip()
+    return bool(user and password and from_email)
+
+
 async def _send_email_otp(email: str, otp_code: str) -> None:
     body_text = (
         f"Your NEXRYDE verification code is {otp_code}. "
         f"This code expires in {OTP_EXPIRY_MINUTES} minutes."
     )
 
-    brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
-    if brevo_key:
+    if brevo_is_configured():
         try:
             await brevo_send_transactional(
                 recipients=[email],
@@ -506,6 +520,13 @@ async def _send_email_otp(email: str, otp_code: str) -> None:
             raise RuntimeError(str(exc) or "Email send failed") from exc
         return
 
+    if not _smtp_config_valid():
+        logger.error(
+            "Email OTP not configured: set BREVO_API_KEY + BREVO_SENDER_EMAIL (or EMAIL_OTP_FROM), "
+            "or valid SMTP_HOST/SMTP_USER/SMTP_PASSWORD"
+        )
+        raise RuntimeError("Email OTP service not configured")
+
     await asyncio.to_thread(_send_email_otp_smtp_fallback, email, body_text)
 
 
@@ -517,7 +538,7 @@ def _send_email_otp_smtp_fallback(email: str, body_text: str) -> None:
     from_email = (os.environ.get("EMAIL_OTP_FROM", "") or smtp_user).strip()
     use_ssl = os.environ.get("SMTP_USE_SSL", "").strip().lower() in ("1", "true", "yes")
 
-    if not smtp_host or not smtp_user or not smtp_password or not from_email:
+    if not _smtp_config_valid():
         raise RuntimeError("Email OTP service not configured")
 
     message = EmailMessage()
