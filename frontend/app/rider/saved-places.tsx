@@ -17,7 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL } from '@/src/services/api';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
@@ -33,7 +33,7 @@ import {
 
 export default function RiderSavedPlacesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(16);
   const [places, setPlaces] = useState<Awaited<ReturnType<typeof loadRiderSavedPlaces>>>([]);
   const [loading, setLoading] = useState(true);
@@ -43,22 +43,23 @@ export default function RiderSavedPlacesScreen() {
   const [savingPlace, setSavingPlace] = useState(false);
 
   const reload = useCallback(async () => {
-    if (!user?.id) {
+    if (!riderId || !canCallAuthedApi) {
       setPlaces([]);
       setLoading(false);
       return;
     }
     setLoading(true);
     try {
-      setPlaces(await loadRiderSavedPlaces(user.id));
+      setPlaces(await loadRiderSavedPlaces(riderId));
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [riderId, canCallAuthedApi]);
 
   useEffect(() => {
+    if (!canCallAuthedApi) return;
     void reload();
-  }, [reload]);
+  }, [reload, canCallAuthedApi]);
 
   const openEditor = (slot: RiderSavedSlot) => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -91,7 +92,7 @@ export default function RiderSavedPlacesScreen() {
   };
 
   const handleAutocompletePick = async (place: { description: string; placeId: string }) => {
-    if (!user?.id || !editingSlot) return;
+    if (!riderId || !canCallAuthedApi || !editingSlot) return;
     setSavingPlace(true);
     try {
       let lat: number | undefined;
@@ -119,7 +120,7 @@ export default function RiderSavedPlacesScreen() {
         Alert.alert('Could not save', 'Pick a suggestion from the list, or try a fuller address.');
         return;
       }
-      await upsertRiderSavedPlace(user.id, { slot: editingSlot, address: addr, lat: lat!, lng: lng! });
+      await upsertRiderSavedPlace(riderId, { slot: editingSlot, address: addr, lat: lat!, lng: lng! });
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setEditorOpen(false);
       setEditingSlot(null);
@@ -131,7 +132,7 @@ export default function RiderSavedPlacesScreen() {
   };
 
   const handleRemove = (slot: RiderSavedSlot) => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     Alert.alert(
       'Remove saved place?',
       `Clear ${RIDER_SAVED_SLOT_META[slot].label} from your shortcuts?`,
@@ -141,7 +142,7 @@ export default function RiderSavedPlacesScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            await removeRiderSavedPlace(user.id!, slot);
+            await removeRiderSavedPlace(riderId, slot);
             await reload();
           },
         },

@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useFlowLayout } from '@/src/constants/flowLayout';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
   getAuthHeaders,
@@ -72,7 +72,7 @@ export default function BankDetailsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const { user } = useAppStore();
+  const { userId: driverId } = useAuthedUserId();
 
   // Bank form state
   const [bankName, setBankName] = useState('');
@@ -113,9 +113,9 @@ export default function BankDetailsScreen() {
   const formStep = [bankName, accountNumber.length === 10, accountName].filter(Boolean).length;
 
   const refreshVault = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await getDriverEarningsVault(user.id);
+      const res = await getDriverEarningsVault(driverId);
       const d = res.data;
       setVaultSpendable(Number(d.wallet_spendable) || 0);
       setVaultLocked(Number(d.vault_locked) || 0);
@@ -129,12 +129,12 @@ export default function BankDetailsScreen() {
   useEffect(() => {
     let active = true;
     const load = async () => {
-      if (!user?.id) { setInitialLoading(false); return; }
+      if (!driverId) { setInitialLoading(false); return; }
       try {
         const [bankRes, restrictionRes, vaultRes] = await Promise.all([
-          getDriverBankDetails(user.id),
-          getDriverPayoutRestrictions(user.id),
-          getDriverEarningsVault(user.id).catch(() => null),
+          getDriverBankDetails(driverId),
+          getDriverPayoutRestrictions(driverId),
+          getDriverEarningsVault(driverId).catch(() => null),
         ]);
         if (!active) return;
         const bankData = bankRes.data;
@@ -160,7 +160,7 @@ export default function BankDetailsScreen() {
     };
     void load();
     return () => { active = false; };
-  }, [user?.id]);
+  }, [driverId]);
 
   useEffect(() => {
     if (!vaultPending?.release_available_at) return;
@@ -199,7 +199,7 @@ export default function BankDetailsScreen() {
     setVerifying(true);
     setVerifyError('');
     try {
-      const res = await fetch(`${BACKEND_URL}/api/drivers/${user?.id}/verify-bank`, {
+      const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/verify-bank`, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ bank_name: bankName, account_number: accountNumber }),
@@ -225,7 +225,7 @@ export default function BankDetailsScreen() {
     }
     setLoading(true);
     try {
-      const response = await fetch(`${BACKEND_URL}/api/drivers/${user?.id}/bank-details`, {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/bank-details`, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ bank_name: bankName, account_number: accountNumber, account_name: accountName }),
@@ -246,7 +246,7 @@ export default function BankDetailsScreen() {
   };
 
   const handleBiometricWithdraw = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     const amount = Number(withdrawAmount);
     if (!Number.isFinite(amount) || amount <= 0) {
       Alert.alert('Invalid amount', 'Enter a valid withdrawal amount.');
@@ -265,7 +265,7 @@ export default function BankDetailsScreen() {
     if (capture.canceled || !capture.assets?.[0]?.base64) return;
     setWithdrawing(true);
     try {
-      const res = await withdrawDriverEarningsWithBiometric(user.id, {
+      const res = await withdrawDriverEarningsWithBiometric(driverId, {
         amount, face_image: `data:image/jpeg;base64,${capture.assets[0].base64}`,
       });
       const data = res.data;
@@ -280,12 +280,12 @@ export default function BankDetailsScreen() {
   };
 
   const handleVaultLock = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     const amount = Number(vaultLockAmount);
     if (!Number.isFinite(amount) || amount <= 0) { Alert.alert('Invalid amount', 'Enter how much to move into the vault.'); return; }
     setVaultBusy(true);
     try {
-      const res = await lockDriverEarningsVault(user.id, amount);
+      const res = await lockDriverEarningsVault(driverId, amount);
       setVaultLockAmount('');
       await refreshVault();
       Alert.alert('Vault updated', res.data.message);
@@ -295,12 +295,12 @@ export default function BankDetailsScreen() {
   };
 
   const handleVaultUnlockRequest = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     const amount = Number(vaultUnlockAmount);
     if (!Number.isFinite(amount) || amount <= 0) { Alert.alert('Invalid amount', 'Enter how much to release from the vault.'); return; }
     setVaultBusy(true);
     try {
-      const res = await requestDriverEarningsVaultUnlock(user.id, amount);
+      const res = await requestDriverEarningsVaultUnlock(driverId, amount);
       setVaultUnlockAmount('');
       setVaultPending(res.data.pending_release);
       Alert.alert('Unlock started', res.data.message);
@@ -310,7 +310,7 @@ export default function BankDetailsScreen() {
   };
 
   const handleVaultConfirmRelease = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     if (!/^\d{4,8}$/.test(vaultReleasePin.trim())) { Alert.alert('PIN', 'Enter your 4–8 digit driver account PIN.'); return; }
     const permission = await ImagePicker.requestCameraPermissionsAsync();
     if (permission.status !== 'granted') { Alert.alert('Permission needed', 'Camera permission is required to release vault funds.'); return; }
@@ -322,7 +322,7 @@ export default function BankDetailsScreen() {
     if (capture.canceled || !capture.assets?.[0]?.base64) return;
     setVaultReleasing(true);
     try {
-      const res = await confirmDriverEarningsVaultRelease(user.id, {
+      const res = await confirmDriverEarningsVaultRelease(driverId, {
         pin: vaultReleasePin.trim(),
         face_image: `data:image/jpeg;base64,${capture.assets[0].base64}`,
       });

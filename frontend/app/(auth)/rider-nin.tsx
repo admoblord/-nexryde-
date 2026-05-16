@@ -84,7 +84,22 @@ export default function RiderNINScreen() {
         await saveUserSession({ ...data.user, token: resolvedToken });
         // Apply any deep-link referral after account creation (separate step)
         if (resolvedToken) void autoApplyPendingReferral(data.user.id, resolvedToken);
-        router.replace('/(rider-tabs)/rider-home');
+        try {
+          const rs = await fetch(`${BACKEND_URL}/api/users/${data.user.id}/rider-verification-status`, {
+            headers: {
+              'Content-Type': 'application/json',
+              ...(resolvedToken ? { Authorization: `Bearer ${resolvedToken}` } : {}),
+            },
+          });
+          const riderStatus = await rs.json().catch(() => ({}));
+          if (rs.ok && riderStatus?.completed) {
+            router.replace('/(rider-tabs)/rider-home');
+          } else {
+            router.replace('/(auth)/rider-verification');
+          }
+        } catch {
+          router.replace('/(auth)/rider-verification');
+        }
       } else {
         Alert.alert('Error', data.detail || 'Registration failed');
       }

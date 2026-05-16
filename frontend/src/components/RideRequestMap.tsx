@@ -89,7 +89,7 @@ function sampleCoordsForFit(
   return out;
 }
 
-/* ─────────────────────── Rider avatar marker (Uber-style) ─────────────────────── */
+/* ─────────────────────── Rider avatar marker ─────────────────────── */
 function RiderAvatarMarker({
   photo,
   initial,

@@ -8,13 +8,21 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Keyboa
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
-import { useAITripBuddy, AI_PERSONALITIES, AIPersonality } from '../src/services/aiTripBuddy';
+import { useAITripBuddy, AI_PERSONALITIES, AIPersonality } from '@/src/services/aiTripBuddy';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 const { width } = Dimensions.get('window');
 const COLORS = { primary: '#00D084', secondary: '#00B4D8', accent: '#FFB800', purple: '#9D4EDD', dark: '#1a1a1a', darkCard: '#2a2a2a', white: '#FFFFFF', textPrimary: '#FFFFFF', textSecondary: '#B0B0B0' };
 
 const AITripBuddyScreen = () => {
+  const authed = useRequireUserOrLogin();
   const { personality, messages, isTyping, sendMessage, changePersonality, clearConversation } = useAITripBuddy();
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
+
   const [inputText, setInputText] = useState('');
   const [showPersonalities, setShowPersonalities] = useState(false);
   const scrollViewRef = useRef<ScrollView>(null);

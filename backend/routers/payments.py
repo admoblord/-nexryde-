@@ -1,4 +1,6 @@
 """Payments Router - Wallet, subscriptions, fare, tiers, promos, receipts for NEXRYDE."""
+from __future__ import annotations
+
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import JSONResponse, HTMLResponse
 from pydantic import BaseModel, Field, ConfigDict

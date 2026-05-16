@@ -102,7 +102,7 @@ const RIDER_SECTIONS: HubSection[] = [
     title: 'Community',
     items: [
       { label: 'Stories', route: '/stories', icon: 'book', hint: 'Community feed' },
-      { label: 'Favorite drivers', route: '/rider/favorite-drivers', icon: 'heart', hint: 'Preferred drivers' },
+      { label: 'Favourite drivers', route: '/rider/favorite-drivers', icon: 'heart-circle', hint: 'Book trusted drivers · ~5% off' },
     ],
   },
   {

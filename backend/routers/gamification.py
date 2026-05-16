@@ -1,4 +1,6 @@
 """Gamification Router - Challenges, Leaderboard, Loyalty Program, Streaks & Badges for NEXRYDE."""
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException
 from datetime import datetime, timezone, timedelta
 import logging

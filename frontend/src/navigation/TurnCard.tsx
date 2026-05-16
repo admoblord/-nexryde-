@@ -1,6 +1,6 @@
 /**
  * TurnCard.tsx
- * Bolt-style (but better) turn-by-turn navigation overlay card.
+ * Turn-by-turn navigation overlay card.
  *
  * Shows:
  *  - Large animated turn arrow (rotation based on maneuver type)

@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
@@ -49,7 +49,7 @@ interface DriverOffer {
 export default function RideBidScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { user } = useAppStore();
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   
   const [offeredPrice, setOfferedPrice] = useState(params.suggestedFare?.toString() || '');
   const [bidId, setBidId] = useState<string | null>(null);
@@ -92,14 +92,14 @@ export default function RideBidScreen() {
   };
 
   const createBid = async () => {
-    if (!user?.id) {
+    if (!riderId || !canCallAuthedApi) {
       Alert.alert('Error', 'Please login first');
       return;
     }
     
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/bid/create?rider_id=${encodeURIComponent(user.id)}`, {
+      const res = await fetch(`${BACKEND_URL}/api/rides/bid/create?rider_id=${encodeURIComponent(riderId)}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -128,9 +128,11 @@ export default function RideBidScreen() {
   };
 
   const fetchOffers = async () => {
-    if (!bidId) return;
+    if (!bidId || !riderId || !canCallAuthedApi) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/bid/${bidId}/offers`);
+      const res = await fetch(`${BACKEND_URL}/api/rides/bid/${bidId}/offers`, {
+        headers: getAuthHeaders(),
+      });
       const data = await res.json();
       if (data.offers) {
         setDriverOffers(data.offers);
@@ -141,14 +143,15 @@ export default function RideBidScreen() {
   };
 
   const acceptOffer = async (offerId: string) => {
-    if (!user?.id || !bidId) return;
+    if (!riderId || !canCallAuthedApi || !bidId) return;
     setLoading(true);
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/rides/bid/${bidId}/accept?rider_id=${encodeURIComponent(user.id)}&offer_id=${encodeURIComponent(offerId)}`,
+        `${BACKEND_URL}/api/rides/bid/${bidId}/accept?rider_id=${encodeURIComponent(riderId)}&offer_id=${encodeURIComponent(offerId)}`,
         {
-        method: 'POST',
-        }
+          method: 'POST',
+          headers: getAuthHeaders(),
+        },
       );
       const data = await res.json();
       if (res.ok && data.success) {

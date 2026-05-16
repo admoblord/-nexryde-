@@ -85,7 +85,7 @@ export function resolvePushNotificationRoute(
       if (milestone === 'first_driver_trip' || milestone === 'three_driver_trips') {
         return { pathname: DRIVER_EARNINGS, params: { tripId } };
       }
-      return { pathname: '/driver/trips', params: { tripId } };
+      return { pathname: DRIVER_HOME, params: { tripId } };
     }
     if (type === 'trip_accepted' && role === 'rider') {
       return { pathname: '/rider/tracking', params: { tripId } };

@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Form, File, UploadFile, Request
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
+import html
 import logging
 import os
 import json
@@ -884,7 +885,6 @@ async def verify_driver_documents(
     vehicle_front: Optional[UploadFile] = File(None),
     vehicle_interior: Optional[UploadFile] = File(None),
     vehicle_ac: Optional[UploadFile] = File(None),
-    nin_expiry: Optional[str] = Form(None),
     drivers_license_expiry: Optional[str] = Form(None),
     vehicle_registration_expiry: Optional[str] = Form(None),
     vehicle_license_expiry: Optional[str] = Form(None),
@@ -929,14 +929,14 @@ async def verify_driver_documents(
             for key in required_keys
             if key != "nin" and not doc_files.get(key)
         ]
-        if not doc_files.get("nin") and not nin_number_ok:
+        if not nin_number_ok:
             missing_docs.insert(0, "nin")
         if missing_docs:
             pretty = ", ".join(missing_docs).replace("_", " ")
             if "nin" in missing_docs:
                 raise HTTPException(
                     status_code=400,
-                    detail="Provide National ID (NIN) slip image or enter your 11-digit NIN number.",
+                    detail="Enter your 11-digit National Identification Number (NIN).",
                 )
             raise HTTPException(status_code=400, detail=f"Missing required documents: {pretty}")
 
@@ -971,6 +971,20 @@ async def verify_driver_documents(
                     "expiry_date": expiry_map.get(doc_key),
                 }
 
+        # NIN digits-only: store under documents.nin so admin lists / archive checks match slip uploads.
+        if nin_number_ok and "nin" not in stored_docs:
+            nin_bytes = normalized_nin_number.encode("utf-8")
+            stored_docs["nin"] = {
+                "filename": "nin_number.txt",
+                "content_type": "application/x-nexryde-nin+v1",
+                "data": base64.b64encode(nin_bytes).decode("utf-8"),
+                "size_bytes": len(nin_bytes),
+                "sha256": _sha256_bytes(nin_bytes),
+                "uploaded_at": datetime.now(timezone.utc).isoformat(),
+                "expiry_date": None,
+                "capture_mode": "number_only",
+            }
+
         doc_hashes = {k: v.get("sha256") for k, v in stored_docs.items()}
         duplicate_hashes = await _find_cross_driver_hash_duplicates(doc_hashes, driver_id)
         identical_hashes_within_submission = len(set(filter(None, doc_hashes.values()))) != len([v for v in doc_hashes.values() if v])
@@ -979,7 +993,9 @@ async def verify_driver_documents(
             fraud_flags.append("cross_driver_duplicate_document_hash")
         if identical_hashes_within_submission:
             fraud_flags.append("duplicate_hash_within_submission")
-        automated_approved = not fraud_flags and all(doc_files.get(key) for key in required_keys)
+        automated_approved = not fraud_flags and all(
+            (bool(doc_files.get(key)) or (key == "nin" and nin_number_ok)) for key in required_keys
+        )
         verification_status = "approved" if automated_approved else "pending_review"
         queue_status = "approved" if automated_approved else "pending"
         now_iso = datetime.now(timezone.utc).isoformat()
@@ -2173,6 +2189,33 @@ async def admin_get_verification_document_image(
         raw_bytes = _b64.b64decode(doc["data"])
     except Exception:
         raise HTTPException(status_code=500, detail="Failed to decode document image")
+
+    # Typed NIN (no photo): serve as SVG so admin <img src="…/document-image/nin"> still previews.
+    if doc_key == "nin" and doc.get("capture_mode") == "number_only":
+        try:
+            nin_text = raw_bytes.decode("utf-8", errors="replace").strip()
+        except Exception:
+            nin_text = ""
+        if not re.fullmatch(r"\d{11}", nin_text):
+            nin_text = "Invalid NIN payload"
+        safe = html.escape(nin_text)
+        svg = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<svg xmlns="http://www.w3.org/2000/svg" width="480" height="140" viewBox="0 0 480 140">'
+            '<rect width="100%" height="100%" rx="12" fill="#020617" stroke="#34D399" stroke-width="2"/>'
+            '<text x="24" y="48" fill="#94A3B8" font-size="14" '
+            'font-family="ui-sans-serif,system-ui,sans-serif">National ID (NIN)</text>'
+            '<text x="24" y="98" fill="#F8FAFC" font-size="26" '
+            'font-family="ui-monospace,Menlo,monospace" font-weight="700" letter-spacing="3">'
+            f"{safe}</text>"
+            "</svg>"
+        )
+        return _Resp(
+            content=svg.encode("utf-8"),
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
     content_type = doc.get("content_type") or "image/jpeg"
     return _Resp(
         content=raw_bytes,
@@ -2971,6 +3014,7 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
                 "reference": existing.get("reference"),
             }
 
+    withdraw_reference = f"withdraw_{uuid.uuid4().hex[:12]}"
     await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
     await db.transactions.insert_one(
         {
@@ -2983,7 +3027,7 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
             "status": "pending_settlement",
             "timestamp": datetime.utcnow(),
             "payment_method": "bank_transfer",
-            "reference": f"withdraw_{uuid.uuid4().hex[:12]}",
+            "reference": withdraw_reference,
             "meta": {
                 "biometric_required": True,
                 "biometric_face_confidence": confidence,
@@ -3009,6 +3053,8 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
         "withdrawn_amount": amount,
         "remaining_balance": round(current_balance - amount, 2),
         "face_match_confidence": confidence,
+        "reference": withdraw_reference,
+        "status": "pending_settlement",
     }
 
 

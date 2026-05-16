@@ -28,7 +28,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const DAILY_LIMIT = 3;
@@ -96,7 +96,7 @@ const dot = StyleSheet.create({
 export default function DestinationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   const [state, setState]                   = useState<DestinationState | null>(null);
   const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
@@ -123,11 +123,11 @@ export default function DestinationScreen() {
 
   /* ── Load ── */
   const load = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
       const [sr, lr] = await Promise.all([
-        fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination`,        { headers: getAuthHeaders() }),
-        fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination/saved`,  { headers: getAuthHeaders() }),
+        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`,        { headers: getAuthHeaders() }),
+        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved`,  { headers: getAuthHeaders() }),
       ]);
       if (sr.ok) {
         setState(await sr.json());
@@ -139,9 +139,12 @@ export default function DestinationScreen() {
       }
     } catch { /* silent */ }
     finally { setLoading(false); }
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [driverId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    if (!canCallAuthedApi) return;
+    void load();
+  }, [canCallAuthedApi, load]);
 
   useEffect(() => {
     const onShow = Keyboard.addListener('keyboardDidShow', (e) => {
@@ -301,8 +304,8 @@ export default function DestinationScreen() {
 
   /* ── Activate destination ── */
   const activateDestination = async (name: string, lat: number, lng: number, label?: string) => {
-    if (!user?.id) return;
-    const r = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination`, {
+    if (!driverId) return;
+    const r = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, {
       method: 'POST',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -327,8 +330,8 @@ export default function DestinationScreen() {
 
   /* ── Save a location as Home / Favourite ── */
   const saveLocation = async (label: string, name: string, lat: number, lng: number) => {
-    if (!user?.id) return;
-    await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination/saved`, {
+    if (!driverId) return;
+    await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved`, {
       method: 'POST',
       headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ label, name, lat, lng }),
@@ -360,7 +363,7 @@ export default function DestinationScreen() {
     } finally {
       setActivating(false);
     }
-  }, [saveAsLabel, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [saveAsLabel, driverId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Handle saved location tap (activate directly) ── */
   const handleSavedTap = useCallback(async (saved: SavedLocation) => {
@@ -372,7 +375,7 @@ export default function DestinationScreen() {
     } finally {
       setActivating(false);
     }
-  }, [user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ── Delete saved location ── */
   const handleDeleteSaved = (label: string) => {
@@ -385,8 +388,8 @@ export default function DestinationScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
-            if (!user?.id) return;
-            await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination/saved/${label}`, {
+            if (!driverId) return;
+            await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved/${label}`, {
               method: 'DELETE',
               headers: getAuthHeaders(),
             });
@@ -405,10 +408,10 @@ export default function DestinationScreen() {
         text: 'Turn Off',
         style: 'destructive',
         onPress: async () => {
-          if (!user?.id) return;
+          if (!driverId) return;
           setCancelling(true);
           try {
-            await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination`, {
+            await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, {
               method: 'DELETE', headers: getAuthHeaders(),
             });
             await load();

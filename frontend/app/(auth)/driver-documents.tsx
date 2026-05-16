@@ -1,44 +1,87 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert,
-  Image, ActivityIndicator, TextInput,
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Image,
+  ActivityIndicator,
+  TextInput,
+  Platform,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Haptics from 'expo-haptics';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
+import { apiErrorMessage } from '@/src/utils/apiErrorMessage';
+import { useAppStore } from '@/src/store/appStore';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useThemeColors } from '@/src/constants/theme';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
-type DocKey = 'nin' | 'drivers_license' | 'passport_photo' | 'vehicle_registration'
-  | 'vehicle_license' | 'hacking_permit' | 'road_worthiness' | 'insurance'
-  | 'vehicle_front' | 'vehicle_interior' | 'vehicle_ac';
+const MINT = '#34D399';
+const MINT_DARK = '#059669';
+const BG_TOP = '#020617';
+const BG_MID = '#0F172A';
+const CARD = 'rgba(15,23,42,0.92)';
+const TEXT = '#F8FAFC';
+const MUTED = '#94A3B8';
+const BORDER = 'rgba(52,211,153,0.2)';
+const INPUT_BG = 'rgba(2,6,23,0.55)';
+
+type DocKey =
+  | 'nin'
+  | 'drivers_license'
+  | 'passport_photo'
+  | 'vehicle_registration'
+  | 'vehicle_license'
+  | 'hacking_permit'
+  | 'road_worthiness'
+  | 'insurance'
+  | 'vehicle_front'
+  | 'vehicle_interior'
+  | 'vehicle_ac';
+
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface DocItem {
   key: DocKey;
   label: string;
-  icon: string;
+  icon: IconName;
+  /** Gradient behind icon */
+  iconGrad: readonly [string, string];
   required: boolean;
   hasExpiry: boolean;
 }
 
 const DOCUMENTS: DocItem[] = [
-  { key: 'nin', label: 'National ID (NIN)', icon: 'card', required: true, hasExpiry: false },
-  { key: 'drivers_license', label: "Driver's License", icon: 'car', required: true, hasExpiry: true },
-  { key: 'passport_photo', label: 'Passport Photo', icon: 'person', required: true, hasExpiry: false },
-  { key: 'vehicle_registration', label: 'Plate Number Upload', icon: 'document-text', required: true, hasExpiry: false },
-  { key: 'vehicle_license', label: 'Vehicle License Document', icon: 'receipt', required: true, hasExpiry: true },
-  { key: 'hacking_permit', label: 'Hackney Permit / Carriage (Optional)', icon: 'shield-checkmark', required: false, hasExpiry: true },
-  { key: 'road_worthiness', label: 'Road Worthiness Certificate', icon: 'construct', required: true, hasExpiry: true },
-  { key: 'insurance', label: 'Vehicle Insurance', icon: 'umbrella', required: true, hasExpiry: true },
-  { key: 'vehicle_front', label: 'Vehicle Photo (Front)', icon: 'camera', required: true, hasExpiry: false },
-  { key: 'vehicle_interior', label: 'Vehicle Interior Photo (LIVE camera only)', icon: 'image', required: true, hasExpiry: false },
-  { key: 'vehicle_ac', label: 'AC System Photo (LIVE camera only)', icon: 'snow', required: true, hasExpiry: false },
+  { key: 'nin', label: 'National ID (NIN)', icon: 'id-card-outline', iconGrad: ['#34D399', '#0D9488'], required: true, hasExpiry: false },
+  { key: 'drivers_license', label: "Driver's License", icon: 'speedometer-outline', iconGrad: ['#38BDF8', '#2563EB'], required: true, hasExpiry: true },
+  { key: 'passport_photo', label: 'Passport Photo', icon: 'person-circle-outline', iconGrad: ['#A78BFA', '#6366F1'], required: true, hasExpiry: false },
+  { key: 'vehicle_registration', label: 'Plate Number Upload', icon: 'document-attach-outline', iconGrad: ['#2DD4BF', '#0D9488'], required: true, hasExpiry: false },
+  { key: 'vehicle_license', label: 'Vehicle License Document', icon: 'reader-outline', iconGrad: ['#FBBF24', '#D97706'], required: true, hasExpiry: true },
+  {
+    key: 'hacking_permit',
+    label: 'Hackney Permit / Carriage',
+    icon: 'ribbon-outline',
+    iconGrad: ['#94A3B8', '#64748B'],
+    required: false,
+    hasExpiry: true,
+  },
+  { key: 'road_worthiness', label: 'Road Worthiness Certificate', icon: 'construct-outline', iconGrad: ['#FB923C', '#EA580C'], required: true, hasExpiry: true },
+  { key: 'insurance', label: 'Vehicle Insurance', icon: 'umbrella-outline', iconGrad: ['#60A5FA', '#4F46E5'], required: true, hasExpiry: true },
+  { key: 'vehicle_front', label: 'Vehicle Photo (Front)', icon: 'car-sport-outline', iconGrad: ['#4ADE80', '#15803D'], required: true, hasExpiry: false },
+  { key: 'vehicle_interior', label: 'Vehicle Interior (live)', icon: 'images-outline', iconGrad: ['#22D3EE', '#0891B2'], required: true, hasExpiry: false },
+  { key: 'vehicle_ac', label: 'AC System Photo (live)', icon: 'snow-outline', iconGrad: ['#7DD3FC', '#0284C7'], required: true, hasExpiry: false },
 ];
 
 const CAMERA_RESUME_TTL_MS = 10 * 60 * 1000;
@@ -71,6 +114,32 @@ const getExpiryValidationMessage = (value?: string) => {
 export default function DriverDocumentsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const { storeReady, token } = useAuthedApiReady();
+  const { colors, isDark } = useThemeColors();
+
+  const palette = useMemo(
+    () => ({
+      text: isDark ? TEXT : colors.text,
+      muted: isDark ? MUTED : colors.textMuted,
+      card: isDark ? CARD : colors.card,
+      cardBorder: isDark ? 'rgba(148,163,184,0.12)' : colors.border,
+      border: isDark ? BORDER : colors.border,
+      inputBg: isDark ? INPUT_BG : colors.surface,
+      insetBg: isDark ? 'rgba(2,6,23,0.65)' : colors.background,
+      placeholder: isDark ? '#64748B' : colors.textMuted,
+      headerBorder: isDark ? 'rgba(148,163,184,0.15)' : colors.border,
+      backBtnBg: isDark ? 'rgba(15,23,42,0.6)' : colors.surface,
+      bottomBg: isDark ? 'rgba(15,23,42,0.96)' : colors.surface,
+      bottomBorder: isDark ? 'rgba(52,211,153,0.15)' : colors.border,
+      heroGrad: isDark
+        ? (['rgba(52,211,153,0.12)', 'rgba(15,23,42,0.95)'] as const)
+        : (['rgba(34,197,94,0.08)', colors.card] as const),
+      iconInnerBg: isDark ? 'rgba(15,23,42,0.92)' : colors.surface,
+      progressAppearance: (isDark ? 'dark' : 'light') as 'dark' | 'light',
+    }),
+    [isDark, colors],
+  );
 
   const [docs, setDocs] = useState<Record<string, string | null>>({});
   const [expiry, setExpiry] = useState<Record<string, string>>({});
@@ -89,6 +158,7 @@ export default function DriverDocumentsScreen() {
     () => `@driver_documents_pending_picker_${driverId || String(params.phone || 'unknown')}`,
     [driverId, params.phone],
   );
+
   const persistableDocUri = async (key: DocKey, uri: string) => {
     if (!uri || !FileSystem.documentDirectory) return uri;
     if (uri.startsWith(FileSystem.documentDirectory)) return uri;
@@ -111,18 +181,21 @@ export default function DriverDocumentsScreen() {
 
   const saveDocUri = async (key: DocKey, uri: string) => {
     const stableUri = await persistableDocUri(key, uri);
-    setDocs(prev => ({ ...prev, [key]: stableUri }));
+    setDocs((prev) => ({ ...prev, [key]: stableUri }));
   };
 
   const markCameraResume = async (key: DocKey) => {
     try {
-      await AsyncStorage.setItem(CAMERA_RESUME_KEY, JSON.stringify({
-        driverId,
-        docKey: key,
-        expiresAt: Date.now() + CAMERA_RESUME_TTL_MS,
-      }));
+      await AsyncStorage.setItem(
+        CAMERA_RESUME_KEY,
+        JSON.stringify({
+          driverId,
+          docKey: key,
+          expiresAt: Date.now() + CAMERA_RESUME_TTL_MS,
+        }),
+      );
     } catch {
-      // This only improves resume behavior after Android camera restarts.
+      /* best-effort */
     }
   };
 
@@ -130,7 +203,7 @@ export default function DriverDocumentsScreen() {
     try {
       await AsyncStorage.removeItem(CAMERA_RESUME_KEY);
     } catch {
-      // Nothing to clean up.
+      /* noop */
     }
   };
 
@@ -147,11 +220,15 @@ export default function DriverDocumentsScreen() {
           ninNumber?: string;
         };
         if (!mounted || draft.version !== DRAFT_VERSION) return;
-        setDocs(draft.docs || {});
-        setExpiry(draft.expiry || {});
+        const restored = { ...(draft.docs || {}) };
+        delete restored.nin;
+        setDocs(restored);
+        const ex = { ...(draft.expiry || {}) };
+        delete ex.nin;
+        setExpiry(ex);
         setNinNumber(draft.ninNumber || '');
       } catch {
-        // Draft recovery is best-effort; the user can still upload again.
+        /* draft recovery best-effort */
       } finally {
         if (mounted) setDraftLoaded(true);
       }
@@ -177,7 +254,8 @@ export default function DriverDocumentsScreen() {
   useEffect(() => {
     let mounted = true;
     const recoverPendingImagePickerResult = async () => {
-      const getPendingResultAsync = (ImagePicker as any).getPendingResultAsync;
+      const getPendingResultAsync = (ImagePicker as { getPendingResultAsync?: () => Promise<ImagePicker.ImagePickerResult> })
+        .getPendingResultAsync;
       if (typeof getPendingResultAsync !== 'function') return;
       try {
         const pendingKey = (await AsyncStorage.getItem(pendingPickerKey)) as DocKey | null;
@@ -186,7 +264,7 @@ export default function DriverDocumentsScreen() {
         if (!mounted || !result || result.canceled || !result.assets?.[0]?.uri) return;
         await saveDocUri(pendingKey, result.assets[0].uri);
       } catch {
-        // Android may not always expose a pending result; normal picker flow still works.
+        /* Android pending result optional */
       } finally {
         await AsyncStorage.removeItem(pendingPickerKey);
       }
@@ -198,20 +276,21 @@ export default function DriverDocumentsScreen() {
   }, [pendingPickerKey]);
 
   const pickImage = (key: DocKey) => {
+    if (key === 'nin') return;
     if (CAMERA_ONLY_KEYS.includes(key)) {
       Alert.alert(
-        'Live Photo Required',
-        'Vehicle photos must be taken NOW with your camera to verify the current condition of your vehicle.',
+        'Live photo required',
+        'This shot must be taken now with your camera so we can verify your vehicle’s current condition.',
         [
-          { text: 'Open Camera', onPress: () => openCamera(key) },
+          { text: 'Open camera', onPress: () => void openCamera(key) },
           { text: 'Cancel', style: 'cancel' },
-        ]
+        ],
       );
       return;
     }
-    Alert.alert('Upload Document', `Choose source for ${DOCUMENTS.find(d => d.key === key)?.label}`, [
-      { text: 'Camera', onPress: () => openCamera(key) },
-      { text: 'Gallery', onPress: () => openGallery(key) },
+    Alert.alert('Add document', `Choose how to add ${DOCUMENTS.find((d) => d.key === key)?.label}`, [
+      { text: 'Camera', onPress: () => void openCamera(key) },
+      { text: 'Gallery', onPress: () => void openGallery(key) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -237,7 +316,7 @@ export default function DriverDocumentsScreen() {
       await AsyncStorage.removeItem(pendingPickerKey);
       await clearCameraResume();
     } catch {
-      Alert.alert('Error', 'Could not open camera.');
+      Alert.alert('Camera', 'Could not open the camera. Try again.');
     } finally {
       setActivePickerKey(null);
     }
@@ -248,7 +327,7 @@ export default function DriverDocumentsScreen() {
       setActivePickerKey(key);
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Gallery access is required to select documents.');
+        Alert.alert('Permission needed', 'Photo library access is required to pick a document.');
         return;
       }
       await AsyncStorage.setItem(pendingPickerKey, key);
@@ -263,20 +342,19 @@ export default function DriverDocumentsScreen() {
       }
       await AsyncStorage.removeItem(pendingPickerKey);
     } catch {
-      Alert.alert('Error', 'Could not open gallery.');
+      Alert.alert('Gallery', 'Could not open your photos. Try again.');
     } finally {
       setActivePickerKey(null);
     }
   };
 
-  const requiredDocs = DOCUMENTS.filter(d => d.required);
+  const requiredDocs = DOCUMENTS.filter((d) => d.required);
   const cleanNinNumber = ninNumber.replace(/\D/g, '');
-  const ninSatisfied = Boolean(docs.nin) || cleanNinNumber.length === 11;
+  const ninSatisfied = cleanNinNumber.length === 11;
   const allRequiredUploaded = requiredDocs.every((d) => {
     if (d.key === 'nin') return ninSatisfied;
     return !!docs[d.key];
   });
-  // Only required docs should block submission.
   const requiredExpiryDocs = DOCUMENTS.filter((d) => d.required && d.hasExpiry);
   const missingRequiredExpiryDocs = requiredExpiryDocs.filter((d) => {
     if (!docs[d.key]) return false;
@@ -295,18 +373,25 @@ export default function DriverDocumentsScreen() {
       missingWithNinFallback.unshift(DOCUMENTS.find((d) => d.key === 'nin') as DocItem);
     }
     if (missingWithNinFallback.length > 0) {
-      Alert.alert('Missing Documents', `Please upload: ${missingWithNinFallback.map(d => d.label).join(', ')}`);
+      Alert.alert('Almost there', `Still needed: ${missingWithNinFallback.map((d) => d.label).join(', ')}`);
       return;
     }
 
     const missingExpiry = missingRequiredExpiryDocs;
     if (missingExpiry.length > 0) {
       Alert.alert(
-        'Expiry Dates Required',
-        `Enter a valid future expiry date as MM/YYYY for: ${missingExpiry.map(d => d.label).join(', ')}`
+        'Expiry dates',
+        `Enter a valid future expiry (MM/YYYY) for: ${missingExpiry.map((d) => d.label).join(', ')}`,
       );
       return;
     }
+    if (!token) {
+      Alert.alert('Session expired', 'Please sign in again to upload documents.', [
+        { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
+      ]);
+      return;
+    }
+
     setVerifying(true);
     try {
       const formData = new FormData();
@@ -315,6 +400,7 @@ export default function DriverDocumentsScreen() {
         formData.append('nin_number', cleanNinNumber);
       }
       for (const doc of DOCUMENTS) {
+        if (doc.key === 'nin') continue;
         if (docs[doc.key]) {
           formData.append(doc.key, {
             uri: docs[doc.key],
@@ -335,9 +421,9 @@ export default function DriverDocumentsScreen() {
         headers: authHeaders,
         body: formData,
       });
-      let data: any = {};
+      let data: Record<string, unknown> = {};
       try {
-        data = await response.json();
+        data = (await response.json()) as Record<string, unknown>;
       } catch {
         data = {};
       }
@@ -347,7 +433,7 @@ export default function DriverDocumentsScreen() {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
           'Documents approved',
-          'Your files passed automated checks and are stored securely. Next, complete your driver profile (vehicle, guarantor, payout details).',
+          'Your files passed automated checks and are stored securely. Next, complete your driver profile.',
           [
             {
               text: 'Continue to profile',
@@ -355,7 +441,7 @@ export default function DriverDocumentsScreen() {
                 router.push({
                   pathname: '/(auth)/driver-profile',
                   params: {
-                    driver_id: params.driver_id || data.driver_id,
+                    driver_id: String(params.driver_id || data.driver_id || ''),
                     phone: params.phone as string,
                     name: params.name as string,
                     email: params.email as string,
@@ -369,25 +455,28 @@ export default function DriverDocumentsScreen() {
         await AsyncStorage.removeItem(draftCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          'Documents Submitted',
-          'Your documents are with the NEXRYDE team for review. You will be notified once verified. After approval, you will get a free 20-trip trial to start earning.',
-          [{
-            text: 'Go to Dashboard',
-            onPress: () => router.replace('/(driver-tabs)/driver-home'),
-          }],
+          'Submitted',
+          'Your documents are with the Nexryde team for review. You will be notified once verified.',
+          [
+            {
+              text: 'Go to dashboard',
+              onPress: () => router.replace('/(driver-tabs)/driver-home'),
+            },
+          ],
         );
       } else {
         const msg =
           formatApiDetail(data?.detail) ||
           (typeof data?.reason === 'string' ? data.reason : '') ||
           (typeof data?.message === 'string' ? data.message : '') ||
-          'Something did not pass validation. Check photo clarity, expiry dates (MM/YYYY), and required fields, then try again.';
+          apiErrorMessage({ response: { data } }, '') ||
+          'Check photo clarity, expiry dates (MM/YYYY), and required fields, then try again.';
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        Alert.alert('Could not submit documents', msg);
+        Alert.alert('Could not submit', msg.trim() || 'Something did not pass validation.');
       }
-    } catch {
+    } catch (e) {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      Alert.alert('Connection error', 'Could not submit documents. Check your connection and try again.');
+      Alert.alert('Connection', apiErrorMessage(e, 'Could not submit documents. Check your connection and try again.'));
     } finally {
       setVerifying(false);
     }
@@ -398,136 +487,268 @@ export default function DriverDocumentsScreen() {
     return !!docs[d.key];
   }).length;
 
-  return (
-    <View style={st.container}>
-      <SafeAreaView style={st.safe}>
-        <View style={st.header}>
-          <TouchableOpacity onPress={() => router.back()} style={st.backBtn}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
-          </TouchableOpacity>
-          <Text style={st.headerTitle}>Driver verification</Text>
-          <Text style={st.progress}>
-            {requiredCompleteCount}/{requiredDocs.length}
-          </Text>
-        </View>
+  const ninDigits = cleanNinNumber.length;
 
-        <ScrollView style={st.scroll} contentContainerStyle={st.scrollContent} showsVerticalScrollIndicator={false}>
-          <DriverOnboardingProgress
-            current="documents"
-            subtitle="Upload clear photos. You can enter NIN where shown. Vehicle interior and AC must be live camera shots."
-          />
-          <View style={st.infoCard}>
-            <Ionicons name="shield-checkmark" size={40} color={COLORS.accentGreen} />
-            <Text style={st.infoTitle}>Documents and checks</Text>
-            <Text style={st.infoText}>
-              Use bright, glare-free light. Expiry fields use MM/YYYY for required documents that have expiry.
-              Once all required documents are uploaded and expiry dates are filled, you can submit.
+  if (!storeReady) {
+    return <AuthLoadingGate />;
+  }
+
+  return (
+    <View style={[st.root, !isDark && { backgroundColor: colors.background }]}>
+      {isDark ? (
+        <LinearGradient colors={[BG_TOP, BG_MID, '#0c1222']} style={StyleSheet.absoluteFill} />
+      ) : null}
+
+      <SafeAreaView style={st.safe} edges={['top']}>
+        <View style={[st.header, { borderBottomColor: palette.headerBorder }]}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={[st.backBtn, { backgroundColor: palette.backBtnBg }]}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <Ionicons name="chevron-back" size={26} color={palette.text} />
+          </TouchableOpacity>
+          <Text style={[st.headerTitle, { color: palette.text }]}>Driver verification</Text>
+          <View style={st.progressPill}>
+            <Text style={st.progressPillTxt}>
+              {requiredCompleteCount}/{requiredDocs.length}
             </Text>
           </View>
+        </View>
 
-          {DOCUMENTS.map((doc) => (
-            <View key={doc.key} style={st.docCard}>
-              <TouchableOpacity style={st.docRow} onPress={() => pickImage(doc.key)}>
-                <View style={[st.docIcon, docs[doc.key] ? st.docIconDone : null]}>
-                  {docs[doc.key] ? (
-                    <Image source={{ uri: docs[doc.key]! }} style={st.docThumb} />
-                  ) : (
-                    <Ionicons name={doc.icon as any} size={28} color={COLORS.lightTextSecondary} />
-                  )}
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={st.docLabel}>
-                    {doc.label} {doc.required && <Text style={{ color: '#EF4444' }}>*</Text>}
-                  </Text>
-                  <Text style={st.docStatus}>
-                    {docs[doc.key]
-                      ? 'Uploaded — tap to retake'
-                      : CAMERA_ONLY_KEYS.includes(doc.key)
-                        ? 'Tap to take a LIVE photo (camera only)'
-                        : 'Tap to upload (camera or gallery)'}
-                  </Text>
-                </View>
-                {activePickerKey === doc.key ? (
-                  <ActivityIndicator color={COLORS.accentGreen} />
-                ) : docs[doc.key] ? (
-                  <Ionicons name="checkmark-circle" size={22} color={COLORS.accentGreen} />
-                ) : (
-                  <Ionicons name="cloud-upload" size={22} color={COLORS.lightTextSecondary} />
-                )}
-              </TouchableOpacity>
+        <ScrollView
+          style={st.scroll}
+          contentContainerStyle={[st.scrollContent, { paddingBottom: 120 + insets.bottom }]}
+          showsVerticalScrollIndicator={false}
+        >
+          <DriverOnboardingProgress
+            current="documents"
+            appearance={palette.progressAppearance}
+            subtitle="Enter your 11-digit NIN (no photo, no expiry). Upload sharp photos for other documents; add MM/YYYY expiry only where shown."
+          />
 
-              {doc.hasExpiry && docs[doc.key] && (
-                <View style={st.expiryRow}>
-                  <Ionicons name="calendar" size={16} color={COLORS.lightTextSecondary} />
-                  <TextInput
-                    style={st.expiryInput}
-                    placeholder="Expiry date (MM/YYYY)"
-                    placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
-                    value={expiry[doc.key] || ''}
-                    onChangeText={(text) => setExpiry(prev => ({ ...prev, [doc.key]: formatExpiryInput(text) }))}
-                    keyboardType="number-pad"
-                    maxLength={7}
-                  />
-                  {expiry[doc.key] && !getExpiryValidationMessage(expiry[doc.key]) && (
-                    <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
-                  )}
-                </View>
-              )}
-              {doc.key === 'nin' && !docs.nin && (
-                <View style={st.expiryRow}>
-                  <Ionicons name="keypad" size={16} color={COLORS.lightTextSecondary} />
-                  <TextInput
-                    style={st.expiryInput}
-                    placeholder="Or enter 11-digit NIN number"
-                    placeholderTextColor={COLORS.lightTextMuted || '#94A3B8'}
-                    value={ninNumber}
-                    onChangeText={(text) => setNinNumber(text.replace(/\D/g, '').slice(0, 11))}
-                    keyboardType="number-pad"
-                    maxLength={11}
-                  />
-                  {cleanNinNumber.length === 11 && (
-                    <Ionicons name="checkmark" size={16} color={COLORS.accentGreen} />
-                  )}
-                </View>
-              )}
+          <LinearGradient colors={palette.heroGrad} style={[st.heroCard, { borderColor: palette.border }]}>
+            <View style={st.heroIconWrap}>
+              <Ionicons name="shield-checkmark" size={26} color={MINT} />
             </View>
-          ))}
-
-          <View style={st.note}>
-            <Ionicons name="lock-closed" size={14} color={COLORS.accentGreen} />
-            <Text style={st.noteText}>Your documents are stored securely and only used for verification</Text>
-          </View>
-
-        </ScrollView>
-
-        <View style={st.bottom}>
-          {!allRequiredExpiriesFilled && (
-            <View style={st.submitHint}>
-              <Ionicons name="alert-circle-outline" size={16} color={COLORS.warning} />
-              <Text style={st.submitHintText}>
-                Add valid future expiry date (MM/YYYY) for: {missingRequiredExpiryDocs.map((d) => d.label).join(', ')}.
+            <View style={{ flex: 1 }}>
+              <Text style={[st.heroTitle, { color: palette.text }]}>Trust & compliance</Text>
+              <Text style={[st.heroBody, { color: palette.muted }]}>
+                Documents are encrypted in transit and at rest. Only authorised reviewers can access them.
               </Text>
             </View>
-          )}
+          </LinearGradient>
+
+          {DOCUMENTS.map((doc, index) => {
+            if (doc.key === 'nin') {
+              const ninDoc = doc;
+              return (
+                <View
+                  key="nin"
+                  style={[
+                    st.docCard,
+                    { backgroundColor: palette.card, borderColor: palette.cardBorder },
+                    index === 0 ? { marginTop: 4 } : null,
+                  ]}
+                >
+                  <View style={st.docRow}>
+                    <LinearGradient
+                      colors={ninDoc.iconGrad}
+                      style={st.iconRing}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                    >
+                      <View style={[st.iconInner, { backgroundColor: palette.iconInnerBg }]}>
+                        <Ionicons name={ninDoc.icon} size={26} color={palette.text} />
+                      </View>
+                    </LinearGradient>
+                    <View style={st.docTextCol}>
+                      <View style={st.titleRow}>
+                        <Text style={[st.docLabel, { color: palette.text }]} numberOfLines={2}>
+                          {ninDoc.label}
+                        </Text>
+                        <View style={st.reqDot}>
+                          <Text style={st.reqDotTxt}>Required</Text>
+                        </View>
+                      </View>
+                      <Text style={[st.docStatus, { color: palette.muted }]} numberOfLines={3}>
+                        NIN does not expire. Enter your 11-digit number only — no photo upload.
+                      </Text>
+                    </View>
+                    <View style={st.trailing}>
+                      {ninSatisfied ? (
+                        <Ionicons name="checkmark-circle" size={28} color={MINT} />
+                      ) : (
+                        <Ionicons name="keypad-outline" size={24} color={palette.muted} />
+                      )}
+                    </View>
+                  </View>
+                  <View style={[st.insetBlock, st.ninInset, { backgroundColor: palette.inputBg }]}>
+                    <Ionicons name="keypad-outline" size={18} color={MINT} />
+                    <TextInput
+                      style={[st.insetInput, { backgroundColor: palette.insetBg, color: palette.text }]}
+                      placeholder="11-digit NIN"
+                      placeholderTextColor={palette.placeholder}
+                      value={ninNumber}
+                      onChangeText={(text) => setNinNumber(text.replace(/\D/g, '').slice(0, 11))}
+                      keyboardType="number-pad"
+                      maxLength={11}
+                      accessibilityLabel="National Identification Number, 11 digits"
+                    />
+                    {ninDigits === 11 ? <Ionicons name="checkmark-circle" size={20} color={MINT} /> : null}
+                    <Text style={[st.ninMeta, { color: palette.muted }]}>{ninDigits}/11</Text>
+                  </View>
+                </View>
+              );
+            }
+
+            const uploaded = !!docs[doc.key];
+            const liveOnly = CAMERA_ONLY_KEYS.includes(doc.key);
+            const expiryMsg = doc.hasExpiry && uploaded ? getExpiryValidationMessage(expiry[doc.key]) : null;
+            const showExpiryRow = doc.hasExpiry && uploaded;
+
+            return (
+              <View
+                key={doc.key}
+                style={[
+                  st.docCard,
+                  { backgroundColor: palette.card, borderColor: palette.cardBorder },
+                  index === 0 ? { marginTop: 4 } : null,
+                ]}
+              >
+                <TouchableOpacity
+                  style={st.docRow}
+                  onPress={() => pickImage(doc.key)}
+                  activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${doc.label}, ${uploaded ? 'uploaded' : 'tap to upload'}`}
+                >
+                  <LinearGradient colors={doc.iconGrad} style={st.iconRing} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                    <View style={[st.iconInner, { backgroundColor: palette.iconInnerBg }]}>
+                      {uploaded ? (
+                        <Image source={{ uri: docs[doc.key]! }} style={st.docThumb} />
+                      ) : (
+                        <Ionicons name={doc.icon} size={26} color={palette.text} />
+                      )}
+                    </View>
+                  </LinearGradient>
+
+                  <View style={st.docTextCol}>
+                    <View style={st.titleRow}>
+                      <Text style={[st.docLabel, { color: palette.text }]} numberOfLines={2}>
+                        {doc.label}
+                      </Text>
+                      {doc.required ? (
+                        <View style={st.reqDot}>
+                          <Text style={st.reqDotTxt}>Required</Text>
+                        </View>
+                      ) : (
+                        <View style={st.optPill}>
+                          <Text style={st.optPillTxt}>Optional</Text>
+                        </View>
+                      )}
+                    </View>
+                    <Text style={[st.docStatus, { color: palette.muted }]} numberOfLines={2}>
+                      {uploaded
+                        ? 'Uploaded — tap to replace'
+                        : liveOnly
+                          ? 'Live camera only — tap to capture'
+                          : 'Camera or gallery — tap to add'}
+                    </Text>
+                  </View>
+
+                  <View style={st.trailing}>
+                    {activePickerKey === doc.key ? (
+                      <ActivityIndicator color={MINT} />
+                    ) : uploaded ? (
+                      <Ionicons name="checkmark-circle" size={28} color={MINT} />
+                    ) : (
+                      <View style={st.uploadCue}>
+                        <Ionicons name="cloud-upload-outline" size={22} color={palette.muted} />
+                      </View>
+                    )}
+                  </View>
+                </TouchableOpacity>
+
+                {showExpiryRow ? (
+                  <View style={[st.insetBlock, { backgroundColor: palette.inputBg }]}>
+                    <Ionicons name="calendar-outline" size={18} color={MINT} />
+                    <TextInput
+                      style={[
+                        st.insetInput,
+                        { backgroundColor: palette.insetBg, color: palette.text },
+                        expiryMsg && expiryMsg !== 'missing' ? st.insetInputErr : null,
+                      ]}
+                      placeholder="Expiry MM/YYYY"
+                      placeholderTextColor={palette.placeholder}
+                      value={expiry[doc.key] || ''}
+                      onChangeText={(text) => setExpiry((prev) => ({ ...prev, [doc.key]: formatExpiryInput(text) }))}
+                      keyboardType="number-pad"
+                      maxLength={7}
+                    />
+                    {expiry[doc.key] && !expiryMsg ? (
+                      <Ionicons name="checkmark-circle" size={20} color={MINT} />
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+
+          <View style={st.trustRow}>
+            <Ionicons name="lock-closed-outline" size={16} color={MINT} />
+            <Text style={[st.trustTxt, { color: palette.muted }]}>
+              Your files are used only for verification and platform safety.
+            </Text>
+          </View>
+        </ScrollView>
+
+        <View
+          style={[
+            st.bottom,
+            {
+              paddingBottom: Math.max(SPACING.lg, 12 + insets.bottom),
+              backgroundColor: palette.bottomBg,
+              borderTopColor: palette.bottomBorder,
+            },
+          ]}
+        >
+          {!allRequiredExpiriesFilled && missingRequiredExpiryDocs.length > 0 ? (
+            <View style={st.submitHint}>
+              <Ionicons name="alert-circle-outline" size={18} color="#FBBF24" />
+              <Text style={st.submitHintText}>
+                Valid future expiry (MM/YYYY) still needed for:{' '}
+                {missingRequiredExpiryDocs.map((d) => d.label).join(', ')}.
+              </Text>
+            </View>
+          ) : null}
           <TouchableOpacity
-            style={[st.submitBtn, (!canSubmit || !allRequiredExpiriesFilled) && st.submitDisabled]}
-            onPress={handleSubmit}
+            style={[st.submitWrap, (!canSubmit || verifying) && st.submitWrapOff]}
+            onPress={() => void handleSubmit()}
             disabled={verifying}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityState={{ disabled: !canSubmit || verifying }}
           >
-            <LinearGradient
-              colors={canSubmit
-                ? [COLORS.accentGreen, COLORS.accentBlue]
-                : [COLORS.lightBorder, COLORS.lightBorder]}
-              style={st.submitGrad}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
-            >
-              {verifying
-                ? <ActivityIndicator color={COLORS.white} />
-                : <Text style={[st.submitText, !canSubmit && st.submitTextOff]}>
-                    Submit for Verification
-                  </Text>
-              }
-            </LinearGradient>
+            {canSubmit && !verifying ? (
+              <LinearGradient colors={[MINT, MINT_DARK]} style={st.submitGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                <Text style={st.submitText}>Submit for verification</Text>
+                <Ionicons name="arrow-forward" size={20} color="#022C22" style={{ marginLeft: 8 }} />
+              </LinearGradient>
+            ) : (
+              <View style={[st.submitGrad, st.submitGradMuted]}>
+                {verifying ? (
+                  <ActivityIndicator color={MINT} />
+                ) : (
+                  <>
+                    <Text style={st.submitTextMuted}>Submit for verification</Text>
+                    <Ionicons name="lock-closed-outline" size={18} color="#64748B" style={{ marginLeft: 8 }} />
+                  </>
+                )}
+              </View>
+            )}
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -536,86 +757,213 @@ export default function DriverDocumentsScreen() {
 }
 
 const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.lightBackground },
+  root: { flex: 1, backgroundColor: BG_TOP },
   safe: { flex: 1 },
   header: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: SPACING.lg, paddingVertical: SPACING.md,
-    backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.lightBorder,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(148,163,184,0.15)',
   },
-  backBtn: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center' },
-  headerTitle: { fontSize: FONT_SIZE.lg, fontWeight: '700', color: COLORS.lightTextPrimary },
-  progress: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.accentGreen },
+  backBtn: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 22,
+    backgroundColor: 'rgba(15,23,42,0.6)',
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: FONT_SIZE.lg,
+    fontWeight: '900',
+    color: TEXT,
+    letterSpacing: -0.3,
+  },
+  progressPill: {
+    minWidth: 52,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    backgroundColor: 'rgba(52,211,153,0.15)',
+    borderWidth: 1,
+    borderColor: BORDER,
+    alignItems: 'center',
+  },
+  progressPillTxt: { fontSize: 13, fontWeight: '900', color: MINT },
   scroll: { flex: 1 },
-  scrollContent: { padding: SPACING.lg, paddingBottom: 40 },
-  infoCard: {
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl,
-    padding: SPACING.lg, alignItems: 'center', marginBottom: SPACING.lg,
+  scrollContent: { paddingHorizontal: 18, paddingTop: 8 },
+  heroCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 16,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    marginBottom: 18,
   },
-  infoTitle: { fontSize: FONT_SIZE.lg, fontWeight: '800', color: COLORS.lightTextPrimary, marginTop: SPACING.sm },
-  infoText: { fontSize: FONT_SIZE.sm, color: COLORS.lightTextSecondary, textAlign: 'center', lineHeight: 20, marginTop: SPACING.xs },
+  heroIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(52,211,153,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.25)',
+  },
+  heroTitle: { color: TEXT, fontSize: 16, fontWeight: '900' },
+  heroBody: { color: MUTED, fontSize: 13, fontWeight: '600', marginTop: 6, lineHeight: 19 },
   docCard: {
-    backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl,
-    marginBottom: SPACING.sm, overflow: 'hidden',
+    backgroundColor: CARD,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.12)',
+    marginBottom: 14,
+    overflow: 'hidden',
+    ...Platform.select({
+      ios: {
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.2,
+        shadowRadius: 16,
+      },
+      android: { elevation: 4 },
+    }),
   },
   docRow: {
-    flexDirection: 'row', alignItems: 'center', padding: SPACING.md, gap: SPACING.md,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 14,
+    gap: 14,
   },
-  docIcon: {
-    width: 52, height: 52, borderRadius: BORDER_RADIUS.lg,
-    backgroundColor: COLORS.lightBorder, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
+  iconRing: {
+    width: 58,
+    height: 58,
+    borderRadius: 18,
+    padding: 2,
   },
-  docIconDone: { borderWidth: 2, borderColor: COLORS.accentGreen },
-  docThumb: { width: '100%', height: '100%', borderRadius: BORDER_RADIUS.lg },
-  docLabel: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.lightTextPrimary },
-  docStatus: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextSecondary, marginTop: 2 },
-  expiryRow: {
-    flexDirection: 'row', alignItems: 'center', gap: SPACING.sm,
-    paddingHorizontal: SPACING.md, paddingBottom: SPACING.md,
-    borderTopWidth: 1, borderTopColor: COLORS.lightBorder,
-    marginHorizontal: SPACING.sm,
-    paddingTop: SPACING.sm,
+  iconInner: {
+    flex: 1,
+    borderRadius: 16,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
   },
-  expiryInput: {
-    flex: 1, fontSize: FONT_SIZE.sm, color: COLORS.lightTextPrimary,
-    borderWidth: 1, borderColor: COLORS.lightBorder, borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.sm, paddingVertical: SPACING.xs,
+  docThumb: { width: '100%', height: '100%' },
+  docTextCol: { flex: 1, minWidth: 0 },
+  titleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  docLabel: { color: TEXT, fontSize: 15, fontWeight: '800', flexShrink: 1 },
+  reqDot: {
+    backgroundColor: 'rgba(248,113,113,0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
   },
-  note: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    marginTop: SPACING.lg, gap: SPACING.xs,
+  reqDotTxt: { fontSize: 10, fontWeight: '800', color: '#FCA5A5', textTransform: 'uppercase', letterSpacing: 0.5 },
+  optPill: {
+    backgroundColor: 'rgba(148,163,184,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
-  noteText: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextSecondary },
+  optPillTxt: { fontSize: 10, fontWeight: '800', color: MUTED, textTransform: 'uppercase', letterSpacing: 0.5 },
+  docStatus: { color: MUTED, fontSize: 12, fontWeight: '600', marginTop: 6, lineHeight: 17 },
+  trailing: { width: 36, alignItems: 'center', justifyContent: 'center' },
+  uploadCue: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: INPUT_BG,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.2)',
+  },
+  insetBlock: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    paddingTop: 4,
+    marginHorizontal: 10,
+    marginBottom: 10,
+    borderRadius: 14,
+    backgroundColor: INPUT_BG,
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.08)',
+  },
+  insetInput: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '600',
+    color: TEXT,
+    paddingVertical: Platform.OS === 'ios' ? 10 : 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(2,6,23,0.65)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.2)',
+  },
+  insetInputErr: { borderColor: 'rgba(248,113,113,0.5)' },
+  ninInset: { paddingTop: 10 },
+  ninMeta: { fontSize: 11, fontWeight: '800', color: MUTED, width: 36, textAlign: 'right' },
+  trustRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 8,
+    paddingHorizontal: 4,
+    paddingBottom: 8,
+  },
+  trustTxt: { flex: 1, fontSize: 12, fontWeight: '600', color: '#64748B', lineHeight: 18 },
   bottom: {
-    backgroundColor: COLORS.white, paddingHorizontal: SPACING.lg, paddingVertical: SPACING.lg,
-    borderTopWidth: 1, borderTopColor: COLORS.lightBorder,
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 18,
+    paddingTop: 12,
+    backgroundColor: 'rgba(15,23,42,0.96)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(52,211,153,0.15)',
   },
   submitHint: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: SPACING.xs,
-    marginBottom: SPACING.sm,
-    backgroundColor: '#FFFBEB',
+    gap: 10,
+    marginBottom: 10,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(251,191,36,0.08)',
     borderWidth: 1,
-    borderColor: '#FDE68A',
-    borderRadius: BORDER_RADIUS.md,
-    paddingHorizontal: SPACING.sm,
-    paddingVertical: SPACING.xs,
+    borderColor: 'rgba(251,191,36,0.25)',
   },
-  submitHintText: {
-    flex: 1,
-    fontSize: FONT_SIZE.xs,
-    color: '#92400E',
-    lineHeight: 18,
-    fontWeight: '600',
+  submitHintText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#FDE68A', lineHeight: 18 },
+  submitWrap: { borderRadius: 16, overflow: 'hidden' },
+  submitWrapOff: { opacity: 1 },
+  submitGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
   },
-  submitBtn: {
-    borderRadius: BORDER_RADIUS.xl, overflow: 'hidden',
-    shadowColor: COLORS.accentGreen, shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, shadowRadius: 12, elevation: 6,
+  submitGradMuted: {
+    backgroundColor: 'rgba(51,65,85,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.2)',
   },
-  submitDisabled: { shadowOpacity: 0, elevation: 0 },
-  submitGrad: { paddingVertical: SPACING.lg, alignItems: 'center' },
-  submitText: { fontSize: FONT_SIZE.md, fontWeight: '700', color: COLORS.white },
-  submitTextOff: { color: COLORS.lightTextMuted },
+  submitText: { fontSize: 16, fontWeight: '900', color: '#022C22' },
+  submitTextMuted: { fontSize: 16, fontWeight: '800', color: '#94A3B8' },
 });

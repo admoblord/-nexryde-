@@ -17,11 +17,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { AreaBoySafety, DangerZone, SafetyAlert, DangerReport, useAreaBoySafety } from '@/src/services/areaBoySafety';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 export default function DriverSafetyAlertsScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const { dangerZones, safetyAlerts, loading, fetchDangerZones, fetchSafetyAlerts, reportDanger } = useAreaBoySafety();
   
   const [refreshing, setRefreshing] = useState(false);
@@ -70,8 +70,13 @@ export default function DriverSafetyAlertsScreen() {
       return;
     }
 
+    if (!driverId || !canCallAuthedApi) {
+      Alert.alert('Session', 'Please wait for sign-in to finish, then try again.');
+      return;
+    }
+
     const report: Omit<DangerReport, 'id' | 'timestamp'> = {
-      userId: user?.id || 'user-123',
+      userId: driverId,
       userName: user?.name || 'Driver',
       userRole: 'driver',
       incidentType: reportType,

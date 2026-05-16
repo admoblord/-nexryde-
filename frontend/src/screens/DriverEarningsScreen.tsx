@@ -17,12 +17,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import { getDriverBankDetails, getDriverEarningsDashboard } from '@/src/services/api';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 type Period = 'today' | 'week' | 'month';
 
 export default function DriverEarningsScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(true);
   const tabPad = useTabBottomPad(8);
@@ -33,7 +34,7 @@ export default function DriverEarningsScreen() {
   const [loadError, setLoadError] = useState(false);
 
   const load = useCallback(async () => {
-    if (!user?.id) {
+    if (!driverId || !canCallAuthedApi) {
       setDashboard(null);
       setBankReady(false);
       setLoading(false);
@@ -42,8 +43,8 @@ export default function DriverEarningsScreen() {
     setLoadError(false);
     try {
       const [earningsRes, bankRes] = await Promise.all([
-        getDriverEarningsDashboard(user.id, period),
-        getDriverBankDetails(user.id),
+        getDriverEarningsDashboard(driverId, period),
+        getDriverBankDetails(driverId),
       ]);
       setDashboard(earningsRes.data || null);
       setBankReady(Boolean(bankRes.data?.payout_ready));
@@ -56,11 +57,12 @@ export default function DriverEarningsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [period, user?.id]);
+  }, [period, canCallAuthedApi, driverId]);
 
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!canCallAuthedApi) return;
+    void load();
+  }, [load, canCallAuthedApi]);
 
   const summary = dashboard?.summary || {};
   const averages = dashboard?.averages || {};

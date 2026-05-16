@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react';
 import * as Location from 'expo-location';
 import { useRideRecording } from '@/src/services/rideRecording';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
 
 type TripLike = {
@@ -19,7 +19,7 @@ const ACTIVE_RECORDING_STATUSES = new Set(['accepted', 'arrived', 'ongoing', 'pe
 const STOP_RECORDING_STATUSES = new Set(['completed', 'cancelled', 'pending_payment']);
 
 export function useTripSafetyRecording(trip?: TripLike | null) {
-  const user = useAppStore((s) => s.user);
+  const { userId } = useAuthedUserId();
   const {
     status,
     currentRecording,
@@ -39,7 +39,7 @@ export function useTripSafetyRecording(trip?: TripLike | null) {
     [trip?.status, trip?.payment_status],
   );
   const driverId = String(trip?.driver_id || '').trim();
-  const riderId = String(trip?.rider_id || user?.id || '').trim();
+  const riderId = String(trip?.rider_id || userId || '').trim();
 
   const shouldRecord = useMemo(() => {
     return Boolean(tripId && riderId && driverId && ACTIVE_RECORDING_STATUSES.has(tripNorm));

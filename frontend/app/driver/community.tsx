@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ const SEED_ANNOUNCEMENTS: Msg[] = [
   {
     _id: 'ann_004', group_id: 'nx_announcements', user_id: 'nexryde_admin',
     user_name: 'Nexryde Team', user_role: 'admin',
-    text: '📍 TURN-BY-TURN NAVIGATION is now LIVE — Nexryde gives you real Google Directions voice guidance as you drive. "In 200m, turn left onto Adeola Odeku Street." Better than Bolt, built for Nigerian roads. Enable it from the trip screen.',
+    text: '📍 TURN-BY-TURN NAVIGATION is now LIVE — Nexryde gives you Google Directions voice guidance tuned for Nigerian roads (example: “In 200m, turn left onto Adeola Odeku Street.”). Enable it from the trip screen.',
     likes: 621, replies: 87, is_announcement: true,
     created_at: new Date(Date.now() - 259200000).toISOString(),
   },
@@ -353,7 +353,7 @@ const vbs = StyleSheet.create({
 export default function DriverCommunityScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAppStore();
+  const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const flatRef = useRef<FlatList>(null);
 
   const [groups, setGroups] = useState<CGroup[]>(SEED_GROUPS);
@@ -443,11 +443,11 @@ export default function DriverCommunityScreen() {
   // ─── Send message ────────────────────────────────────────────────────────────
   const sendMessage = async (txt: string = newMsg) => {
     const text = txt.trim();
-    if (!text || !selectedGroup) return;
+    if (!text || !selectedGroup || !driverId || !canCallAuthedApi) return;
     setSending(true);
     const optimistic: Msg = {
       _id: `local_${Date.now()}`, group_id: selectedGroup.group_id,
-      user_id: user?.id ?? 'me', user_name: user?.name ?? 'You',
+      user_id: driverId, user_name: user?.name ?? 'You',
       user_role: user?.role ?? 'driver', text, likes: 0, replies: 0,
       created_at: new Date().toISOString(),
     };
@@ -461,7 +461,7 @@ export default function DriverCommunityScreen() {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          user_id: user?.id ?? 'anonymous',
+          user_id: driverId,
           user_name: user?.name ?? 'Anonymous Driver',
           user_role: user?.role ?? 'driver',
           text,
@@ -482,19 +482,22 @@ export default function DriverCommunityScreen() {
   const likeMsg = (id: string) => {
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setMessages(prev => prev.map(m => m._id === id ? { ...m, likes: m.liked ? m.likes - 1 : m.likes + 1, liked: !m.liked } : m));
-    fetch(`${BACKEND_URL}/api/community/messages/${id}/like`, { method: 'POST' }).catch(() => {});
+    fetch(`${BACKEND_URL}/api/community/messages/${id}/like`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+    }).catch(() => {});
   };
 
   // ─── Create poll ─────────────────────────────────────────────────────────────
   const createPoll = async () => {
-    if (!pollQ.trim() || !selectedGroup) return;
+    if (!pollQ.trim() || !selectedGroup || !driverId || !canCallAuthedApi) return;
     const opts = pollOpts.filter(o => o.trim());
     if (opts.length < 2) { Alert.alert('Need at least 2 options'); return; }
     try {
       const res = await fetch(`${BACKEND_URL}/api/community/groups/${selectedGroup.group_id}/polls`, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.id, user_name: user?.name, question: pollQ.trim(), options: opts, duration_hours: 24 }),
+        body: JSON.stringify({ user_id: driverId, user_name: user?.name, question: pollQ.trim(), options: opts, duration_hours: 24 }),
       });
       const data = await res.json().catch(() => ({}));
       if (data.success) {
@@ -505,6 +508,7 @@ export default function DriverCommunityScreen() {
   };
 
   const voteOnPoll = async (pid: string, idx: number) => {
+    if (!driverId || !canCallAuthedApi) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     setPolls(prev => prev.map(p => {
       if (p.poll_id !== pid) return p;
@@ -516,7 +520,7 @@ export default function DriverCommunityScreen() {
       await fetch(`${BACKEND_URL}/api/community/polls/${pid}/vote`, {
         method: 'POST',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: user?.id, option_index: idx }),
+        body: JSON.stringify({ user_id: driverId, option_index: idx }),
       });
     } catch { }
   };
@@ -556,7 +560,7 @@ export default function DriverCommunityScreen() {
   );
 
   const renderMsg = ({ item }: { item: Msg }) => {
-    const isMe = item.user_id === (user?.id ?? 'me');
+    const isMe = driverId ? item.user_id === driverId : false;
     const isAdmin = item.user_role === 'admin';
     const isAnnouncement = item.is_announcement || isAdmin;
     return (

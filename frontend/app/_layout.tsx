@@ -3,10 +3,11 @@ import 'react-native-get-random-values';
 
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, View, Text, Platform, AppState } from 'react-native';
+import { StyleSheet, View, Text, Platform, useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { COLORS } from '@/src/constants/theme';
+import { DARK_COLORS, LIGHT_COLORS } from '@/src/constants/theme';
+import { bootstrapThemeFromStorage } from '@/src/theme/appearanceTheme';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
@@ -128,6 +129,14 @@ export default function RootLayout() {
   const router = useRouter();
   const { user } = useAppStore();
   const attRequested = useRef(false);
+  const colorScheme = useColorScheme();
+  const isDark = colorScheme === 'dark';
+  const stackBackground = isDark ? DARK_COLORS.background : LIGHT_COLORS.background;
+
+  // Restore last Light / Dark / Auto choice so hooks + StatusBar match immediately after splash
+  useEffect(() => {
+    void bootstrapThemeFromStorage();
+  }, []);
 
   // Request ATT on iOS after first render
   useEffect(() => {
@@ -146,8 +155,8 @@ export default function RootLayout() {
       if (actionKey) {
         const route = ACTION_ROUTES[actionKey];
         if (route) {
-          // Only navigate if a driver is logged in
-          if (user?.role === 'driver' || !user) {
+          // Driver quick actions — only when a driver session is active
+          if (user?.role === 'driver') {
             router.push(route as any);
           }
           return;
@@ -167,7 +176,7 @@ export default function RootLayout() {
       handleUrl(url);
     });
     return () => sub.remove();
-  }, [user?.role]);
+  }, [router, user?.id, user?.role]);
 
   try {
     useNotifications();
@@ -177,12 +186,12 @@ export default function RootLayout() {
           <ErrorBoundary>
             <QueryProvider>
               <LanguageProvider>
-                <StatusBar style="light" />
+                <StatusBar style={isDark ? 'light' : 'dark'} />
                 <OfflineBanner />
                 <Stack
                   screenOptions={{
                     headerShown: false,
-                    contentStyle: { backgroundColor: COLORS.background },
+                    contentStyle: { backgroundColor: stackBackground },
                     // iOS: use native slide animation; Android: slide up from bottom
                     animation: Platform.OS === 'ios' ? 'default' : 'fade_from_bottom',
                     // iOS: gesture-back enabled everywhere

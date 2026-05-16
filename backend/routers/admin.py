@@ -1,4 +1,6 @@
 """Admin Router - All admin panel and management endpoints for NEXRYDE."""
+from __future__ import annotations
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -221,7 +223,9 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
         {"id": rider_id},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "nin": 1,
          "face_image": 1, "profile_image": 1, "face_verified": 1,
-         "nin_verified": 1, "address": 1, "gender": 1, "created_at": 1,
+         "nin_verified": 1, "nin_registry_verified": 1,
+         "face_liveness_score": 1, "face_capture_meta": 1,
+         "address": 1, "gender": 1, "created_at": 1,
          "is_verified": 1, "suspended_until": 1, "blocked": 1,
          "referral_code": 1, "username": 1},
     )
@@ -253,6 +257,7 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
         "is_verified":     rider.get("is_verified"),
         "face_verified":   rider.get("face_verified"),
         "nin_verified":    rider.get("nin_verified"),
+        "nin_registry_verified": rider.get("nin_registry_verified", False),
         "nin":             rider.get("nin"),            # Full NIN for admin
         "nin_masked":      _mask_nin(rider.get("nin")), # Masked for display
         "has_nin":         bool(rider.get("nin")),
@@ -260,6 +265,8 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
         "profile_image":   rider.get("profile_image"),  # Profile photo
         "has_face_image":  bool(rider.get("face_image")),
         "has_profile_image": bool(rider.get("profile_image")),
+        "face_liveness_score": rider.get("face_liveness_score"),
+        "face_capture_meta": rider.get("face_capture_meta"),
         "suspended_until": rider.get("suspended_until"),
         "blocked":         rider.get("blocked", False),
         "referral_code":   rider.get("referral_code"),
@@ -403,6 +410,7 @@ async def admin_get_driver_full_profile(driver_id: str):
             "size_bytes": doc_data.get("size_bytes"),
             "uploaded_at": doc_data.get("uploaded_at"),
             "expiry_date": doc_data.get("expiry_date"),
+            "capture_mode": doc_data.get("capture_mode"),
             "has_data": bool(doc_data.get("data")),
         })
 
@@ -450,6 +458,8 @@ async def admin_get_driver_full_profile(driver_id: str):
         "documents": {
             "total_submitted": len(doc_list),
             "submitted_at": docs.get("submitted_at"),
+            "nin_capture_mode": docs.get("nin_capture_mode"),
+            "nin_number_stored": bool(docs.get("nin_number")),
             "items": doc_list,
         },
         "violations": {
@@ -509,6 +519,7 @@ async def admin_get_all_driver_documents(limit: int = 50, skip: int = 0):
                 "uploaded_at": doc.get("uploaded_at"),
                 "expiry_date": doc.get("expiry_date"),
                 "size_bytes": doc.get("size_bytes"),
+                "capture_mode": doc.get("capture_mode"),
             })
         result.append({
             "driver_id": driver_id,
@@ -1477,6 +1488,17 @@ async def verify_vehicle_registration(registration_id: str, approved: bool = Tru
                 "read": False,
                 "created_at": datetime.utcnow()
             })
+
+            from services.product_notification_email import schedule_notify_user_brevo_email
+
+            vtitle = "Vehicle verification approved" if approved else "Vehicle verification update"
+            schedule_notify_user_brevo_email(
+                driver_id,
+                subject=f"NEXRYDE — {vtitle}",
+                body_plain=message,
+                tags=["nexryde-vehicle-verification", "approved" if approved else "rejected"],
+                respect_notification_channels=False,
+            )
     
     logger.info(f"Vehicle registration {registration_id} {'approved' if approved else 'rejected'}")
     

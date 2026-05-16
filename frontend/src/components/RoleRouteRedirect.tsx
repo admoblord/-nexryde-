@@ -1,8 +1,8 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 type RoleRouteRedirectProps = {
   riderHref: string;
@@ -16,33 +16,22 @@ export default function RoleRouteRedirect({
   fallbackHref = '/(auth)/login',
 }: RoleRouteRedirectProps) {
   const router = useRouter();
+  const storeReady = usePersistStoreReady();
   const user = useAppStore((state) => state.user);
+  const token = useAppStore((state) => state.token);
 
   useEffect(() => {
-    if (!user?.role) {
-      router.replace(fallbackHref);
+    if (!storeReady) return;
+    if (!user?.id || !token) {
+      router.replace(fallbackHref as any);
       return;
     }
-    router.replace(user.role === 'driver' ? driverHref : riderHref);
-  }, [driverHref, fallbackHref, riderHref, router, user?.role]);
+    if (user.role === 'driver') {
+      router.replace(driverHref as any);
+    } else {
+      router.replace(riderHref as any);
+    }
+  }, [storeReady, user?.id, user?.role, token, driverHref, riderHref, fallbackHref, router]);
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.loader}>
-        <ActivityIndicator size="large" color="#22E180" />
-      </View>
-    </SafeAreaView>
-  );
+  return <AuthLoadingGate />;
 }
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0F172A',
-  },
-  loader: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});

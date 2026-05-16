@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 import {
   View,
   Text,
@@ -22,6 +24,7 @@ import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgr
 export default function RegisterScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const canShowAuth = useRedirectIfAuthed();
   
   // Get params - can come from phone OTP or Google auth
   const phone = params.phone as string;
@@ -30,8 +33,11 @@ export default function RegisterScreen() {
   const googlePicture = params.picture as string;
   const googleId = params.google_id as string;
   const authType = params.auth_type as string;
-  
-  const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>('rider');
+  const roleParam = params.role as string | undefined;
+
+  const [selectedRole, setSelectedRole] = useState<'rider' | 'driver'>(() =>
+    roleParam === 'driver' || roleParam === 'rider' ? roleParam : 'rider',
+  );
   const [name, setName] = useState(googleName || '');
   const [email, setEmail] = useState(googleEmail || '');
   const [phoneNumber, setPhoneNumber] = useState(phone || '');
@@ -72,17 +78,32 @@ export default function RegisterScreen() {
     
     const isEmailAuth = authType === 'email';
     if (!isGoogleAuth && !isEmailAuth && !phoneNumber.trim()) {
+      // Phone OTP sign-up path — email-only sign-up uses email + OTP and does not require a line here.
       Alert.alert('Phone required', 'Enter your Nigerian mobile number so we can reach your account.');
       return;
     }
 
+    // Drivers: Nigerian phone is required before terms — account, safety, SMS recovery, and payouts.
+    if (selectedRole === 'driver') {
+      const rawPhone = (phone ? String(phone) : phoneNumber).trim();
+      const np = normalizePhone(rawPhone);
+      if (!/^\+234\d{10}$/.test(np)) {
+        Alert.alert(
+          'Phone required',
+          'Enter a valid Nigerian mobile number (10 digits after +234). This is part of driver registration.',
+        );
+        return;
+      }
+    }
+
     // Navigate to appropriate verification screen based on role
     if (selectedRole === 'driver') {
+      const driverPhone = normalizePhone((phone ? String(phone) : phoneNumber).trim());
       // Drivers must accept Terms & Conditions
       router.push({
         pathname: '/(auth)/driver-terms',
         params: {
-          phone: normalizePhone(phoneNumber),
+          phone: driverPhone,
           name: name,
           email: email || '',
           google_id: googleId || '',
@@ -103,6 +124,10 @@ export default function RegisterScreen() {
       });
     }
   };
+
+  if (!canShowAuth) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>

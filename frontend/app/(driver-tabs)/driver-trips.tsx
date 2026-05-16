@@ -22,6 +22,7 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 function formatEarnings(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
@@ -138,7 +139,8 @@ function PulsingLiveDot() {
 export default function DriverTripsTab() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user, currentTrip } = useAppStore();
+  const { currentTrip } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
 
@@ -149,11 +151,11 @@ export default function DriverTripsTab() {
   const [loadError, setLoadError] = useState(false);
 
   const loadTrips = useCallback(async () => {
-    if (!user?.id) { setLoading(false); return; }
+    if (!driverId || !canCallAuthedApi) { setLoading(false); return; }
     setLoadError(false);
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/trips/user/${user.id}?role=driver`,
+        `${BACKEND_URL}/api/trips/user/${driverId}?role=driver`,
         { headers: getAuthHeaders() },
       );
       if (!res.ok) throw new Error('Failed');
@@ -165,9 +167,12 @@ export default function DriverTripsTab() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [canCallAuthedApi, driverId]);
 
-  useEffect(() => { void loadTrips(); }, [loadTrips]);
+  useEffect(() => {
+    if (!canCallAuthedApi) return;
+    void loadTrips();
+  }, [loadTrips, canCallAuthedApi]);
 
   const onRefresh = () => {
     setRefreshing(true);
@@ -212,10 +217,10 @@ export default function DriverTripsTab() {
         onPress={() => {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           if (active) {
-            router.push('/driver/trips' as any);
+            router.push('/(driver-tabs)/driver-home' as any);
           } else {
             // Show trip detail
-            router.push({ pathname: '/driver/trips' as any });
+            router.push({ pathname: '/(driver-tabs)/driver-home' } as any);
           }
         }}
         activeOpacity={0.88}
@@ -313,7 +318,7 @@ export default function DriverTripsTab() {
             style={styles.manageTripBtn}
             onPress={() => {
               void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-              router.push('/driver/trips' as any);
+              router.push('/(driver-tabs)/driver-home' as any);
             }}
             activeOpacity={0.88}
           >
@@ -331,7 +336,12 @@ export default function DriverTripsTab() {
       {currentTrip?.id && (
         <TouchableOpacity
           style={styles.activeTripBanner}
-          onPress={() => router.push('/driver/trips' as any)}
+          onPress={() =>
+            router.push({
+              pathname: '/(driver-tabs)/driver-home',
+              ...(currentTrip?.id ? { params: { tripId: currentTrip.id } } : {}),
+            } as any)
+          }
           activeOpacity={0.9}
         >
           <LinearGradient colors={['#1E3A5F', '#2563EB']} style={[styles.activeTripGrad, { padding: flow.cardPad }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
@@ -445,7 +455,12 @@ export default function DriverTripsTab() {
         </View>
         <TouchableOpacity
           style={styles.operationsBtn}
-          onPress={() => router.push('/driver/trips' as any)}
+          onPress={() =>
+            router.push({
+              pathname: '/(driver-tabs)/driver-home',
+              ...(currentTrip?.id ? { params: { tripId: currentTrip.id } } : {}),
+            } as any)
+          }
           activeOpacity={0.88}
         >
           <Ionicons name="radio" size={16} color="#2563EB" />

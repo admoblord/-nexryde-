@@ -5,8 +5,8 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 type Badge = {
   icon: string;
@@ -27,16 +27,18 @@ const BADGE_DEFINITIONS: Badge[] = [
 
 export default function BadgesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [badges, setBadges] = useState<Badge[]>(BADGE_DEFINITIONS);
   const [loading, setLoading] = useState(true);
   const [earnedCount, setEarnedCount] = useState(0);
 
   useEffect(() => {
     const loadBadges = async () => {
-      if (!user?.id) { setLoading(false); return; }
+      if (!driverId || !canCallAuthedApi) { setLoading(false); return; }
       try {
-        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/certification`);
+        const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/certification`, {
+          headers: getAuthHeaders(),
+        });
         const data = await res.json();
         const stats = data?.stats || {};
         const trips = Number(stats.total_trips ?? data?.trips_completed ?? user?.total_trips ?? 0);
@@ -60,7 +62,7 @@ export default function BadgesScreen() {
       }
     };
     loadBadges();
-  }, [user?.id]);
+  }, [driverId, canCallAuthedApi, user?.rating, user?.total_trips]);
 
   return (
     <View style={styles.container}>

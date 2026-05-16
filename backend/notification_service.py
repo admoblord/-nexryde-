@@ -25,6 +25,84 @@ EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send"
 _fcm_app_initialized = False
 
 
+def _truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _notification_email_mirror_enabled() -> bool:
+    """Duplicate selected pushes to inbox via Brevo when configured (see ``NOTIFICATION_EMAIL_MIRROR_TRIPS``)."""
+    return _truthy_env("NOTIFICATION_EMAIL_MIRROR")
+
+
+def _mirror_includes_trip_source() -> bool:
+    """Trip/driver-assignment pings are high-volume; opt-in explicitly."""
+    return _truthy_env("NOTIFICATION_EMAIL_MIRROR_TRIPS")
+
+
+def _should_mirror_push_source(source: str) -> bool:
+    if not _notification_email_mirror_enabled():
+        return False
+    s = (source or "trip").strip().lower()
+    if s == "trip" and not _mirror_includes_trip_source():
+        return False
+    return True
+
+
+def _user_allows_notification_email(channels: Any) -> bool:
+    """Matches app default: email on unless user turns it off in notification_channels."""
+    if not isinstance(channels, dict):
+        return True
+    return channels.get("email", True) is not False
+
+
+async def _mirror_push_to_email(
+    user_id: str,
+    recipient: str,
+    title: str,
+    body: str,
+    source: str,
+) -> None:
+    try:
+        from services.brevo_transactional_mail import (
+            BrevoMailError,
+            brevo_is_configured,
+            brevo_send_transactional,
+            brevo_simple_notification_html,
+        )
+
+        if not brevo_is_configured():
+            return
+        subj = (title or "NEXRYDE")[:200]
+        text = f"{title}\n\n{body}" if title else (body or "")
+        tag_src = "".join(c if c.isalnum() else "-" for c in (source or "app")[:48]).strip("-") or "app"
+        await brevo_send_transactional(
+            recipients=[recipient],
+            subject=subj,
+            text_content=text,
+            html_content=brevo_simple_notification_html(title=subj, body_plain=body or ""),
+            tags=["nexryde-push-mirror", tag_src],
+        )
+    except BrevoMailError as exc:
+        logger.debug("Push→email mirror skipped for %s: %s", user_id, exc)
+    except Exception:
+        logger.warning("Push→email mirror failed user=%s", user_id, exc_info=True)
+
+
+def _schedule_push_email_mirror(
+    user_id: str,
+    user: dict[str, Any],
+    title: str,
+    body: str,
+    source: str,
+) -> None:
+    if not _should_mirror_push_source(source):
+        return
+    addr = (user.get("email") or "").strip()
+    if not addr or not _user_allows_notification_email(user.get("notification_channels")):
+        return
+    asyncio.create_task(_mirror_push_to_email(user_id, addr, title, body, source))
+
+
 def _is_expo_token(token: str) -> bool:
     t = (token or "").strip()
     return t.startswith("ExponentPushToken[") or t.startswith("ExpoPushToken")
@@ -222,7 +300,7 @@ async def send_push_notification(
 
     user = await db.users.find_one(
         {"id": user_id},
-        {"push_token": 1, "push_devices": 1},
+        {"push_token": 1, "push_devices": 1, "email": 1, "notification_channels": 1},
     )
     if not user:
         await _record_event(
@@ -235,6 +313,8 @@ async def send_push_notification(
             {"nid": nid, **({"experiment_key": experiment_key} if experiment_key else {}), **({"variant": variant} if variant else {})},
         )
         return False
+
+    _schedule_push_email_mirror(user_id, user, title, body, source)
 
     tokens_todo: list[tuple[str, Optional[str]]] = []
     seen: set[str] = set()

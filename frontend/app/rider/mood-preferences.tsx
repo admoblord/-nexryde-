@@ -7,7 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getAuthHeaders, BACKEND_URL } from '@/src/services/api';
 
 // ── types ─────────────────────────────────────────────────
@@ -76,31 +76,31 @@ const DEFAULT_MOOD: MoodState = {
 // ── component ─────────────────────────────────────────────
 export default function MoodPreferencesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const [mood, setMood] = useState<MoodState>(DEFAULT_MOOD);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const savedAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     void (async () => {
       try {
         const headers = getAuthHeaders();
-        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/preferences`, { headers });
+        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/preferences`, { headers });
         const data = await res.json();
         const saved = data?.ride_mood;
         if (saved) setMood({ ...DEFAULT_MOOD, ...saved });
       } catch { /* use defaults */ }
       finally { setLoading(false); }
     })();
-  }, [user?.id]);
+  }, [riderId, canCallAuthedApi]);
 
   const handleSave = async () => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     setSaving(true);
     try {
-      await fetch(`${BACKEND_URL}/api/users/${user.id}/preferences`, {
+      await fetch(`${BACKEND_URL}/api/users/${riderId}/preferences`, {
         method: 'PUT',
         headers: getAuthHeaders(),
         body: JSON.stringify({ ride_mood: mood }),

@@ -14,6 +14,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import logging
+import asyncio
 
 from database import db
 
@@ -264,6 +265,24 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
         "created_at": datetime.now(timezone.utc).isoformat(),
         "read": False,
     })
+
+    from services.product_notification_email import schedule_notify_user_brevo_email
+
+    vdesc = (config.get("description") or violation_type).strip()
+    body = (
+        f"A policy-related event was recorded on your account.\n\n"
+        f"Type: {vdesc}\n"
+        + (f"Trip: {trip_id}\n\n" if trip_id else "\n")
+        + f"What you need to know:\n{action_result.get('message', '')}\n\n"
+        f"If this looks wrong, reach out via in-app support."
+    ).strip()
+    schedule_notify_user_brevo_email(
+        user_id,
+        subject="Important: NEXRYDE policy notice",
+        body_plain=body,
+        tags=["nexryde-violation", violation_type[:32]],
+        respect_notification_channels=False,
+    )
 
     return action_result
 

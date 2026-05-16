@@ -24,7 +24,16 @@ import * as FileSystem from 'expo-file-system';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RIDER_MAP_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
+import {
+  RiderFindingStatusHero,
+  RiderFindingStrip,
+} from '@/src/components/rider/RiderFindingDriverChrome';
+import { RiderLiveTripDock, RiderLiveTripDockFade } from '@/src/components/rider/RiderLiveTripDock';
+import { RiderFindingTripDock } from '@/src/components/rider/RiderFindingTripDock';
+import { RiderPaymentDock } from '@/src/components/rider/RiderPaymentDock';
+import { AddFavoriteDriverModal } from '@/src/components/rider/AddFavoriteDriverModal';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
   activateInvisibleShieldMode,
@@ -40,7 +49,11 @@ import {
 } from '@/src/services/api';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
-import { riderTripStatusPollIntervalMs, isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
+import {
+  riderTripStatusPollIntervalMs,
+  isRiderMapLiveTripStatus,
+  isRiderMapFirstTripStatus,
+} from '@/src/constants/tripRealtimeRhythm';
 import { useTripSafetyRecording } from '@/src/hooks/useTripSafetyRecording';
 import MapComponent from '@/src/components/MapComponent';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
@@ -70,8 +83,15 @@ function resolveTrackingColorDot(color: string): string {
 
 export default function TrackingScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ tripId?: string; pickup?: string; destination?: string }>();
-  const { user, token, currentTrip, setCurrentTrip } = useAppStore();
+  const params = useLocalSearchParams<{
+    tripId?: string;
+    pickup?: string;
+    destination?: string;
+    fromBook?: string;
+  }>();
+  const fromBookHandoff = params.fromBook === 'true' || params.fromBook === '1';
+  const { currentTrip, setCurrentTrip } = useAppStore();
+  const { user, userId: riderId, token } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
   const [driverInfo, setDriverInfo] = useState<any>(null);
   const [tripStatus, setTripStatus] = useState<string>('pending');
@@ -107,7 +127,9 @@ export default function TrackingScreen() {
   const [checkingFavorite, setCheckingFavorite] = useState(false);
   const [showFavoritePrompt, setShowFavoritePrompt] = useState(false);
   const [addingFavorite, setAddingFavorite] = useState(false);
+  const [acceptedBanner, setAcceptedBanner] = useState(false);
   const favoritePromptShownRef = useRef<string | null>(null);
+  const acceptedBannerShownRef = useRef(false);
   const pickupAlertSentRef = useRef(false);
   const geoFenceAlertShownRef = useRef<string | null>(null);
   const speedSpikeAlertShownRef = useRef<string | null>(null);
@@ -125,8 +147,8 @@ export default function TrackingScreen() {
   const [identityConfirmed, setIdentityConfirmed]   = useState(false);
   const [vehicleLocked, setVehicleLocked]           = useState(false);
   const [riderCurrentCoords, setRiderCurrentCoords] = useState<{ lat: number; lng: number } | null>(null);
-  /** Map-first layout: hide verbose trip intel until the rider expands (calmer, Uber-like hierarchy). */
-  const [uberTripDetailsOpen, setUberTripDetailsOpen] = useState(false);
+  /** Map-first: hide dense trip panels until rider expands trip details. */
+  const [tripDetailsExpanded, setTripDetailsExpanded] = useState(false);
   const identityModalShownRef = useRef<string | null>(null);
   const arrivedPromptShownRef = useRef<string | null>(null);
   const navigateOnce = useCallback(
@@ -156,15 +178,21 @@ export default function TrackingScreen() {
 
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const uberMapFirst =
-    Platform.OS !== 'web' && isRiderMapLiveTripStatus(tripStatus);
-  const uberMapHeight = useMemo(
-    () => Math.min(Math.max(Math.round(flow.height * 0.72), 360), 640),
+  const riderMapFirst = isRiderMapFirstTripStatus(tripStatus);
+  const mapFirstPanelHeight = useMemo(
+    () => Math.min(Math.max(Math.round(flow.height * 0.8), 360), 640),
     [flow.height],
   );
 
-  const showUberTripDetailPanel = !uberMapFirst || uberTripDetailsOpen;
-
+  const showTripDetailsPanel = !riderMapFirst || tripDetailsExpanded;
+  const showMapFirstCriticalAlerts =
+    riderMapFirst &&
+    !tripDetailsExpanded &&
+    Boolean(
+      speedSpikeAlert?.active ||
+        gpsSpoofingAlert?.active ||
+        (safeArrivalCheck?.required && !safeArrivalCheck?.confirmed_at),
+    );
   const riderMapFareDisplay = useMemo(() => {
     const f = currentTrip?.fare;
     if (f == null || !Number.isFinite(Number(f))) return null;
@@ -183,6 +211,19 @@ export default function TrackingScreen() {
     [tripStatus],
   );
 
+  const showStatusCard = !riderMapFirst || showTripDetailsPanel || showMapFirstCriticalAlerts;
+  const showMapFirstFindingDock =
+    riderMapFirst && isFindingDriverPhase && !tripDetailsExpanded && !fromBookHandoff;
+  const showMapFirstPaymentDock =
+    riderMapFirst && tripStatus === 'pending_payment' && !tripDetailsExpanded;
+  const showMapFirstLiveDock =
+    riderMapFirst && isRiderMapLiveTripStatus(tripStatus) && !tripDetailsExpanded;
+  const showMapFirstOverlayDock =
+    showMapFirstFindingDock || showMapFirstPaymentDock || showMapFirstLiveDock;
+  const hideMapFirstScrollPanel = showMapFirstOverlayDock && !tripDetailsExpanded;
+  const mapFirstScrollPadBottom =
+    insets.bottom + (showMapFirstOverlayDock ? (showMapFirstPaymentDock ? 340 : 300) : 220);
+
   /** Short area line for assignment sheet (e.g. neighbourhood, city). */
   const pickupVicinityLabel = useMemo(() => {
     const raw = String(currentTrip?.pickup_location?.address || (params.pickup as string) || '').trim();
@@ -199,7 +240,7 @@ export default function TrackingScreen() {
   }, [driverInfo?.name]);
 
   useEffect(() => {
-    setUberTripDetailsOpen(false);
+    setTripDetailsExpanded(false);
   }, [effectiveTripId]);
 
   useEffect(() => {
@@ -208,8 +249,8 @@ export default function TrackingScreen() {
   }, [effectiveTripId]);
 
   useEffect(() => {
-    if (!uberMapFirst) setUberTripDetailsOpen(false);
-  }, [uberMapFirst]);
+    if (!riderMapFirst) setTripDetailsExpanded(false);
+  }, [riderMapFirst]);
 
   useEffect(() => {
     const active = isRiderMapLiveTripStatus(tripStatus);
@@ -247,11 +288,11 @@ export default function TrackingScreen() {
 
   // Check if this driver is favorited
   const checkIsFavorite = useCallback(async (driverId: string) => {
-    if (!user?.id || !driverId) return;
+    if (!riderId || !driverId) return;
     setCheckingFavorite(true);
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/users/${user.id}/favorite-drivers/${driverId}/check`,
+        `${BACKEND_URL}/api/users/${riderId}/favorite-drivers/${driverId}/check`,
         { headers: getAuthHeaders() }
       );
       if (res.ok) {
@@ -260,15 +301,15 @@ export default function TrackingScreen() {
       }
     } catch { /* silent */ }
     finally { setCheckingFavorite(false); }
-  }, [user?.id]);
+  }, [riderId]);
 
   // Add driver to favorites
   const handleAddFavorite = useCallback(async (driverId: string) => {
-    if (!user?.id || !driverId) return;
+    if (!riderId || !driverId) return;
     setAddingFavorite(true);
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/users/${user.id}/favorite-drivers`,
+        `${BACKEND_URL}/api/users/${riderId}/favorite-drivers`,
         {
           method: 'POST',
           headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
@@ -277,7 +318,9 @@ export default function TrackingScreen() {
       );
       if (res.ok) {
         setIsFavoriteDriver(true);
-        Alert.alert('Added to Favorites', 'You can call this driver after future rides too.');
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
       }
     } catch {
       Alert.alert('Error', 'Could not add driver to favorites.');
@@ -285,7 +328,7 @@ export default function TrackingScreen() {
       setAddingFavorite(false);
       setShowFavoritePrompt(false);
     }
-  }, [user?.id]);
+  }, [riderId]);
   /* ── Rider GPS for auto-confirm ── */
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -495,7 +538,7 @@ export default function TrackingScreen() {
               : 'Live tracking will appear once a driver accepts';
 
   const fetchStatus = useCallback(async () => {
-    if (!effectiveTripId || !user?.id) return;
+    if (!effectiveTripId || !riderId) return;
     try {
       const res = await fetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/status`, {
         headers: getAuthHeaders(),
@@ -579,7 +622,7 @@ export default function TrackingScreen() {
     }
   }, [
     effectiveTripId,
-    user?.id,
+    riderId,
     router,
     securityPromptShown,
     setCurrentTrip,
@@ -689,15 +732,15 @@ export default function TrackingScreen() {
   );
 
   const { connected: riderWsConnected } = useRiderTripRealtime({
-    riderId: user?.id,
+    riderId,
     token,
-    enabled: Boolean(effectiveTripId && user?.id && token),
+    enabled: Boolean(effectiveTripId && riderId && token),
     watchTripId: effectiveTripId || null,
     onTripUpdate: handleTripWs,
   });
 
   useEffect(() => {
-    if (!effectiveTripId || !user?.id) {
+    if (!effectiveTripId || !riderId) {
       setLoading(false);
       return;
     }
@@ -716,7 +759,7 @@ export default function TrackingScreen() {
       mounted = false;
       clearInterval(interval);
     };
-  }, [effectiveTripId, user?.id, fetchStatus, riderWsConnected, tripStatus]);
+  }, [effectiveTripId, riderId, fetchStatus, riderWsConnected, tripStatus]);
 
   // Check favorite status whenever driverInfo.driver_id becomes known
   useEffect(() => {
@@ -739,8 +782,20 @@ export default function TrackingScreen() {
     }
   }, [tripStatus, driverInfo?.driver_id, isFavoriteDriver, effectiveTripId]);
 
+  useEffect(() => {
+    if (!fromBookHandoff || acceptedBannerShownRef.current) return;
+    if (!isRiderMapLiveTripStatus(tripStatus)) return;
+    acceptedBannerShownRef.current = true;
+    setAcceptedBanner(true);
+    if (Platform.OS !== 'web') {
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    }
+    const t = setTimeout(() => setAcceptedBanner(false), 3200);
+    return () => clearTimeout(t);
+  }, [fromBookHandoff, tripStatus]);
+
   const handleCancelRide = async () => {
-    if (!effectiveTripId || !user?.id) return;
+    if (!effectiveTripId || !riderId) return;
     if (['ongoing', 'pending_payment', 'completed', 'cancelled'].includes(tripStatus)) {
       router.back();
       return;
@@ -749,7 +804,7 @@ export default function TrackingScreen() {
       const res = await fetch(`${BACKEND_URL}/api/trips/${effectiveTripId}/cancel`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ cancelled_by: user.id }),
+        body: JSON.stringify({ cancelled_by: riderId }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -778,7 +833,7 @@ export default function TrackingScreen() {
     if (Platform.OS !== 'web') {
       void Haptics.selectionAsync();
     }
-    const openDetails = () => setUberTripDetailsOpen(true);
+    const openDetails = () => setTripDetailsExpanded(true);
     const openShare = () =>
       router.push({ pathname: '/rider/share-trip', params: { tripId: effectiveTripId } } as any);
     const openSupport = () => router.push('/support' as any);
@@ -840,7 +895,7 @@ export default function TrackingScreen() {
   };
 
   const handleSilentDangerMode = async () => {
-    if (!effectiveTripId || !user?.id) return;
+    if (!effectiveTripId || !riderId) return;
     setSilentProtecting(true);
     try {
       const permission = await Location.requestForegroundPermissionsAsync();
@@ -1168,6 +1223,63 @@ export default function TrackingScreen() {
     });
   }, [effectiveTripId, safeArrivalCheck]);
 
+  const paymentChecklist = useMemo(() => {
+    const items: Array<{
+      id: string;
+      label: string;
+      completed: boolean;
+      onPress?: () => void;
+    }> = [];
+    if (financialPaymentPending) {
+      items.push({
+        id: 'pay',
+        label: 'Pay fare or confirm cash with driver',
+        completed: false,
+        onPress: () =>
+          router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any),
+      });
+    }
+    items.push({
+      id: 'rate',
+      label: 'Rate your driver on receipt',
+      completed: tripStatus === 'completed',
+      onPress: () =>
+        router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any),
+    });
+    if (safeArrivalCheck?.required) {
+      items.push({
+        id: 'safe',
+        label: 'Confirm safe arrival',
+        completed: Boolean(safeArrivalCheck?.confirmed_at),
+        onPress: safeArrivalCheck?.confirmed_at ? undefined : () => void handleConfirmSafeArrival(),
+      });
+    }
+    if (invisibleShieldMode?.active && !invisibleShieldMode?.auto_escalated_at) {
+      items.push({
+        id: 'shield',
+        label: 'Confirm safe after shield mode',
+        completed: Boolean(invisibleShieldMode?.confirmed_safe_at),
+        onPress: invisibleShieldMode?.confirmed_safe_at
+          ? undefined
+          : () => void handleConfirmShieldSafe(),
+      });
+    }
+    return items;
+  }, [
+    financialPaymentPending,
+    tripStatus,
+    safeArrivalCheck,
+    invisibleShieldMode,
+    effectiveTripId,
+    router,
+  ]);
+
+  const findingBidNgn = useMemo(() => {
+    const raw = currentTrip as Record<string, unknown> | null;
+    const f = raw?.fare ?? raw?.offered_fare;
+    return Number(f) > 0 ? Math.round(Number(f)) : 0;
+  }, [currentTrip]);
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0F1A" />
@@ -1181,7 +1293,7 @@ export default function TrackingScreen() {
             <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
           </TouchableOpacity>
           <View style={styles.headerTitleWrap}>
-            {uberMapFirst && tripStatus === 'ongoing' ? (
+            {riderMapFirst && tripStatus === 'ongoing' ? (
               <View style={styles.headerWordmarkRow} pointerEvents="none">
                 <Text style={styles.headerWordNex}>NEX</Text>
                 <Text style={styles.headerWordRyde}>RYDE</Text>
@@ -1204,7 +1316,7 @@ export default function TrackingScreen() {
               </Text>
             )}
           </View>
-          {uberMapFirst ? (
+          {riderMapFirst ? (
             <TouchableOpacity
               style={styles.headerMenuBtn}
               onPress={handleRideTripMenu}
@@ -1219,36 +1331,42 @@ export default function TrackingScreen() {
           )}
         </View>
 
+        {acceptedBanner ? (
+          <View
+            style={[styles.acceptedToast, { top: insets.top + 52 }]}
+            pointerEvents="none"
+            accessibilityLiveRegion="polite"
+          >
+            <LinearGradient
+              colors={['#064E3B', '#047857']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.acceptedToastGrad}
+            >
+              <Ionicons name="checkmark-circle" size={22} color="#6EE7B7" />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.acceptedToastTitle}>Trip accepted</Text>
+                <Text style={styles.acceptedToastSub} numberOfLines={1}>
+                  {rideAcceptedSubtitle}
+                </Text>
+              </View>
+            </LinearGradient>
+          </View>
+        ) : null}
+
         <View
           style={[
             styles.content,
-            { paddingHorizontal: uberMapFirst ? 0 : flow.padH },
-            uberMapFirst && styles.contentUber,
+            { paddingHorizontal: riderMapFirst ? 0 : flow.padH },
+            riderMapFirst && styles.mapFirstContentWrap,
           ]}
         >
-          {!uberMapFirst && isFindingDriverPhase ? (
-            <View style={styles.findingStrip}>
-              <LinearGradient
-                colors={['rgba(0,208,132,0.22)', 'rgba(0,208,132,0.04)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.findingStripGrad}
-              >
-                <View style={styles.findingStripRow}>
-                  <View style={styles.findingStripDot} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.findingStripTitle}>Matching drivers nearby</Text>
-                    <Text style={styles.findingStripSub} numberOfLines={1}>
-                      {pickupVicinityLabel || 'Your request is live'}
-                    </Text>
-                  </View>
-                  <View style={styles.findingStripPill}>
-                    <Text style={styles.findingStripPillText}>LIVE</Text>
-                  </View>
-                </View>
-              </LinearGradient>
-            </View>
-          ) : !uberMapFirst ? (
+          {!riderMapFirst && isFindingDriverPhase ? (
+            <RiderFindingStrip
+              title="Finding your driver"
+              subtitle={pickupVicinityLabel || 'Your request is live · usually under 2 min'}
+            />
+          ) : !riderMapFirst ? (
             <View style={styles.liveTripHero}>
               <View style={styles.liveTripHeroLeft}>
                 <Text style={styles.liveTripHeroTitle}>Trip Intelligence</Text>
@@ -1295,9 +1413,9 @@ export default function TrackingScreen() {
                 return (
                   <View
                     style={
-                      uberMapFirst
+                      riderMapFirst
                         ? {
-                            height: uberMapHeight,
+                            height: mapFirstPanelHeight,
                             width: '100%',
                             marginBottom: SPACING.sm,
                             paddingHorizontal: Math.max(SPACING.sm, Math.round(flow.padH * 0.85)),
@@ -1330,7 +1448,9 @@ export default function TrackingScreen() {
                               : null,
                       }}
                       tripStatus={tripStatus}
-                      embedded={uberMapFirst}
+                      embedded={riderMapFirst}
+                      /** Map-first tracking uses `RiderLiveTripDock` only — never stack RideMap's embedded assignment sheet. */
+                      suppressDriverOverlay={riderMapFirst}
                       vehicleColor={driverInfo?.color ?? null}
                       onCallDriver={handleCallDriverPress}
                       onChatDriver={() =>
@@ -1374,24 +1494,26 @@ export default function TrackingScreen() {
           )}
 
           <ScrollView
-            style={uberMapFirst ? { flex: 1 } : undefined}
-            scrollEnabled
+            style={riderMapFirst ? { flex: hideMapFirstScrollPanel ? 0 : 1 } : undefined}
+            scrollEnabled={!hideMapFirstScrollPanel}
             nestedScrollEnabled
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={{
               paddingHorizontal: flow.padH,
-              flexGrow: 1,
+              flexGrow: hideMapFirstScrollPanel ? 0 : 1,
               maxWidth: flow.maxContentWidth,
               alignSelf: 'center',
               width: '100%',
-              paddingBottom: uberMapFirst ? insets.bottom + 220 : SPACING.md,
-              paddingTop: uberMapFirst ? SPACING.xs : 0,
+              paddingBottom: riderMapFirst ? mapFirstScrollPadBottom : SPACING.md,
+              paddingTop: riderMapFirst && !hideMapFirstScrollPanel ? SPACING.xs : 0,
               gap: Math.round(flow.sectionGap * 0.35),
             }}
           >
+          {!hideMapFirstScrollPanel ? (
+          <>
           {/* ── DRIVER IDENTITY CARD (accepted + arrived) — below map on non–map-first layout ── */}
-          {!uberMapFirst && (tripStatus === 'accepted' || tripStatus === 'arrived') && driverInfo && (
+          {!riderMapFirst && (tripStatus === 'accepted' || tripStatus === 'arrived') && driverInfo && (
             <View style={[styles.identityCard, tripStatus === 'arrived' && styles.identityCardArrived]}>
               {/* Row: avatar + info */}
               <View style={styles.identityRow}>
@@ -1491,12 +1613,13 @@ export default function TrackingScreen() {
             </View>
           )}
 
-          {/* Status Card — map-first: critical alerts + compact strip; full intel behind "Trip details" */}
+          {/* Status Card — map-first: critical alerts only until expanded; full intel in trip details */}
+          {showStatusCard ? (
           <View
             style={[
               styles.statusCard,
-              uberMapFirst && styles.statusCardUber,
-              isFindingDriverPhase && !uberMapFirst && styles.statusCardFinding,
+              riderMapFirst && styles.mapFirstStatusCardWrap,
+              isFindingDriverPhase && styles.statusCardFinding,
             ]}
           >
             {speedSpikeAlert?.active ? (
@@ -1553,86 +1676,14 @@ export default function TrackingScreen() {
               </View>
             ) : null}
 
-            {uberMapFirst && !uberTripDetailsOpen ? (
-              <View style={styles.uberQuietWrap}>
-                {loading ? (
-                  <View style={styles.uberQuietLoading}>
-                    <ActivityIndicator size="small" color={COLORS.accentGreen} />
-                    <Text style={styles.uberQuietLoadingText}>Updating trip…</Text>
-                  </View>
-                ) : null}
-                {!loading && (tripStatus === 'arrived' || (tripStatus === 'accepted' && !identityConfirmed)) ? (
-                  <View style={styles.uberPrimaryActions}>
-                    {tripStatus === 'arrived' ? (
-                      <TouchableOpacity
-                        style={styles.uberPrimaryCtaShell}
-                        onPress={() =>
-                          router.push({ pathname: '/rider/security-code', params: { trip_id: effectiveTripId } } as any)
-                        }
-                        activeOpacity={0.9}
-                      >
-                        <LinearGradient
-                          colors={[...RIDER_MAP_PRIMARY_CTA_GRADIENT]}
-                          start={{ x: 0, y: 0 }}
-                          end={{ x: 1, y: 1 }}
-                          style={styles.uberPrimaryCta}
-                        >
-                          <Ionicons name="keypad" size={20} color="#022C22" />
-                          <Text style={styles.uberPrimaryCtaText}>Show pickup code</Text>
-                        </LinearGradient>
-                      </TouchableOpacity>
-                    ) : null}
-                    {tripStatus === 'accepted' && !identityConfirmed ? (
-                      <TouchableOpacity
-                        style={styles.uberSecondaryCta}
-                        onPress={() => setShowIdentityModal(true)}
-                        activeOpacity={0.88}
-                      >
-                        <Ionicons name="shield-checkmark-outline" size={18} color="#38BDF8" />
-                        <Text style={styles.uberSecondaryCtaText}>Verify driver before pickup</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-                ) : null}
-                {driverLocation && !loading ? (
-                  <View style={styles.uberLivePill}>
-                    <Ionicons
-                      name={driverInfo?.is_moving ? 'navigate' : 'pause-circle'}
-                      size={15}
-                      color={driverInfo?.is_moving ? COLORS.success : COLORS.warning}
-                    />
-                    <Text style={styles.uberLivePillText}>
-                      {driverInfo?.is_moving ? 'Live · Moving toward you' : 'Live · Driver paused'}
-                    </Text>
-                  </View>
-                ) : null}
-                <TouchableOpacity
-                  style={styles.uberDetailsToggle}
-                  onPress={() => setUberTripDetailsOpen(true)}
-                  activeOpacity={0.88}
-                >
-                  <Ionicons name="reader-outline" size={22} color="#94A3B8" />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.uberDetailsToggleTitle}>Trip details</Text>
-                    <Text style={styles.uberDetailsToggleSub}>Safety & tools</Text>
-                  </View>
-                  <Ionicons name="chevron-down" size={22} color="#64748B" />
-                </TouchableOpacity>
-              </View>
-            ) : null}
-
-            {showUberTripDetailPanel ? (
+            {showTripDetailsPanel ? (
               <>
-            <View style={styles.loadingContainer}>
-              {isFindingDriverPhase && !uberMapFirst ? (
-                <View style={styles.findingRingWrap}>
-                  <View style={styles.findingRing}>
-                    <ActivityIndicator size="large" color={COLORS.accentGreen} />
-                  </View>
-                </View>
+            <View style={isFindingDriverPhase && !riderMapFirst ? styles.findingHeroSlot : styles.loadingContainer}>
+              {isFindingDriverPhase && !riderMapFirst ? (
+                <RiderFindingStatusHero />
               ) : loading ? (
                 <ActivityIndicator size="large" color={COLORS.accentGreen} />
-              ) : !uberMapFirst ? (
+              ) : !riderMapFirst ? (
                 <Ionicons
                   name={
                     tripStatus === 'accepted'
@@ -1654,7 +1705,7 @@ export default function TrackingScreen() {
                 <View style={{ height: 4 }} />
               )}
             </View>
-            {!uberMapFirst && (
+            {!riderMapFirst && (
               <>
                 <Text style={styles.statusTitle}>
                   {isFindingDriverPhase
@@ -1830,7 +1881,7 @@ export default function TrackingScreen() {
             )}
 
             {/* Route Info — sticky dock shows this for map-first active trips */}
-            {!uberMapFirst && (
+            {!riderMapFirst && (
               <View style={styles.routeInfo}>
                 <View style={styles.routePoint}>
                   <View style={[styles.routeDot, { backgroundColor: COLORS.accentGreen }]} />
@@ -1843,19 +1894,20 @@ export default function TrackingScreen() {
                 </View>
               </View>
             )}
-            {uberMapFirst && uberTripDetailsOpen ? (
+            {riderMapFirst && tripDetailsExpanded ? (
               <TouchableOpacity
-                style={styles.uberDetailsCloseRow}
-                onPress={() => setUberTripDetailsOpen(false)}
+                style={styles.tripDetailsCloseRow}
+                onPress={() => setTripDetailsExpanded(false)}
                 activeOpacity={0.85}
               >
-                <Text style={styles.uberDetailsCloseText}>Hide trip details</Text>
+                <Text style={styles.tripDetailsCloseText}>Hide trip details</Text>
                 <Ionicons name="chevron-up" size={18} color="#94A3B8" />
               </TouchableOpacity>
             ) : null}
               </>
             ) : null}
           </View>
+          ) : null}
 
           {guardianAlert?.active && (
             <View style={styles.guardianCard}>
@@ -1894,11 +1946,11 @@ export default function TrackingScreen() {
               tripStatus === 'arrived' ||
               tripStatus === 'ongoing' ||
               tripStatus === 'pending_payment') &&
-            showUberTripDetailPanel && (
+            showTripDetailsPanel && (
             <>
               <View style={styles.actionsCard}>
                 {/* Call/chat live on map overlay when using map-first layout */}
-                {!uberMapFirst && (
+                {!riderMapFirst && (
                   <>
                     <TouchableOpacity
                       style={styles.actionBtn}
@@ -2092,250 +2144,110 @@ export default function TrackingScreen() {
               )}
             </>
           )}
-          </ScrollView>
-
-          {uberMapFirst ? (
-            <View
-              pointerEvents="box-none"
-              style={[
-                styles.uberStickyDock,
-                {
-                  paddingBottom: Math.max(insets.bottom, 12),
-                },
-              ]}
-            >
-              <View style={styles.uberStickyDockInner}>
-                {(tripStatus === 'accepted' || tripStatus === 'arrived') && driverInfo ? (
-                  <>
-                    <View style={styles.uberDockBrandRow}>
-                      <View style={styles.uberDockLogo}>
-                        <Text style={styles.uberDockLogoTxt}>NX</Text>
-                      </View>
-                      <Text style={styles.uberDockBrand}>NEXRYDE</Text>
-                      <View style={{ flex: 1 }} />
-                      <View style={styles.uberDockLivePill}>
-                        <View style={styles.uberDockLiveDot} />
-                        <Text style={styles.uberDockLiveTxt}>LIVE</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.uberDockHeroGreen}>
-                      {tripStatus === 'accepted' ? 'Your driver is on the way!' : 'Your driver has arrived'}
-                    </Text>
-                    <Text style={styles.uberDockSubMuted}>
-                      {tripStatus === 'accepted' && driverPickupApproach
-                        ? `ETA ~${driverPickupApproach.min} min · ${
-                            driverPickupApproach.km < 1
-                              ? `${Math.round(driverPickupApproach.meters)} m`
-                              : `${driverPickupApproach.km.toFixed(1)} km`
-                          } away`
-                        : tripStatus === 'arrived'
-                          ? 'Meet your driver at the pickup pin and confirm the vehicle.'
-                          : rideAcceptedSubtitle}
-                    </Text>
-                    <View style={styles.uberDriverHeroCard}>
-                      {driverInfo.profile_image || driverInfo.face_image ? (
-                        <Image
-                          source={{ uri: driverInfo.profile_image || driverInfo.face_image }}
-                          style={styles.uberDriverHeroAvatar}
-                        />
-                      ) : (
-                        <View style={styles.uberDriverHeroAvatarPh}>
-                          <Text style={styles.uberDriverHeroAvatarLetter}>
-                            {(driverInfo.name || 'D').charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-                      )}
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={styles.uberDriverHeroName} numberOfLines={1}>
-                          {driverInfo.name || 'Your driver'}
-                        </Text>
-                        <Text style={styles.uberDriverHeroVehicle} numberOfLines={2}>
-                          {`${driverInfo.vehicle || 'Vehicle'}${
-                            driverInfo.color ? ` · ${driverInfo.color}` : ''
-                          }${driverInfo.plate ? ` · ${driverInfo.plate}` : ''}`}
-                        </Text>
-                        <View style={styles.uberDriverHeroRate}>
-                          <Ionicons name="star" size={14} color="#FBBF24" />
-                          <Text style={styles.uberDriverHeroRateTxt}>
-                            {Number(driverInfo.rating ?? driverInfo.avg_rating ?? 0).toFixed(1)}
-                            {typeof driverInfo.total_trips === 'number' && driverInfo.total_trips > 0
-                              ? ` · ${Number(driverInfo.total_trips).toLocaleString()} rides`
-                              : ''}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                    <View style={styles.uberMetricsGrid}>
-                      <View style={styles.uberMetricCell}>
-                        <Text style={styles.uberMetricK}>Agreed fare</Text>
-                        <Text style={styles.uberMetricVGreen}>
-                          {riderMapFareDisplay ?? '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.uberMetricCell}>
-                        <Text style={styles.uberMetricK}>Distance</Text>
-                        <Text style={styles.uberMetricV}>
-                          {currentTrip?.distance_km != null
-                            ? `${Number(currentTrip.distance_km).toFixed(1)} km`
-                            : '—'}
-                        </Text>
-                      </View>
-                      <View style={styles.uberMetricCell}>
-                        <Text style={styles.uberMetricK}>Trip ETA</Text>
-                        <Text style={styles.uberMetricV}>
-                          {directionsEtaMin != null
-                            ? `~${directionsEtaMin} min`
-                            : currentTrip?.duration_mins != null
-                              ? `~${Math.round(Number(currentTrip.duration_mins))} min`
-                              : '—'}
-                        </Text>
-                      </View>
-                    </View>
-                    <View style={styles.uberCommRow}>
-                      <TouchableOpacity
-                        style={[
-                          styles.uberCommBtn,
-                          !(callAllowed && driverInfo?.phone) && styles.uberCommBtnMuted,
-                        ]}
-                        onPress={handleCallDriverPress}
-                        activeOpacity={0.88}
-                      >
-                        <Ionicons
-                          name="call"
-                          size={22}
-                          color={callAllowed && driverInfo?.phone ? '#022C22' : '#94A3B8'}
-                        />
-                        <Text
-                          style={[
-                            styles.uberCommBtnTxt,
-                            !(callAllowed && driverInfo?.phone) && styles.uberCommBtnTxtMuted,
-                          ]}
-                        >
-                          Call
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.uberCommBtn}
-                        onPress={() =>
-                          router.push({ pathname: '/chat', params: { tripId: effectiveTripId } } as any)
-                        }
-                        activeOpacity={0.88}
-                      >
-                        <Ionicons name="chatbubble-ellipses" size={22} color="#022C22" />
-                        <Text style={styles.uberCommBtnTxt}>Message</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <Text style={styles.uberStickyHeadline}>
-                      {tripStatus === 'accepted'
-                        ? `${driverInfo?.name || 'Your driver'} accepted your ride`
-                        : tripStatus === 'arrived'
-                          ? `${driverInfo?.name || 'Your driver'} has arrived`
-                          : tripStatus === 'ongoing'
-                            ? 'Ride in progress'
-                            : tripStatus === 'pending_payment'
-                              ? financialPaymentPending
-                                ? 'Pay for this trip'
-                                : 'Safety confirmation'
-                              : 'Ride update'}
-                    </Text>
-                    {(tripStatus === 'accepted' ||
-                      tripStatus === 'arrived' ||
-                      tripStatus === 'ongoing') &&
-                    driverInfo?.vehicle ? (
-                      <Text style={styles.uberStickyVehicle} numberOfLines={2}>
-                        {`${driverInfo.vehicle}${driverInfo.color ? `, ${driverInfo.color}` : ''}${
-                          driverInfo.plate ? ` · ${driverInfo.plate}` : ''
-                        }`}
-                      </Text>
-                    ) : tripStatus === 'pending_payment' ? (
-                      <Text style={styles.uberStickyVehicle} numberOfLines={4}>
-                        {financialPaymentPending
-                          ? 'Use cash with your driver or open Wallet / trip receipt to pay in-app.'
-                          : 'Finish the quick safety prompts so we can close your trip in the app.'}
-                      </Text>
-                    ) : null}
-                    {tripStatus === 'pending_payment' && financialPaymentPending ? (
-                      <TouchableOpacity
-                        style={styles.uberPayWideCta}
-                        onPress={() =>
-                          router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
-                        }
-                        activeOpacity={0.9}
-                        accessibilityRole="button"
-                        accessibilityLabel="Open trip receipt and complete payment"
-                      >
-                        <Ionicons name="wallet-outline" size={22} color="#022C22" />
-                        <Text style={styles.uberPayWideCtaTxt}>Open receipt & pay</Text>
-                      </TouchableOpacity>
-                    ) : null}
-                  </>
-                )}
-                <View style={styles.uberRouteBrief}>
-                  <View style={styles.uberRouteBriefRow}>
-                    <View style={[styles.uberRouteDot, { backgroundColor: COLORS.accentGreen }]} />
-                    <Text style={styles.uberRouteBriefText} numberOfLines={2}>
-                      {(params.pickup as string) ||
-                        currentTrip?.pickup_location?.address ||
-                        'Your pickup'}
-                    </Text>
-                  </View>
-                  <View style={styles.uberRouteBriefLine} />
-                  <View style={styles.uberRouteBriefRow}>
-                    <View style={[styles.uberRouteDot, { backgroundColor: COLORS.accentBlue }]} />
-                    <Text style={styles.uberRouteBriefText} numberOfLines={2}>
-                      {(params.destination as string) ||
-                        currentTrip?.dropoff_location?.address ||
-                        'Destination'}
-                    </Text>
-                  </View>
-                </View>
-                <View style={styles.uberEcosystemRow}>
-                  <TouchableOpacity
-                    style={styles.uberEcoLink}
-                    onPress={() => router.push('/support' as any)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="headset-outline" size={17} color="#94A3B8" />
-                    <Text style={styles.uberEcoLinkText}>Help</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.uberEcoLink}
-                    onPress={() => router.push('/rider/wallet' as any)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="wallet-outline" size={17} color="#94A3B8" />
-                    <Text style={styles.uberEcoLinkText}>Wallet</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={styles.uberEcoLink}
-                    onPress={() => router.push('/rider/share-trip' as any)}
-                    activeOpacity={0.85}
-                  >
-                    <Ionicons name="share-outline" size={17} color="#94A3B8" />
-                    <Text style={styles.uberEcoLinkText}>Share</Text>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity
-                  style={styles.uberCancelOutline}
-                  onPress={handleCancelRide}
-                  activeOpacity={0.88}
-                >
-                  <Text style={styles.uberCancelOutlineText}>
-                    {['ongoing', 'pending_payment', 'completed', 'cancelled'].includes(tripStatus)
-                      ? 'Close tracking'
-                      : 'Cancel ride'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </View>
+          </>
           ) : null}
+          </ScrollView>
         </View>
 
-        {/* Cancel — hidden when sticky dock is shown */}
-        {!uberMapFirst && (
+        {showMapFirstOverlayDock ? (
+          <>
+            <RiderLiveTripDockFade height={Math.min(280, mapFirstScrollPadBottom)} />
+            {showMapFirstFindingDock ? (
+              <RiderFindingTripDock
+                loading={loading}
+                pickupVicinityLabel={pickupVicinityLabel}
+                bidNgn={findingBidNgn}
+                routeKmLabel={
+                  currentTrip?.distance_km != null
+                    ? `${Number(currentTrip.distance_km).toFixed(1)} km`
+                    : null
+                }
+                routeMinLabel={
+                  directionsEtaMin != null
+                    ? `~${directionsEtaMin} min`
+                    : currentTrip?.duration_mins != null
+                      ? `~${Math.round(Number(currentTrip.duration_mins))} min`
+                      : null
+                }
+                onCancel={() => void handleCancelRide()}
+                bottomInset={insets.bottom}
+              />
+            ) : null}
+            {showMapFirstPaymentDock ? (
+              <RiderPaymentDock
+                loading={loading}
+                fareDisplay={riderMapFareDisplay}
+                financialPaymentPending={financialPaymentPending}
+                paymentStatus={paymentStatus}
+                checklist={paymentChecklist}
+                onPay={() =>
+                  router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
+                }
+                onOpenReceipt={() =>
+                  router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
+                }
+                onClose={() => void handleCancelRide()}
+                onOpenTripDetails={() => setTripDetailsExpanded(true)}
+                bottomInset={insets.bottom}
+              />
+            ) : null}
+            {showMapFirstLiveDock ? (
+            <RiderLiveTripDock
+              tripStatus={tripStatus}
+              loading={loading}
+              driverInfo={driverInfo}
+              driverPickupApproach={driverPickupApproach}
+              riderProfileImage={user?.profile_image ?? null}
+              riderDisplayName={user?.name ?? null}
+              identityConfirmed={identityConfirmed}
+              driverLocation={driverLocation}
+              driverMoving={Boolean(driverInfo?.is_moving)}
+              fareDisplay={riderMapFareDisplay}
+              distanceKm={currentTrip?.distance_km ?? null}
+              etaMin={directionsEtaMin}
+              durationMins={currentTrip?.duration_mins ?? null}
+              pickupLabel={
+                (params.pickup as string) ||
+                currentTrip?.pickup_location?.address ||
+                'Your pickup'
+              }
+              destinationLabel={
+                (params.destination as string) ||
+                currentTrip?.dropoff_location?.address ||
+                'Destination'
+              }
+              callAllowed={callAllowed}
+              onCallDriver={handleCallDriverPress}
+              onChatDriver={() =>
+                router.push({ pathname: '/chat', params: { tripId: effectiveTripId } } as any)
+              }
+              onShowPickupCode={() =>
+                router.push({
+                  pathname: '/rider/security-code',
+                  params: { trip_id: effectiveTripId },
+                } as any)
+              }
+              onVerifyIdentity={() => setShowIdentityModal(true)}
+              onOpenTripDetails={() => setTripDetailsExpanded(true)}
+              onCancelRide={() => void handleCancelRide()}
+              onHelp={() => router.push('/support' as any)}
+              onWallet={() => router.push('/(rider-tabs)/rider-wallet' as any)}
+              onShare={() => router.push('/rider/share-trip' as any)}
+              bottomInset={insets.bottom}
+              isFavoriteDriver={isFavoriteDriver}
+              favoriteLoading={addingFavorite || checkingFavorite}
+              onToggleFavorite={
+                driverInfo?.driver_id && !isFavoriteDriver
+                  ? () => setShowFavoritePrompt(true)
+                  : undefined
+              }
+            />
+            ) : null}
+          </>
+        ) : null}
+
+        {/* Cancel — hidden when map-first dock is shown */}
+        {!riderMapFirst && (
           <View style={styles.bottomContainer}>
             <TouchableOpacity
               style={[styles.cancelButton, isFindingDriverPhase && styles.cancelButtonFinding]}
@@ -2389,88 +2301,19 @@ export default function TrackingScreen() {
         onClose={() => setShowMismatchModal(false)}
       />
 
-      {/* ── Favorite Driver Prompt Modal ── */}
-      <Modal
+      <AddFavoriteDriverModal
         visible={showFavoritePrompt}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowFavoritePrompt(false)}
-      >
-        <View style={favStyles.overlay}>
-          <View style={favStyles.card}>
-            <View style={favStyles.iconWrap}>
-              <Ionicons name="star" size={36} color="#f59e0b" />
-            </View>
-            <Text style={favStyles.title}>Add driver to favorites?</Text>
-            <Text style={favStyles.body}>
-              {driverInfo?.name ? `${driverInfo.name} drove you safely.` : 'Your driver drove you safely.'}{'\n'}
-              Favorite them to keep calling after future rides.
-            </Text>
-            <View style={favStyles.row}>
-              <TouchableOpacity
-                style={[favStyles.btn, favStyles.btnOutline]}
-                onPress={() => setShowFavoritePrompt(false)}
-              >
-                <Text style={favStyles.btnOutlineText}>Not now</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[favStyles.btn, favStyles.btnPrimary, addingFavorite && { opacity: 0.7 }]}
-                onPress={() => void handleAddFavorite(driverInfo?.driver_id || '')}
-                disabled={addingFavorite}
-              >
-                {addingFavorite ? (
-                  <ActivityIndicator size="small" color="#fff" />
-                ) : (
-                  <Text style={favStyles.btnPrimaryText}>Yes, add favorite</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        driverName={driverInfo?.name}
+        driverVehicle={driverInfo?.vehicle}
+        driverPlate={driverInfo?.plate}
+        profileImage={driverInfo?.profile_image || driverInfo?.face_image}
+        saving={addingFavorite}
+        onDismiss={() => setShowFavoritePrompt(false)}
+        onAdd={() => void handleAddFavorite(driverInfo?.driver_id || '')}
+      />
     </View>
   );
 }
-
-const favStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  card: {
-    backgroundColor: '#fff',
-    borderRadius: 20,
-    padding: 28,
-    alignItems: 'center',
-    width: '100%',
-    maxWidth: 340,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.15,
-    shadowRadius: 20,
-    elevation: 12,
-  },
-  iconWrap: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#fef3c7',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-  },
-  title: { fontSize: 18, fontWeight: '800', color: '#0f172a', marginBottom: 8, textAlign: 'center' },
-  body: { fontSize: 14, color: '#475569', textAlign: 'center', lineHeight: 20, marginBottom: 20 },
-  row: { flexDirection: 'row', gap: 12, width: '100%' },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  btnOutline: { borderWidth: 2, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
-  btnOutlineText: { fontSize: 14, fontWeight: '700', color: '#64748b' },
-  btnPrimary: { backgroundColor: '#f59e0b' },
-  btnPrimaryText: { fontSize: 14, fontWeight: '800', color: '#fff' },
-});
 
 const styles = StyleSheet.create({
   container: {
@@ -2479,6 +2322,38 @@ const styles = StyleSheet.create({
   },
   safeArea: {
     flex: 1,
+  },
+  acceptedToast: {
+    position: 'absolute',
+    left: SPACING.md,
+    right: SPACING.md,
+    zIndex: 40,
+    borderRadius: BORDER_RADIUS.lg,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(110,231,183,0.35)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  acceptedToastGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    paddingVertical: SPACING.sm + 2,
+    paddingHorizontal: SPACING.md,
+  },
+  acceptedToastTitle: {
+    color: '#ECFDF5',
+    fontSize: FONT_SIZE.md,
+    fontWeight: '800',
+  },
+  acceptedToastSub: {
+    color: 'rgba(236,253,245,0.85)',
+    fontSize: FONT_SIZE.sm,
+    marginTop: 2,
   },
   header: {
     flexDirection: 'row',
@@ -2541,14 +2416,14 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
-  contentUber: {
+  mapFirstContentWrap: {
     paddingHorizontal: 0,
   },
-  uberLiveStripOuter: {
+  tripLiveStripOuter: {
     paddingHorizontal: SPACING.lg,
     marginBottom: SPACING.xs,
   },
-  uberLiveStrip: {
+  tripLiveStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
@@ -2559,14 +2434,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.sm,
   },
-  uberLiveStripText: {
+  tripLiveStripText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
     color: '#E2E8F0',
     letterSpacing: -0.2,
   },
-  uberLiveChip: {
+  tripLiveChip: {
     flexDirection: 'row',
     alignItems: 'center',
     borderRadius: BORDER_RADIUS.full,
@@ -2576,45 +2451,66 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.sm,
     paddingVertical: 5,
   },
-  uberLiveChipText: {
+  tripLiveChipText: {
     fontSize: FONT_SIZE.xs,
     fontWeight: '900',
     color: '#22E5A0',
     letterSpacing: 0.5,
   },
-  statusCardUber: {
+  mapFirstStatusCardWrap: {
     paddingVertical: SPACING.md,
     paddingHorizontal: SPACING.md,
     alignItems: 'stretch',
   },
-  uberQuietWrap: {
+  tripQuietWrap: {
     width: '100%',
     gap: SPACING.md,
     marginTop: SPACING.xs,
   },
-  uberQuietLoading: {
+  tripFindingDock: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: SPACING.sm,
+    gap: 6,
+  },
+  tripFindingTitle: {
+    fontSize: FONT_SIZE.md,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    textAlign: 'center',
+    letterSpacing: -0.2,
+  },
+  tripFindingSub: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 20,
+    paddingHorizontal: SPACING.sm,
+  },
+  tripQuietLoading: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: SPACING.sm,
     paddingVertical: SPACING.sm,
   },
-  uberQuietLoadingText: {
+  tripQuietLoadingText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '700',
     color: 'rgba(248,250,252,0.75)',
   },
-  uberPrimaryActions: {
+  tripPrimaryActions: {
     width: '100%',
     gap: SPACING.sm,
   },
-  uberPrimaryCtaShell: {
+  tripPrimaryCtaShell: {
     borderRadius: BORDER_RADIUS.xxl,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(0,212,106,0.42)',
   },
-  uberPrimaryCta: {
+  tripPrimaryCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2622,13 +2518,13 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: SPACING.md,
   },
-  uberPrimaryCtaText: {
+  tripPrimaryCtaText: {
     fontSize: FONT_SIZE.md,
     fontWeight: '900',
     color: '#022C22',
     letterSpacing: -0.2,
   },
-  uberSecondaryCta: {
+  tripSecondaryCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2639,13 +2535,13 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(56,189,248,0.45)',
     backgroundColor: 'rgba(56,189,248,0.1)',
   },
-  uberSecondaryCtaText: {
+  tripSecondaryCtaText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
     color: '#38BDF8',
     textAlign: 'center',
   },
-  uberLivePill: {
+  tripLivePill: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'flex-start',
@@ -2657,12 +2553,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  uberLivePillText: {
+  tripLivePillText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
     color: '#E2E8F0',
   },
-  uberDetailsToggle: {
+  tripDetailsToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     width: '100%',
@@ -2673,20 +2569,20 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
   },
-  uberDetailsToggleTitle: {
+  tripDetailsToggleTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '900',
     color: '#F8FAFC',
     letterSpacing: -0.3,
   },
-  uberDetailsToggleSub: {
+  tripDetailsToggleSub: {
     marginTop: 2,
     fontSize: FONT_SIZE.xs,
     fontWeight: '600',
     color: 'rgba(148,163,184,0.95)',
     lineHeight: 16,
   },
-  uberDetailsCloseRow: {
+  tripDetailsCloseRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2694,18 +2590,18 @@ const styles = StyleSheet.create({
     marginTop: SPACING.md,
     paddingVertical: SPACING.sm,
   },
-  uberDetailsCloseText: {
+  tripDetailsCloseText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
     color: '#94A3B8',
   },
-  uberDockBrandRow: {
+  tripDockBrandRow: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
     gap: 8,
   },
-  uberDockLogo: {
+  tripDockLogo: {
     width: 32,
     height: 32,
     borderRadius: 16,
@@ -2713,9 +2609,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  uberDockLogoTxt: { fontSize: 11, fontWeight: '900', color: '#022C22', letterSpacing: -0.3 },
-  uberDockBrand: { fontSize: 15, fontWeight: '900', color: '#F8FAFC', letterSpacing: 0.5 },
-  uberDockLivePill: {
+  tripDockLogoTxt: { fontSize: 11, fontWeight: '900', color: '#022C22', letterSpacing: -0.3 },
+  tripDockBrand: { fontSize: 15, fontWeight: '900', color: '#F8FAFC', letterSpacing: 0.5 },
+  tripDockLivePill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
@@ -2726,9 +2622,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(34,197,94,0.35)',
   },
-  uberDockLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E' },
-  uberDockLiveTxt: { fontSize: 10, fontWeight: '900', color: '#E2E8F0', letterSpacing: 0.6 },
-  uberDockHeroGreen: {
+  tripDockLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#22C55E' },
+  tripDockLiveTxt: { fontSize: 10, fontWeight: '900', color: '#E2E8F0', letterSpacing: 0.6 },
+  tripDockHeroGreen: {
     fontSize: 22,
     fontWeight: '800',
     color: '#4ADE80',
@@ -2736,7 +2632,7 @@ const styles = StyleSheet.create({
     lineHeight: 28,
     marginTop: 6,
   },
-  uberDockSubMuted: {
+  tripDockSubMuted: {
     fontSize: 14,
     fontWeight: '600',
     color: 'rgba(148,163,184,0.95)',
@@ -2744,7 +2640,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     marginBottom: 4,
   },
-  uberDriverHeroCard: {
+  tripDriverHeroCard: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 14,
@@ -2755,14 +2651,14 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(51,65,85,0.5)',
     marginTop: 4,
   },
-  uberDriverHeroAvatar: {
+  tripDriverHeroAvatar: {
     width: 56,
     height: 56,
     borderRadius: 28,
     borderWidth: 2,
     borderColor: 'rgba(34,197,94,0.45)',
   },
-  uberDriverHeroAvatarPh: {
+  tripDriverHeroAvatarPh: {
     width: 56,
     height: 56,
     borderRadius: 28,
@@ -2772,23 +2668,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  uberDriverHeroAvatarLetter: { fontSize: 22, fontWeight: '900', color: '#86EFAC' },
-  uberDriverHeroName: { fontSize: 17, fontWeight: '900', color: '#F8FAFC' },
-  uberDriverHeroVehicle: {
+  tripDriverHeroAvatarLetter: { fontSize: 22, fontWeight: '900', color: '#86EFAC' },
+  tripDriverHeroName: { fontSize: 17, fontWeight: '900', color: '#F8FAFC' },
+  tripDriverHeroVehicle: {
     fontSize: 13,
     fontWeight: '600',
     color: '#94A3B8',
     marginTop: 4,
     lineHeight: 18,
   },
-  uberDriverHeroRate: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
-  uberDriverHeroRateTxt: { fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
-  uberMetricsGrid: {
+  tripDriverHeroRate: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 8 },
+  tripDriverHeroRateTxt: { fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
+  tripMetricsGrid: {
     flexDirection: 'row',
     gap: 8,
     marginTop: 10,
   },
-  uberMetricCell: {
+  tripMetricCell: {
     flex: 1,
     backgroundColor: 'rgba(15,23,42,0.65)',
     borderRadius: 14,
@@ -2798,7 +2694,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(51,65,85,0.45)',
     alignItems: 'center',
   },
-  uberMetricK: {
+  tripMetricK: {
     fontSize: 10,
     fontWeight: '800',
     color: '#64748B',
@@ -2807,22 +2703,22 @@ const styles = StyleSheet.create({
     marginBottom: 6,
     textAlign: 'center',
   },
-  uberMetricV: {
+  tripMetricV: {
     fontSize: 16,
     fontWeight: '900',
     color: '#F1F5F9',
     letterSpacing: -0.35,
     textAlign: 'center',
   },
-  uberMetricVGreen: {
+  tripMetricVGreen: {
     fontSize: 16,
     fontWeight: '900',
     color: '#4ADE80',
     letterSpacing: -0.35,
     textAlign: 'center',
   },
-  uberCommRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
-  uberCommBtn: {
+  tripCommRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  tripCommBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2834,10 +2730,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(51,65,85,0.55)',
   },
-  uberCommBtnMuted: { opacity: 0.55 },
-  uberCommBtnTxt: { fontSize: 15, fontWeight: '800', color: '#F8FAFC' },
-  uberCommBtnTxtMuted: { color: '#94A3B8' },
-  uberStickyDock: {
+  tripCommBtnMuted: { opacity: 0.55 },
+  tripCommBtnTxt: { fontSize: 15, fontWeight: '800', color: '#F8FAFC' },
+  tripCommBtnTxtMuted: { color: '#94A3B8' },
+  tripStickyDock: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.1)',
     borderTopLeftRadius: 22,
@@ -2849,25 +2745,25 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 20,
   },
-  uberStickyDockInner: {
+  tripStickyDockInner: {
     paddingHorizontal: SPACING.lg,
     paddingTop: SPACING.md,
     gap: 12,
   },
-  uberStickyHeadline: {
+  tripStickyHeadline: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '900',
     color: '#F8FAFC',
     letterSpacing: -0.45,
     lineHeight: 24,
   },
-  uberStickyVehicle: {
+  tripStickyVehicle: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '700',
     color: 'rgba(226,232,240,0.92)',
     lineHeight: 20,
   },
-  uberPayWideCta: {
+  tripPayWideCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2877,12 +2773,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     marginTop: 4,
   },
-  uberPayWideCtaTxt: {
+  tripPayWideCtaTxt: {
     fontSize: FONT_SIZE.md,
     fontWeight: '900',
     color: '#022C22',
   },
-  uberRouteBrief: {
+  tripRouteBrief: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
@@ -2890,17 +2786,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.08)',
     gap: 6,
   },
-  uberRouteBriefRow: {
+  tripRouteBriefRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
-  uberRouteDot: {
+  tripRouteDot: {
     width: 9,
     height: 9,
     borderRadius: 5,
   },
-  uberRouteBriefLine: {
+  tripRouteBriefLine: {
     width: 2,
     height: 14,
     backgroundColor: 'rgba(148,163,184,0.38)',
@@ -2908,14 +2804,14 @@ const styles = StyleSheet.create({
     marginVertical: 3,
     borderRadius: 2,
   },
-  uberRouteBriefText: {
+  tripRouteBriefText: {
     flex: 1,
     fontSize: FONT_SIZE.sm,
     fontWeight: '700',
     color: '#F1F5F9',
     lineHeight: 20,
   },
-  uberCancelOutline: {
+  tripCancelOutline: {
     marginTop: 2,
     minHeight: 50,
     borderRadius: BORDER_RADIUS.xxl,
@@ -2926,19 +2822,19 @@ const styles = StyleSheet.create({
     borderColor: COLORS.error,
     backgroundColor: 'transparent',
   },
-  uberCancelOutlineText: {
+  tripCancelOutlineText: {
     fontSize: FONT_SIZE.md,
     fontWeight: '800',
     color: COLORS.error,
   },
-  uberEcosystemRow: {
+  tripEcosystemRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingVertical: 4,
     marginTop: 2,
   },
-  uberEcoLink: {
+  tripEcoLink: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -2951,7 +2847,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.08)',
   },
-  uberEcoLinkText: {
+  tripEcoLinkText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
     color: '#CBD5E1',
@@ -3108,10 +3004,11 @@ const styles = StyleSheet.create({
     elevation: 8,
   },
   statusCardFinding: {
-    backgroundColor: 'rgba(15,23,42,0.92)',
-    borderColor: 'rgba(0,208,132,0.22)',
-    shadowColor: '#00D46A',
-    shadowOpacity: 0.12,
+    backgroundColor: 'rgba(8,12,22,0.94)',
+    borderColor: 'rgba(52,245,184,0.24)',
+    shadowColor: '#34F5B8',
+    shadowOpacity: 0.18,
+    shadowRadius: 20,
   },
   actionsCard: {
     marginTop: SPACING.lg,
@@ -3436,6 +3333,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
+  },
+  findingHeroSlot: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: SPACING.sm,
   },
   findingRingWrap: {
     alignItems: 'center',

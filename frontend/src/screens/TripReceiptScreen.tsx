@@ -21,6 +21,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { RiderBrandHeaderRow } from '@/src/components/rider/RiderBrandChrome';
+import { RiderFavoriteIcon } from '@/src/components/rider/RiderFavoriteIcon';
+import { AddFavoriteDriverModal } from '@/src/components/rider/AddFavoriteDriverModal';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import {
   getTrip,
@@ -33,6 +35,7 @@ import {
   getAuthHeaders,
 } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { CURRENCY, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { summarizeTripReceiptFare } from '@/src/utils/tripReceiptFare';
 
@@ -133,6 +136,7 @@ export default function TripReceiptScreen() {
   const flow    = useFlowLayout();
   const params  = useLocalSearchParams<{ tripId?: string }>();
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
 
   // ── Data state ──────────────────────────────────────────────────────────
   const [loading, setLoading]               = useState(true);
@@ -143,6 +147,7 @@ export default function TripReceiptScreen() {
   // ── Interaction state ────────────────────────────────────────────────────
   const [isFavorite,      setIsFavorite]      = useState(false);
   const [savingFavorite,  setSavingFavorite]  = useState(false);
+  const [showFavoriteModal, setShowFavoriteModal] = useState(false);
   const [myRating,        setMyRating]        = useState(0);
   const [hoveredStar,     setHoveredStar]     = useState(0);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
@@ -184,9 +189,9 @@ export default function TripReceiptScreen() {
           } catch {}
           finally { setLoadingBlackBox(false); }
         }
-        if (tripData?.driver_id && user?.id) {
+        if (tripData?.driver_id && userId && canCallAuthedApi) {
           try {
-            const favRes = await checkFavoriteDriver(user.id, tripData.driver_id);
+            const favRes = await checkFavoriteDriver(userId, tripData.driver_id);
             setIsFavorite(favRes.data?.is_favorite === true);
           } catch {}
         }
@@ -194,7 +199,7 @@ export default function TripReceiptScreen() {
       finally { setLoading(false); }
     };
     run();
-  }, [params.tripId, user?.id]);
+  }, [params.tripId, userId, canCallAuthedApi]);
 
   // ── Entry animations ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -298,7 +303,7 @@ export default function TripReceiptScreen() {
   );
 
   const submitRating = useCallback(async () => {
-    if (!trip?.id || !user?.id || ratingSubmitted || submittingRating || myRating < 1) return;
+    if (!trip?.id || !userId || !canCallAuthedApi || ratingSubmitted || submittingRating || myRating < 1) return;
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     Animated.sequence([
       Animated.spring(starScales[myRating - 1], { toValue: 1.35, tension: 200, friction: 5, useNativeDriver: true }),
@@ -322,7 +327,7 @@ export default function TripReceiptScreen() {
         cleanliness: selectedReacts.includes('clean') ? 5 : undefined,
         safety: selectedReacts.includes('safe') ? 5 : undefined,
       };
-      await fetch(`${BACKEND_URL}/api/trips/${trip.id}/rate?rater_id=${user.id}`, {
+      await fetch(`${BACKEND_URL}/api/trips/${trip.id}/rate?rater_id=${userId}`, {
         method: 'PUT',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -336,7 +341,8 @@ export default function TripReceiptScreen() {
     }
   }, [
     trip?.id,
-    user?.id,
+    userId,
+    canCallAuthedApi,
     myRating,
     selectedReacts,
     ratingComment,
@@ -376,7 +382,7 @@ export default function TripReceiptScreen() {
   };
 
   const handleAddFavorite = async () => {
-    if (!user?.id || !trip?.driver_id || savingFavorite) return;
+    if (!userId || !canCallAuthedApi || !trip?.driver_id || savingFavorite) return;
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     Animated.sequence([
       Animated.spring(heartScale, { toValue: 1.5, tension: 180, friction: 4, useNativeDriver: true }),
@@ -384,7 +390,7 @@ export default function TripReceiptScreen() {
     ]).start();
     setSavingFavorite(true);
     try {
-      await addFavoriteDriver(user.id, trip.driver_id);
+      await addFavoriteDriver(userId, trip.driver_id);
       setIsFavorite(true);
     } catch (e: any) {
       Alert.alert('Error', e?.response?.data?.detail || 'Could not save driver.');
@@ -393,8 +399,18 @@ export default function TripReceiptScreen() {
     }
   };
 
+  const handleFavoritePress = () => {
+    if (!trip?.driver_id || savingFavorite) return;
+    if (isFavorite) {
+      handleRemoveFavorite();
+      return;
+    }
+    void Haptics.selectionAsync();
+    setShowFavoriteModal(true);
+  };
+
   const handleRemoveFavorite = () => {
-    if (!user?.id || !trip?.driver_id || savingFavorite) return;
+    if (!userId || !canCallAuthedApi || !trip?.driver_id || savingFavorite) return;
     Alert.alert(
       'Remove favorite?',
       `Stop showing ${view?.driverName || 'this driver'} in My Drivers?`,
@@ -405,7 +421,7 @@ export default function TripReceiptScreen() {
           onPress: async () => {
             setSavingFavorite(true);
             try {
-              await removeFavoriteDriver(user.id, trip.driver_id!);
+              await removeFavoriteDriver(userId, trip.driver_id!);
               setIsFavorite(false);
             } catch (e: any) {
               Alert.alert('Error', e?.response?.data?.detail || 'Could not update favorites.');
@@ -471,11 +487,17 @@ export default function TripReceiptScreen() {
     );
   }
   if (!view) {
+    const missingTripId = !params.tripId;
     return (
       <SafeAreaView style={s.container}>
         <View style={s.centered}>
-          <Ionicons name="receipt-outline" size={56} color={C.dim} />
-          <Text style={s.emptyTitle}>Receipt not available</Text>
+          <Ionicons name={missingTripId ? 'alert-circle-outline' : 'receipt-outline'} size={56} color={C.dim} />
+          <Text style={s.emptyTitle}>{missingTripId ? 'No trip selected' : 'Receipt not available'}</Text>
+          <Text style={s.emptySub}>
+            {missingTripId
+              ? 'Open a completed trip from Trips to view a receipt, or go back and try again.'
+              : 'This trip could not be loaded. It may have been removed or you may not have access.'}
+          </Text>
           <TouchableOpacity onPress={() => router.back()} style={s.primaryBtn}>
             <Text style={s.primaryBtnText}>Go Back</Text>
           </TouchableOpacity>
@@ -689,7 +711,7 @@ export default function TripReceiptScreen() {
               <Text style={s.payInstructBank}>{view.bankName}</Text>
               <Text style={s.payInstructAcct}>{view.accountNumber}</Text>
               <Text style={s.payInstructName}>{view.accountName}</Text>
-              {user?.id === trip?.rider_id && (
+              {userId === trip?.rider_id && (
                 <TouchableOpacity style={s.confirmPayBtn} onPress={handleConfirmPayment} disabled={confirmingPayment}>
                   <Ionicons name="checkmark-circle-outline" size={16} color={C.white} />
                   <Text style={s.confirmPayBtnText}>{confirmingPayment ? 'Confirming...' : 'I Have Paid'}</Text>
@@ -713,24 +735,15 @@ export default function TripReceiptScreen() {
                 <Text style={s.driverVehicle}>{view.vehicle}{view.plate ? ` · ${view.plate}` : ''}</Text>
               </View>
             </View>
-            {/* Favourite heart */}
-            {trip?.driver_id && (
-              <TouchableOpacity
-                onPress={isFavorite ? handleRemoveFavorite : () => void handleAddFavorite()}
+            {trip?.driver_id ? (
+              <RiderFavoriteIcon
+                size={48}
+                filled={isFavorite}
+                onPress={handleFavoritePress}
                 disabled={savingFavorite}
                 style={s.heartBtn}
-                accessibilityRole="button"
-                accessibilityLabel={isFavorite ? 'Remove from favourites' : 'Add to favourites'}
-              >
-                <Animated.View style={{ transform: [{ scale: heartScale }] }}>
-                  <Ionicons
-                    name={isFavorite ? 'heart' : 'heart-outline'}
-                    size={26}
-                    color={isFavorite ? C.red : C.muted}
-                  />
-                </Animated.View>
-              </TouchableOpacity>
-            )}
+              />
+            ) : null}
           </View>
 
           {view.mysteryBonusNgn > 0 ? (
@@ -782,7 +795,10 @@ export default function TripReceiptScreen() {
           {trip?.driver_id && !isFavorite && ratingSubmitted && (
             <TouchableOpacity
               style={s.favBanner}
-              onPress={() => void handleAddFavorite()}
+              onPress={() => {
+                void Haptics.selectionAsync();
+                setShowFavoriteModal(true);
+              }}
               disabled={savingFavorite}
               activeOpacity={0.85}
             >
@@ -1084,6 +1100,16 @@ export default function TripReceiptScreen() {
 
         </Animated.View>
       </ScrollView>
+
+      <AddFavoriteDriverModal
+        visible={showFavoriteModal}
+        driverName={view?.driverName}
+        driverVehicle={view?.vehicle}
+        driverPlate={view?.plate}
+        saving={savingFavorite}
+        onDismiss={() => setShowFavoriteModal(false)}
+        onAdd={() => void handleAddFavorite().then(() => setShowFavoriteModal(false))}
+      />
     </SafeAreaView>
   );
 }
@@ -1094,6 +1120,7 @@ const s = StyleSheet.create({
   centered:     { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 16 },
   loadingText:  { color: C.muted, fontWeight: '600', fontSize: FONT_SIZE.sm },
   emptyTitle:   { fontSize: FONT_SIZE.lg, fontWeight: '800', color: C.white, textAlign: 'center' },
+  emptySub:     { fontSize: FONT_SIZE.sm, color: C.muted, textAlign: 'center', marginTop: SPACING.sm, marginBottom: SPACING.lg, paddingHorizontal: SPACING.xl, lineHeight: 20 },
   primaryBtn:   { backgroundColor: C.greenBright, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 },
   primaryBtnText: { color: '#022C22', fontWeight: '800' },
 

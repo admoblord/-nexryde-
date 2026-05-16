@@ -183,12 +183,12 @@ const NativeMap: React.FC<MapComponentProps> = ({
         onMapReady={onMapReady}
         customMapStyle={DARK_STYLE}
       >
-        {/* Route polyline — layered cyan / ice (premium vs flat Bolt blue) */}
+        {/* Route polyline — layered Nexryde greens */}
         {cleanRoute.length >= DIRECTIONS_ROUTE_MIN_POINTS ? (
           <>
             <Polyline
               coordinates={cleanRoute}
-              strokeColor="rgba(56,189,248,0.12)"
+              strokeColor="rgba(74,222,128,0.18)"
               strokeWidth={20}
               geodesic={false}
               lineCap="round"
@@ -196,7 +196,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
             />
             <Polyline
               coordinates={cleanRoute}
-              strokeColor="rgba(14,165,233,0.45)"
+              strokeColor="rgba(0,212,106,0.45)"
               strokeWidth={10}
               geodesic={false}
               lineCap="round"
@@ -204,7 +204,7 @@ const NativeMap: React.FC<MapComponentProps> = ({
             />
             <Polyline
               coordinates={cleanRoute}
-              strokeColor="#E0F2FE"
+              strokeColor={COLORS.accentGreenLight}
               strokeWidth={3}
               geodesic={false}
               lineCap="round"

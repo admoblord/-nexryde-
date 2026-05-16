@@ -18,19 +18,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
-import {
-  driverTermsRouteParams,
-  driverDocumentsRouteParams,
-  driverProfileRouteParams,
-} from '@/src/utils/driverOnboardingNav';
 import { saveUserSession } from '@/utils/authStorage';
+import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 
 export default function VerifyScreen() {
   const router = useRouter();
-  const { phone, pin_id, provider } = useLocalSearchParams<{ 
+  const { phone, pin_id } = useLocalSearchParams<{ 
     phone: string; 
     pin_id: string;
-    provider: string;
   }>();
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
   
@@ -59,74 +54,7 @@ export default function VerifyScreen() {
   }, [resendTimer]);
 
   const routeVerifiedUser = async (loggedUser: any, resolvedToken: string | null) => {
-    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (resolvedToken) authHeaders.Authorization = `Bearer ${resolvedToken}`;
-
-    if (loggedUser?.role === 'driver') {
-      try {
-        const st = await fetch(`${BACKEND_URL}/api/drivers/${loggedUser.id}/onboarding-status`, { headers: authHeaders });
-        const status = await st.json();
-        if (!st.ok || !status?.completed) {
-          if (status?.step === 'terms') {
-            router.replace({
-              pathname: '/(auth)/driver-terms',
-              params: driverTermsRouteParams(loggedUser),
-            });
-            return;
-          }
-          if (status?.step === 'documents') {
-            router.replace({
-              pathname: '/(auth)/driver-documents',
-              params: driverDocumentsRouteParams(loggedUser),
-            });
-            return;
-          }
-          if (status?.step === 'documents_review' || status?.step === 'documents_rejected') {
-            if (status?.step === 'documents_rejected') {
-              router.replace({
-                pathname: '/(auth)/driver-verification-status',
-                params: driverDocumentsRouteParams(loggedUser),
-              });
-            } else {
-              router.replace('/(driver-tabs)/driver-home');
-            }
-            return;
-          }
-          if (status?.step === 'profile') {
-            router.replace({
-              pathname: '/(auth)/driver-profile',
-              params: driverProfileRouteParams(loggedUser),
-            });
-            return;
-          }
-        }
-        router.replace('/(driver-tabs)/driver-home');
-        return;
-      } catch {
-        router.replace({
-          pathname: '/(auth)/driver-documents',
-          params: driverDocumentsRouteParams(loggedUser),
-        });
-        return;
-      }
-      router.replace({
-        pathname: '/(auth)/driver-documents',
-        params: driverDocumentsRouteParams(loggedUser),
-      });
-      return;
-    }
-
-    try {
-      const st = await fetch(`${BACKEND_URL}/api/users/${loggedUser.id}/rider-verification-status`, { headers: authHeaders });
-      const riderStatus = await st.json();
-      if (st.ok && riderStatus?.completed) {
-        router.replace('/(rider-tabs)/rider-home');
-      } else {
-        router.replace('/(auth)/rider-verification');
-      }
-    } catch {
-      router.replace('/(auth)/rider-verification');
-    }
+    await routeAuthedUser(router, loggedUser, resolvedToken);
   };
 
   const handleVerifyOTP = async () => {
@@ -241,8 +169,6 @@ export default function VerifyScreen() {
     }
   };
 
-  const isTermii = provider === 'termii';
-
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -270,23 +196,13 @@ export default function VerifyScreen() {
               </View>
               <Text style={styles.title}>Verify Phone</Text>
               <Text style={styles.subtitle}>
-                {isTermii 
-                  ? 'Enter the 6-digit code sent via SMS to'
-                  : 'Enter the 6-digit verification code'
-                }
+                Enter the 6-digit code for
               </Text>
               <Text style={styles.phone}>{normalizePhone(phone || '')}</Text>
               
-              {/* Provider indicator */}
               <View style={styles.providerBadge}>
-                <Ionicons 
-                  name={isTermii ? "chatbubbles" : "code-working"} 
-                  size={14} 
-                  color={COLORS.accentGreen} 
-                />
-                <Text style={styles.providerText}>
-                  {isTermii ? 'SMS Verification' : 'Verification'}
-                </Text>
+                <Ionicons name="chatbubbles" size={14} color={COLORS.accentGreen} />
+                <Text style={styles.providerText}>SMS code</Text>
               </View>
             </View>
 

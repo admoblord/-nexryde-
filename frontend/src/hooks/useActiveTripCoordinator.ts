@@ -2,16 +2,20 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 import { getActiveTrip } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 
 const POLL_MS = 22000;
 
 export default function useActiveTripCoordinator() {
-  const user = useAppStore((s) => s.user);
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const { storeReady, canCallAuthedApi } = useAuthedApiReady();
+  const { userId } = useAuthedUserId();
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!storeReady) return;
+    if (!canCallAuthedApi || !userId) {
       setCurrentTrip(null);
       return;
     }
@@ -20,7 +24,7 @@ export default function useActiveTripCoordinator() {
 
     const pullActiveTrip = async () => {
       try {
-        const res = await getActiveTrip(user.id);
+        const res = await getActiveTrip(userId);
         const payload = res?.data;
         if (!mounted) return;
 
@@ -55,6 +59,6 @@ export default function useActiveTripCoordinator() {
       clearInterval(interval);
       appStateSub.remove();
     };
-  }, [user?.id, setCurrentTrip]);
+  }, [canCallAuthedApi, storeReady, userId, setCurrentTrip]);
 }
 

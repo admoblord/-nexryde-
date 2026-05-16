@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Authentication Endpoints Testing Script for NEXRYDE
-Specifically testing SMS OTP (Termii) and Google OAuth (Emergent Auth) as requested
+Tests SMS OTP and Google OAuth (Emergent Auth).
+SMS OTP uses SMS_OTP_MOCK on the backend when no SMS provider is configured.
 """
 
 import requests
@@ -23,7 +24,7 @@ def log_test(test_name, status, details=""):
     print()
 
 def test_sms_otp_endpoint():
-    """Test POST /api/auth/send-otp - SMS OTP with Termii integration"""
+    """Test POST /api/auth/send-otp - SMS OTP (mock or provider per server env)"""
     print("\n" + "="*60)
     print("TESTING SMS OTP ENDPOINT")
     print("="*60)
@@ -44,16 +45,15 @@ def test_sms_otp_endpoint():
             print(f"Response Body: {json.dumps(response_data, indent=2)}")
             
             if response.status_code == 200:
-                # Check if Termii was used or fallback to mock
                 provider = response_data.get("provider", "unknown")
-                if provider == "termii":
-                    log_test("SMS OTP - Termii Integration", "PASS", "Termii SMS service working successfully")
+                if provider == "sms_mock":
+                    log_test("SMS OTP - Mock mode", "PASS", "SMS_OTP_MOCK — check server logs for OTP")
                 elif provider == "mock":
-                    log_test("SMS OTP - Mock Fallback", "PASS", "Fallback to mock mode (Termii may have failed)")
+                    log_test("SMS OTP - Mock Fallback", "PASS", "Legacy mock response")
                     if "otp" in response_data:
                         print(f"    Mock OTP Code: {response_data['otp']}")
                 else:
-                    log_test("SMS OTP - Provider Unknown", "WARN", f"Unknown provider: {provider}")
+                    log_test("SMS OTP - Provider", "WARN", f"provider: {provider}")
                 
                 return True, response_data
             else:
@@ -122,12 +122,12 @@ def test_google_oauth_endpoint():
         return False, None
 
 def check_backend_logs():
-    """Check backend logs for Termii and Google/Emergent Auth responses"""
+    """Check backend logs for SMS OTP and Google/Emergent Auth responses"""
     print("\n" + "="*60)
     print("CHECKING BACKEND LOGS")
     print("="*60)
     
-    print("Checking supervisor backend logs for Termii and Emergent Auth responses...")
+    print("Checking supervisor backend logs for SMS and Emergent Auth responses...")
     
     # Check backend error logs
     try:
@@ -143,11 +143,11 @@ def check_backend_logs():
             print("-" * 50)
             logs = result.stdout
             
-            # Look for Termii-related logs
-            termii_logs = [line for line in logs.split('\n') if 'termii' in line.lower() or 'sms' in line.lower()]
-            if termii_logs:
-                print("🔍 TERMII/SMS RELATED LOGS:")
-                for log in termii_logs[-10:]:  # Last 10 Termii logs
+            # Look for SMS/OTP-related logs
+            sms_logs = [line for line in logs.split('\n') if 'sms' in line.lower() or 'otp' in line.lower()]
+            if sms_logs:
+                print("🔍 SMS/OTP RELATED LOGS:")
+                for log in sms_logs[-10:]:
                     print(f"  {log}")
                 print()
             
@@ -189,11 +189,11 @@ def check_backend_logs():
             print("-" * 50)
             logs = result.stdout
             
-            # Look for Termii-related logs
-            termii_logs = [line for line in logs.split('\n') if 'termii' in line.lower() or 'sms' in line.lower()]
-            if termii_logs:
-                print("🔍 TERMII/SMS RELATED LOGS:")
-                for log in termii_logs[-10:]:
+            # Look for SMS/OTP-related logs
+            sms_logs = [line for line in logs.split('\n') if 'sms' in line.lower() or 'otp' in line.lower()]
+            if sms_logs:
+                print("🔍 SMS/OTP RELATED LOGS:")
+                for log in sms_logs[-10:]:
                     print(f"  {log}")
                 print()
             
@@ -224,8 +224,6 @@ def analyze_errors(sms_result, google_result):
     # Analyze SMS OTP results
     if not sms_result[0]:
         errors_found.append("SMS OTP endpoint failed")
-    elif sms_result[1] and sms_result[1].get("provider") == "mock":
-        errors_found.append("Termii SMS integration not working - falling back to mock mode")
     
     # Analyze Google OAuth results
     if not google_result[0]:
@@ -247,7 +245,7 @@ def main():
     print(f"Backend URL: {BACKEND_URL}")
     print(f"Test Time: {datetime.now().isoformat()}")
     print("\nTesting as requested:")
-    print("1. POST /api/auth/send-otp - SMS OTP with Termii")
+    print("1. POST /api/auth/send-otp - SMS OTP")
     print("2. POST /api/auth/google/exchange - Google OAuth with Emergent Auth")
     
     # Test SMS OTP endpoint
@@ -273,10 +271,10 @@ def main():
     print(f"SMS OTP Endpoint: {'✅ WORKING' if sms_result[0] else '❌ FAILED'}")
     if sms_result[0] and sms_result[1]:
         provider = sms_result[1].get("provider", "unknown")
-        if provider == "termii":
-            print("  └─ Termii SMS integration: ✅ ACTIVE")
+        if provider == "sms_mock":
+            print("  └─ SMS OTP mock: ✅ (code logged server-side)")
         elif provider == "mock":
-            print("  └─ Termii SMS integration: ❌ FAILED (using mock fallback)")
+            print("  └─ Legacy mock provider")
         else:
             print(f"  └─ Provider: {provider}")
     
@@ -290,10 +288,8 @@ def main():
         for error in errors:
             print(f"  • {error}")
         print("\nRecommendations:")
-        if "Termii" in str(errors):
-            print("  • Check Termii API key and configuration")
-            print("  • Verify Termii account balance and status")
-            print("  • Check network connectivity to Termii API")
+        if "SMS OTP" in str(errors):
+            print("  • Ensure SMS_OTP_MOCK=true for local testing, or use email OTP on the client")
         if "Google OAuth" in str(errors):
             print("  • Check Emergent Auth configuration")
             print("  • Verify Google OAuth credentials")

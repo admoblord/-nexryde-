@@ -4,6 +4,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { registerPushToken, reportNotificationOpened } from '@/src/services/api';
 import { ensureAndroidPushChannels } from '@/src/services/notifications';
 import { markFeatureAsSeen, syncAndNotifyNewFeatures } from '@/src/services/featureAnnouncements';
@@ -35,6 +36,7 @@ Notifications.setNotificationHandler({
 export function useNotifications() {
   const router = useRouter();
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const responseListener = useRef<Notifications.Subscription | null>(null);
   const userRef = useRef(user);
 
@@ -43,7 +45,7 @@ export function useNotifications() {
   }, [user]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
 
     (async () => {
       if (!Device.isDevice) return;
@@ -61,10 +63,10 @@ export function useNotifications() {
         projectId: '342aff56-5e09-4363-b8b6-12ab1cdec11f',
       });
       try {
-        await registerPushToken(user.id, tokenData.data, { platform: Platform.OS });
+        await registerPushToken(userId, tokenData.data, { platform: Platform.OS });
       } catch {}
       try {
-        await syncAndNotifyNewFeatures(user.role);
+        await syncAndNotifyNewFeatures(user?.role ?? 'rider');
       } catch {}
     })();
 
@@ -94,5 +96,5 @@ export function useNotifications() {
         responseListener.current.remove();
       }
     };
-  }, [user?.id, user?.role, router]);
+  }, [userId, canCallAuthedApi, user?.role, router]);
 }

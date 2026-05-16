@@ -1,4 +1,6 @@
 """Trips Router - Trip CRUD, ride flow, and trip management for NEXRYDE."""
+from __future__ import annotations
+
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 from typing import Optional
@@ -16,7 +18,6 @@ import hashlib
 import hmac
 import base64
 from cryptography.fernet import Fernet
-import httpx
 
 from database import db
 from fare_estimate_cache import get_fare_estimate
@@ -43,6 +44,7 @@ from wallet_ops import (
     apply_driver_wallet_ride_credit,
     apply_rider_wallet_ride_debit,
 )
+from services.product_notification_email import schedule_trip_receipt_emails_after_payment
 from earnings_query import match_completed_trip_paid_for_earnings
 from user_scores import calculate_rider_risk_score
 from security_advanced import general_limiter, trip_request_limiter
@@ -199,9 +201,6 @@ def calculate_distance_haversine(lat1, lon1, lat2, lon2):
 SHIELD_LOW_RIDER_RATING = 3.5
 SHIELD_MIN_TRIPS_FOR_FLAG = 3
 BLACK_BOX_SIGNING_SECRET = os.environ.get("NEXRYDE_BLACK_BOX_SECRET") or os.environ.get("JWT_SECRET") or "nexryde-black-box-dev"
-TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
-TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
-TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 SPEED_SPIKE_LIMIT_KMH = 100.0
 SAFE_ARRIVAL_CONFIRM_MINUTES = 5
 SAFE_ARRIVAL_CALL_RESPONSE_SECONDS = 90
@@ -312,33 +311,8 @@ def _distance_from_route_km(route_points: list[dict], lat: float, lng: float) ->
 
 
 async def _notify_emergency_contacts_for_geofence(trip: dict, lat: float, lng: float) -> int:
-    rider = await db.users.find_one({"id": trip.get("rider_id")}, {"_id": 0, "name": 1, "emergency_contacts": 1}) or {}
-    emergency_contacts = rider.get("emergency_contacts") or []
-    if not TERMII_API_KEY or not emergency_contacts:
-        return 0
-    user_name = rider.get("name", "A rider")
-    location_link = f"https://maps.google.com/?q={lat},{lng}"
-    notified = 0
-    async with httpx.AsyncClient() as http_client:
-        for contact in emergency_contacts:
-            try:
-                phone = str(contact.get("phone", "")).lstrip("+")
-                if not phone:
-                    continue
-                payload = {
-                    "to": phone,
-                    "from": TERMII_FROM_ID,
-                    "sms": f"URGENT NEXRYDE ALERT: {user_name}'s trip deviated from the approved route. Location: {location_link} Trip: {trip.get('id')}",
-                    "type": "plain",
-                    "channel": "generic",
-                    "api_key": TERMII_API_KEY,
-                }
-                resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
-                if resp.status_code < 400:
-                    notified += 1
-            except Exception:
-                continue
-    return notified
+    """SMS to emergency contacts disabled (no SMS provider)."""
+    return 0
 
 
 async def _maybe_escalate_invisible_shield(trip: dict) -> dict:
@@ -364,31 +338,7 @@ async def _maybe_escalate_invisible_shield(trip: dict) -> dict:
     lng = location.get("lng")
     contacts = rider.get("emergency_contacts") or []
     notified = 0
-    if TERMII_API_KEY and contacts:
-        map_link = f"https://maps.google.com/?q={lat},{lng}" if lat is not None and lng is not None else "Location unavailable"
-        async with httpx.AsyncClient() as http_client:
-            for contact in contacts:
-                try:
-                    phone = str(contact.get("phone", "")).lstrip("+")
-                    if not phone:
-                        continue
-                    payload = {
-                        "to": phone,
-                        "from": TERMII_FROM_ID,
-                        "sms": (
-                            f"NEXRYDE INVISIBLE SHIELD ALERT: {rider.get('name', 'A rider')} did not confirm safe arrival. "
-                            f"Protected trip audio has been escalated to Nexryde Safety. {map_link}"
-                        ),
-                        "type": "plain",
-                        "channel": "generic",
-                        "api_key": TERMII_API_KEY,
-                    }
-                    resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
-                    if resp.status_code < 400:
-                        notified += 1
-                except Exception:
-                    continue
-
+    # SMS to emergency contacts not sent; shield escalation still records case + SOS below.
     audio_meta = await db.shield_trip_audio.find_one(
         {"trip_id": trip.get("id"), "uploaded_by": trip.get("rider_id")},
         {"_id": 0, "id": 1, "created_at": 1, "mime_type": 1},
@@ -504,39 +454,8 @@ async def _freeze_trip_fare_for_investigation(trip_id: str, reason: str) -> None
 
 
 async def _notify_emergency_contacts_for_safe_arrival(trip: dict, lat: Optional[float], lng: Optional[float]) -> int:
-    rider = await db.users.find_one({"id": trip.get("rider_id")}, {"_id": 0, "name": 1, "emergency_contacts": 1}) or {}
-    contacts = rider.get("emergency_contacts") or []
-    if not TERMII_API_KEY or not contacts:
-        return 0
-    location_link = (
-        f"https://maps.google.com/?q={lat},{lng}"
-        if lat is not None and lng is not None
-        else "Location unavailable"
-    )
-    notified = 0
-    async with httpx.AsyncClient() as http_client:
-        for contact in contacts:
-            try:
-                phone = str(contact.get("phone", "")).lstrip("+")
-                if not phone:
-                    continue
-                payload = {
-                    "to": phone,
-                    "from": TERMII_FROM_ID,
-                    "sms": (
-                        f"NEXRYDE SAFE ARRIVAL ALERT: {rider.get('name', 'A rider')} has not confirmed safe arrival "
-                        f"after trip {trip.get('id')}. Last known location: {location_link}"
-                    ),
-                    "type": "plain",
-                    "channel": "generic",
-                    "api_key": TERMII_API_KEY,
-                }
-                resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
-                if resp.status_code < 400:
-                    notified += 1
-            except Exception:
-                continue
-    return notified
+    """SMS to emergency contacts disabled (no SMS provider)."""
+    return 0
 
 
 async def _maybe_process_safe_arrival_check(trip: dict) -> dict:
@@ -3746,6 +3665,8 @@ async def complete_trip(trip_id: str, request: Request):
             drv_body = f"Trip completed! ₦{fare_f:,.0f} earned."
             drv_data = {"type": "trip_completed", "trip_id": trip_id}
         await send_push_notification(did, drv_title, drv_body, drv_data)
+    if trip.get("payment_status") == "completed":
+        schedule_trip_receipt_emails_after_payment(trip_id)
     await _emit_rider_trip_realtime(trip_id)
     return trip
 
@@ -3779,6 +3700,7 @@ async def confirm_trip_payment(trip_id: str, request: Request):
         {"$set": {"payment_status": "completed", "paid_at": datetime.utcnow()}},
     )
     await _log_trip_event(trip_id, "payment_confirmed", actor_id, {"payment_status": "completed"})
+    schedule_trip_receipt_emails_after_payment(trip_id)
     await _emit_rider_trip_realtime(trip_id)
     return {"success": True, "payment_status": "completed", "message": "Payment confirmed"}
 

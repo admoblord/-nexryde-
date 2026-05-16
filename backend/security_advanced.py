@@ -249,17 +249,35 @@ def generate_2fa_code(length: int = 6) -> str:
 
 
 async def send_2fa_code(email: str, phone: str = None) -> bool:
-    """Generate and store 2FA code. Code is NOT returned or logged."""
+    """Generate and store a 6-digit admin 2FA code; deliver via Brevo transactional email."""
     code = generate_2fa_code()
 
     twofa_codes[email] = {
         "code": code,
         "expires_at": time.time() + (5 * 60),
-        "attempts": 0
+        "attempts": 0,
     }
 
-    logger.info(f"2FA code generated for {email}")
-    return True
+    try:
+        from services.brevo_transactional_mail import brevo_send_transactional, brevo_simple_notification_html
+
+        subject = "NEXRYDE Admin — verification code"
+        plain = (
+            f"Your admin verification code is {code}. It expires in 5 minutes.\n\n"
+            "If you did not request this, ignore this email."
+        )
+        await brevo_send_transactional(
+            recipients=[email],
+            subject=subject,
+            text_content=plain,
+            html_content=brevo_simple_notification_html(title="Admin verification code", body_plain=plain),
+            tags=["nexryde-admin-2fa"],
+        )
+        return True
+    except Exception as e:
+        twofa_codes.pop(email, None)
+        logger.warning("Admin 2FA email delivery failed for %s: %s", email, e)
+        return False
 
 
 async def verify_2fa_code(email: str, code: str) -> bool:

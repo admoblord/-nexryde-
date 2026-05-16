@@ -14,14 +14,21 @@ import {
 import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMergedPreferences';
 import { useAppStore } from '@/src/store/appStore';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const authed = useRequireUserOrLogin();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
   const { colors } = useThemeColors();
   const { user } = useAppStore();
   const prefVariant = user?.role === 'driver' ? 'driver' : 'rider';
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={['top']}>

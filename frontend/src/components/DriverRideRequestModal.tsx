@@ -1,7 +1,7 @@
 /**
  * DriverRideRequestModal — Nexryde 2030 Edition
  *
- * Full-screen Uber-style layout:
+ * Full-screen assignment layout for incoming ride offers.
  *   • Map fills the whole screen — A→B route clearly visible
  *   • Rider avatar (human-head) at pickup A
  *   • Flag marker at destination B
@@ -31,6 +31,7 @@ import RideRequestMap from '@/src/components/RideRequestMap';
 import Constants from 'expo-constants';
 import { fetchGoogleDrivingRoutes, DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { isShortTripFare } from '@/src/utils/farePresentation';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 
 const C = DS_COLOR;
 
@@ -187,7 +188,27 @@ export default function DriverRideRequestModal({
 
   /* ── Rider info ── */
   const riderName  = trip?.rider_name || trip?.rider?.name || (trip?.shield?.rider_display_name as string)?.trim() || 'Rider';
-  const riderPhoto = trip?.rider_photo || trip?.rider?.profile_image || null;
+  const riderPhotoRaw = useMemo(() => {
+    const rawTrip = trip as Record<string, unknown> | undefined;
+    const rider = rawTrip?.rider as Record<string, unknown> | undefined;
+    const candidates = [
+      rawTrip?.rider_photo,
+      rider?.profile_image,
+      rider?.photo,
+      rawTrip?.rider_avatar,
+      rawTrip?.rider_profile_image,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string' && c.trim().length > 0) return c.trim();
+    }
+    return null;
+  }, [trip]);
+
+  const riderPhoto = useMemo(() => resolvePublicMediaUri(riderPhotoRaw), [riderPhotoRaw]);
+
+  useEffect(() => {
+    setImgError(false);
+  }, [riderPhoto]);
   const initial    = riderName.charAt(0).toUpperCase() || 'R';
   const rating     = trip?.shield?.rider_reputation_avg != null ? Number(trip.shield.rider_reputation_avg).toFixed(1) : null;
   const ratingCount = trip?.shield?.rider_reputation_trip_count ?? null;
@@ -569,6 +590,7 @@ export default function DriverRideRequestModal({
                       <Image
                         source={{ uri: riderPhoto }}
                         style={s.heroAvatar}
+                        resizeMode="cover"
                         onError={() => setImgError(true)}
                       />
                     ) : (

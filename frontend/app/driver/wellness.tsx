@@ -16,7 +16,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { PredictiveMaintenanceAI, type MaintenanceAlert } from '@/src/services/predictiveMaintenance';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
@@ -39,7 +39,7 @@ interface BreakRecord {
 
 export default function DriverWellnessScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   // Driving session tracking
   const [currentSession, setCurrentSession] = useState<DrivingSession | null>(null);
@@ -74,13 +74,14 @@ export default function DriverWellnessScreen() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    loadWellnessData();
+    if (!canCallAuthedApi) return;
+    void loadWellnessData();
     startDrivingTimer();
 
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, []);
+  }, [canCallAuthedApi]);
 
   useEffect(() => {
     // Check if it's time for a rest alert
@@ -93,9 +94,9 @@ export default function DriverWellnessScreen() {
   }, [drivingTimeMinutes]);
 
   const loadWellnessData = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=week`, {
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`, {
         headers: getAuthHeaders(),
       });
       if (!res.ok) return;
@@ -116,11 +117,11 @@ export default function DriverWellnessScreen() {
   };
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!driverId) return;
     let active = true;
     const loadVehicleHealthBaseline = async () => {
       try {
-        const stored = await AsyncStorage.getItem(`@vehicle_health_${user.id}`);
+        const stored = await AsyncStorage.getItem(`@vehicle_health_${driverId}`);
         if (!stored || !active) return;
         const parsed = JSON.parse(stored) as {
           lastServiceDate?: number;
@@ -140,12 +141,12 @@ export default function DriverWellnessScreen() {
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [driverId]);
 
   const persistVehicleHealthBaseline = async (date: number, mileageKm: number) => {
-    if (!user?.id) return;
+    if (!driverId) return;
     await AsyncStorage.setItem(
-      `@vehicle_health_${user.id}`,
+      `@vehicle_health_${driverId}`,
       JSON.stringify({
         lastServiceDate: date,
         lastServiceMileageKm: mileageKm,

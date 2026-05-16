@@ -1,9 +1,10 @@
 """Auth Router - Authentication, OTP, Registration, and Session Management for NEXRYDE."""
-from fastapi import APIRouter, HTTPException, Response, Request
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, HTTPException, Response, Request, Query, status
+from pydantic import BaseModel, Field, EmailStr, ConfigDict, AliasChoices
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
+import asyncio
 import logging
 import os
 import random
@@ -23,15 +24,27 @@ from face_match import (
     FACE_TEMPLATE_SIMSWAP_MIN,
 )
 from security_advanced import create_jwt_token, auth_limiter, otp_limiter, check_brute_force, record_failed_login, clear_login_attempts
+from services.brevo_transactional_mail import BrevoMailError, brevo_send_transactional, brevo_simple_notification_html
+from services.nexryde_brevo_unified_otp import (
+    request_otp as brevo_unified_request_otp,
+    verify_otp as brevo_unified_verify_otp,
+    otp_status as brevo_unified_otp_status,
+    OTP_EXPIRY_SECONDS as BREVO_UNIFIED_OTP_EXPIRY_SECONDS,
+    GENERIC_REQUEST_RATE,
+    GENERIC_VERIFY_FAIL,
+    GENERIC_SERVER,
+)
 
 logger = logging.getLogger('server')
 auth_router = APIRouter(prefix="/api", tags=["Auth"])
 
 # Config
-TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
-TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
-TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
-TERMII_CHANNEL = (os.environ.get('TERMII_CHANNEL', 'dnd') or 'dnd').strip().lower()
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+# When true, phone OTP is stored and logged — no SMS is sent (local/dev only).
+SMS_OTP_MOCK = _env_truthy("SMS_OTP_MOCK")
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # OTP Configuration
@@ -114,6 +127,105 @@ class EmailOTPRequest(BaseModel):
 class EmailOTPVerifyRequest(BaseModel):
     email: str
     otp: str
+    device_id: Optional[str] = None
+
+
+class UnifiedEmailOtpRequestBody(BaseModel):
+    """Request / resend branded email OTP (any userType string)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    email: EmailStr
+    user_type: str = Field(
+        default="user",
+        max_length=64,
+        validation_alias=AliasChoices("userType", "user_type"),
+        description="e.g. driver, rider, admin — used for email subject/branding only",
+    )
+
+
+class UnifiedEmailOtpVerifyBody(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
+
+
+async def _complete_existing_user_email_login(email: str, device_id: Optional[str]) -> dict:
+    """
+    Issue JWT or driver fortress challenge for an existing user (passwordless email).
+    Used by /auth/email-signin and /auth/email-otp/verify after OTP check.
+    """
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+    if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
+        profile_check = await db.driver_profiles.find_one(
+            {"user_id": user["id"]}, {"_id": 0, "verification_status": 1}
+        ) or {}
+        if profile_check.get("verification_status") in ("approved", "verified"):
+            _now_iso = datetime.now(timezone.utc).isoformat()
+            await db.users.update_one(
+                {"id": user["id"]},
+                {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""},
+                 "$set": {"sim_swap_lock_cleared_at": _now_iso, "sim_swap_lock_cleared_source": "email_login_verified_driver"}}
+            )
+            await db.driver_profiles.update_one(
+                {"user_id": user["id"]},
+                {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
+            )
+        else:
+            raise HTTPException(
+                status_code=423,
+                detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
+            )
+
+    user = await db.users.find_one({"email": email})
+    if not user:
+        raise HTTPException(status_code=500, detail="Internal error")
+
+    if user.get("role") == "driver":
+        driver_profile = await db.driver_profiles.find_one(
+            {"user_id": user["id"]},
+            {"_id": 0, "fortress_known_devices": 1, "face_image": 1},
+        ) or {}
+        dev = (device_id or "").strip()
+        known_devices = set(driver_profile.get("fortress_known_devices") or [])
+        if not user.get("fortress_exempt") and (not dev or dev not in known_devices):
+            challenge_id = str(uuid.uuid4())
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=8)
+            await db.driver_login_fortress_challenges.insert_one(
+                {
+                    "id": challenge_id,
+                    "user_id": user["id"],
+                    "email": email,
+                    "device_id": dev or None,
+                    "expires_at": expires_at,
+                    "status": "pending",
+                    "created_at": datetime.now(timezone.utc),
+                }
+            )
+            masked_phone = ""
+            phone = str(user.get("phone") or "")
+            if len(phone) >= 6:
+                masked_phone = f"{phone[:4]}****{phone[-2:]}"
+            return {
+                "message": "Driver Account Fortress verification required.",
+                "fortress_required": True,
+                "challenge_id": challenge_id,
+                "masked_phone": masked_phone,
+                "pin_setup_required": not bool(user.get("driver_account_pin_hash")),
+            }
+
+    user["_id"] = str(user["_id"])
+    token = create_jwt_token(user["id"], user.get("role", "rider"))
+    return {
+        "message": "Login successful",
+        "is_new_user": False,
+        "user": user,
+        "token": token,
+    }
 
 
 class DriverFortressVerifyRequest(BaseModel):
@@ -370,12 +482,40 @@ async def increment_email_otp_attempts(email: str) -> int:
     return result.get("attempts", 0) if result else OTP_MAX_ATTEMPTS
 
 
-def _send_email_otp(email: str, otp_code: str) -> None:
+async def _send_email_otp(email: str, otp_code: str) -> None:
+    body_text = (
+        f"Your NEXRYDE verification code is {otp_code}. "
+        f"This code expires in {OTP_EXPIRY_MINUTES} minutes."
+    )
+
+    brevo_key = os.environ.get("BREVO_API_KEY", "").strip()
+    if brevo_key:
+        try:
+            await brevo_send_transactional(
+                recipients=[email],
+                subject="NEXRYDE Email Verification Code",
+                text_content=body_text,
+                html_content=brevo_simple_notification_html(
+                    title="Email verification code",
+                    body_plain=body_text,
+                ),
+                tags=["nexryde-email-otp", "mongo-email-otp"],
+            )
+        except BrevoMailError as exc:
+            logger.error("Brevo email OTP send failed: %s", exc)
+            raise RuntimeError(str(exc) or "Email send failed") from exc
+        return
+
+    await asyncio.to_thread(_send_email_otp_smtp_fallback, email, body_text)
+
+
+def _send_email_otp_smtp_fallback(email: str, body_text: str) -> None:
     smtp_host = os.environ.get("SMTP_HOST", "").strip()
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_user = os.environ.get("SMTP_USER", "").strip()
     smtp_password = os.environ.get("SMTP_PASSWORD", "").strip()
     from_email = (os.environ.get("EMAIL_OTP_FROM", "") or smtp_user).strip()
+    use_ssl = os.environ.get("SMTP_USE_SSL", "").strip().lower() in ("1", "true", "yes")
 
     if not smtp_host or not smtp_user or not smtp_password or not from_email:
         raise RuntimeError("Email OTP service not configured")
@@ -384,15 +524,17 @@ def _send_email_otp(email: str, otp_code: str) -> None:
     message["Subject"] = "NEXRYDE Email Verification Code"
     message["From"] = from_email
     message["To"] = email
-    message.set_content(
-        f"Your NEXRYDE verification code is {otp_code}. "
-        f"This code expires in {OTP_EXPIRY_MINUTES} minutes."
-    )
+    message.set_content(body_text)
 
-    with smtplib.SMTP(smtp_host, smtp_port, timeout=20) as smtp:
-        smtp.starttls()
-        smtp.login(smtp_user, smtp_password)
-        smtp.send_message(message)
+    if use_ssl:
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, timeout=30) as smtp:
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(message)
+    else:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=30) as smtp:
+            smtp.starttls()
+            smtp.login(smtp_user, smtp_password)
+            smtp.send_message(message)
 
 
 async def _create_and_send_email_otp(email: str) -> None:
@@ -409,7 +551,7 @@ async def _create_and_send_email_otp(email: str) -> None:
                 raise HTTPException(status_code=429, detail=f"Please wait {wait} seconds before requesting another email OTP.")
     otp_code = generate_otp()
     try:
-        _send_email_otp(normalized, otp_code)
+        await _send_email_otp(normalized, otp_code)
     except RuntimeError:
         raise HTTPException(
             status_code=503,
@@ -424,85 +566,67 @@ async def _create_and_send_email_otp(email: str) -> None:
     await save_email_otp_record(normalized, otp_code)
 
 async def send_sms_notification(phone: str, message: str):
-    """Send SMS notification via Termii"""
-    try:
-        if not TERMII_API_KEY:
-            logger.warning(f"SMS skipped (Termii not configured): {phone}")
-            return False
-        
-        async with httpx.AsyncClient() as http_client:
-            # Termii requires phone number WITHOUT the + prefix
-            termii_phone = phone.lstrip('+')
-            
-            payload = {
-                "api_key": TERMII_API_KEY,
-                "to": termii_phone,
-                "from": "NEXRYDE",
-                "channel": "dnd",
-                "type": "plain",
-                "sms": message
-            }
-            
-            logger.info(f"Sending SMS notification to {termii_phone}")
-            
-            response = await http_client.post(
-                f"{TERMII_BASE_URL}/api/sms/send",
-                json=payload,
-                timeout=30.0
-            )
-            
-            if response.status_code == 200:
-                logger.info(f"✅ SMS notification sent to {termii_phone}")
-                return True
-            else:
-                logger.error(f"SMS notification failed: {response.status_code} - {response.text}")
-                return False
-    except Exception as e:
-        logger.error(f"SMS notification error: {e}")
-        return False
+    """Outbound SMS disabled. Log for support; use in-app/push for delivery."""
+    logger.debug("SMS notification skipped (no SMS provider configured): phone=%s", phone[:8] if phone else "")
+    return False
 
 async def send_driver_verification_notification(user_id: str, status: str, reason: str = None):
     """Send notification to driver about verification status"""
     try:
         user = await db.users.find_one({"id": user_id})
-        if not user or not user.get("phone"):
-            logger.warning(f"Cannot send notification - user {user_id} not found or no phone")
+        if not user:
+            logger.warning(f"Cannot send verification notification — user {user_id} not found")
             return
-        
+
         phone = user.get("phone")
         name = user.get("name", "Driver")
-        
+
         if status == "approved":
             message = f"🎉 Congratulations {name}! Your NEXRYDE driver account has been APPROVED. You can now start accepting rides and earning money. Welcome to the team!"
         elif status == "rejected":
             message = f"Hi {name}, your NEXRYDE driver verification was not approved. Reason: {reason or 'Documents did not meet requirements'}. Please re-submit your documents."
         else:
             message = f"Hi {name}, your NEXRYDE driver verification is being reviewed. We'll notify you soon!"
-        
-        # Send SMS
-        await send_sms_notification(phone, message)
-        
+
+        mail = (user.get("email") or "").strip().lower()
+        title = "Driver Verification " + status.upper()
+        if mail:
+            try:
+                await brevo_send_transactional(
+                    recipients=[mail],
+                    subject=f"NEXRYDE — {title}",
+                    text_content=message,
+                    html_content=brevo_simple_notification_html(title=f"NEXRYDE — {title}", body_plain=message),
+                    tags=["nexryde-driver-verification", f"status-{status}"[:24]],
+                )
+            except BrevoMailError as exc:
+                logger.warning("Driver verification Brevo email skipped: %s", exc)
+
+        # SMS path (optional — no provider configured in many environments)
+        if phone:
+            await send_sms_notification(phone, message)
+
         # Also store in-app notification
         notification = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
             "type": "verification_" + status,
-            "title": "Driver Verification " + status.upper(),
+            "title": title,
             "message": message,
             "read": False,
-            "created_at": datetime.now(timezone.utc)
+            "created_at": datetime.now(timezone.utc),
         }
         await db.notifications.insert_one(notification)
-        
-        logger.info(f"📱 Verification notification sent to {name} ({phone}): {status}")
-        
+
+        logger.info("Verification notification queued for %s (email=%s phone=%s): %s", name, bool(mail), bool(phone), status)
+
     except Exception as e:
         logger.error(f"Failed to send verification notification: {e}")
 
 @auth_router.post("/auth/send-otp")
 @auth_router.post("/auth/request-otp")  # Alias endpoint
 async def send_otp(request: OTPRequest, http_request: Request):
-    """Send OTP via Termii SMS"""
+    """Send phone OTP. Set SMS_OTP_MOCK=true for dev (OTP logged, not sent)."""
     await otp_limiter.check_rate_limit(http_request, request.phone)
     request_id = str(uuid.uuid4())[:8]
     try:
@@ -533,96 +657,33 @@ async def send_otp(request: OTPRequest, http_request: Request):
         
         # Generate OTP
         otp_code = generate_otp()
-        
-        if not TERMII_API_KEY:
-            logger.error("[OTP:%s] TERMII_API_KEY missing in env", request_id)
-            raise HTTPException(status_code=500, detail="SMS service not configured. Please contact support.")
-        
-        try:
-            async with httpx.AsyncClient() as http_client:
-                termii_phone = normalized_phone.lstrip('+')
-                
-                preferred_channel = TERMII_CHANNEL if TERMII_CHANNEL in {"dnd", "generic"} else "dnd"
-                channels_to_try = [preferred_channel] + [c for c in ("generic", "dnd") if c != preferred_channel]
 
-                for channel in channels_to_try:
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": termii_phone,
-                        "from": TERMII_FROM_ID or "NEXRYDE",
-                        "channel": channel,
-                        "type": "plain",
-                        "sms": f"Your NEXRYDE verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                    }
+        if SMS_OTP_MOCK:
+            await save_otp_record(
+                phone=normalized_phone,
+                otp=otp_code,
+                provider="sms_mock",
+                message_id=None,
+            )
+            logger.warning(
+                "[OTP:%s] SMS_OTP_MOCK enabled — OTP for %s is %s (not sent over SMS)",
+                request_id,
+                normalized_phone,
+                otp_code,
+            )
+            return {
+                "success": True,
+                "message": "OTP generated (mock: code in server logs)",
+                "expires_in_minutes": OTP_EXPIRY_MINUTES,
+                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
+                "provider": "sms_mock",
+            }
 
-                    logger.info(
-                        "[OTP:%s] Sending to Termii phone=%s sender=%s channel=%s base=%s",
-                        request_id,
-                        termii_phone,
-                        TERMII_FROM_ID or "NEXRYDE",
-                        channel,
-                        TERMII_BASE_URL,
-                    )
-
-                    response = await http_client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload,
-                        timeout=30.0
-                    )
-
-                    logger.info("[OTP:%s] Termii status=%s channel=%s", request_id, response.status_code, channel)
-                    logger.info("[OTP:%s] Termii body=%s", request_id, response.text)
-
-                    if response.status_code == 200:
-                        try:
-                            data = response.json()
-                        except Exception:
-                            logger.error("[OTP:%s] Termii returned non-JSON body=%s", request_id, response.text)
-                            raise HTTPException(status_code=500, detail="OTP provider returned invalid response.")
-                        if data.get("code") != "ok":
-                            logger.error("[OTP:%s] Termii rejected response=%s", request_id, data)
-                            continue
-
-                        message_id = data.get('message_id')
-                        await save_otp_record(
-                            phone=normalized_phone,
-                            otp=otp_code,
-                            provider="termii",
-                            message_id=message_id
-                        )
-
-                        logger.info(
-                            "[OTP:%s] OTP sent successfully normalized_phone=%s message_id=%s channel=%s",
-                            request_id,
-                            normalized_phone,
-                            message_id,
-                            channel,
-                        )
-                        return {
-                            "success": True,
-                            "message": "OTP sent successfully via SMS",
-                            "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                            "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                            "provider": "termii",
-                            "channel": channel,
-                        }
-
-                    low = response.text.lower()
-                    route_issue = "no route" in low or "route" in low or "channel" in low
-                    if route_issue and channel != channels_to_try[-1]:
-                        logger.warning("[OTP:%s] Termii route issue on channel=%s; retrying fallback.", request_id, channel)
-                        continue
-
-                    logger.error("[OTP:%s] Termii API non-200 status=%s body=%s", request_id, response.status_code, response.text)
-                    raise HTTPException(status_code=500, detail="Failed to send SMS")
-
-                raise HTTPException(status_code=500, detail="Failed to send SMS")
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.exception("[OTP:%s] Termii exception: %s", request_id, str(e))
-            raise HTTPException(status_code=500, detail="Failed to send SMS")
-        
+        logger.error("[OTP:%s] Phone SMS OTP disabled. Use email sign-in or set SMS_OTP_MOCK=true for dev.", request_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Phone SMS verification is not available. Sign in with email, or enable SMS_OTP_MOCK for local testing.",
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -631,84 +692,11 @@ async def send_otp(request: OTPRequest, http_request: Request):
 
 @auth_router.post("/auth/request-otp-whatsapp")
 async def send_otp_whatsapp(request: OTPRequest):
-    """Send OTP via WhatsApp using Termii"""
-    try:
-        # Normalize phone number
-        normalized_phone = request.phone.replace('+', '').replace(' ', '').replace('-', '')
-        if normalized_phone.startswith('0'):
-            normalized_phone = '234' + normalized_phone[1:]
-        elif not normalized_phone.startswith('234'):
-            normalized_phone = '234' + normalized_phone
-        
-        # Generate OTP
-        otp_code = str(random.randint(100000, 999999))
-        
-        # Store OTP
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=OTP_EXPIRY_MINUTES)
-        otp_store[request.phone] = {
-            "otp": otp_code,
-            "expires": expires_at,
-            "attempts": 0
-        }
-        
-        # Try WhatsApp via Termii
-        if TERMII_API_KEY:
-            try:
-                payload = {
-                    "api_key": TERMII_API_KEY,
-                    "to": normalized_phone,
-                    "from": "NEXRYDE",
-                    "channel": "whatsapp",
-                    "type": "plain",
-                    "sms": f"Your NexRyde verification code is {otp_code}. This code expires in {OTP_EXPIRY_MINUTES} minutes."
-                }
-                
-                logger.info(f"Sending WhatsApp OTP to {normalized_phone}")
-                
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    response = await client.post(
-                        f"{TERMII_BASE_URL}/api/sms/send",
-                        json=payload
-                    )
-                    
-                    logger.info(f"WhatsApp Termii response: {response.text}")
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        if result.get("code") == "ok":
-                            logger.info(f"WhatsApp OTP sent successfully to {normalized_phone}")
-                            return {
-                                "success": True,
-                                "message": "OTP sent successfully via WhatsApp",
-                                "expires_in_minutes": OTP_EXPIRY_MINUTES,
-                                "resend_cooldown_seconds": OTP_RESEND_COOLDOWN_SECONDS,
-                                "provider": "whatsapp"
-                            }
-                    
-                    # WhatsApp failed - return error with details
-                    error_msg = response.text
-                    logger.error(f"WhatsApp delivery failed: {error_msg}")
-                    return {
-                        "success": False,
-                        "message": "WhatsApp not available. Please use SMS instead."
-                    }
-                    
-            except Exception as e:
-                logger.error(f"WhatsApp error: {str(e)}")
-                return {
-                    "success": False,
-                    "message": "WhatsApp service unavailable. Please use SMS instead."
-                }
-        
-        # Termii not configured
-        return {
-            "success": False,
-            "message": "WhatsApp service not configured. Please use SMS instead."
-        }
-        
-    except Exception as e:
-        logger.error(f"WhatsApp OTP error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Failed to send WhatsApp OTP")
+    """WhatsApp OTP delivery is not configured."""
+    return {
+        "success": False,
+        "message": "WhatsApp verification is not available. Use email sign-in or SMS with SMS_OTP_MOCK for testing.",
+    }
 
 @auth_router.post("/auth/verify-otp")
 async def verify_otp(request: OTPVerify, http_request: Request):
@@ -986,78 +974,14 @@ async def google_sign_in(request: GoogleSignInRequest):
 
 @auth_router.post("/auth/email-signin")
 async def email_sign_in(request: EmailSignInRequest):
-    """Email sign-in helper: existing users log in directly, new users continue registration."""
+    """Email sign-in: existing users log in directly, new users continue registration (legacy / hybrid)."""
     email = (request.email or "").strip().lower()
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(status_code=400, detail="Invalid email address")
 
     user = await db.users.find_one({"email": email})
     if user:
-        if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
-            # Auto-clear false-positive SIM swap locks for verified drivers.
-            # A driver who has completed verification and provides valid email credentials
-            # should never be permanently locked out by a stale fingerprint mismatch.
-            profile_check = await db.driver_profiles.find_one(
-                {"user_id": user["id"]}, {"_id": 0, "verification_status": 1}
-            ) or {}
-            if profile_check.get("verification_status") in ("approved", "verified"):
-                _now_iso = datetime.now(timezone.utc).isoformat()
-                await db.users.update_one(
-                    {"id": user["id"]},
-                    {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""},
-                     "$set": {"sim_swap_lock_cleared_at": _now_iso, "sim_swap_lock_cleared_source": "email_login_verified_driver"}}
-                )
-                await db.driver_profiles.update_one(
-                    {"user_id": user["id"]},
-                    {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
-                )
-                user["sim_swap_lock"] = {"active": False}
-            else:
-                raise HTTPException(
-                    status_code=423,
-                    detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
-                )
-        if user.get("role") == "driver":
-            driver_profile = await db.driver_profiles.find_one(
-                {"user_id": user["id"]},
-                {"_id": 0, "fortress_known_devices": 1, "face_image": 1},
-            ) or {}
-            device_id = (request.device_id or "").strip()
-            known_devices = set(driver_profile.get("fortress_known_devices") or [])
-            # fortress_exempt flag allows test/admin accounts to skip the fortress check
-            if not user.get("fortress_exempt") and (not device_id or device_id not in known_devices):
-                challenge_id = str(uuid.uuid4())
-                expires_at = datetime.now(timezone.utc) + timedelta(minutes=8)
-                await db.driver_login_fortress_challenges.insert_one(
-                    {
-                        "id": challenge_id,
-                        "user_id": user["id"],
-                        "email": email,
-                        "device_id": device_id or None,
-                        "expires_at": expires_at,
-                        "status": "pending",
-                        "created_at": datetime.now(timezone.utc),
-                    }
-                )
-                masked_phone = ""
-                phone = str(user.get("phone") or "")
-                if len(phone) >= 6:
-                    masked_phone = f"{phone[:4]}****{phone[-2:]}"
-                return {
-                    "message": "Driver Account Fortress verification required.",
-                    "fortress_required": True,
-                    "challenge_id": challenge_id,
-                    "masked_phone": masked_phone,
-                    "pin_setup_required": not bool(user.get("driver_account_pin_hash")),
-                }
-        user["_id"] = str(user["_id"])
-        token = create_jwt_token(user["id"], user.get("role", "rider"))
-        return {
-            "message": "Login successful",
-            "is_new_user": False,
-            "user": user,
-            "token": token,
-        }
+        return await _complete_existing_user_email_login(email, request.device_id)
 
     suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "Nexryde User"
     return {
@@ -1116,6 +1040,13 @@ async def verify_email_otp(request: EmailOTPVerifyRequest):
             raise HTTPException(status_code=400, detail="Too many failed attempts. Please request a new code.")
         raise HTTPException(status_code=400, detail=f"Invalid OTP code. {remaining} attempt(s) remaining.")
 
+    await db.email_otp_records.delete_one({"email": email})
+
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        login_result = await _complete_existing_user_email_login(email, request.device_id)
+        return {**login_result, "verified": True, "message": login_result.get("message", "Login successful")}
+
     now = datetime.now(timezone.utc)
     expires = now + timedelta(hours=EMAIL_OTP_VERIFICATION_TTL_HOURS)
     await db.email_verifications.update_one(
@@ -1132,7 +1063,6 @@ async def verify_email_otp(request: EmailOTPVerifyRequest):
         },
         upsert=True,
     )
-    await db.email_otp_records.delete_one({"email": email})
 
     suggested_name = email.split("@")[0].replace(".", " ").title() or "Nexryde User"
     return {
@@ -1485,6 +1415,14 @@ async def register(request: RegisterRequest, http_request: Request):
     # Keep email_verifications collection untouched when OTP flow is disabled.
     
     token = create_jwt_token(user["id"], user.get("role", "rider"))
+    if user.get("email"):
+        from services.product_notification_email import schedule_registration_welcome_email
+
+        schedule_registration_welcome_email(
+            to_email=str(user["email"]),
+            name=str(user.get("name") or ""),
+            role=str(user.get("role") or "rider"),
+        )
     return {"message": "Registration successful", "user": user, "token": token}
 
 @auth_router.post("/auth/logout")
@@ -1511,4 +1449,89 @@ async def logout(request: Request, response: Response):
     except Exception as e:
         logger.error(f"Logout error: {str(e)}")
         return {"message": "Logout successful"}
+
+
+# --- Brevo unified email OTP (in-memory; see services/nexryde_brevo_unified_otp.py) ---
+
+
+async def _brevo_unified_issue_otp(body: "UnifiedEmailOtpRequestBody", http_request: Request) -> dict:
+    await otp_limiter.check_rate_limit(
+        http_request, f"brevo_unified_otp_req:{str(body.email).lower()}"
+    )
+    ok, err = await brevo_unified_request_otp(
+        email_raw=str(body.email),
+        user_type_raw=str(body.user_type),
+    )
+    if not ok:
+        if err == GENERIC_REQUEST_RATE:
+            raise HTTPException(
+                status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={"success": False, "message": err},
+            )
+        if err and "Invalid email format" in err:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "message": err},
+            )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "message": err or GENERIC_SERVER},
+        )
+    return {
+        "success": True,
+        "message": "If this mailbox can receive Nexryde mail, a verification code will arrive shortly.",
+        "expires_in_minutes": 10,
+    }
+
+
+@auth_router.post("/auth/otp/request")
+async def brevo_unified_otp_request_endpoint(
+    body: UnifiedEmailOtpRequestBody,
+    http_request: Request,
+):
+    """
+    Request a 6-digit OTP by email. Rate-limited per mailbox (1/min) and global limiter.
+    `userType` customizes the Brevo template (driver, rider, admin, or any string).
+    """
+    return await _brevo_unified_issue_otp(body, http_request)
+
+
+@auth_router.post("/auth/otp/resend")
+async def brevo_unified_otp_resend_endpoint(
+    body: UnifiedEmailOtpRequestBody,
+    http_request: Request,
+):
+    """Same rules as /auth/otp/request (per-email cooldown preserved)."""
+    return await _brevo_unified_issue_otp(body, http_request)
+
+
+@auth_router.post("/auth/otp/verify")
+async def brevo_unified_otp_verify_endpoint(
+    body: UnifiedEmailOtpVerifyBody,
+    http_request: Request,
+):
+    await otp_limiter.check_rate_limit(
+        http_request, f"brevo_unified_otp_verify:{str(body.email).lower()}"
+    )
+    ok, session_token, err = await brevo_unified_verify_otp(
+        email_raw=str(body.email),
+        code_raw=body.otp,
+    )
+    if not ok:
+        raise HTTPException(
+            status.HTTP_401_UNAUTHORIZED,
+            detail={"success": False, "message": err or GENERIC_VERIFY_FAIL},
+        )
+    return {
+        "success": True,
+        "message": "Verification successful.",
+        "session_token": session_token,
+        "otp_flow_expires_hint_seconds": BREVO_UNIFIED_OTP_EXPIRY_SECONDS,
+    }
+
+
+@auth_router.get("/auth/otp/status")
+async def brevo_unified_otp_status_endpoint(email: EmailStr = Query(..., description="Email to inspect")):
+    """Debug: pending OTP metadata for this email (per-server process memory only)."""
+    return await brevo_unified_otp_status(email_raw=str(email))
 

@@ -18,14 +18,18 @@ import * as Location from 'expo-location';
 import * as Clipboard from 'expo-clipboard';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useEmergencyContacts } from '@/src/hooks/useEmergencyContacts';
 
 export default function ShareTripScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { user, currentTrip } = useAppStore();
+  const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
+  const { currentTrip } = useAppStore();
   const [currentLocation, setCurrentLocation] = useState<any>(null);
-  const { contacts: emergencyContacts, loading: loadingContacts, refresh: refreshEmergencyContacts } = useEmergencyContacts(user?.id);
+  const { contacts: emergencyContacts, loading: loadingContacts, refresh: refreshEmergencyContacts } = useEmergencyContacts(
+    canCallAuthedApi ? riderId : undefined,
+  );
   const [shareLink, setShareLink] = useState('');
   const [tracking, setTracking] = useState(false);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
@@ -36,7 +40,6 @@ export default function ShareTripScreen() {
   }) | null;
 
   useEffect(() => {
-    void refreshEmergencyContacts();
     generateShareLink();
     void startLocationTracking();
     return () => {
@@ -44,7 +47,12 @@ export default function ShareTripScreen() {
         locationSubscription.current.remove();
       }
     };
-  }, [refreshEmergencyContacts]);
+  }, []);
+
+  useEffect(() => {
+    if (!canCallAuthedApi) return;
+    void refreshEmergencyContacts();
+  }, [canCallAuthedApi, refreshEmergencyContacts]);
 
   const generateShareLink = () => {
     const tripId = currentTrip?.id || params.tripId;

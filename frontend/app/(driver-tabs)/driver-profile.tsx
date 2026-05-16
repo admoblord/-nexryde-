@@ -31,6 +31,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 const { width: W } = Dimensions.get('window');
 const TILE_W = (W - 48 - 12) / 2;
@@ -168,6 +169,7 @@ export default function DriverProfileScreen() {
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(16);
   const { user, logout, setUser, subscription } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showSwitchModal, setShowSwitchModal] = useState(false);
@@ -189,11 +191,11 @@ export default function DriverProfileScreen() {
   }, []);
 
   const loadDriverProfile = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId || !canCallAuthedApi) return;
     try {
       const [profileRes, vehiclesRes] = await Promise.allSettled([
-        getDriverProfile(user.id),
-        fetch(`${BACKEND_URL}/api/drivers/${user.id}/vehicles`, {
+        getDriverProfile(driverId),
+        fetch(`${BACKEND_URL}/api/drivers/${driverId}/vehicles`, {
           headers: getAuthHeaders(),
         }).then(r => r.json()).catch(() => ({ vehicles: [] })),
       ]);
@@ -207,30 +209,33 @@ export default function DriverProfileScreen() {
         setDriverVehicles(((vehiclesRes.value as any)?.vehicles || []) as DriverVehicle[]);
       }
     } catch { /* non-critical */ }
-  }, [user?.id]);
+  }, [canCallAuthedApi, driverId]);
 
-  useEffect(() => { void loadDriverProfile(); }, [loadDriverProfile]);
+  useEffect(() => {
+    if (!canCallAuthedApi) return;
+    void loadDriverProfile();
+  }, [loadDriverProfile, canCallAuthedApi]);
 
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      if (!user?.id) return;
+      if (!driverId || !canCallAuthedApi) return;
       setLoadingTrust(true);
       try {
-        const res = await getUserTrustSummary(user.id);
+        const res = await getUserTrustSummary(driverId);
         if (mounted) setTrustSummary(res.data);
       } catch { /* non-critical */ }
       finally { if (mounted) setLoadingTrust(false); }
     };
     void load();
     return () => { mounted = false; };
-  }, [user?.id]);
+  }, [canCallAuthedApi, driverId]);
 
   const saveProfileImage = async (uri: string) => {
     setProfileImage(uri);
-    if (user) {
+    if (user && driverId && canCallAuthedApi) {
       setUser({ ...user, profile_image: uri });
-      try { await updateUser(user.id, { profile_image: uri }); } catch { /* silent */ }
+      try { await updateUser(driverId, { profile_image: uri }); } catch { /* silent */ }
     }
   };
 
@@ -270,7 +275,7 @@ export default function DriverProfileScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
-          if (user?.id) await deleteUserAccount(user.id);
+          if (driverId && canCallAuthedApi) await deleteUserAccount(driverId);
           await logout();
           router.replace('/(auth)/login');
         } catch { Alert.alert('Error', 'Could not delete account right now.'); }

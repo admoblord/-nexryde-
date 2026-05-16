@@ -23,6 +23,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 import * as ImagePicker from 'expo-image-picker';
 import {
   createNexrydeStory,
@@ -67,7 +70,8 @@ const STORY_TYPES = [
 
 export default function NexrydeStoriesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const storeReady = usePersistStoreReady();
+  const { user, userId, canCallAuthedApi } = useAuthedUserId();
   const [stories, setStories] = useState<Story[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -108,7 +112,7 @@ export default function NexrydeStoriesScreen() {
   }, [loadStories]);
 
   const handlePost = useCallback(async () => {
-    if (!user?.id) {
+    if (!userId || !canCallAuthedApi) {
       Alert.alert('Login required', 'Please sign in to post a story.');
       return;
     }
@@ -138,7 +142,7 @@ export default function NexrydeStoriesScreen() {
     } finally {
       setPosting(false);
     }
-  }, [draft, storyType, user?.id, mediaData, mediaType, loadStories]);
+  }, [draft, storyType, userId, canCallAuthedApi, mediaData, mediaType, loadStories]);
 
   const pickStoryMedia = useCallback(async (kind: 'image' | 'video') => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -264,6 +268,10 @@ export default function NexrydeStoriesScreen() {
       }),
     [closeViewer, viewerTranslateY]
   );
+
+  if (!storeReady) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>

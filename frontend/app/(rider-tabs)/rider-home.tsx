@@ -20,8 +20,10 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SupportedLanguage, SUPPORTED_LANGUAGES } from '@/src/i18n/translations';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders, getDriverOfMonth, voteDriverOfMonth } from '@/src/services/api';
-import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
+import { normalizeTripStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { FeatureHubDrawer } from '@/src/components/FeatureHubDrawer';
 import { RiderSavedSlotPremiumIcon } from '@/src/components/RiderSavedSlotPremiumIcon';
@@ -29,7 +31,6 @@ import { COLORS } from '@/src/constants/theme';
 import { BRAND, HOME_PALETTE } from '@/src/constants/designSystem';
 import {
   RIDER_HOME_DEST_BAR_BORDER,
-  RIDER_HOME_RESUME_ACCENT,
   RIDER_HOME_WALLET_BORDER,
   RIDER_PRIMARY_CTA_GRADIENT,
 } from '@/src/constants/riderRideChrome';
@@ -41,6 +42,7 @@ import {
   type RiderSavedPlace,
 } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { RiderFavoritesHomeStrip } from '@/src/components/rider/RiderFavoritesHomeStrip';
 
 const ICON_EMERGENCY = '#EF4444';
 const ICON_SUPPORT = '#F97316';
@@ -49,6 +51,8 @@ const FEAT_SAFETY = '#F59E0B';
 
 export default function ModernRiderHome() {
   const router = useRouter();
+  const { canCallAuthedApi } = useAuthedApiReady();
+  const { userId: riderId } = useAuthedUserId();
   const { user, token, currentTrip, setCurrentTrip } = useAppStore();
   const firstName =
     (user?.name && String(user.name).trim().split(/\s+/)[0]) || 'there';
@@ -87,6 +91,13 @@ export default function ModernRiderHome() {
       bg: ICON_SUPPORT,
     },
     {
+      id: 'favourites',
+      label: 'Favourites',
+      icon: 'heart' as const,
+      route: '/rider/favorite-drivers',
+      bg: '#DB2777',
+    },
+    {
       id: 'wallet',
       label: 'My Wallet',
       icon: 'wallet' as const,
@@ -121,13 +132,17 @@ export default function ModernRiderHome() {
 
   useEffect(() => {
     const enforceRiderVerification = async () => {
-      if (!user?.id || user?.role !== 'rider') return;
+      if (!canCallAuthedApi || !riderId || user?.role !== 'rider') return;
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/rider-verification-status`, {
+        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/rider-verification-status`, {
           headers: getAuthHeaders(),
         });
-        // Only redirect on explicit 4xx — never on network failures or 5xx
+        // Auth / identity errors → re-login only when we had a token (avoid pre-hydration 401).
         if (res.status === 401 || res.status === 403) {
+          router.replace('/(auth)/login');
+          return;
+        }
+        if (res.status === 404) {
           router.replace('/(auth)/rider-verification');
           return;
         }
@@ -142,17 +157,17 @@ export default function ModernRiderHome() {
         // Network error — don't redirect, let the user stay on home
       }
     };
-    enforceRiderVerification();
-  }, [router, user?.id, user?.role]);
+    void enforceRiderVerification();
+  }, [canCallAuthedApi, router, riderId, user?.role]);
 
   useFocusEffect(
     useCallback(() => {
-      if (!user?.id) {
+      if (!riderId || !canCallAuthedApi) {
         setSavedPlaces([]);
         return;
       }
-      void loadRiderSavedPlaces(user.id).then(setSavedPlaces).catch(() => setSavedPlaces([]));
-    }, [user?.id]),
+      void loadRiderSavedPlaces(riderId).then(setSavedPlaces).catch(() => setSavedPlaces([]));
+    }, [riderId, canCallAuthedApi]),
   );
 
   const openBookToSaved = useCallback(
@@ -171,12 +186,12 @@ export default function ModernRiderHome() {
   );
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!canCallAuthedApi || !riderId) return;
     const loadRecentTrips = async () => {
       setRecentTripsLoading(true);
       try {
         const res = await fetch(
-          `${BACKEND_URL}/api/trips/rider/${user.id}?limit=3&status=completed`,
+          `${BACKEND_URL}/api/trips/rider/${riderId}?limit=3&status=completed`,
           { headers: getAuthHeaders() }
         );
         if (res.ok) {
@@ -189,8 +204,8 @@ export default function ModernRiderHome() {
         setRecentTripsLoading(false);
       }
     };
-    loadRecentTrips();
-  }, [user?.id]);
+    void loadRecentTrips();
+  }, [canCallAuthedApi, riderId]);
 
   useEffect(() => {
     const loadDriverOfMonth = async () => {
@@ -206,13 +221,13 @@ export default function ModernRiderHome() {
 
   // Wallet balance + completed trip count for first-ride nudge
   useEffect(() => {
-    if (!user?.id) return;
+    if (!canCallAuthedApi || !riderId) return;
     const loadWalletAndStats = async () => {
       try {
         const headers = getAuthHeaders();
           const [walletRes, tripsRes] = await Promise.allSettled([
-          fetch(`${BACKEND_URL}/api/wallet/${user.id}`, { headers }),
-          fetch(`${BACKEND_URL}/api/trips/rider/${user.id}?limit=1&status=completed`, { headers }),
+          fetch(`${BACKEND_URL}/api/wallet/${riderId}`, { headers }),
+          fetch(`${BACKEND_URL}/api/trips/rider/${riderId}?limit=1&status=completed`, { headers }),
         ]);
         if (walletRes.status === 'fulfilled' && walletRes.value.ok) {
           const data = await walletRes.value.json();
@@ -229,13 +244,13 @@ export default function ModernRiderHome() {
       } catch { /* non-critical */ }
     };
     void loadWalletAndStats();
-  }, [user?.id]);
+  }, [canCallAuthedApi, riderId]);
 
   const normalizedCurrentTripStatus = normalizeTripStatus(currentTrip?.status, (currentTrip as any)?.payment_status);
-  const showResumeChip = Boolean(currentTrip?.id && isActiveTripStatus(normalizedCurrentTripStatus));
 
   const riderTripWsEnabled = Boolean(
-    user?.id &&
+    riderId &&
+      canCallAuthedApi &&
       token &&
       currentTrip?.id &&
       ['pending', 'pending_driver_offers', 'accepted', 'arrived', 'ongoing', 'pending_payment'].includes(
@@ -260,34 +275,22 @@ export default function ModernRiderHome() {
   );
 
   useRiderTripRealtime({
-    riderId: user?.id,
+    riderId,
     token,
     enabled: riderTripWsEnabled,
     watchTripId: currentTrip?.id ?? null,
     onTripUpdate: handleRiderHomeTripWs,
   });
-  const resumeStatusLabel =
-    normalizedCurrentTripStatus === 'pending' || normalizedCurrentTripStatus === 'pending_driver_offers'
-      ? 'Finding drivers'
-      : normalizedCurrentTripStatus === 'accepted'
-        ? 'Driver on the way'
-        : normalizedCurrentTripStatus === 'arrived'
-          ? 'Driver arrived'
-          : normalizedCurrentTripStatus === 'ongoing'
-            ? 'Trip in progress'
-            : normalizedCurrentTripStatus === 'pending_payment'
-              ? 'Payment pending'
-              : 'Active trip';
 
   const handleVoteDriverOfMonth = useCallback(
     async (driverId: string) => {
-      if (!user?.id) {
+      if (!riderId || !canCallAuthedApi) {
         router.push('/(auth)/login' as any);
         return;
       }
       try {
         setVotingDriverId(driverId);
-        const res = await voteDriverOfMonth(user.id, driverId);
+        const res = await voteDriverOfMonth(riderId, driverId);
         setDriverOfMonth(res.data || null);
       } catch (error: any) {
         Alert.alert('Vote unavailable', error?.response?.data?.detail || 'You may have already voted this month.');
@@ -295,7 +298,7 @@ export default function ModernRiderHome() {
         setVotingDriverId(null);
       }
     },
-    [router, user?.id]
+    [router, riderId, canCallAuthedApi]
   );
 
   return (
@@ -338,21 +341,7 @@ export default function ModernRiderHome() {
         </View>
       </View>
 
-      {showResumeChip ? (
-        <TouchableOpacity
-          style={[styles.resumeTripChip, { marginHorizontal: flow.padH }]}
-          onPress={() => router.push({ pathname: '/rider/tracking', params: { tripId: currentTrip?.id } } as any)}
-          activeOpacity={0.85}
-        >
-          <Ionicons name="navigate-circle" size={16} color="#065F46" />
-          <Text style={styles.resumeTripChipText}>
-            Resume Trip #{String(currentTrip?.id || '').slice(-6).toUpperCase()} - {resumeStatusLabel}
-          </Text>
-          <Ionicons name="chevron-forward" size={16} color="#065F46" />
-        </TouchableOpacity>
-      ) : null}
-
-      {/* ── Uber-style "Where to?" destination bar ── */}
+      {/* ── Destination bar (“Where to?”) ── */}
       <TouchableOpacity
         style={[styles.whereToBar, { marginHorizontal: flow.padH }]}
         onPress={() => router.push('/rider/book' as any)}
@@ -561,6 +550,11 @@ export default function ModernRiderHome() {
               );
             })}
           </ScrollView>
+        </Animated.View>
+
+        {/* FAVOURITE DRIVERS — one-tap rebook trusted drivers */}
+        <Animated.View style={[styles.section, { opacity: fadeAnim }]}>
+          <RiderFavoritesHomeStrip />
         </Animated.View>
 
         {/* QUICK ACCESS - ICON ROW */}
@@ -822,32 +816,6 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
-  },
-  resumeTripChip: {
-    marginBottom: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 14,
-    backgroundColor: '#ECFDF5',
-    borderWidth: 1,
-    borderColor: '#A7F3D0',
-    borderLeftWidth: 4,
-    borderLeftColor: RIDER_HOME_RESUME_ACCENT,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    shadowColor: BRAND.primaryNeon,
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.12,
-    shadowRadius: 8,
-    elevation: 2,
-  },
-  resumeTripChipText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#065F46',
-    textTransform: 'capitalize',
   },
   whereToBar: {
     marginTop: 4,

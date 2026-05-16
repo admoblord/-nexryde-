@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput, Alert, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -8,15 +8,29 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { useAppStore } from '@/src/store/appStore';
 import { updateUser } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function EditProfileScreen() {
   const router = useRouter();
+  const authed = useRequireUserOrLogin();
   const { user, setUser } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
+
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (!userId || !canCallAuthedApi || !user) return;
+    setName(user.name || '');
+    setEmail(user.email || '');
+    setPhone(user.phone || '');
+    setProfileImage(user.profile_image || null);
+  }, [userId, canCallAuthedApi, user]);
 
   const pickImage = () => {
     Alert.alert('Change Photo', 'Choose photo source', [
@@ -72,7 +86,7 @@ export default function EditProfileScreen() {
   };
 
   const handleSave = async () => {
-    if (!user?.id) {
+    if (!userId || !canCallAuthedApi) {
       Alert.alert('Error', 'No user session found. Please login again.');
       return;
     }
@@ -84,7 +98,7 @@ export default function EditProfileScreen() {
         phone: phone.trim() || undefined,
         profile_image: profileImage || undefined,
       };
-      const response = await updateUser(user.id, payload);
+      const response = await updateUser(userId, payload);
       const updatedUser = response?.data || { ...user, ...payload };
       setUser(updatedUser);
       await saveUserSession(updatedUser);
@@ -97,6 +111,10 @@ export default function EditProfileScreen() {
       setIsSaving(false);
     }
   };
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>

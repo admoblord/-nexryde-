@@ -13,8 +13,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter, useSegments } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
-import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { DRIVER_ACTIVE_TRIP_HREF } from '@/src/constants/driverNavigation';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
 
@@ -33,6 +34,7 @@ interface ActiveTrip {
 export default function ActiveTripBar() {
   const router = useRouter();
   const { user, currentTrip, setCurrentTrip } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const [calling, setCalling] = useState(false);
   const slideAnim = useRef(new Animated.Value(100)).current;
   const insets = useSafeAreaInsets();
@@ -49,7 +51,7 @@ export default function ActiveTripBar() {
   }, [activeTrip]);
 
   const handleCall = async () => {
-    if (!activeTrip?.id || !user?.id) return;
+    if (!activeTrip?.id || !userId || !canCallAuthedApi || !user) return;
     setCalling(true);
     try {
       const res = await fetch(`${BACKEND_URL}/api/call/session`, {
@@ -102,17 +104,17 @@ export default function ActiveTripBar() {
     if (user?.role === 'rider') {
       router.push({ pathname: '/rider/tracking', params: { tripId: activeTrip.id } } as any);
     } else {
-      router.push(DRIVER_TRIPS_TAB_HREF);
+      router.push(DRIVER_ACTIVE_TRIP_HREF as any);
     }
   };
 
   const handleCancelPending = async () => {
-    if (!activeTrip?.id || !user?.id) return;
+    if (!activeTrip?.id || !userId || !canCallAuthedApi) return;
     try {
       const res = await fetch(`${BACKEND_URL}/api/trips/${activeTrip.id}/cancel`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ cancelled_by: user.id }),
+        body: JSON.stringify({ cancelled_by: userId }),
       });
       const data = await res.json();
       if (res.ok) {

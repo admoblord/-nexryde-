@@ -11,7 +11,6 @@ import base64
 import hashlib
 from openai import OpenAI
 
-import httpx
 from cryptography.fernet import Fernet
 
 from database import db
@@ -23,9 +22,6 @@ from security_advanced import general_limiter
 logger = logging.getLogger('server')
 support_router = APIRouter(prefix="/api", tags=["Support"])
 
-TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
-TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
-TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
 POLICE_ALERT_NUMBERS = [n.strip() for n in (os.environ.get("NEXRYDE_POLICE_ALERT_NUMBERS", "")).split(",") if n.strip()]
 MAX_TRIP_VIDEO_BYTES = 25 * 1024 * 1024  # 25MB guard for in-DB payload storage
@@ -252,19 +248,7 @@ async def trigger_sos(request: SOSRequest, http_request: Request):
     await db.sos_alerts.insert_one(sos.model_dump() if hasattr(sos, "model_dump") else sos.dict())
     await db.trips.update_one({"id": request.trip_id}, {"$set": {"sos_triggered": True, "sos_triggered_at": datetime.now(timezone.utc)}})
     contacts_notified = 0
-    if TERMII_API_KEY and emergency_contacts:
-        location_link = f"https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-        async with httpx.AsyncClient() as http_client:
-            for contact in emergency_contacts:
-                try:
-                    phone = contact["phone"].lstrip('+')
-                    sms_text = f"EMERGENCY! {user_name} triggered SOS on NexRyde! Location: {location_link} Trip: {request.trip_id}"
-                    payload = {"api_key": TERMII_API_KEY, "to": phone, "from": "NEXRYDE", "channel": "dnd", "type": "plain", "sms": sms_text}
-                    resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
-                    if resp.status_code == 200:
-                        contacts_notified += 1
-                except Exception as e:
-                    logger.error(f"SOS SMS error: {e}")
+    # SMS to emergency contacts not sent; SOS still stored and nearby drivers notified.
     # NEXRYDE Shield: notify other online drivers within 2km (rider or driver SOS).
     nearby_driver_alerts = await broadcast_sos_to_nearby_nexryde_drivers(
         request.location_lat,
@@ -330,30 +314,7 @@ async def one_touch_police_connect(request: PoliceConnectRequest, http_request: 
     )
 
     sms_sent = 0
-    if TERMII_API_KEY and POLICE_ALERT_NUMBERS:
-        message = (
-            "NEXRYDE POLICE CONNECT ALERT\n"
-            f"Driver: {driver.get('name', 'Driver')}\n"
-            f"Vehicle: {profile.get('vehicle_model', 'Vehicle')} / {profile.get('vehicle_plate', 'N/A')}\n"
-            f"Trip: {request.trip_id}\n"
-            f"Location: https://maps.google.com/?q={request.location_lat},{request.location_lng}"
-        )
-        async with httpx.AsyncClient() as http_client:
-            for number in POLICE_ALERT_NUMBERS:
-                try:
-                    payload = {
-                        "api_key": TERMII_API_KEY,
-                        "to": number.lstrip("+"),
-                        "from": TERMII_FROM_ID,
-                        "channel": "dnd",
-                        "type": "plain",
-                        "sms": message,
-                    }
-                    resp = await http_client.post(f"{TERMII_BASE_URL}/api/sms/send", json=payload, timeout=10.0)
-                    if resp.status_code == 200:
-                        sms_sent += 1
-                except Exception as e:
-                    logger.warning("Police connect SMS failed for %s: %s", number, e)
+    # Police alert SMS not sent (no SMS gateway).
 
     return {
         "success": True,

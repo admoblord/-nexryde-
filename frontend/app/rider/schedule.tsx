@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
@@ -53,7 +54,7 @@ interface ScheduledRide {
 
 export default function ScheduleScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const params = useLocalSearchParams<{
     pickup?: string;
     dropoff?: string;
@@ -78,10 +79,10 @@ export default function ScheduleScreen() {
   const [fareEstimate, setFareEstimate] = useState<number | null>(null);
 
   useEffect(() => {
-    if (user?.id) {
-      loadScheduledRides();
+    if (riderId && canCallAuthedApi) {
+      void loadScheduledRides();
     }
-  }, [user?.id]);
+  }, [riderId, canCallAuthedApi]);
 
   useEffect(() => {
     if (params.pickup) setPickup(String(params.pickup));
@@ -100,9 +101,9 @@ export default function ScheduleScreen() {
   }, [params.pickup, params.dropoff, params.pickupLat, params.pickupLng, params.dropoffLat, params.dropoffLng, params.rideType, params.fareEstimate]);
 
   const loadScheduledRides = async () => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${user.id}`, {
+      const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${riderId}`, {
         headers: getAuthHeaders(),
       });
       const data = await res.json();
@@ -115,11 +116,11 @@ export default function ScheduleScreen() {
   };
 
   const scheduleRide = async () => {
-    if (!user?.id) {
+    if (!riderId || !canCallAuthedApi) {
       Alert.alert('Error', 'Please login first');
       return;
     }
-    
+
     if (pickup === 'Select Pickup Location' || dropoff === 'Select Drop-off Location') {
       Alert.alert('Missing Information', 'Please select pickup and drop-off locations');
       return;
@@ -135,7 +136,7 @@ export default function ScheduleScreen() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/rides/schedule?rider_id=${encodeURIComponent(user.id)}`, {
+      const res = await fetch(`${BACKEND_URL}/api/rides/schedule?rider_id=${encodeURIComponent(riderId)}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -174,8 +175,9 @@ export default function ScheduleScreen() {
           text: 'Yes, Cancel',
           style: 'destructive',
           onPress: async () => {
+            if (!riderId || !canCallAuthedApi) return;
             try {
-              await fetch(`${BACKEND_URL}/api/rides/scheduled/${rideId}/cancel?rider_id=${encodeURIComponent(user?.id || '')}`, {
+              await fetch(`${BACKEND_URL}/api/rides/scheduled/${rideId}/cancel?rider_id=${encodeURIComponent(riderId)}`, {
                 method: 'DELETE',
                 headers: getAuthHeaders(),
               });

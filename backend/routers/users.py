@@ -11,6 +11,12 @@ import re
 
 from database import db
 from user_scores import build_trust_summary
+from nin_registry_verify import (
+    verify_nin_with_full_name,
+    completion_requires_registry_match,
+    completion_allows_format_only,
+)
+from face_match import face_template_match_confidence, FACE_TEMPLATE_SIMSWAP_MIN
 
 logger = logging.getLogger('server')
 users_router = APIRouter(prefix="/api", tags=["Users"])
@@ -46,6 +52,8 @@ class EmergencyContactRequest(BaseModel):
 
 class FaceVerificationRequest(BaseModel):
     face_image: str
+    liveness_probe_image: Optional[str] = None
+    capture_meta: Optional[dict] = None
 
 class FavoriteDriverRequest(BaseModel):
     driver_id: str
@@ -91,6 +99,12 @@ class RiderVerificationUpdate(BaseModel):
     phone: str
     address: str
     nin: str
+
+
+class RiderNinVerifyBody(BaseModel):
+    nin: str
+    full_name: str
+
 
 # ==================== USER CRUD ====================
 
@@ -270,12 +284,16 @@ async def get_rider_verification_status(user_id: str, request: Request):
     nin = (user.get("nin") or "").strip()
     if not re.fullmatch(r"\d{11}", nin):
         missing.append("nin")
+    if not bool(user.get("face_verified")):
+        missing.append("face")
 
     return {
         "user_id": user_id,
         "role": "rider",
         "completed": len(missing) == 0,
         "missing": missing,
+        "nin_registry_verified": bool(user.get("nin_registry_verified")),
+        "face_verified": bool(user.get("face_verified")),
     }
 
 
@@ -288,6 +306,9 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
     if user.get("role") != "rider":
         raise HTTPException(status_code=403, detail="Rider account required")
 
+    if not bool(user.get("face_verified")):
+        raise HTTPException(status_code=400, detail="Complete biometric verification before submitting.")
+
     name = (body.name or "").strip()
     address = (body.address or "").strip()
     nin = (body.nin or "").strip()
@@ -298,6 +319,31 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
         raise HTTPException(status_code=400, detail="Address is required")
     if not re.fullmatch(r"\d{11}", nin):
         raise HTTPException(status_code=400, detail="NIN must be exactly 11 digits")
+
+    vr = await verify_nin_with_full_name(nin=nin, full_name=name)
+    if not vr.get("format_ok"):
+        raise HTTPException(status_code=400, detail=vr.get("message") or "Invalid NIN")
+
+    # Registry match only when explicitly required — webhook presence alone does not block onboarding.
+    need_registry = completion_requires_registry_match()
+    if need_registry:
+        if not vr.get("registry_checked"):
+            raise HTTPException(
+                status_code=503,
+                detail="NIN registry verification is unavailable. Try again soon.",
+            )
+        if not vr.get("registry_verified"):
+            raise HTTPException(status_code=400, detail=vr.get("message") or "NIN could not be verified.")
+        nin_verified_final = True
+        nin_registry_verified_final = True
+    elif completion_allows_format_only():
+        nin_verified_final = True
+        nin_registry_verified_final = bool(vr.get("registry_verified"))
+    else:
+        raise HTTPException(
+            status_code=503,
+            detail="NIN verification is not configured. Contact support.",
+        )
 
     digits = ''.join(filter(str.isdigit, raw_phone))
     if len(digits) < 10:
@@ -311,6 +357,7 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
     else:
         normalized_phone = '+234' + digits
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     await db.users.update_one(
         {"id": user_id},
         {"$set": {
@@ -318,11 +365,15 @@ async def complete_rider_verification(user_id: str, request: Request, body: Ride
             "phone": normalized_phone,
             "address": address,
             "nin": nin,
-            "nin_verified": True,
+            "nin_verified": nin_verified_final,
+            "nin_registry_verified": nin_registry_verified_final,
+            "nin_name_match_score": vr.get("name_match_score"),
+            "nin_verify_last_message": vr.get("message"),
+            "nin_verify_checked_at": now_iso,
             "is_verified": True,
             "rider_verification_completed": True,
             "onboarding_complete": True,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now_iso,
         }}
     )
 
@@ -554,11 +605,43 @@ async def list_blocked_riders(user_id: str, request: Request):
 
 # ==================== FACE VERIFICATION ====================
 
+@users_router.post("/users/{user_id}/verify-rider-nin")
+async def verify_rider_nin(user_id: str, http_request: Request, body: RiderNinVerifyBody):
+    """Preflight NIN + full-name check (shows inline UI feedback before final submit)."""
+    verify_owner_strict(http_request, user_id)
+    user = await db.users.find_one({"id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.get("role") != "rider":
+        raise HTTPException(status_code=403, detail="Rider account required")
+
+    nin = (body.nin or "").strip()
+    full_name = (body.full_name or "").strip()
+    vr = await verify_nin_with_full_name(nin=nin, full_name=full_name)
+    now_iso = datetime.now(timezone.utc).isoformat()
+    await db.users.update_one(
+        {"id": user_id},
+        {"$set": {
+            "nin_verify_preview_at": now_iso,
+            "nin_verify_preview": {
+                "format_ok": vr.get("format_ok"),
+                "registry_checked": vr.get("registry_checked"),
+                "registry_verified": vr.get("registry_verified"),
+                "name_match_ok": vr.get("name_match_ok"),
+                "name_match_score": vr.get("name_match_score"),
+                "message": vr.get("message"),
+            },
+            "updated_at": now_iso,
+        }},
+    )
+    return {"success": True, **vr}
+
+
 @users_router.post("/users/{user_id}/verify-face")
-async def verify_face(user_id: str, request: FaceVerificationRequest, http_request: Request):
+async def verify_face(user_id: str, payload: FaceVerificationRequest, http_request: Request):
     verify_owner_strict(http_request, user_id)
     try:
-        image_data = request.face_image
+        image_data = payload.face_image
         if ',' in image_data:
             image_data = image_data.split(',')[1]
         decoded = base64.b64decode(image_data)
@@ -570,11 +653,57 @@ async def verify_face(user_id: str, request: FaceVerificationRequest, http_reque
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"face_image": request.face_image, "face_verified": True, "face_verified_at": datetime.now(timezone.utc).isoformat()}}
-    )
-    return {"success": True, "message": "Face verified successfully", "verified": True, "verified_at": datetime.now(timezone.utc).isoformat()}
+
+    liveness_score = None
+    probe = payload.liveness_probe_image
+    if probe:
+        try:
+            pdata = probe.split(',', 1)[1] if ',' in probe else probe
+            pdecoded = base64.b64decode(pdata)
+            if len(pdecoded) < 8000 or len(pdecoded) > 5000000:
+                raise HTTPException(status_code=400, detail="Secondary capture is invalid. Retake both shots.")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=400, detail="Secondary capture could not be read.")
+
+        try:
+            sim = face_template_match_confidence(payload.face_image, probe)
+            liveness_score = sim
+            if sim < FACE_TEMPLATE_SIMSWAP_MIN:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Biometric check failed: the two captures don't match. Retake in good lighting.",
+                )
+            if sim > 99.2:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Please retake: move slightly between captures so we know it's a live session.",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning("verify_face liveness compare failed: %s", e)
+            raise HTTPException(status_code=400, detail="Could not complete biometric comparison.")
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    set_doc = {
+        "face_image": payload.face_image,
+        "face_verified": True,
+        "face_verified_at": now_iso,
+        "face_liveness_score": liveness_score,
+        "face_capture_meta": payload.capture_meta or {},
+        "updated_at": now_iso,
+    }
+
+    await db.users.update_one({"id": user_id}, {"$set": set_doc})
+    return {
+        "success": True,
+        "message": "Face verified successfully",
+        "verified": True,
+        "verified_at": now_iso,
+        "liveness_score": liveness_score,
+    }
 
 # ==================== NOTIFICATIONS ====================
 

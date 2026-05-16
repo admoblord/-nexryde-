@@ -3,12 +3,12 @@ import { Platform, Vibration } from 'react-native';
 import { Audio } from 'expo-av';
 import { getDriverOfferSoundModule } from '@/src/constants/driverOfferSounds';
 import { useDriverOfferSoundPrefs } from '@/src/hooks/useDriverOfferSoundPrefs';
+import { configureDriverOfferAudioMode } from '@/src/services/driverOfferAudioSession';
 
 /**
- * Uber/Bolt-style alert while a ride offer modal is visible:
- * looping audio (plays in iOS silent mode) + repeating haptics.
- * Teardown runs automatically when the offer clears (accept / ignore / timeout).
- * Ringtone + mute come from Settings → driver preferences (AsyncStorage).
+ * Ride-offer alert while the modal is visible:
+ * looping audio (silent-switch bypass on iOS where OS allows) + repeating haptics.
+ * Teardown runs when the offer clears (accept / ignore / timeout).
  */
 export function useDriverOfferAlert(enabled: boolean, stableOfferKey: string | null) {
   const { ringtoneId, soundEnabled } = useDriverOfferSoundPrefs();
@@ -54,24 +54,19 @@ export function useDriverOfferAlert(enabled: boolean, stableOfferKey: string | n
     void (async () => {
       if (!soundEnabled) return;
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          staysActiveInBackground: true,
-          playsInSilentModeIOS: true,
-          shouldDuckAndroid: true,
-          playThroughEarpieceAndroid: false,
-        });
+        await configureDriverOfferAudioMode(true);
 
         const { sound } = await Audio.Sound.createAsync(getDriverOfferSoundModule(ringtoneId), {
-          shouldPlay: true,
+          shouldPlay: false,
           isLooping: true,
-          volume: 0.9,
+          volume: 1,
         });
         if (cancelled) {
           await sound.unloadAsync().catch(() => {});
           return;
         }
         soundRef.current = sound;
+        await sound.playAsync();
       } catch {
         /* Audio is best-effort; vibration still cues the driver */
       }

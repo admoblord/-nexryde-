@@ -18,6 +18,17 @@ class PaymentReminderSystem:
             -3: self.send_suspension_warning,
             -7: self.send_suspension_notice,
         }
+
+    async def _payment_subscription_email(self, driver_id: str, subject: str, body: str, tag: str) -> None:
+        from services.product_notification_email import notify_user_brevo_email
+
+        await notify_user_brevo_email(
+            driver_id,
+            subject=subject[:998],
+            body_plain=body,
+            tags=["nexryde-payment-reminder", tag[:32]],
+            respect_notification_channels=False,
+        )
     
     async def check_all_subscriptions(self):
         """Check all subscriptions and send reminders"""
@@ -73,6 +84,12 @@ NexRyde Team
         
         await self.send_notification(driver_id, message, "payment_reminder", "medium")
         await self.send_sms(driver_id, f"NexRyde: Payment of ₦{amount:,} due in 5 days. Pay at nexryde.com/pay")
+        await self._payment_subscription_email(
+            driver_id,
+            "NEXRYDE — Subscription renews in 5 days",
+            message,
+            "due-5d",
+        )
     
     async def send_1_day_reminder(self, subscription: Dict[str, Any]):
         """Send 1-day urgent reminder"""
@@ -95,6 +112,7 @@ Support: 0XXX XXX XXXX
         await self.send_notification(driver_id, message, "payment_urgent", "high")
         await self.send_sms(driver_id, f"URGENT: NexRyde payment ₦{amount:,} due tomorrow! Pay now.")
         await self.send_push_notification(driver_id, "Payment Due Tomorrow!", message)
+        await self._payment_subscription_email(driver_id, "NEXRYDE — Payment due tomorrow", message, "due-1d")
     
     async def send_overdue_notification(self, subscription: Dict[str, Any]):
         """Send overdue payment notice"""
@@ -122,6 +140,7 @@ Questions? Call support immediately.
         await self.send_notification(driver_id, message, "payment_overdue", "critical")
         await self.send_sms(driver_id, f"OVERDUE: ₦{amount:,}. Limited access active. Pay within 7 days.")
         await self.send_push_notification(driver_id, "Payment Overdue!", "Limited access active")
+        await self._payment_subscription_email(driver_id, "NEXRYDE — Subscription payment overdue", message, "overdue")
     
     async def send_suspension_warning(self, subscription: Dict[str, Any]):
         """Send 4-day suspension warning"""
@@ -153,6 +172,7 @@ This is your final warning.
         await self.send_sms(driver_id, f"FINAL WARNING: Pay ₦{amount:,} in 4 days or account suspended!")
         await self.send_push_notification(driver_id, "Account Suspension in 4 Days!", message)
         await self.send_whatsapp(driver_id, message)
+        await self._payment_subscription_email(driver_id, "NEXRYDE — Final subscription warning", message, "warn-suspend")
     
     async def send_suspension_notice(self, subscription: Dict[str, Any]):
         """Send suspension notice"""
@@ -185,6 +205,7 @@ Support: 0XXX XXX XXXX
         await self.send_sms(driver_id, f"Account SUSPENDED. Pay ₦{total:,} (includes ₦2K fee) to reactivate.")
         await self.send_push_notification(driver_id, "Account Suspended", "Pay to reactivate")
         await self.send_whatsapp(driver_id, message)
+        await self._payment_subscription_email(driver_id, "NEXRYDE — Account suspended (subscription)", message, "suspended")
     
     async def limit_access(self, subscription: Dict[str, Any]):
         """Limit account access (days 0-7 overdue)"""
@@ -226,14 +247,15 @@ Support: 0XXX XXX XXXX
         pass
     
     async def send_sms(self, driver_id: str, message: str):
-        """Send SMS via Termii API"""
+        """Send SMS (no provider configured; stub)."""
         # Use existing SMS service
         pass
     
     async def send_push_notification(self, driver_id: str, title: str, body: str):
-        """Send push notification"""
-        # Use existing push notification service
-        pass
+        """Send push (and optional Brevo email mirror) via notification_service."""
+        from notification_service import send_push_notification
+
+        await send_push_notification(driver_id, title, body, source="payment_reminder")
     
     async def send_whatsapp(self, driver_id: str, message: str):
         """Send WhatsApp message"""

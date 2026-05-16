@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import Slider from '@react-native-community/slider';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders, getDriverSalaryMode, updateDriverSalaryMode } from '@/src/services/api';
 
 const SMART_MODE_STORAGE_KEY = 'nexryde_smart_mode_settings';
@@ -51,7 +51,7 @@ interface SalaryModePlan {
 
 export default function SmartModeScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   const [settings, setSettings] = useState<SmartModeSettings>({
     enabled: false,
@@ -91,9 +91,10 @@ export default function SmartModeScreen() {
 
   useEffect(() => {
     void loadSmartFilters();
+    if (!canCallAuthedApi) return;
     void loadSalaryMode();
     void loadEarnings();
-  }, []);
+  }, [canCallAuthedApi]);
 
   // Auto-save smart filters to AsyncStorage whenever they change (after first mount)
   useEffect(() => {
@@ -112,9 +113,9 @@ export default function SmartModeScreen() {
   };
 
   const loadSalaryMode = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await getDriverSalaryMode(user.id);
+      const res = await getDriverSalaryMode(driverId);
       if (res.data?.salary_mode) {
         setSalaryMode((prev) => ({ ...prev, ...res.data.salary_mode }));
       }
@@ -124,9 +125,9 @@ export default function SmartModeScreen() {
   const loadSettings = loadSalaryMode;
 
   const loadEarnings = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=today`, {
+      const res = await fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
         headers: getAuthHeaders(),
       });
       if (!res.ok) return;
@@ -145,9 +146,9 @@ export default function SmartModeScreen() {
   };
 
   const saveSettings = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await updateDriverSalaryMode(user.id, {
+      const res = await updateDriverSalaryMode(driverId, {
         enabled: salaryMode.enabled,
         monthly_income_target: salaryMode.monthly_income_target,
       });

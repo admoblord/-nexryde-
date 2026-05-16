@@ -22,3 +22,43 @@ export const HANDLE_GRADIENT_ONGOING: readonly [string, string, string] = [
   'rgba(59,130,246,0.32)',
   'rgba(57,255,20,0.5)',
 ];
+
+export const PHASE_CHROME_BLUR = 52;
+export const PHASE_CHROME_RADIUS = 20;
+
+export const DOCK_PHASE_COLORS = {
+  heading_pickup: {
+    border: 'rgba(52,245,184,0.28)',
+    sheen: 'rgba(52,245,184,0.14)',
+    kicker: '#4ADE80',
+    dot: '#34F5B8',
+  },
+  arrived: {
+    border: 'rgba(52,245,184,0.38)',
+    sheen: 'rgba(52,245,184,0.16)',
+    kicker: '#4ADE80',
+    dot: '#34F5B8',
+  },
+  rider_in_car: {
+    border: 'rgba(52,245,184,0.32)',
+    sheen: 'rgba(52,245,184,0.12)',
+    kicker: '#4ADE80',
+    dot: '#34F5B8',
+  },
+  ongoing: {
+    border: 'rgba(96,165,250,0.35)',
+    sheen: 'rgba(59,130,246,0.14)',
+    kicker: '#93C5FD',
+    dot: '#60A5FA',
+  },
+} as const;
+
+/** Compact stat chip on docks */
+export const DOCK_METRIC_CHIP = {
+  bg: 'rgba(15,23,42,0.75)',
+  border: 'rgba(148,163,184,0.18)',
+  label: '#64748B',
+  value: '#F1F5F9',
+  accentBorder: 'rgba(52,245,184,0.35)',
+  accentValue: '#D1FAE5',
+} as const;

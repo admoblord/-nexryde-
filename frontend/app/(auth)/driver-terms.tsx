@@ -18,11 +18,16 @@ import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgr
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { saveUserSession } from '@/utils/authStorage';
+import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
+import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function DriverTermsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const canShowAuth = useRedirectIfAuthed();
+  const surf = useOnboardingSurfaces();
   const [accepted, setAccepted] = useState(false);
   const [loading, setLoading] = useState(false);
   
@@ -137,15 +142,19 @@ export default function DriverTermsScreen() {
     }
   };
 
+  if (!canShowAuth) {
+    return <AuthLoadingGate />;
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: surf.screen }]}>
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: surf.header, borderBottomColor: surf.border }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            <Ionicons name="arrow-back" size={24} color={surf.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Driver Terms & Conditions</Text>
+          <Text style={[styles.headerTitle, { color: surf.text }]}>Driver Terms & Conditions</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -157,6 +166,7 @@ export default function DriverTermsScreen() {
         >
           <DriverOnboardingProgress
             current="terms"
+            appearance={surf.isDark ? 'dark' : 'light'}
             subtitle="Read the driver partnership terms, accept below, then continue to document upload."
           />
           <View style={styles.termsCard}>

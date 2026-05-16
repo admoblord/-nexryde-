@@ -20,21 +20,27 @@ export function DriverOnboardingProgress({
   current,
   subtitle,
   preview,
+  appearance = 'light',
 }: {
   current: DriverOnboardingStep;
   subtitle?: string;
   /** Register screen: show what comes next before step 1. */
   preview?: boolean;
+  /** `dark` matches premium auth surfaces (slate + mint). */
+  appearance?: 'light' | 'dark';
 }) {
+  const dark = appearance === 'dark';
+  const c = dark ? darkColors : lightColors;
+
   if (preview) {
     return (
-      <View style={styles.wrap} accessibilityRole="header">
-        <Text style={styles.stepText}>Driver verification: 3 steps after Continue</Text>
-        <Text style={styles.previewFlow}>Terms → Documents → Driver profile</Text>
-        <View style={styles.track}>
-          <View style={[styles.fill, { width: '12%' }]} />
+      <View style={[styles.wrap, dark && styles.wrapDark]} accessibilityRole="header">
+        <Text style={[styles.stepText, { color: c.step }]}>Driver verification: 3 steps after Continue</Text>
+        <Text style={[styles.previewFlow, { color: c.preview }]}>Terms → Documents → Driver profile</Text>
+        <View style={[styles.track, { backgroundColor: c.trackBg }]}>
+          <View style={[styles.fill, { width: '12%', backgroundColor: c.fill }]} />
         </View>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+        {subtitle ? <Text style={[styles.subtitle, { color: c.sub }]}>{subtitle}</Text> : null}
       </View>
     );
   }
@@ -42,17 +48,33 @@ export function DriverOnboardingProgress({
   const idx = stepIndex(current);
   const pct = ((idx + 1) / 3) * 100;
   return (
-    <View style={styles.wrap} accessibilityRole="header">
-      <Text style={styles.stepText}>
+    <View style={[styles.wrap, dark && styles.wrapDark]} accessibilityRole="header">
+      <Text style={[styles.stepText, { color: c.step }]}>
         Step {idx + 1} of 3 · {LABELS[current]}
       </Text>
-      <View style={styles.track}>
-        <View style={[styles.fill, { width: `${pct}%` }]} />
+      <View style={[styles.track, { backgroundColor: c.trackBg }]}>
+        <View style={[styles.fill, { width: `${pct}%`, backgroundColor: c.fill }]} />
       </View>
-      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+      {subtitle ? <Text style={[styles.subtitle, { color: c.sub }]}>{subtitle}</Text> : null}
     </View>
   );
 }
+
+const lightColors = {
+  step: COLORS.lightTextPrimary,
+  preview: COLORS.lightTextSecondary,
+  trackBg: COLORS.lightBorder,
+  fill: COLORS.accentGreen,
+  sub: COLORS.lightTextSecondary,
+};
+
+const darkColors = {
+  step: '#F8FAFC',
+  preview: '#94A3B8',
+  trackBg: 'rgba(148,163,184,0.2)',
+  fill: '#34D399',
+  sub: '#94A3B8',
+};
 
 const styles = StyleSheet.create({
   wrap: {
@@ -64,35 +86,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: COLORS.lightBorder,
   },
+  wrapDark: {
+    backgroundColor: 'rgba(15,23,42,0.88)',
+    borderColor: 'rgba(52,211,153,0.22)',
+  },
   stepText: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
     textAlign: 'center',
   },
   previewFlow: {
     marginTop: 4,
     fontSize: FONT_SIZE.xs,
     fontWeight: '700',
-    color: COLORS.lightTextSecondary,
     textAlign: 'center',
   },
   track: {
     marginTop: SPACING.sm,
     height: 6,
     borderRadius: 3,
-    backgroundColor: COLORS.lightBorder,
     overflow: 'hidden',
   },
   fill: {
     height: '100%',
     borderRadius: 3,
-    backgroundColor: COLORS.accentGreen,
   },
   subtitle: {
     marginTop: SPACING.sm,
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
     textAlign: 'center',
     lineHeight: 17,
     fontWeight: '600',

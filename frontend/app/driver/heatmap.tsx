@@ -27,6 +27,7 @@ import * as Haptics from 'expo-haptics';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE, MapStyleElement } from 'react-native-maps';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -230,6 +231,7 @@ export default function DriverHeatmapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
+  const { canCallAuthedApi } = useAuthedApiReady();
   const mapHeight = Math.round(flow.width * 0.65);
   const mapEdge = Math.max(10, flow.padH);
   const mapRef = useRef<MapView>(null);
@@ -270,6 +272,10 @@ export default function DriverHeatmapScreen() {
   }, []);
 
   const loadHeatmap = useCallback(async (coords?: { lat: number; lng: number }) => {
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     startSpin();
     setFetchHint(null);
     try {
@@ -387,10 +393,11 @@ export default function DriverHeatmapScreen() {
       setLoading(false);
       stopSpin();
     }
-  }, [driverCoords, getFreshCoords, startSpin, stopSpin]);
+  }, [canCallAuthedApi, driverCoords, getFreshCoords, startSpin, stopSpin]);
 
   // Get GPS on mount, then fetch
   useEffect(() => {
+    if (!canCallAuthedApi) return;
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -407,8 +414,7 @@ export default function DriverHeatmapScreen() {
 
     const interval = setInterval(() => { void loadHeatmap(); }, 45000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [canCallAuthedApi, loadHeatmap]);
 
   const onRefresh = useCallback(async () => {
     if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);

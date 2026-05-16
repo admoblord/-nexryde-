@@ -15,7 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { BACKEND_URL, getAuthHeaders, getDriverProfile } from '@/src/services/api';
 import { driverDocumentsRouteParams } from '@/src/utils/driverOnboardingNav';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 
 const DOC_DESCRIPTIONS: Record<string, string> = {
@@ -80,7 +80,7 @@ export default function DocumentsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const { user } = useAppStore();
+  const { user, userId: driverId } = useAuthedUserId();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -101,10 +101,10 @@ export default function DocumentsScreen() {
   ]);
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
       // Fetch enriched profile (includes nin_verified, document_statuses, vehicles)
-      const profileRes = await getDriverProfile(user.id);
+      const profileRes = await getDriverProfile(driverId);
       const profile = profileRes.data as any;
       const approved = profile?.verification_status === 'approved';
       const ninOk: boolean = Boolean(profile?.nin_verified);
@@ -113,7 +113,7 @@ export default function DocumentsScreen() {
       setVerificationStatus(profile?.verification_status || '');
 
       // Build status per document from the archived verification record
-      const docsRes = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/documents`, {
+      const docsRes = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/documents`, {
         headers: getAuthHeaders(),
       });
       const docsData = docsRes.ok ? await docsRes.json() : {};
@@ -140,7 +140,7 @@ export default function DocumentsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [driverId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -301,7 +301,7 @@ export default function DocumentsScreen() {
           <TouchableOpacity
             style={styles.updateButton}
             onPress={() => {
-              if (!user?.id) return;
+              if (!driverId || !user) return;
               router.push({
                 pathname: '/(auth)/driver-documents',
                 params: driverDocumentsRouteParams(user),

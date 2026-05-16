@@ -29,6 +29,7 @@ import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
   getAuthHeaders,
@@ -64,6 +65,7 @@ import {
   type GoogleDrivingRouteOverview,
 } from '@/src/navigation/navUtils';
 import { decodePolyline } from '@/src/utils/polylineDecoder';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 import { fetchDrivingRoute } from '@/src/services/drivingRouteApi';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
@@ -199,6 +201,8 @@ const COLORS = {
   green: '#00D46A',
   blue: '#0EA5E9',
   accentBlue: '#0EA5E9',
+  /** Inner route highlight on map (Nexryde mint, not generic sky-blue). */
+  routeHighlight: '#86EFAC',
   lime: '#B8F11B',
   white: '#FFFFFF',
   muted: '#94A3B8',
@@ -606,7 +610,7 @@ function BookingRideMapNative(props: {
                 />
                 <Polyline
                   coordinates={props.routePolyline}
-                  strokeColor="#E0F2FE"
+                  strokeColor={COLORS.routeHighlight}
                   strokeWidth={3}
                   geodesic={false}
                   lineCap="round"
@@ -739,7 +743,8 @@ function BookInDriveStyle() {
     destLat?: string;
     destLng?: string;
   }>();
-  const { user, token, setCurrentTrip } = useAppStore();
+  const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const { user, userId: riderId, token, canCallAuthedApi } = useAuthedUserId();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
@@ -781,6 +786,7 @@ function BookInDriveStyle() {
   const calculateInFlightRef = useRef(false);
   const offerInFlightRef = useRef(false);
   const navigationInFlightRef = useRef(false);
+  const trackingHandoffRef = useRef(false);
   /** Geo + time snapshot when a fare estimate was computed (for locked quote + drift checks). */
   const fareLockSnapshotRef = useRef<{
     at: number;
@@ -893,7 +899,37 @@ function BookInDriveStyle() {
     }
   }, []);
 
-  /** Schedule screen with whatever route context we have (Bolt-style “Later” — no blocking alerts). */
+  /** After driver accepts, hand off to map-first tracking (one finding UI on book overlay). */
+  const navigateToLiveTracking = useCallback(
+    (id: string, opts?: { immediate?: boolean }) => {
+      if (!id || trackingHandoffRef.current) return;
+      trackingHandoffRef.current = true;
+      clearDriverPoll();
+      const go = () => {
+        router.replace({
+          pathname: '/rider/tracking',
+          params: {
+            tripId: id,
+            ...(pickup?.trim() ? { pickup } : {}),
+            ...(destination?.trim() ? { destination } : {}),
+            fromBook: 'true',
+          },
+        } as any);
+      };
+      if (opts?.immediate) {
+        setSearchingForDriver(false);
+        go();
+        return;
+      }
+      setTimeout(() => {
+        setSearchingForDriver(false);
+        go();
+      }, 500);
+    },
+    [router, pickup, destination, clearDriverPoll],
+  );
+
+  /** Schedule screen with route context (“Later”) — lightweight, non-blocking. */
   const openScheduleRide = () => {
     if (navigationInFlightRef.current) return;
     const pLat = pickupCoords?.lat || currentLocation?.lat;
@@ -968,7 +1004,7 @@ function BookInDriveStyle() {
   const tripPaymentMethod = useCallback(() => (ridePaymentMethod === 'wallet' ? 'wallet' : 'cash'), [ridePaymentMethod]);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!riderId) {
       setWalletBalance(null);
       return;
     }
@@ -980,13 +1016,13 @@ function BookInDriveStyle() {
         setWalletBalance(null);
       }
     })();
-  }, [user?.id]);
+  }, [riderId]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!riderId) return;
     (async () => {
       try {
-        const res = await getRiderPreferences(user.id);
+        const res = await getRiderPreferences(riderId);
         const name = String(res.data?.estate_name || '');
         const code = String(res.data?.estate_gate_code || '');
         setEstateName(name);
@@ -997,14 +1033,14 @@ function BookInDriveStyle() {
         }
       } catch {}
     })();
-  }, [user?.id]);
+  }, [riderId]);
 
   // Check if rider is currently booking-suspended (1h cooldown after 7 cancellations in 24h)
   useEffect(() => {
-    if (!user?.id) return;
+    if (!riderId) return;
     void (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/enforcement/book-status/${user.id}`, {
+        const res = await fetch(`${BACKEND_URL}/api/enforcement/book-status/${riderId}`, {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
@@ -1014,7 +1050,7 @@ function BookInDriveStyle() {
         }
       } catch {}
     })();
-  }, [user?.id]);
+  }, [riderId]);
 
   // Countdown ticker for booking suspension
   useEffect(() => {
@@ -1042,10 +1078,10 @@ function BookInDriveStyle() {
 
   // Pre-load rider's saved mood preferences as default chip selection
   useEffect(() => {
-    if (!user?.id) return;
+    if (!riderId) return;
     void (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/preferences`, {
+        const res = await fetch(`${BACKEND_URL}/api/users/${riderId}/preferences`, {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
@@ -1059,7 +1095,7 @@ function BookInDriveStyle() {
         if (chips.length > 0) setRidePreferences(chips);
       } catch {}
     })();
-  }, [user?.id]);
+  }, [riderId]);
 
   useEffect(() => {
     if (!BOOKING_PROMO_ENABLED) return;
@@ -1074,7 +1110,7 @@ function BookInDriveStyle() {
 
   // Check if this rider has never taken a trip — show 20% first-ride discount banner
   useEffect(() => {
-    if (!user?.id) return;
+    if (!riderId) return;
     let cancelled = false;
     void fetch(`${BACKEND_URL}/api/incentives/first-ride-status`, {
       headers: getAuthHeaders(),
@@ -1085,8 +1121,7 @@ function BookInDriveStyle() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [riderId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1108,13 +1143,13 @@ function BookInDriveStyle() {
   }, []);
 
   useEffect(() => {
-    if (!user?.id) {
+    if (!riderId) {
       setScheduledRides([]);
       return;
     }
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${encodeURIComponent(user.id)}`, {
+        const res = await fetch(`${BACKEND_URL}/api/rides/scheduled/${encodeURIComponent(riderId)}`, {
           headers: getAuthHeaders(),
         });
         const data = await res.json();
@@ -1124,7 +1159,7 @@ function BookInDriveStyle() {
         setScheduledRides([]);
       }
     })();
-  }, [user?.id]);
+  }, [riderId]);
 
   useEffect(() => {
     const lat = pickupCoords?.lat || currentLocation?.lat;
@@ -1178,7 +1213,7 @@ function BookInDriveStyle() {
       const dl = t?.dropoff_location;
       setCurrentTrip({
         id,
-        rider_id: user?.id || '',
+        rider_id: riderId || '',
         driver_id: t?.driver_id || null,
         pickup_location:
           pl && typeof pl === 'object'
@@ -1232,9 +1267,10 @@ function BookInDriveStyle() {
         plate: t?.vehicle_plate || '',
         color: t?.vehicle_color || '',
       });
+      navigateToLiveTracking(id);
     },
     [
-      user?.id,
+      riderId,
       pickupCoords,
       destinationCoords,
       currentLocation,
@@ -1245,6 +1281,7 @@ function BookInDriveStyle() {
       setCurrentTrip,
       clearDriverPoll,
       tripPaymentMethod,
+      navigateToLiveTracking,
     ]
   );
 
@@ -1667,7 +1704,7 @@ function BookInDriveStyle() {
         city: payload.city,
         pickup_address: payload.pickup_address,
         dropoff_address: payload.dropoff_address,
-        rider_id: payload.rider_id ?? (user?.id ? String(user.id) : undefined),
+        rider_id: payload.rider_id ?? (riderId ? String(riderId) : undefined),
         ...(payload.preferred_driver_id
           ? { preferred_driver_id: payload.preferred_driver_id }
           : {}),
@@ -2043,7 +2080,7 @@ function BookInDriveStyle() {
     // Re-run when on-device Directions finishes so client leg metrics reach /fare/estimate.
     bookingRouteLoading,
     bookingRouteEtaMin,
-    user?.id,
+    riderId,
     requestedDriverId,
   ]);
 
@@ -2119,7 +2156,7 @@ function BookInDriveStyle() {
 
   const findOffers = async () => {
     if (offerInFlightRef.current) return;
-    if (!user?.id) { Alert.alert('Login', 'Please login to request a ride.'); return; }
+    if (!riderId || !canCallAuthedApi) { Alert.alert('Login', 'Please login to request a ride.'); return; }
     if (!selectedVehicle) { Alert.alert('Select Vehicle', 'Please select a vehicle type first.'); setShowVehicleModal(true); return; }
     if (!pickup?.trim() || !destination?.trim()) {
       Alert.alert('Locations', 'Choose pickup and destination.');
@@ -2156,7 +2193,7 @@ function BookInDriveStyle() {
           city: cityEarly,
           pickup_address: pickup?.trim() || undefined,
           dropoff_address: destination?.trim() || undefined,
-          rider_id: user?.id ? String(user.id) : undefined,
+          rider_id: riderId ? String(riderId) : undefined,
           preferred_driver_id: requestedDriverId || undefined,
         });
         fareForBid = fresh;
@@ -2239,7 +2276,7 @@ function BookInDriveStyle() {
         'default';
       const normalizedService = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
 
-      const res = await fetch(`${BACKEND_URL}/api/trips/request?rider_id=${user.id}`, {
+      const res = await fetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
@@ -2297,25 +2334,25 @@ function BookInDriveStyle() {
   };
 
   const cancelPendingTrip = async (id: string | null) => {
-    if (!id || !user?.id) return;
+    if (!id || !riderId || !canCallAuthedApi) return;
     try {
       await fetch(`${BACKEND_URL}/api/trips/${id}/cancel`, {
         method: 'PUT',
         headers: getAuthHeaders(),
-        body: JSON.stringify({ cancelled_by: user.id }),
+        body: JSON.stringify({ cancelled_by: riderId }),
       });
     } catch {}
   };
 
   const handleSaveGateCode = async () => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     if (!estateGateCode.trim()) {
       Alert.alert('Gate Code Required', 'Enter the gate code before saving.');
       return;
     }
     setSavingGateCode(true);
     try {
-      await updateRiderPreferences(user.id, {
+      await updateRiderPreferences(riderId, {
         estate_name: estateName.trim() || null,
         estate_gate_code: estateGateCode.trim() || null,
       });
@@ -2330,9 +2367,9 @@ function BookInDriveStyle() {
   };
 
   const handleClearGateCode = async () => {
-    if (!user?.id) return;
+    if (!riderId || !canCallAuthedApi) return;
     try {
-      await updateRiderPreferences(user.id, { estate_name: null, estate_gate_code: null });
+      await updateRiderPreferences(riderId, { estate_name: null, estate_gate_code: null });
       setEstateName('');
       setEstateGateCode('');
       setGateCodeSaved(false);
@@ -2356,7 +2393,7 @@ function BookInDriveStyle() {
           clearDriverPoll();
           setCurrentTrip({
             id,
-            rider_id: user?.id || '',
+            rider_id: riderId || '',
             driver_id: data.driver_info.driver_id || null,
             pickup_location: {
               lat: pickupCoords?.lat || 0,
@@ -2388,6 +2425,7 @@ function BookInDriveStyle() {
             completed_at: null,
           });
           setDriverFound(data.driver_info);
+          navigateToLiveTracking(id);
         }
       } catch {}
       if (attempts >= 30) {
@@ -2400,7 +2438,7 @@ function BookInDriveStyle() {
           if (finalData?.success && isRiderMapLiveTripStatus(String(finalData.status || '')) && finalData.driver_info) {
             setCurrentTrip({
               id,
-              rider_id: user?.id || '',
+              rider_id: riderId || '',
               driver_id: finalData.driver_info.driver_id || null,
               pickup_location: {
                 lat: pickupCoords?.lat || 0,
@@ -2432,6 +2470,7 @@ function BookInDriveStyle() {
               completed_at: null,
             });
             setDriverFound(finalData.driver_info);
+            navigateToLiveTracking(id);
             return;
           }
         } catch {}
@@ -2476,15 +2515,16 @@ function BookInDriveStyle() {
   );
 
   useRiderTripRealtime({
-    riderId: user?.id,
+    riderId,
     token,
-    enabled: Boolean(searchingForDriver && tripId && user?.id && token),
+    enabled: Boolean(searchingForDriver && tripId && canCallAuthedApi && riderId && token),
     watchTripId: tripId,
     onTripUpdate: handleRiderTripWs,
   });
 
   const cancelSearch = async () => {
     clearDriverPoll();
+    trackingHandoffRef.current = false;
     if (searchCountdownRef.current) clearInterval(searchCountdownRef.current);
     setSearchCountdown(0);
     await cancelPendingTrip(tripId);
@@ -2573,12 +2613,16 @@ function BookInDriveStyle() {
       typeof df.face_image === 'string' && df.face_image.length > 0
         ? df.face_image
         : null;
-    const profile =
+    const profileRaw =
       typeof df.profile_image === 'string' && df.profile_image.length > 0
         ? df.profile_image
         : typeof df.photo === 'string' && df.photo.length > 0
           ? df.photo
-          : null;
+          : typeof (df as Record<string, unknown>).avatar_url === 'string' &&
+              String((df as Record<string, unknown>).avatar_url).trim().length > 0
+            ? String((df as Record<string, unknown>).avatar_url).trim()
+            : null;
+    const profile = profileRaw;
     const phoneRaw =
       typeof df.phone === 'string' && df.phone.length > 0
         ? df.phone
@@ -2597,8 +2641,8 @@ function BookInDriveStyle() {
             ? (df.avg_rating as number)
             : undefined,
       trip_count: typeof trips === 'number' && trips > 0 ? trips : undefined,
-      face_image: face,
-      profile_image: profile,
+      face_image: resolvePublicMediaUri(face) ?? resolvePublicMediaUri(profile),
+      profile_image: resolvePublicMediaUri(profile) ?? resolvePublicMediaUri(face),
       phone: phoneRaw,
     };
   }, [driverFound]);
@@ -2926,31 +2970,31 @@ function BookInDriveStyle() {
           <View style={s.sheetHandle} accessibilityRole="none" />
 
           {BOOKING_PROMO_ENABLED && bookingPromoVisible ? (
-            <View style={s.boltPromoBanner}>
-              <View style={s.boltPromoIconWrap}>
+            <View style={s.bookFlowPromoBanner}>
+              <View style={s.bookFlowPromoIconWrap}>
                 <Ionicons name="pricetag" size={18} color={COLORS.blue} />
               </View>
-              <View style={s.boltPromoTextCol}>
-                <Text style={s.boltPromoTitle}>Ride on your schedule</Text>
-                <Text style={s.boltPromoBody}>
+              <View style={s.bookFlowPromoTextCol}>
+                <Text style={s.bookFlowPromoTitle}>Ride on your schedule</Text>
+                <Text style={s.bookFlowPromoBody}>
                   Book ahead and lock your route when it suits you.
                 </Text>
-                <View style={s.boltPromoActions}>
+                <View style={s.bookFlowPromoActions}>
                   <TouchableOpacity
-                    style={s.boltPromoCta}
+                    style={s.bookFlowPromoCta}
                     onPress={openScheduleRide}
                     activeOpacity={0.88}
                     accessibilityRole="button"
                     accessibilityLabel="Open schedule from promo"
                   >
-                    <Text style={s.boltPromoCtaText}>Schedule</Text>
+                    <Text style={s.bookFlowPromoCtaText}>Schedule</Text>
                     <Ionicons name="arrow-forward" size={14} color={COLORS.bg} />
                   </TouchableOpacity>
                 </View>
               </View>
               <TouchableOpacity
                 onPress={dismissBookingPromo}
-                style={s.boltPromoClose}
+                style={s.bookFlowPromoClose}
                 hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
                 accessibilityLabel="Dismiss promo"
                 accessibilityRole="button"
@@ -2960,54 +3004,54 @@ function BookInDriveStyle() {
             </View>
           ) : null}
 
-          <Text style={s.boltHeroTitle}>Go wherever, whenever.</Text>
-          <Text style={s.boltHeroSub}>Pickup follows your map. Set where you are headed below.</Text>
+          <Text style={s.bookFlowHeroTitle}>Go wherever, whenever.</Text>
+          <Text style={s.bookFlowHeroSub}>Pickup follows your map. Set where you are headed below.</Text>
 
-          <View style={s.boltServiceRow}>
+          <View style={s.bookFlowServiceRow}>
             <TouchableOpacity
-              style={s.boltServiceCard}
+              style={s.bookFlowServiceCard}
               onPress={openDestinationSearch}
               activeOpacity={0.88}
               accessibilityLabel="Find a ride"
               accessibilityRole="button"
             >
-              <View style={[s.boltServiceIconBg, { backgroundColor: 'rgba(0,212,106,0.14)' }]}>
+              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(0,212,106,0.14)' }]}>
                 <Ionicons name="car-sport" size={26} color={COLORS.green} />
               </View>
-              <Text style={s.boltServiceTitle}>Rides</Text>
-              <Text style={s.boltServiceSub}>{`Let's go`}</Text>
+              <Text style={s.bookFlowServiceTitle}>Rides</Text>
+              <Text style={s.bookFlowServiceSub}>{`Let's go`}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={s.boltServiceCard}
+              style={s.bookFlowServiceCard}
               onPress={openScheduleRide}
               activeOpacity={0.88}
               accessibilityLabel="Schedule a ride"
               accessibilityRole="button"
             >
-              <View style={[s.boltServiceIconBg, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
+              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(14,165,233,0.18)' }]}>
                 <Ionicons name="calendar" size={24} color={COLORS.blue} />
               </View>
-              <Text style={s.boltServiceTitle}>Schedule</Text>
-              <Text style={s.boltServiceSub}>Book ahead</Text>
+              <Text style={s.bookFlowServiceTitle}>Schedule</Text>
+              <Text style={s.bookFlowServiceSub}>Book ahead</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={s.boltServiceCard}
+              style={s.bookFlowServiceCard}
               onPress={() => router.push('/rider/family')}
               activeOpacity={0.88}
               accessibilityLabel="Family and favorites"
               accessibilityRole="button"
             >
-              <View style={[s.boltServiceIconBg, { backgroundColor: 'rgba(147,51,234,0.2)' }]}>
+              <View style={[s.bookFlowServiceIconBg, { backgroundColor: 'rgba(147,51,234,0.2)' }]}>
                 <Ionicons name="people" size={24} color={COLORS.purple} />
               </View>
-              <Text style={s.boltServiceTitle}>Family</Text>
-              <Text style={s.boltServiceSub}>People you trust</Text>
+              <Text style={s.bookFlowServiceTitle}>Family</Text>
+              <Text style={s.bookFlowServiceSub}>People you trust</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={s.boltWhereShell}>
+          <View style={s.bookFlowWhereShell}>
             <TouchableOpacity
-              style={s.boltWhereMain}
+              style={s.bookFlowWhereMain}
               onPress={openDestinationSearch}
               activeOpacity={0.88}
               accessibilityLabel={destination?.trim() ? 'Edit destination' : 'Where to'}
@@ -3015,27 +3059,27 @@ function BookInDriveStyle() {
             >
               <Ionicons name="search" size={22} color={COLORS.dim} />
               <Text
-                style={[s.boltWhereQuestion, !!destination?.trim() && s.boltWhereFilled]}
+                style={[s.bookFlowWhereQuestion, !!destination?.trim() && s.bookFlowWhereFilled]}
                 numberOfLines={1}
               >
                 {destination?.trim() ? destination : 'Where to?'}
               </Text>
             </TouchableOpacity>
-            <View style={s.boltWhereDivider} />
+            <View style={s.bookFlowWhereDivider} />
             <TouchableOpacity
-              style={s.boltLaterWrap}
+              style={s.bookFlowLaterWrap}
               onPress={openScheduleRide}
               activeOpacity={0.88}
               accessibilityLabel="Schedule for later"
               accessibilityRole="button"
             >
               <Ionicons name="calendar-outline" size={20} color={COLORS.bg} />
-              <Text style={s.boltLaterLabel}>Later</Text>
+              <Text style={s.bookFlowLaterLabel}>Later</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={s.boltRecentBlock}>
-            <Text style={s.boltRecentHeading}>Recent</Text>
+          <View style={s.bookFlowRecentBlock}>
+            <Text style={s.bookFlowRecentHeading}>Recent</Text>
             {recentDestinations.length > 0 ? (
               recentDestinations.slice(0, 5).map((item, idx) => {
                 const title = String(item.address || item.description || '').trim();
@@ -3043,16 +3087,16 @@ function BookInDriveStyle() {
                 return (
                   <TouchableOpacity
                     key={`recent-${idx}-${title.slice(0, 24)}`}
-                    style={s.boltRecentRow}
+                    style={s.bookFlowRecentRow}
                     onPress={() => applyRecentDestination(item)}
                     activeOpacity={0.88}
                   >
-                    <View style={s.boltRecentIcon}>
+                    <View style={s.bookFlowRecentIcon}>
                       <Ionicons name="time-outline" size={18} color={COLORS.dim} />
                     </View>
                     <View style={{ flex: 1 }}>
-                      <Text style={s.boltRecentTitle} numberOfLines={1}>{title}</Text>
-                      <Text style={s.boltRecentMeta}>
+                      <Text style={s.bookFlowRecentTitle} numberOfLines={1}>{title}</Text>
+                      <Text style={s.bookFlowRecentMeta}>
                         {Number.isFinite(item.lat) && Number.isFinite(item.lng) ? 'Saved pin' : 'Recent place'}
                       </Text>
                     </View>
@@ -3906,12 +3950,8 @@ function BookInDriveStyle() {
         }}
         onCancelSearch={() => void cancelSearch()}
         onTrackDriver={() => {
-          setSearchingForDriver(false);
-          setDriverFound(null);
-          router.replace({
-            pathname: '/rider/tracking',
-            params: { tripId: tripId || '', pickup, destination },
-          } as any);
+          if (!tripId) return;
+          navigateToLiveTracking(tripId, { immediate: true });
         }}
         onCallDriver={() => {
           const raw = matchedDriverForOverlay?.phone?.trim();
@@ -4110,21 +4150,21 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(148,163,184,0.35)',
     marginBottom: 18,
   },
-  boltHeroTitle: {
+  bookFlowHeroTitle: {
     fontSize: 26,
     fontWeight: '900',
     color: COLORS.white,
     letterSpacing: -0.5,
     marginBottom: 6,
   },
-  boltHeroSub: {
+  bookFlowHeroSub: {
     fontSize: 14,
     fontWeight: '600',
     color: COLORS.muted,
     marginBottom: 20,
     lineHeight: 20,
   },
-  boltPromoBanner: {
+  bookFlowPromoBanner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
@@ -4136,7 +4176,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     marginBottom: 18,
   },
-  boltPromoIconWrap: {
+  bookFlowPromoIconWrap: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -4144,21 +4184,21 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  boltPromoTextCol: { flex: 1, minWidth: 0 },
-  boltPromoTitle: {
+  bookFlowPromoTextCol: { flex: 1, minWidth: 0 },
+  bookFlowPromoTitle: {
     fontSize: 15,
     fontWeight: '900',
     color: COLORS.white,
     marginBottom: 4,
   },
-  boltPromoBody: {
+  bookFlowPromoBody: {
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.muted,
     lineHeight: 18,
   },
-  boltPromoActions: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  boltPromoCta: {
+  bookFlowPromoActions: { marginTop: 10, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  bookFlowPromoCta: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -4167,15 +4207,15 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     borderRadius: 12,
   },
-  boltPromoCtaText: { fontSize: 13, fontWeight: '900', color: COLORS.bg },
-  boltPromoClose: { padding: 2, marginTop: -4 },
-  boltServiceRow: {
+  bookFlowPromoCtaText: { fontSize: 13, fontWeight: '900', color: COLORS.bg },
+  bookFlowPromoClose: { padding: 2, marginTop: -4 },
+  bookFlowServiceRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',
     gap: 10,
     marginBottom: 18,
   },
-  boltServiceCard: {
+  bookFlowServiceCard: {
     flex: 1,
     minWidth: 0,
     backgroundColor: COLORS.card,
@@ -4186,7 +4226,7 @@ const s = StyleSheet.create({
     borderColor: 'rgba(148,163,184,0.14)',
     minHeight: 112,
   },
-  boltServiceIconBg: {
+  bookFlowServiceIconBg: {
     width: 46,
     height: 46,
     borderRadius: 14,
@@ -4194,9 +4234,9 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 10,
   },
-  boltServiceTitle: { fontSize: 15, fontWeight: '900', color: COLORS.white },
-  boltServiceSub: { fontSize: 12, fontWeight: '600', color: COLORS.dim, marginTop: 4 },
-  boltWhereShell: {
+  bookFlowServiceTitle: { fontSize: 15, fontWeight: '900', color: COLORS.white },
+  bookFlowServiceSub: { fontSize: 12, fontWeight: '600', color: COLORS.dim, marginTop: 4 },
+  bookFlowWhereShell: {
     flexDirection: 'row',
     alignItems: 'stretch',
     backgroundColor: COLORS.cardLight,
@@ -4207,7 +4247,7 @@ const s = StyleSheet.create({
     overflow: 'hidden',
     minHeight: 58,
   },
-  boltWhereMain: {
+  bookFlowWhereMain: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
@@ -4216,15 +4256,15 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     paddingRight: 8,
   },
-  boltWhereQuestion: {
+  bookFlowWhereQuestion: {
     flex: 1,
     fontSize: 17,
     fontWeight: '800',
     color: COLORS.dim,
   },
-  boltWhereFilled: { color: COLORS.white, fontWeight: '700' },
-  boltWhereDivider: { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(148,163,184,0.35)' },
-  boltLaterWrap: {
+  bookFlowWhereFilled: { color: COLORS.white, fontWeight: '700' },
+  bookFlowWhereDivider: { width: StyleSheet.hairlineWidth, backgroundColor: 'rgba(148,163,184,0.35)' },
+  bookFlowLaterWrap: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -4233,9 +4273,9 @@ const s = StyleSheet.create({
     backgroundColor: COLORS.lime,
     minWidth: 88,
   },
-  boltLaterLabel: { fontSize: 15, fontWeight: '900', color: COLORS.bg },
-  boltRecentBlock: { marginBottom: 18 },
-  boltRecentHeading: {
+  bookFlowLaterLabel: { fontSize: 15, fontWeight: '900', color: COLORS.bg },
+  bookFlowRecentBlock: { marginBottom: 18 },
+  bookFlowRecentHeading: {
     fontSize: 13,
     fontWeight: '800',
     color: COLORS.dim,
@@ -4243,7 +4283,7 @@ const s = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
-  boltRecentRow: {
+  bookFlowRecentRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -4252,7 +4292,7 @@ const s = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: 'rgba(148,163,184,0.2)',
   },
-  boltRecentIcon: {
+  bookFlowRecentIcon: {
     width: 40,
     height: 40,
     borderRadius: 20,
@@ -4260,8 +4300,8 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  boltRecentTitle: { fontSize: 15, fontWeight: '700', color: COLORS.white, lineHeight: 20 },
-  boltRecentMeta: { fontSize: 12, fontWeight: '500', color: COLORS.dim, marginTop: 1 },
+  bookFlowRecentTitle: { fontSize: 15, fontWeight: '700', color: COLORS.white, lineHeight: 20 },
+  bookFlowRecentMeta: { fontSize: 12, fontWeight: '500', color: COLORS.dim, marginTop: 1 },
   recentEmptyRow: {
     flexDirection: 'row',
     alignItems: 'center',

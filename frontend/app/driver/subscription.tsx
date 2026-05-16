@@ -18,7 +18,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   getSubscriptionConfig,
   getDriverSubscriptionStatus,
@@ -83,7 +83,7 @@ interface VirtualAccountDetails {
 
 export default function SubscriptionScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
   const [loading, setLoading] = useState(true);
   const [pricing, setPricing] = useState<PricingData | null>(null);
@@ -104,7 +104,8 @@ export default function SubscriptionScreen() {
   const slideAnim = useRef(new Animated.Value(Platform.OS === 'web' ? 0 : 50)).current;
 
   useEffect(() => {
-    initializeData();
+    if (!canCallAuthedApi) return;
+    void initializeData();
     
     // Safety timeout for web - stop loading after 5 seconds
     const timeout = setTimeout(() => {
@@ -132,7 +133,7 @@ export default function SubscriptionScreen() {
         statusPollRef.current = null;
       }
     };
-  }, []);
+  }, [canCallAuthedApi]);
 
   const initializeData = async () => {
     try {
@@ -153,8 +154,8 @@ export default function SubscriptionScreen() {
   };
 
   const ensureDriverEligibleForActivation = async () => {
-    if (!user?.id) return true;
-    const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/onboarding-status`, {
+    if (!driverId || !user) return true;
+    const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`, {
       headers: getAuthHeaders(),
     });
     const status = await response.json();
@@ -163,15 +164,19 @@ export default function SubscriptionScreen() {
       Alert.alert(
         'Verification in review',
         'Your documents are saved. Subscription and payment activation unlock after approval.',
-        [{ text: 'Go to driver home', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+        [{ text: 'OK', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
       );
-      router.replace('/(driver-tabs)/driver-home');
       return false;
     }
     if (step === 'documents_rejected') {
       router.replace({
         pathname: '/(auth)/driver-verification-status',
-        params: { driver_id: user.id, phone: user.phone, name: user.name, email: user.email },
+        params: {
+          driver_id: driverId,
+          phone: user?.phone ?? '',
+          name: user?.name ?? '',
+          email: user?.email ?? '',
+        },
       });
       return false;
     }
@@ -228,7 +233,7 @@ export default function SubscriptionScreen() {
   };
 
   const fetchSubscriptionStatus = async () => {
-    if (!user?.id) {
+    if (!driverId) {
       setSubscription({
         tier: 'none',
         status: 'expired',
@@ -320,7 +325,7 @@ export default function SubscriptionScreen() {
 
 
   const payWithSquadCheckout = async (tier: 'city_rider' | 'road_warrior') => {
-    if (!user?.id) {
+    if (!driverId || !user) {
       Alert.alert('Error', 'Please login first');
       return;
     }

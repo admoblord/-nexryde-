@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -12,10 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '@/src/store/appStore';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { BACKEND_URL } from '@/src/services/api';
+import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 interface RiskZone {
   name: string;
@@ -37,14 +37,13 @@ interface AIRiskAnalysis {
 
 export default function AccidentPredictionScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [riskData, setRiskData] = useState<AIRiskAnalysis | null>(null);
   const [highRiskAreas, setHighRiskAreas] = useState<RiskZone[]>([]);
 
-  const [LAT, setLAT] = useState(6.5244);
-  const [LNG, setLNG] = useState(3.3792);
+  const [coords, setCoords] = useState({ lat: 6.5244, lng: 3.3792 });
 
   useEffect(() => {
     (async () => {
@@ -53,34 +52,32 @@ export default function AccidentPredictionScreen() {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          setLAT(loc.coords.latitude);
-          setLNG(loc.coords.longitude);
+          setCoords({ lat: loc.coords.latitude, lng: loc.coords.longitude });
         }
       } catch { /* use default */ }
     })();
-    fetchRiskData();
   }, []);
 
-  const fetchRiskData = async () => {
-    if (!user?.id) {
+  const fetchRiskData = useCallback(async () => {
+    if (!driverId || !canCallAuthedApi) {
       setLoading(false);
       setRefreshing(false);
       return;
     }
     try {
-      // Fetch AI risk prediction
+      const headers = { ...getAuthHeaders(), 'Content-Type': 'application/json' };
       const riskRes = await fetch(
-        `${BACKEND_URL}/api/ai/accident/predict-risk?driver_id=${encodeURIComponent(user?.id || '')}&current_lat=${LAT}&current_lng=${LNG}`,
-        { method: 'POST' }
+        `${BACKEND_URL}/api/ai/accident/predict-risk?driver_id=${encodeURIComponent(driverId)}&current_lat=${coords.lat}&current_lng=${coords.lng}`,
+        { method: 'POST', headers },
       );
       const riskJSON = await riskRes.json();
       if (riskJSON.success && (riskJSON.ai_analysis || riskJSON.risk_analysis)) {
         setRiskData(riskJSON.ai_analysis || riskJSON.risk_analysis);
       }
 
-      // Fetch high-risk areas
       const areasRes = await fetch(
-        `${BACKEND_URL}/api/ai/accident/high-risk-areas?lat=${LAT}&lng=${LNG}`
+        `${BACKEND_URL}/api/ai/accident/high-risk-areas?lat=${coords.lat}&lng=${coords.lng}`,
+        { headers: getAuthHeaders() },
       );
       const areasJSON = await areasRes.json();
       if (areasJSON.success) {
@@ -92,11 +89,15 @@ export default function AccidentPredictionScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  };
+  }, [driverId, canCallAuthedApi, coords.lat, coords.lng]);
+
+  useEffect(() => {
+    void fetchRiskData();
+  }, [fetchRiskData]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    fetchRiskData();
+    void fetchRiskData();
   };
 
   const getRiskColor = (level: string) => {

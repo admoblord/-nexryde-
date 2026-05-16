@@ -35,12 +35,12 @@ export default function DriverOfferRingtoneScreen() {
       >
         <View style={styles.intro}>
           <View style={styles.introIcon}>
-            <Ionicons name="notifications" size={22} color="#0284C7" />
+            <Ionicons name="notifications" size={22} color={COLORS.accentGreenDark} />
           </View>
-          <Text style={styles.introTitle}>Choose how new offers sound</Text>
+          <Text style={styles.introTitle}>Pick your alert sound</Text>
           <Text style={styles.introBody}>
-            When a ride request appears, your phone plays the tone you pick (and can loop until you accept or
-            decline). Use preview to hear each option — including Nexryde originals tuned for clarity in the car.
+            Nexryde repeats your chosen tone until you accept or decline an offer. Preview each tone below — Groove
+            loop runs longer so it carries better over traffic noise.
           </Text>
         </View>
 
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: BORDER_RADIUS.md,
-    backgroundColor: '#E0F2FE',
+    backgroundColor: COLORS.accentGreenSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.sm,

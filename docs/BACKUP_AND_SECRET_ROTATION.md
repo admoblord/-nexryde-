@@ -40,8 +40,8 @@
 
 - auth: `JWT_SECRET`
 - squad: `SQUAD_SECRET_KEY`, `SQUAD_WEBHOOK_SECRET`
-- sms: `TERMII_API_KEY`
-- email otp: `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`
+- phone OTP (optional dev): `SMS_OTP_MOCK`
+- email otp: `BREVO_API_KEY` + `BREVO_SENDER_EMAIL` or `EMAIL_OTP_FROM` (Brevo REST), **or** SMTP (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `EMAIL_OTP_FROM`) if Brevo key unset
 - ops: `NEXRYDE_OPS_KEY`
 
 ## Post-Rotation Verification

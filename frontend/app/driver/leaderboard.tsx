@@ -12,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getDriverLeaderboard } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
@@ -29,7 +29,7 @@ interface LeaderboardEntry {
 
 export default function LeaderboardScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('weekly');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -53,8 +53,8 @@ export default function LeaderboardScreen() {
         badge: row.badge,
       }));
       setLeaderboard(normalized);
-      if (user?.id) {
-        const mine = normalized.find((entry) => entry.driver_id === user.id) || null;
+      if (canCallAuthedApi && driverId) {
+        const mine = normalized.find((entry) => entry.driver_id === driverId) || null;
         setUserRank(mine);
       } else {
         setUserRank(null);

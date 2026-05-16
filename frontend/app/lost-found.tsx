@@ -16,10 +16,16 @@ import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { getUserTrips, getUserLostItems, reportLostItem } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function LostFoundScreen() {
   const router = useRouter();
+  const authed = useRequireUserOrLogin();
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
+
   const [activeTab, setActiveTab] = useState<'report' | 'history'>('report');
   const [description, setDescription] = useState('');
   const [selectedTripId, setSelectedTripId] = useState<string>('');
@@ -29,15 +35,15 @@ export default function LostFoundScreen() {
   const [history, setHistory] = useState<any[]>([]);
 
   const load = async () => {
-    if (!user?.id) {
+    if (!userId || !canCallAuthedApi || !user) {
       setLoading(false);
       return;
     }
     try {
       const role = user.role === 'driver' ? 'driver' : 'rider';
       const [tripRes, historyRes] = await Promise.all([
-        getUserTrips(user.id, role),
-        getUserLostItems(user.id),
+        getUserTrips(userId, role),
+        getUserLostItems(userId),
       ]);
       const trips = Array.isArray(tripRes.data) ? tripRes.data : [];
       const completedTrips = trips
@@ -55,10 +61,10 @@ export default function LostFoundScreen() {
 
   useEffect(() => {
     load();
-  }, [user?.id]);
+  }, [userId, canCallAuthedApi, user?.role]);
 
   const submitReport = async () => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi || !user) return;
     if (!selectedTripId) {
       Alert.alert('Select Trip', 'Please select the trip where item was lost.');
       return;
@@ -72,7 +78,7 @@ export default function LostFoundScreen() {
       await reportLostItem({
         trip_id: selectedTripId,
         description: description.trim(),
-        reporter_id: user.id,
+        reporter_id: userId,
         reporter_role: user.role === 'driver' ? 'driver' : 'rider',
       });
       Alert.alert('Reported', 'Lost item report submitted successfully.');
@@ -90,6 +96,10 @@ export default function LostFoundScreen() {
     () => [...history].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || ''))),
     [history]
   );
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>

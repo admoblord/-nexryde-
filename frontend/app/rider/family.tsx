@@ -17,7 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { Card, Button, Badge } from '@/src/components/UI';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { 
   createFamily, 
   getFamily, 
@@ -47,7 +47,7 @@ interface Family {
 
 export default function FamilyModeScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
   
   const [family, setFamily] = useState<Family | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -59,8 +59,12 @@ export default function FamilyModeScreen() {
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
-    loadFamily();
-  }, [user?.id]);
+    if (!canCallAuthedApi) {
+      setInitialLoading(false);
+      return;
+    }
+    void loadFamily();
+  }, [riderId, canCallAuthedApi]);
 
   const normalizePhone = (value: string) => {
     const clean = (value || '').trim();
@@ -73,13 +77,13 @@ export default function FamilyModeScreen() {
   };
 
   const loadFamily = async () => {
-    if (!user?.id) {
+    if (!riderId || !canCallAuthedApi) {
       setInitialLoading(false);
       return;
     }
     try {
       // Check if user has a family_id set
-      const userFamilyId = (user as any).family_id;
+      const userFamilyId = (user as { family_id?: string } | null)?.family_id;
       if (userFamilyId) {
         const res = await getFamily(userFamilyId);
         setFamily(res.data);
@@ -102,10 +106,11 @@ export default function FamilyModeScreen() {
       Alert.alert('Error', 'Please enter a family name');
       return;
     }
-    
+    if (!riderId || !canCallAuthedApi) return;
+
     setLoading(true);
     try {
-      const res = await createFamily(user!.id, newFamilyName.trim());
+      const res = await createFamily(riderId, newFamilyName.trim());
       Alert.alert('Success', 'Family created! You can now add members.');
       setShowCreateModal(false);
       setNewFamilyName('');
@@ -176,7 +181,7 @@ export default function FamilyModeScreen() {
   };
 
   const handleSafetyAlert = async () => {
-    if (!family || !user?.id) return;
+    if (!family || !riderId || !canCallAuthedApi) return;
     
     Alert.alert(
       'Safety Alert',
@@ -200,7 +205,7 @@ export default function FamilyModeScreen() {
               } catch (locErr) {
                 console.log('Family safety location fallback used:', locErr);
               }
-              await triggerFamilySafetyAlert(family.id, user.id, lat, lng);
+              await triggerFamilySafetyAlert(family.id, riderId, lat, lng);
               Alert.alert('Alert Sent', 'All family members have been notified');
             } catch (error) {
               Alert.alert('Error', 'Failed to send alert');

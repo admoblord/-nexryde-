@@ -20,10 +20,15 @@ import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { useBottomInset } from '@/src/hooks/useBottomPad';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { storeReady, token, canCallAuthedApi } = useAuthedApiReady();
+  const surf = useOnboardingSurfaces();
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
   const { bottom } = useBottomInset();
   
@@ -62,7 +67,7 @@ export default function DriverProfileScreen() {
   // Pre-populate any fields already saved (e.g. driver revisits the screen)
   useEffect(() => {
     const driverId = params.driver_id as string || '';
-    if (!driverId) return;
+    if (!driverId || !canCallAuthedApi) return;
     setLoadingExisting(true);
     fetch(`${BACKEND_URL}/api/drivers/${driverId}/profile`, { headers: getAuthHeaders() })
       .then(r => r.ok ? r.json() : null)
@@ -94,7 +99,7 @@ export default function DriverProfileScreen() {
       })
       .catch(() => { /* silent — form starts empty */ })
       .finally(() => setLoadingExisting(false));
-  }, []);
+  }, [canCallAuthedApi, token, params.driver_id]);
 
   const VEHICLE_TYPES = [
     { id: 'economy', label: 'Economy', icon: 'car', desc: 'Standard vehicles' },
@@ -180,6 +185,13 @@ export default function DriverProfileScreen() {
       return;
     }
 
+    if (!token) {
+      Alert.alert('Session expired', 'Please sign in again to save your profile.', [
+        { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
+      ]);
+      return;
+    }
+
     setSubmitting(true);
     try {
       const response = await fetch(`${BACKEND_URL}/api/drivers/complete-profile`, {
@@ -258,15 +270,19 @@ export default function DriverProfileScreen() {
     }
   };
 
+  if (!storeReady) {
+    return <AuthLoadingGate />;
+  }
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: surf.screen }]}>
       <SafeAreaView style={styles.safeArea}>
         {/* Header */}
-        <View style={styles.header}>
+        <View style={[styles.header, { backgroundColor: surf.header, borderBottomColor: surf.border }]}>
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            <Ionicons name="arrow-back" size={24} color={surf.text} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Driver profile</Text>
+          <Text style={[styles.headerTitle, { color: surf.text }]}>Driver profile</Text>
           <View style={styles.placeholder} />
         </View>
 
@@ -277,6 +293,7 @@ export default function DriverProfileScreen() {
         >
           <DriverOnboardingProgress
             current="profile"
+            appearance={surf.isDark ? 'dark' : 'light'}
             subtitle="Accurate details speed up approval. Bank fields are optional but recommended for payouts."
           />
           <View style={styles.infoCard}>

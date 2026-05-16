@@ -191,11 +191,11 @@ export function maneuverToRotation(maneuver: string): number {
 
 // ── Maneuver → accent colour ───────────────────────────────────────────────
 export function maneuverToColor(maneuver: string): string {
-  if (maneuver.includes('left')) return '#38bdf8';   // sky blue
-  if (maneuver.includes('right')) return '#f59e0b';  // amber
+  if (maneuver.includes('left')) return '#34D399'; // mint / emerald — Nexryde lane cue
+  if (maneuver.includes('right')) return '#f59e0b'; // amber
   if (maneuver.includes('u-turn')) return '#f87171'; // red
-  if (maneuver.includes('roundabout')) return '#a78bfa'; // purple
-  return '#22c55e'; // green for straight/merge/continue
+  if (maneuver.includes('roundabout')) return '#a78bfa'; // violet
+  return '#22c55e'; // green straight / merge / continue
 }
 
 // ── Fetch one segment from Google Directions (called ONCE per segment) ─────

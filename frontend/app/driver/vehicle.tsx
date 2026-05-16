@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ const cp = StyleSheet.create({
 export default function VehicleScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { user } = useAppStore();
+  const { userId: driverId } = useAuthedUserId();
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
@@ -183,10 +183,10 @@ export default function VehicleScreen() {
     successTimer.current = setTimeout(() => setSuccessMessage(null), 3500);
   };
 
-  const apiBase = `${BACKEND_URL}/api/drivers/${user?.id}/vehicles`;
+  const apiBase = driverId ? `${BACKEND_URL}/api/drivers/${driverId}/vehicles` : '';
 
   const loadVehicles = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId || !apiBase) return;
     setLoadError(false);
     try {
       const res = await fetch(apiBase, { headers: getAuthHeaders() });
@@ -204,7 +204,7 @@ export default function VehicleScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id, apiBase, cardSlide, cardFade]);
+  }, [driverId, apiBase, cardSlide, cardFade]);
 
   useEffect(() => { void loadVehicles(); }, [loadVehicles]);
 

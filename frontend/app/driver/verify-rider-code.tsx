@@ -20,12 +20,14 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { BACKEND_URL, getAuthHeaders, getTrip } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useAppStore, type Trip } from '@/src/store/appStore';
 
 const CODE_LENGTH = 4;
 
 export default function VerifyRiderCodeScreen() {
   const router = useRouter();
+  const { canCallAuthedApi } = useAuthedUserId();
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const { trip_id, driver_id, auto } = useLocalSearchParams<{
     trip_id: string;
@@ -84,6 +86,10 @@ export default function VerifyRiderCodeScreen() {
 
   const submitCode = useCallback(async (code: string) => {
     if (code.length !== CODE_LENGTH || submitting) return;
+    if (!canCallAuthedApi) {
+      setError('Session loading — try again in a moment.');
+      return;
+    }
     setSubmitting(true);
     setError('');
     try {
@@ -125,18 +131,19 @@ export default function VerifyRiderCodeScreen() {
     } finally {
       setSubmitting(false);
     }
-  }, [trip_id, driver_id, submitting, router, setCurrentTrip]);
+  }, [trip_id, driver_id, submitting, router, setCurrentTrip, canCallAuthedApi]);
 
   const filled = digits.filter(Boolean).length;
 
   return (
     <View style={styles.root}>
       <LinearGradient
-        colors={['#020617', '#0a0f1e', '#0f172a']}
+        colors={['#060A14', '#0A1628', '#0D2137']}
         style={StyleSheet.absoluteFill}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0.4, y: 1 }}
       />
+      <View style={styles.glowMint} pointerEvents="none" />
 
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.headerRow}>
@@ -172,6 +179,17 @@ export default function VerifyRiderCodeScreen() {
               </View>
               <Text style={styles.eyebrow}>{auto === '1' ? 'Arrived · verify' : 'Before you start'}</Text>
               <Text style={styles.title}>Enter pickup code</Text>
+
+              <View style={styles.steps}>
+                {['Ask rider', 'Enter code', 'Start trip'].map((label, i) => (
+                  <View key={label} style={styles.stepCol}>
+                    <View style={[styles.stepDot, i <= (filled > 0 ? 1 : 0) && styles.stepDotOn]}>
+                      <Text style={styles.stepNum}>{i + 1}</Text>
+                    </View>
+                    <Text style={[styles.stepLbl, i <= (filled > 0 ? 1 : 0) && styles.stepLblOn]}>{label}</Text>
+                  </View>
+                ))}
+              </View>
 
               <View style={styles.flowCard}>
                 <Text style={styles.subtitle}>
@@ -312,7 +330,37 @@ export default function VerifyRiderCodeScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  glowMint: {
+    position: 'absolute',
+    top: -40,
+    right: -30,
+    width: 200,
+    height: 200,
+    borderRadius: 100,
+    backgroundColor: '#34F5B8',
+    opacity: 0.08,
+  },
   safe: { flex: 1 },
+  steps: {
+    flexDirection: 'row',
+    width: '100%',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 8,
+  },
+  stepCol: { alignItems: 'center', flex: 1, gap: 6 },
+  stepDot: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(148,163,184,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stepDotOn: { backgroundColor: 'rgba(52,245,184,0.25)', borderWidth: 1, borderColor: 'rgba(52,245,184,0.5)' },
+  stepNum: { fontSize: 12, fontWeight: '900', color: '#94A3B8' },
+  stepLbl: { fontSize: 10, fontWeight: '700', color: '#64748B', textAlign: 'center' },
+  stepLblOn: { color: '#A7F3D0' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -12,6 +12,9 @@ import {
 import policeContacts from '@/src/data/policeContacts';
 import { askSupportVoiceBot, getSupportContacts, reportTripIssue } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 function SupportVoiceHandler({
   onListeningStart,
@@ -66,7 +69,9 @@ const normalizeStateInput = (value: string) =>
 export default function SupportScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const storeReady = usePersistStoreReady();
   const { user, currentTrip } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const [message, setMessage] = useState('');
   const [issueCategory, setIssueCategory] = useState<'safety' | 'fare' | 'behavior' | 'route' | 'payment' | 'general'>('general');
   const [issueText, setIssueText] = useState('');
@@ -163,7 +168,7 @@ export default function SupportScreen() {
     try {
       const res = await askSupportVoiceBot({
         message: cleaned,
-        user_id: user?.id,
+        user_id: canCallAuthedApi ? userId : undefined,
         trip_id: currentTrip?.id,
         language: 'auto',
       });
@@ -235,7 +240,7 @@ export default function SupportScreen() {
   };
 
   const submitIssueReport = async () => {
-    if (!user?.id) {
+    if (!userId || !canCallAuthedApi || !user) {
       Alert.alert('Login required', 'Please login and try again.');
       return;
     }
@@ -252,7 +257,7 @@ export default function SupportScreen() {
       const role = user.role === 'driver' ? 'driver' : 'rider';
       const res = await reportTripIssue({
         trip_id: prefilledTripId,
-        user_id: user.id,
+        user_id: userId,
         role,
         category: issueCategory,
         description: issueText.trim(),
@@ -269,6 +274,10 @@ export default function SupportScreen() {
       setReportingIssue(false);
     }
   };
+
+  if (!storeReady) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>

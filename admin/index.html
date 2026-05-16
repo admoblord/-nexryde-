@@ -1468,10 +1468,10 @@
                         </td>
                         <td style="color:#94A3B8;font-size:13px;">${r.phone || '—'}</td>
                         <td style="font-weight:700;color:#E2E8F0;text-align:center;">${r.total_trips || 0}</td>
-                        <td>
-                            ${r.has_nin
-                                ? `<span style="background:#0F3D2B;color:#22C55E;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-shield-check-line"></i> Yes</span>`
-                                : `<span style="background:#3D1A1A;color:#EF4444;padding:3px 9px;border-radius:20px;font-size:11px;font-weight:700;"><i class="ri-shield-cross-line"></i> No</span>`
+                        <td style="font-family:ui-monospace,monospace;font-size:12px;color:#CBD5E1;letter-spacing:0.5px;">
+                            ${r.has_nin && r.nin
+                                ? `${String(r.nin).slice(0,3)}••••••${String(r.nin).slice(-2)}`
+                                : `<span style="color:#64748B;">—</span>`
                             }
                         </td>
                         <td>
@@ -2579,6 +2579,7 @@
                             ['Face ID Photo',      id.face_verified,   'ri-scan-line'],
                             ['NIN Submitted',      id.has_nin,         'ri-id-card-line'],
                             ['NIN Verified',       id.nin_verified,    'ri-shield-check-line'],
+                            ['NIN Registry Match', !!id.nin_registry_verified, 'ri-database-2-line'],
                             ['Profile Completed',  id.is_verified,     'ri-user-check-line'],
                             ['Phone Linked',       !!r.phone,          'ri-phone-line'],
                             ['Email Linked',       !!r.email,          'ri-mail-line'],

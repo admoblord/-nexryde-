@@ -21,7 +21,7 @@ import {
   markFeatureAsSeen,
 } from '@/src/services/featureAnnouncements';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 
 type Props = {
@@ -70,7 +70,7 @@ function relativeTime(raw: string): string {
 
 export default function FeatureNotificationsScreen({ role }: Props) {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
 
   const [tab, setTab] = useState<NotifTab>('activity');
@@ -95,11 +95,11 @@ export default function FeatureNotificationsScreen({ role }: Props) {
   }, [role]);
 
   const loadBackendNotifs = useCallback(async () => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     try {
       const headers = getAuthHeaders() as Record<string, string>;
       const res = await fetch(
-        `${BACKEND_URL}/api/users/${user.id}/notifications?limit=40`,
+        `${BACKEND_URL}/api/users/${userId}/notifications?limit=40`,
         { headers }
       );
       if (res.ok) {
@@ -110,7 +110,7 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     } catch {
       // silent — show empty state
     }
-  }, [user?.id]);
+  }, [userId, canCallAuthedApi]);
 
   const load = useCallback(async () => {
     await Promise.all([loadFeatures(), loadBackendNotifs()]);
@@ -118,10 +118,16 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     setRefreshing(false);
   }, [loadFeatures, loadBackendNotifs]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
+    void load();
+  }, [load, canCallAuthedApi]);
 
   const markNotifRead = async (notifId: string) => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     setBackendNotifs((prev) =>
       prev.map((n) => (n.id === notifId ? { ...n, read: true } : n))
     );
@@ -129,20 +135,20 @@ export default function FeatureNotificationsScreen({ role }: Props) {
     try {
       const headers = getAuthHeaders() as Record<string, string>;
       await fetch(
-        `${BACKEND_URL}/api/users/${user.id}/notifications/${notifId}/read`,
+        `${BACKEND_URL}/api/users/${userId}/notifications/${notifId}/read`,
         { method: 'POST', headers }
       );
     } catch { /* best-effort */ }
   };
 
   const markAllNotifRead = async () => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     setBackendNotifs((prev) => prev.map((n) => ({ ...n, read: true })));
     setUnreadBackend(0);
     try {
       const headers = getAuthHeaders() as Record<string, string>;
       await fetch(
-        `${BACKEND_URL}/api/users/${user.id}/notifications/read-all`,
+        `${BACKEND_URL}/api/users/${userId}/notifications/read-all`,
         { method: 'POST', headers }
       );
     } catch { /* best-effort */ }

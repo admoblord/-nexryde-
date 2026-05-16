@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Tabs } from 'expo-router';
 import { View, StyleSheet, Text } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { COLORS, FONT_SIZE, SHADOWS } from '@/src/constants/theme';
+import { FONT_SIZE, SHADOWS, tabIconActivePillBg, useThemeColors } from '@/src/constants/theme';
 import { BRAND } from '@/src/constants/designSystem';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
@@ -11,10 +11,23 @@ import ActiveTripBar from '@/src/components/ActiveTripBar';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
+import { useRequireRole } from '@/src/hooks/useRequireRole';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
-function DriverNotifIcon({ color, focused, count }: { color: string; focused: boolean; count: number }) {
+function DriverNotifIcon({
+  color,
+  focused,
+  count,
+  isDark,
+}: {
+  color: string;
+  focused: boolean;
+  count: number;
+  isDark: boolean;
+}) {
   return (
-    <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+    <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
       <Ionicons name={focused ? 'notifications' : 'notifications-outline'} size={24} color={color} />
       {count > 0 && (
         <View style={styles.badge}>
@@ -27,17 +40,46 @@ function DriverNotifIcon({ color, focused, count }: { color: string; focused: bo
 
 export default function DriverTabLayout() {
   const { t } = useLanguage();
-  const { user, token, isOnline: isDriverOnline } = useAppStore();
+  const { colors, isDark } = useThemeColors();
+  const roleOk = useRequireRole('driver');
+  const { isOnline: isDriverOnline } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();
   useActiveTripCoordinator();
 
+  const tabScreenOptions = useMemo(
+    () => ({
+      headerShown: false,
+      tabBarActiveTintColor: BRAND.primaryNeon,
+      tabBarInactiveTintColor: colors.textMuted,
+      tabBarHideOnKeyboard: true,
+      tabBarStyle: isDriverOnline
+        ? { display: 'none' as const }
+        : {
+            backgroundColor: colors.surface,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderTopColor: colors.border,
+            height: TAB_BAR_HEIGHT + insets.bottom,
+            paddingBottom: insets.bottom + 4,
+            paddingTop: 8,
+            ...(isDark ? SHADOWS.lg : SHADOWS.md),
+          },
+      tabBarLabelStyle: {
+        fontSize: FONT_SIZE.xxs,
+        fontWeight: '700' as const,
+        marginTop: 4,
+      },
+    }),
+    [colors.border, colors.surface, colors.textMuted, insets.bottom, isDark, isDriverOnline],
+  );
+
   useEffect(() => {
-    if (!user?.id || !token) return;
+    if (!canCallAuthedApi || !userId) return;
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${user.id}/notifications?unread_only=true&limit=1`, {
+        const res = await fetch(`${BACKEND_URL}/api/users/${userId}/notifications?unread_only=true&limit=1`, {
           headers: getAuthHeaders(),
         });
         if (res.ok) {
@@ -50,40 +92,23 @@ export default function DriverTabLayout() {
     fetchUnread();
     const iv = setInterval(fetchUnread, 30000);
     return () => { cancelled = true; clearInterval(iv); };
-  }, [user?.id, token]);
+  }, [canCallAuthedApi, userId]);
+
+  if (!roleOk) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <>
       <Tabs
-        screenOptions={{
-          headerShown: false,
-          tabBarActiveTintColor: BRAND.primaryNeon,
-          tabBarInactiveTintColor: '#94A3B8',
-          tabBarHideOnKeyboard: true,
-          tabBarStyle: isDriverOnline
-            ? { display: 'none' }
-            : {
-                backgroundColor: COLORS.surface,
-                borderTopWidth: 1,
-                borderTopColor: 'rgba(51,65,85,0.55)',
-                height: TAB_BAR_HEIGHT + insets.bottom,
-                paddingBottom: insets.bottom + 4,
-                paddingTop: 8,
-                ...SHADOWS.lg,
-              },
-          tabBarLabelStyle: {
-            fontSize: FONT_SIZE.xxs,
-            fontWeight: '700',
-            marginTop: 4,
-          },
-        }}
+        screenOptions={tabScreenOptions}
       >
         <Tabs.Screen
           name="driver-home"
           options={{
             title: t.tabs.home,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
                 <Ionicons name={focused ? 'home' : 'home-outline'} size={24} color={color} />
               </View>
             ),
@@ -94,7 +119,7 @@ export default function DriverTabLayout() {
           options={{
             title: t.tabs.earnings,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
                 <Ionicons name={focused ? 'cash' : 'cash-outline'} size={24} color={color} />
               </View>
             ),
@@ -105,7 +130,7 @@ export default function DriverTabLayout() {
           options={{
             title: t.tabs.trips,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
                 <Ionicons name={focused ? 'car' : 'car-outline'} size={24} color={color} />
               </View>
             ),
@@ -116,7 +141,7 @@ export default function DriverTabLayout() {
           options={{
             title: t.tabs.safety,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
                 <Ionicons name={focused ? 'shield-checkmark' : 'shield-checkmark-outline'} size={24} color={color} />
               </View>
             ),
@@ -127,7 +152,7 @@ export default function DriverTabLayout() {
           options={{
             title: t.tabs.updates,
             tabBarIcon: ({ color, focused }) => (
-              <DriverNotifIcon color={color} focused={focused} count={unreadCount} />
+              <DriverNotifIcon color={color} focused={focused} count={unreadCount} isDark={isDark} />
             ),
           }}
         />
@@ -136,7 +161,7 @@ export default function DriverTabLayout() {
           options={{
             title: t.tabs.profile,
             tabBarIcon: ({ color, focused }) => (
-              <View style={[styles.iconContainer, focused && styles.iconContainerActive]}>
+              <View style={[styles.iconContainer, focused && { backgroundColor: tabIconActivePillBg(isDark) }]}>
                 <Ionicons name={focused ? 'person' : 'person-outline'} size={24} color={color} />
               </View>
             ),
@@ -155,9 +180,6 @@ const styles = StyleSheet.create({
     width: 40,
     height: 30,
     borderRadius: 14,
-  },
-  iconContainerActive: {
-    backgroundColor: 'rgba(34, 197, 94, 0.12)',
   },
   badge: {
     position: 'absolute',

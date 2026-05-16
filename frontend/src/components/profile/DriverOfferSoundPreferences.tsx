@@ -41,8 +41,8 @@ export function DriverOfferSoundPreferences({ defaultExpandedTones = false }: { 
   return (
     <>
       <View style={[styles.menuItem, { borderBottomColor: COLORS.gray100 }]}>
-        <View style={[styles.menuIcon, { backgroundColor: '#DCFCE7' }]}>
-          <Ionicons name="volume-high-outline" size={20} color={COLORS.accentGreen} />
+        <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+          <Ionicons name="volume-high-outline" size={20} color={COLORS.accentGreenDark} />
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[styles.menuText, { color: colors.text }]}>Offer ringtone sound</Text>
@@ -65,8 +65,8 @@ export function DriverOfferSoundPreferences({ defaultExpandedTones = false }: { 
           accessibilityRole="button"
           disabled={!soundEnabled}
         >
-          <View style={[styles.menuIcon, { backgroundColor: '#E0F2FE' }]}>
-            <Ionicons name="musical-notes-outline" size={20} color="#0284C7" />
+          <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+            <Ionicons name="musical-notes-outline" size={20} color={COLORS.accentGreenDark} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.menuText, { color: colors.text, marginLeft: SPACING.md }]}>Ringtone</Text>
@@ -104,9 +104,9 @@ export function DriverOfferSoundPreferences({ defaultExpandedTones = false }: { 
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   >
                     {loadingPreview ? (
-                      <ActivityIndicator size="small" color="#0284C7" />
+                      <ActivityIndicator size="small" color={COLORS.accentGreen} />
                     ) : (
-                      <Ionicons name="play-circle-outline" size={28} color="#0284C7" />
+                      <Ionicons name="play-circle-outline" size={28} color={COLORS.accentGreen} />
                     )}
                   </TouchableOpacity>
                   {active && (

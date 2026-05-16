@@ -3,6 +3,7 @@ import { Accelerometer } from 'expo-sensors';
 import * as Location from 'expo-location';
 import { triggerSOS } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 const ACTIVE_STATUSES = new Set(['accepted', 'arrived', 'ongoing', 'pending_payment']);
 const SHAKE_THRESHOLD_G = 1.35;
@@ -13,6 +14,7 @@ const MIN_SHAKE_GAP_MS = 300;
 
 export default function usePanicShakeGuard() {
   const user = useAppStore((s) => s.user);
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const currentTrip = useAppStore((s) => s.currentTrip);
   const cooldownUntilRef = useRef(0);
   const shakeTimesRef = useRef<number[]>([]);
@@ -21,7 +23,9 @@ export default function usePanicShakeGuard() {
   useEffect(() => {
     const tripId = currentTrip?.id || '';
     const tripStatus = currentTrip?.status || '';
-    const enabled = Boolean(user?.id && user.role === 'rider' && tripId && ACTIVE_STATUSES.has(tripStatus));
+    const enabled = Boolean(
+      canCallAuthedApi && userId && user?.role === 'rider' && tripId && ACTIVE_STATUSES.has(tripStatus),
+    );
     if (!enabled) {
       shakeTimesRef.current = [];
       return;
@@ -68,5 +72,5 @@ export default function usePanicShakeGuard() {
     return () => {
       subscription.remove();
     };
-  }, [currentTrip?.id, currentTrip?.status, user?.id, user?.role]);
+  }, [currentTrip?.id, currentTrip?.status, userId, canCallAuthedApi, user?.role]);
 }

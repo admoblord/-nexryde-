@@ -24,6 +24,8 @@ import { BRAND, LAYOUT } from '@/src/constants/designSystem';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, triggerSOS, getAuthHeaders } from '@/src/services/api';
 import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
 import policeContacts from '@/src/data/policeContacts';
@@ -178,6 +180,8 @@ function quickBg(v: (typeof QUICK)[number]['variant']) {
 export default function RiderSafetyScreen() {
   const router = useRouter();
   const { user, currentTrip } = useAppStore();
+  const { canCallAuthedApi } = useAuthedApiReady();
+  const { userId: riderId } = useAuthedUserId();
   const [activeTripId, setActiveTripId] = useState<string | null>(currentTrip?.id || null);
   const [loadingTrip, setLoadingTrip] = useState(false);
   const tabPad = useTabBottomPad(8);
@@ -250,11 +254,12 @@ export default function RiderSafetyScreen() {
   }, [sosPulse]);
 
   useEffect(() => {
+    if (!canCallAuthedApi || !riderId || !BACKEND_URL) return;
+
     const fetchActiveTrip = async () => {
-      if (!user?.id || !BACKEND_URL) return;
       setLoadingTrip(true);
       try {
-        const res = await fetch(`${BACKEND_URL}/api/trips/active/${user.id}`, { headers: getAuthHeaders() });
+        const res = await fetch(`${BACKEND_URL}/api/trips/active/${riderId}`, { headers: getAuthHeaders() });
         const data = await res.json();
         if (data?.active && data?.trip?.id) {
           setActiveTripId(String(data.trip.id));
@@ -268,10 +273,10 @@ export default function RiderSafetyScreen() {
       }
     };
 
-    fetchActiveTrip();
+    void fetchActiveTrip();
     const interval = setInterval(fetchActiveTrip, 20000);
     return () => clearInterval(interval);
-  }, [user?.id, BACKEND_URL]);
+  }, [canCallAuthedApi, riderId, BACKEND_URL]);
 
   const handleConfirmSOS = async () => {
     if (!effectiveTripId) {

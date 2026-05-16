@@ -1,18 +1,25 @@
-import React, { useEffect, useMemo, useRef, type ComponentProps } from 'react';
+import React, { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Animated,
-  Easing,
   useWindowDimensions,
   Image,
   Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import {
+  RiderFindingMetricsCard,
+  RiderFindingRadar,
+  RiderFindingSheetHandle,
+  RiderFindingStatusRow,
+} from '@/src/components/rider/RiderFindingDriverChrome';
+import { RIDER_FINDING_SHEET_BORDER } from '@/src/constants/riderRideChrome';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 
 export type RiderPostRequestPhase = 'searching' | 'matched';
 
@@ -91,15 +98,17 @@ function FindingFlowHeader({
   );
 }
 
-const DOT_SIZES = [6, 8, 11, 8] as const;
-
 function stripTripEtaLabel(s: string | null | undefined): string | null {
   if (!s) return null;
   return s.replace(/\s*trip\s*$/i, '').trim();
 }
 
 function MatchedDriverHero({ driver }: { driver: RiderMatchedDriver }) {
-  const uri = driver.face_image || driver.profile_image || null;
+  const resolvedFace = useMemo(() => resolvePublicMediaUri(driver.face_image ?? null), [driver.face_image]);
+  const resolvedProfile = useMemo(() => resolvePublicMediaUri(driver.profile_image ?? null), [driver.profile_image]);
+  const uri = resolvedFace || resolvedProfile;
+  const [imgFail, setImgFail] = useState(false);
+  useEffect(() => setImgFail(false), [uri]);
   const vehicleLine = [driver.color, driver.vehicle].filter(Boolean).join(' ');
   const platePart = driver.plate ? ` · ${driver.plate}` : '';
   return (
@@ -111,12 +120,13 @@ function MatchedDriverHero({ driver }: { driver: RiderMatchedDriver }) {
         style={StyleSheet.absoluteFillObject}
       />
       <View style={styles.heroPhotoRing}>
-        {uri ? (
+        {uri && !imgFail ? (
           <Image
             source={{ uri }}
             style={styles.heroPhoto}
             resizeMode="cover"
             accessibilityLabel={`Photo of ${driver.name}`}
+            onError={() => setImgFail(true)}
             {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
           />
         ) : (
@@ -198,62 +208,6 @@ function MatchedTripStats({
       />
       <MatchedStatChip icon="location" label="Distance" value={routeKmLabel || '—'} />
       <MatchedStatChip icon="time" label="ETA" value={eta} />
-    </View>
-  );
-}
-
-function FindingDots() {
-  const a = useRef([0, 1, 2, 3].map(() => new Animated.Value(0.32))).current;
-  useEffect(() => {
-    const loops = a.map((v, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(v, {
-            toValue: 1,
-            duration: 440,
-            delay: i * 100,
-            easing: Easing.out(Easing.quad),
-            useNativeDriver: true,
-          }),
-          Animated.timing(v, {
-            toValue: 0.26,
-            duration: 440,
-            easing: Easing.in(Easing.quad),
-            useNativeDriver: true,
-          }),
-        ]),
-      ),
-    );
-    loops.forEach((l) => l.start());
-    return () => loops.forEach((l) => l.stop());
-  }, [a]);
-  return (
-    <View style={styles.dotsRow}>
-      {a.map((v, i) => {
-        const d = DOT_SIZES[i] ?? 8;
-        return (
-          <Animated.View
-            key={i}
-            style={[
-              styles.dotBase,
-              {
-                width: d,
-                height: d,
-                borderRadius: d / 2,
-                opacity: v,
-                transform: [
-                  {
-                    scale: v.interpolate({
-                      inputRange: [0.26, 1],
-                      outputRange: [0.88, 1.2],
-                    }),
-                  },
-                ],
-              },
-            ]}
-          />
-        );
-      })}
     </View>
   );
 }
@@ -341,22 +295,33 @@ export function RiderPostRequestOverlay({
         pointerEvents="box-none"
       >
         <View style={styles.sheetShell}>
-          <View style={styles.sheetHandle} accessibilityLabel="Sheet handle" />
+          <BlurView intensity={56} tint="dark" style={StyleSheet.absoluteFillObject} />
+          <LinearGradient
+            colors={['rgba(52,245,184,0.07)', 'transparent']}
+            start={{ x: 0.5, y: 0 }}
+            end={{ x: 0.5, y: 1 }}
+            style={styles.sheetSheen}
+            pointerEvents="none"
+          />
+          <RiderFindingSheetHandle />
           <View style={styles.panel}>
           {phase === 'searching' ? (
             <>
+              <RiderFindingStatusRow
+                countdown={searchCountdown > 0 ? searchCountdown : undefined}
+              />
               <Text style={styles.headline}>{headline}</Text>
               <Text style={styles.sub}>{sub}</Text>
-              <FindingDots />
+              <RiderFindingRadar size={116} />
               {searchCountdown > 0 ? (
                 <Text style={styles.countdown}>
-                  Offer refreshes in{' '}
+                  Offer window refreshes in{' '}
                   <Text style={searchCountdown <= 15 ? styles.countdownUrgent : styles.countdownStrong}>
                     {searchCountdown}s
                   </Text>
                 </Text>
               ) : (
-                <Text style={styles.countdownStill}>Still matching drivers…</Text>
+                <Text style={styles.countdownStill}>Still scanning nearby drivers…</Text>
               )}
             </>
           ) : (
@@ -367,36 +332,11 @@ export function RiderPostRequestOverlay({
           )}
 
           {phase === 'searching' ? (
-            <View style={styles.metricsCard}>
-              <LinearGradient
-                colors={['rgba(34,229,160,0.08)', 'transparent', 'rgba(2,6,23,0)']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFillObject}
-                pointerEvents="none"
-              />
-              <View style={styles.metricCell}>
-                <Text style={styles.metricK}>Your bid</Text>
-                <Text style={styles.metricVGreen}>₦{Math.max(0, Math.round(bidNgn)).toLocaleString()}</Text>
-              </View>
-              <LinearGradient
-                colors={['transparent', 'rgba(148,163,184,0.28)', 'transparent']}
-                style={styles.metricVsep}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 0, y: 1 }}
-              />
-              <View style={styles.metricCell}>
-                <Text style={styles.metricK}>Route</Text>
-                <Text style={styles.metricV} numberOfLines={1}>
-                  {routeKmLabel || '—'}
-                </Text>
-                {routeMinLabel ? (
-                  <Text style={styles.metricHint} numberOfLines={1}>
-                    {routeMinLabel}
-                  </Text>
-                ) : null}
-              </View>
-            </View>
+            <RiderFindingMetricsCard
+              bidNgn={bidNgn}
+              routeKmLabel={routeKmLabel}
+              routeMinLabel={routeMinLabel}
+            />
           ) : null}
 
           {phase === 'matched' && driverMatched ? (
@@ -574,34 +514,32 @@ const styles = StyleSheet.create({
   },
   sheetShell: {
     marginHorizontal: 0,
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    backgroundColor: '#070B12',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderLeftWidth: StyleSheet.hairlineWidth,
-    borderRightWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(34,229,160,0.18)',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    backgroundColor: 'rgba(6,11,22,0.55)',
+    borderTopWidth: 1,
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: RIDER_FINDING_SHEET_BORDER,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 28,
+    shadowOffset: { width: 0, height: -12 },
+    shadowOpacity: 0.55,
+    shadowRadius: 32,
     elevation: 28,
   },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 36,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: 'rgba(148,163,184,0.28)',
-    marginTop: 12,
-    marginBottom: 6,
+  sheetSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 88,
   },
   panel: {
     paddingHorizontal: 20,
-    paddingTop: 6,
+    paddingTop: 2,
     paddingBottom: 12,
-    gap: 16,
+    gap: 14,
   },
   driverFoundBar: {
     position: 'absolute',
@@ -634,11 +572,11 @@ const styles = StyleSheet.create({
     letterSpacing: 1.6,
   },
   headline: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: -0.55,
-    lineHeight: 28,
+    letterSpacing: -0.65,
+    lineHeight: 30,
     textAlign: 'center',
   },
   headlineMatched: {
@@ -668,22 +606,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     paddingHorizontal: 10,
     letterSpacing: 0.1,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    marginTop: 6,
-    marginBottom: 4,
-  },
-  dotBase: {
-    backgroundColor: '#22E5A0',
-    shadowColor: '#22E5A0',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 6,
-    elevation: 4,
   },
   countdown: {
     textAlign: 'center',
@@ -879,57 +801,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#F8FAFC',
     letterSpacing: 0.25,
-  },
-  metricsCard: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
-    backgroundColor: 'rgba(15,23,42,0.75)',
-    borderRadius: 20,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(34,229,160,0.18)',
-    paddingVertical: 17,
-    paddingHorizontal: 17,
-    marginTop: 2,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.32,
-    shadowRadius: 18,
-    elevation: 12,
-  },
-  metricCell: { flex: 1, justifyContent: 'center', paddingHorizontal: 2 },
-  metricVsep: {
-    width: StyleSheet.hairlineWidth,
-    marginHorizontal: 6,
-    alignSelf: 'stretch',
-    minHeight: 52,
-  },
-  metricK: {
-    fontSize: 10,
-    fontWeight: '900',
-    color: '#64748B',
-    letterSpacing: 0.95,
-    textTransform: 'uppercase',
-    marginBottom: 7,
-  },
-  metricVGreen: {
-    fontSize: 25,
-    fontWeight: '900',
-    color: '#34F5B8',
-    letterSpacing: -0.75,
-  },
-  metricV: {
-    fontSize: 21,
-    fontWeight: '900',
-    color: '#F1F5F9',
-    letterSpacing: -0.45,
-  },
-  metricHint: {
-    marginTop: 5,
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#94A3B8',
-    lineHeight: 16,
   },
   primaryBtnOuter: {
     borderRadius: 17,

@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { BRAND, LAYOUT } from '@/src/constants/designSystem';
-import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
+import { DRIVER_ACTIVE_TRIP_HREF, DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import policeContacts from '@/src/data/policeContacts';
@@ -62,7 +62,7 @@ const SECTIONS: { title: string; rows: SafeRow[] }[] = [
   {
     title: 'Emergency tools',
     rows: [
-      { label: 'Active trip safety', desc: 'Police connect, witness & SOS during a live trip', route: DRIVER_TRIPS_TAB_HREF, icon: 'flash', tone: 'danger' },
+      { label: 'Active trip safety', desc: 'Police connect, witness & SOS during a live trip', route: DRIVER_ACTIVE_TRIP_HREF, icon: 'flash', tone: 'danger' },
       { label: 'Safety alerts & zones', desc: 'Area risk map and community reports', route: '/driver/safety-alerts', icon: 'map', tone: 'danger' },
       { label: 'Support', desc: '24/7 help and incident reporting', route: '/support', icon: 'headset', tone: 'info' },
     ],

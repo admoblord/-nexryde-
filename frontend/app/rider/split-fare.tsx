@@ -17,12 +17,13 @@ import * as Contacts from 'expo-contacts';
 import * as SMS from 'expo-sms';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
 import { splitFare } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useAppStore } from '@/src/store/appStore';
 
 export default function SplitFareScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const user = useAppStore((s) => s.user);
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const currentTrip = useAppStore((s) => s.currentTrip);
   const [totalFare] = useState(params.fare ? Number(params.fare) : 5000);
   const [searchQuery, setSearchQuery] = useState('');
@@ -129,12 +130,12 @@ export default function SplitFareScreen() {
     sendInFlightRef.current = true;
     setLoading(true);
     try {
-      if (!tripId || !user?.id) {
+      if (!tripId || !riderId || !canCallAuthedApi) {
         Alert.alert('Trip Required', 'Open split fare from an active trip.');
         return;
       }
       const phoneNumbers = selectedFriends.map((f) => normalizePhone(f.phone)).filter(Boolean);
-      await splitFare(tripId, user.id, phoneNumbers);
+      await splitFare(tripId, riderId, phoneNumbers);
       const isSmsAvailable = await SMS.isAvailableAsync();
       if (isSmsAvailable) {
         const message = `NEXRYDE split fare request: total ${CURRENCY}${totalFare.toLocaleString()}, your share ${CURRENCY}${splitAmount.toLocaleString()}. Open NEXRYDE app to accept.`;

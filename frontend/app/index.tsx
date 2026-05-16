@@ -15,13 +15,9 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL } from '@/src/services/api';
-import {
-  driverTermsRouteParams,
-  driverDocumentsRouteParams,
-  driverProfileRouteParams,
-} from '@/src/utils/driverOnboardingNav';
 import { loadDriverState } from '@/src/services/driverStateService';
+import { awaitPersistHydration } from '@/src/hooks/usePersistStoreReady';
+import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 
 const { width, height } = Dimensions.get('window');
 
@@ -39,7 +35,6 @@ const C = {
 };
 
 const DRIVER_CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
-const STARTUP_TIMEOUT_MS = 2500;
 
 export default function SplashScreen() {
   const router = useRouter();
@@ -76,18 +71,6 @@ export default function SplashScreen() {
   const ctaY = useRef(new Animated.Value(40)).current;
 
   // ── Helper ─────────────────────────────────────────────────────────
-  const fetchJsonWithTimeout = async (url: string, opts: RequestInit = {}) => {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), STARTUP_TIMEOUT_MS);
-    try {
-      const res = await fetch(url, { ...opts, signal: ctrl.signal });
-      const data = await res.json().catch(() => ({}));
-      return { response: res, data };
-    } finally {
-      clearTimeout(t);
-    }
-  };
-
   const isDriverCameraResumeActive = async (userData: any) => {
     if (userData?.role !== 'driver') return false;
     try {
@@ -169,6 +152,7 @@ export default function SplashScreen() {
   const checkSession = async () => {
     try {
       try {
+        await awaitPersistHydration();
         const isLoggedIn = await isUserLoggedIn();
         if (isLoggedIn) {
           const userData = await getUserSession();
@@ -191,42 +175,25 @@ export default function SplashScreen() {
           setToken(userData.token || null);
           setIsAuthenticated(true);
 
-          // ── Smart Resume ─────────────────────────────────────────────────
+          const authedUser = {
+            id: userData.id,
+            phone: userData.phone,
+            name: userData.name,
+            email: userData.email,
+            role: userData.role as 'rider' | 'driver',
+          };
+
           if (userData.role === 'driver') {
             const driverState = await loadDriverState(userData.id).catch(() => null);
             if (driverState?.activeTripId) {
-              // Mid-trip resume: live trip UI lives on driver home (no separate /driver/tracking route).
               router.replace('/(driver-tabs)/driver-home' as any);
-            } else {
-              router.replace('/(driver-tabs)/driver-home');
+              setChecking(false);
+              return;
             }
-          } else {
-            router.replace('/(rider-tabs)/rider-home');
           }
 
-          // Background onboarding check
-          const headers: Record<string, string> = userData.token
-            ? { Authorization: `Bearer ${userData.token}` } : {};
-          (async () => {
-            try {
-              if (userData.role === 'driver') {
-                const u = { id: userData.id, phone: userData.phone, name: userData.name, email: userData.email };
-                const { response: st, data } = await fetchJsonWithTimeout(
-                  `${BACKEND_URL}/api/drivers/${userData.id}/onboarding-status`, { headers });
-                if (!st.ok || !data?.completed) {
-                  const step = data?.step;
-                  if (step === 'terms') router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(u) });
-                  else if (step === 'profile') router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(u) });
-                  else if (step === 'documents_rejected') router.replace({ pathname: '/(auth)/driver-verification-status', params: driverDocumentsRouteParams(u) });
-                  else if (step === 'documents') router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(u) });
-                }
-                return;
-              }
-              const { response: rr, data: rs } = await fetchJsonWithTimeout(
-                `${BACKEND_URL}/api/users/${userData.id}/rider-verification-status`, { headers });
-              if (!rr.ok || !rs?.completed) router.replace('/(auth)/rider-verification');
-            } catch { /* stay on home */ }
-          })();
+          await routeAuthedUser(router, authedUser, userData.token || null);
+          setChecking(false);
           return;
         }
       } catch { /* storage unavailable */ }

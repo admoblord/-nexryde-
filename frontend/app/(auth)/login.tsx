@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,32 +7,30 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
-  Dimensions,
   ScrollView,
   ActivityIndicator,
   Alert,
   Linking,
   Image,
+  Animated,
+  Easing,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import { BlurView } from 'expo-blur';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppStore, type User } from '@/src/store/appStore';
 import { saveUserSession, getUserSession } from '@/utils/authStorage';
 import { autoApplyPendingReferral } from '@/src/services/referralService';
-import {
-  driverTermsRouteParams,
-  driverDocumentsRouteParams,
-  driverProfileRouteParams,
-} from '@/src/utils/driverOnboardingNav';
 import { BACKEND_URL, postDriverFortressVerify, formatApiDetail } from '@/src/services/api';
-
-const { width, height } = Dimensions.get('window');
+import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
+import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 // Colors based on NEXRYDE logo
 const COLORS = {
@@ -52,7 +50,13 @@ const COLORS = {
   gray700: '#2D3748',
   google: '#4285F4',
   googleSoft: 'rgba(66, 133, 244, 0.15)',
+  bankGold: 'rgba(212, 175, 55, 0.38)',
+  bankGoldBright: '#D4AF37',
+  bankInk: '#06090E',
+  bankVeil: '#0E141C',
 };
+
+const FORTRESS_PHONE_DRAFT_KEY = 'nexryde_driver_fortress_phone_draft';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -61,7 +65,7 @@ export default function LoginScreen() {
   const requestedRole = params.role === 'driver' || params.role === 'rider' ? params.role : null;
   const [email, setEmail] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
-  const [emailOtpRequired, setEmailOtpRequired] = useState(false);
+  const [authStep, setAuthStep] = useState<'email' | 'code'>('email');
   const [emailOtp, setEmailOtp] = useState('');
   const [emailOtpLoading, setEmailOtpLoading] = useState(false);
   const [otpTargetEmail, setOtpTargetEmail] = useState('');
@@ -77,6 +81,55 @@ export default function LoginScreen() {
   const [pinSetupRequired, setPinSetupRequired] = useState(false);
   const [loginError, setLoginError] = useState<{ type: 'sim_swap' | 'generic' | null; message: string }>({ type: null, message: '' });
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const canShowAuth = useRedirectIfAuthed();
+
+  const faceRingPulse = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (!fortressChallengeId) {
+      faceRingPulse.setValue(1);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(faceRingPulse, {
+          toValue: 1.045,
+          duration: 1600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(faceRingPulse, {
+          toValue: 1,
+          duration: 1600,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [fortressChallengeId, faceRingPulse]);
+
+  useEffect(() => {
+    if (!fortressChallengeId) return;
+    let cancelled = false;
+    void SecureStore.getItemAsync(FORTRESS_PHONE_DRAFT_KEY).then((stored) => {
+      if (cancelled || !stored) return;
+      setFortressPhoneInput((prev) => (prev.trim().length > 0 ? prev : stored));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fortressChallengeId]);
+
+  useEffect(() => {
+    if (!fortressChallengeId) return;
+    const t = setTimeout(() => {
+      const v = fortressPhoneInput.trim();
+      if (v.length >= 10) void SecureStore.setItemAsync(FORTRESS_PHONE_DRAFT_KEY, v).catch(() => {});
+    }, 500);
+    return () => clearTimeout(t);
+  }, [fortressPhoneInput, fortressChallengeId]);
 
   useEffect(() => {
     const checkBiometricLoginAvailability = async () => {
@@ -119,80 +172,16 @@ export default function LoginScreen() {
     }
   };
 
-  const routeVerifiedUser = async (loggedUser: any, resolvedToken: string | null) => {
-    const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-    if (resolvedToken) authHeaders.Authorization = `Bearer ${resolvedToken}`;
-
-    if (loggedUser?.role === 'driver') {
-      try {
-        const st = await fetch(`${getBackendUrl()}/api/drivers/${loggedUser.id}/onboarding-status`, {
-          headers: authHeaders,
-        });
-        const status = await st.json();
-        if (!st.ok || !status?.completed) {
-          if (status?.step === 'terms') {
-            router.replace({
-              pathname: '/(auth)/driver-terms',
-              params: driverTermsRouteParams(loggedUser),
-            });
-            return;
-          }
-          if (status?.step === 'documents') {
-            router.replace({
-              pathname: '/(auth)/driver-documents',
-              params: driverDocumentsRouteParams(loggedUser),
-            });
-            return;
-          }
-          if (status?.step === 'documents_review' || status?.step === 'documents_rejected') {
-            if (status?.step === 'documents_rejected') {
-              router.replace({
-                pathname: '/(auth)/driver-verification-status',
-                params: driverDocumentsRouteParams(loggedUser),
-              });
-            } else {
-              router.replace('/(driver-tabs)/driver-home');
-            }
-            return;
-          }
-          if (status?.step === 'profile') {
-            router.replace({
-              pathname: '/(auth)/driver-profile',
-              params: driverProfileRouteParams(loggedUser),
-            });
-            return;
-          }
-        }
-        router.replace('/(driver-tabs)/driver-home');
-        return;
-      } catch {
-        // Network error checking onboarding status — go to home rather than forcing
-        // re-onboarding on a transient error. The home screen will re-check status.
-        router.replace('/(driver-tabs)/driver-home');
-        return;
-      }
-    }
-
-    try {
-      const st = await fetch(`${getBackendUrl()}/api/users/${loggedUser.id}/rider-verification-status`, {
-        headers: authHeaders,
-      });
-      const riderStatus = await st.json();
-      if (st.ok && riderStatus?.completed) {
-        router.replace('/(rider-tabs)/rider-home');
-      } else {
-        router.replace('/(auth)/rider-verification');
-      }
-    } catch {
-      router.replace('/(auth)/rider-verification');
-    }
+  const routeVerifiedUser = async (loggedUser: User, resolvedToken: string | null) => {
+    await routeAuthedUser(router, loggedUser, resolvedToken);
   };
 
-  const handleEmailSignIn = async () => {
+  /** Passwordless email: request NEXRYDE code, then verify on next step. */
+  const handleRequestEmailCode = async () => {
     const normalizedEmail = email.trim().toLowerCase();
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
     if (!validEmail) {
-      Alert.alert("Invalid email", "Please enter a valid email address.");
+      Alert.alert('Invalid email', 'Please enter a valid email address.');
       return;
     }
 
@@ -201,104 +190,32 @@ export default function LoginScreen() {
     const t = setTimeout(() => {
       controller.abort();
       setEmailLoading(false);
-      Alert.alert("Connection Timeout", "Could not reach server. Please try again.");
+      Alert.alert('Connection Timeout', 'Could not reach server. Please try again.');
     }, 15000);
 
     try {
-      const res = await fetch(`${getBackendUrl()}/api/auth/email-signin`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, device_id: deviceId || undefined }),
+      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: normalizedEmail }),
         signal: controller.signal,
       });
-
-      const text = await res.text();
-      let data: any = null;
-      try { data = JSON.parse(text); } catch {}
-
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        const detail = data?.detail || data?.message || text || "Please try again.";
-        const isSIMSwap = res.status === 423 || String(detail).toLowerCase().includes('sim swap');
-        setLoginError({
-          type: isSIMSwap ? 'sim_swap' : 'generic',
-          message: isSIMSwap
-            ? 'A SIM change was detected on your device. Your account has been temporarily secured for your protection.'
-            : String(detail),
-        });
+        const detail = data?.detail || data?.message || 'Please try again.';
+        setLoginError({ type: 'generic', message: String(detail) });
         return;
       }
       setLoginError({ type: null, message: '' });
-
-      if (data?.fortress_required) {
-        setFortressChallengeId(String(data.challenge_id || ''));
-        setFortressMaskedPhone(String(data.masked_phone || ''));
-        setPinSetupRequired(Boolean(data.pin_setup_required));
-        setFortressFaceImage('');
-        Alert.alert(
-          'Driver Account Fortress',
-          'New device detected. Complete face scan, PIN, and registered phone verification to continue.'
-        );
-        return;
+      setOtpTargetEmail(normalizedEmail);
+      setAuthStep('code');
+      setEmailOtp('');
+      if (Platform.OS !== 'web') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
-
-      if (data?.is_new_user) {
-        if (data?.email_verification_required) {
-          setOtpTargetEmail(normalizedEmail);
-          setEmailOtpRequired(true);
-          Alert.alert('Verify your email', 'We sent a NEXRYDE OTP to your email. Enter it to continue onboarding.');
-          return;
-        }
-        const newEmail = data?.email_data?.email || normalizedEmail;
-        const newName = data?.email_data?.name || normalizedEmail.split('@')[0];
-        if (requestedRole === 'driver') {
-          router.push({
-            pathname: '/(auth)/driver-terms',
-            params: {
-              email: newEmail,
-              name: newName,
-            },
-          });
-        } else if (requestedRole === 'rider') {
-          router.push({
-            pathname: '/(auth)/rider-nin',
-            params: {
-              email: newEmail,
-              name: newName,
-            },
-          });
-        } else {
-          router.push({
-            pathname: '/(auth)/register',
-            params: {
-              email: newEmail,
-              name: newName,
-              auth_type: 'email',
-            },
-          });
-        }
-        return;
-      }
-
-      if (!data?.is_new_user && data?.user) {
-        const resolvedToken = data?.token || data?.user?.token || null;
-        setUser(data.user);
-        setToken(resolvedToken);
-        setIsAuthenticated(true);
-        await saveUserSession({ ...data.user, token: resolvedToken });
-        // Auto-apply any deep-link referral code for riders (silently)
-        if (data.user.role !== 'driver' && resolvedToken)
-          void autoApplyPendingReferral(data.user.id, resolvedToken);
-        await routeVerifiedUser(data.user, resolvedToken);
-        return;
-      }
-
-      if (!data?.user) {
-        Alert.alert("Email sign-in failed", data?.message || "Could not complete sign in.");
-        return;
-      }
-    } catch (e: any) {
-      if (e?.name !== "AbortError") {
-        Alert.alert("Connection Error", "Unable to sign in with email right now.");
+    } catch (e: unknown) {
+      if ((e as Error)?.name !== 'AbortError') {
+        Alert.alert('Connection Error', 'Unable to send verification email right now.');
       }
     } finally {
       clearTimeout(t);
@@ -309,9 +226,15 @@ export default function LoginScreen() {
   const continueToOnboarding = (verifiedEmail: string, suggestedName?: string) => {
     const newName = suggestedName || verifiedEmail.split('@')[0];
     if (requestedRole === 'driver') {
+      // Collect Nigerian phone on register before terms — driver accounts require a line for ops & payouts.
       router.push({
-        pathname: '/(auth)/driver-terms',
-        params: { email: verifiedEmail, name: newName },
+        pathname: '/(auth)/register',
+        params: {
+          email: verifiedEmail,
+          name: newName,
+          auth_type: 'email',
+          role: 'driver',
+        },
       });
       return;
     }
@@ -330,7 +253,7 @@ export default function LoginScreen() {
 
   const handleVerifyEmailOtp = async () => {
     if (!otpTargetEmail || emailOtp.trim().length < 4) {
-      Alert.alert('Invalid code', 'Enter the OTP sent to your email.');
+      Alert.alert('Invalid code', 'Enter the verification code from your email.');
       return;
     }
     setEmailOtpLoading(true);
@@ -338,18 +261,55 @@ export default function LoginScreen() {
       const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/verify`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: otpTargetEmail, otp: emailOtp.trim() }),
+        body: JSON.stringify({
+          email: otpTargetEmail,
+          otp: emailOtp.trim(),
+          device_id: deviceId || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
-        Alert.alert('Verification failed', data?.detail || 'Could not verify code.');
+        const detail = data?.detail || 'Could not verify code.';
+        const isSimSwap =
+          res.status === 423 || String(detail).toLowerCase().includes('sim swap');
+        setLoginError({
+          type: isSimSwap ? 'sim_swap' : 'generic',
+          message: isSimSwap
+            ? 'A SIM change was detected on your device. Your account has been temporarily secured for your protection.'
+            : String(detail),
+        });
         return;
       }
-      setEmailOtpRequired(false);
+      setLoginError({ type: null, message: '' });
+
+      if (data?.fortress_required) {
+        setFortressChallengeId(String(data.challenge_id || ''));
+        setFortressMaskedPhone(String(data.masked_phone || ''));
+        setPinSetupRequired(Boolean(data.pin_setup_required));
+        setFortressFaceImage('');
+        return;
+      }
+
+      const resolvedToken = (data?.token ?? data?.user?.token ?? null) as string | null;
+      if (data?.user && resolvedToken !== null && resolvedToken !== '') {
+        setUser(data.user);
+        setToken(resolvedToken);
+        setIsAuthenticated(true);
+        await saveUserSession({ ...data.user, token: resolvedToken });
+        if (data.user.role !== 'driver' && resolvedToken) {
+          void autoApplyPendingReferral(data.user.id, resolvedToken);
+        }
+        await routeVerifiedUser(data.user, resolvedToken);
+        return;
+      }
+
       setEmailOtp('');
-      continueToOnboarding(data?.email_data?.email || otpTargetEmail, data?.email_data?.name);
+      continueToOnboarding(
+        data?.email_data?.email || otpTargetEmail,
+        data?.email_data?.name,
+      );
     } catch {
-      Alert.alert('Connection error', 'Unable to verify email OTP right now.');
+      Alert.alert('Connection error', 'Unable to verify code right now.');
     } finally {
       setEmailOtpLoading(false);
     }
@@ -386,7 +346,7 @@ export default function LoginScreen() {
     const capture = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: false,
-      quality: 0.82,
+      quality: 0.92,
       base64: true,
       exif: false,
       cameraType: ImagePicker.CameraType.front,
@@ -424,6 +384,7 @@ export default function LoginScreen() {
       setToken(resolvedToken);
       setIsAuthenticated(true);
       await saveUserSession({ ...loggedIn, token: resolvedToken });
+      void SecureStore.deleteItemAsync(FORTRESS_PHONE_DRAFT_KEY).catch(() => {});
       setFortressChallengeId(null);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await routeVerifiedUser(loggedIn, resolvedToken);
@@ -467,6 +428,29 @@ export default function LoginScreen() {
     }
   };
 
+  const emailAuthCard = (
+    <AuthEmailCardBody
+      authStep={authStep}
+      email={email}
+      setEmail={setEmail}
+      emailLoading={emailLoading}
+      emailOtp={emailOtp}
+      setEmailOtp={setEmailOtp}
+      emailOtpLoading={emailOtpLoading}
+      otpTargetEmail={otpTargetEmail}
+      onRequestCode={handleRequestEmailCode}
+      onVerifyCode={() => void handleVerifyEmailOtp()}
+      onResend={() => void handleResendEmailOtp()}
+      onChangeEmail={() => {
+        setAuthStep('email');
+        setEmailOtp('');
+      }}
+    />
+  );
+
+  if (!canShowAuth) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>
@@ -554,152 +538,132 @@ export default function LoginScreen() {
                 </View>
               )}
 
-              {/* Email Sign-In */}
-              <View style={styles.emailContainer}>
-                <TextInput
-                  style={styles.emailInput}
-                  placeholder="you@example.com"
-                  placeholderTextColor={COLORS.textMuted}
-                  keyboardType="email-address"
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  value={email}
-                  onChangeText={setEmail}
-                />
-                <TouchableOpacity
-                  style={styles.continueButton}
-                  onPress={handleEmailSignIn}
-                  disabled={emailLoading}
-                  activeOpacity={0.9}
-                >
-                  <LinearGradient
-                    colors={email.includes('@')
-                      ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-                      : [COLORS.gray700, COLORS.gray700]
-                    }
-                    style={styles.buttonGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 0 }}
-                  >
-                    {emailLoading ? (
-                      <ActivityIndicator color={COLORS.primary} />
-                    ) : (
-                      <>
-                        <Ionicons name="mail" size={20} color={email.includes('@') ? COLORS.primary : COLORS.textMuted} style={{ marginRight: 8 }} />
-                        <Text style={[
-                          styles.continueButtonText,
-                          email.includes('@') && styles.continueButtonTextActive
-                        ]}>
-                          Continue with Email
-                        </Text>
-                      </>
-                    )}
-                  </LinearGradient>
-                </TouchableOpacity>
-              </View>
+              {/* Email / code — glass card */}
+              {!fortressChallengeId ? (
+                Platform.OS === 'web' ? (
+                  <View style={[styles.authGlass, styles.authGlassWeb]}>{emailAuthCard}</View>
+                ) : (
+                  <BlurView intensity={48} tint="dark" style={styles.authGlass}>
+                    {emailAuthCard}
+                  </BlurView>
+                )
+              ) : null}
 
               {fortressChallengeId ? (
-                <View style={styles.fortressPanel}>
-                  <View style={styles.fortressHeaderRow}>
-                    <View style={styles.fortressShieldIcon}>
-                      <Ionicons name="shield-checkmark" size={22} color={COLORS.green} />
+                <View style={styles.bankVaultCard}>
+                  <LinearGradient
+                    colors={[COLORS.bankVeil, COLORS.bankInk]}
+                    style={StyleSheet.absoluteFillObject}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                  />
+                  <View style={styles.bankVaultHeader}>
+                    <View style={styles.bankVaultBadge}>
+                      <Ionicons name="shield-half-outline" size={15} color={COLORS.bankGoldBright} />
+                      <Text style={styles.bankVaultBadgeText}>SECURE ACCESS</Text>
                     </View>
-                    <View style={styles.fortressHeaderText}>
-                      <Text style={styles.fortressTitle}>Driver Account Fortress</Text>
-                      <Text style={styles.fortressSubtitle}>
-                        We’ll store this face to recognize you on this device—like phone face unlock. Enter your
-                        details on file for {fortressMaskedPhone || 'your number'}.
-                      </Text>
-                    </View>
+                    <Text style={styles.bankVaultTitle}>Verify it's you</Text>
+                    <Text style={styles.bankVaultBody}>
+                      New device detected. Capture your face like phone unlock, then confirm the credentials we have on file for{' '}
+                      <Text style={styles.bankVaultMasked}>{fortressMaskedPhone || 'your registered line'}</Text>.
+                    </Text>
                   </View>
-                  <View style={styles.fortressTipRow}>
+
+                  <Animated.View style={[styles.bankFaceRingWrap, { transform: [{ scale: faceRingPulse }] }]}>
+                    <LinearGradient
+                      colors={[COLORS.greenLight, COLORS.bankGoldBright, COLORS.green]}
+                      start={{ x: 0.12, y: 0 }}
+                      end={{ x: 0.88, y: 1 }}
+                      style={styles.bankFaceOuterRing}
+                    >
+                      {fortressFaceImage ? (
+                        <View style={styles.bankFaceInnerCutout}>
+                          <Image source={{ uri: fortressFaceImage }} style={styles.bankFacePreviewImg} resizeMode="cover" />
+                          <TouchableOpacity
+                            style={styles.bankFaceRetakeFab}
+                            onPress={handleRetakeFortressFace}
+                            accessibilityRole="button"
+                            accessibilityLabel="Retake face photo"
+                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                          >
+                            <Ionicons name="camera-reverse" size={18} color="#F8FAFC" />
+                          </TouchableOpacity>
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          activeOpacity={0.9}
+                          onPress={() => void handleCaptureFortressFace()}
+                          accessibilityRole="button"
+                          accessibilityLabel="Open camera to capture your face"
+                          style={styles.bankFaceInnerCutout}
+                        >
+                          <View style={styles.bankFacePlaceholder}>
+                            <View style={styles.bankFaceScanIcon}>
+                              <Ionicons name="scan-outline" size={42} color="rgba(226,232,240,0.78)" />
+                            </View>
+                            <Text style={styles.bankFacePlaceholderTitle}>Align your face</Text>
+                            <Text style={styles.bankFacePlaceholderSub}>Tap to open camera · Bright room · Hold steady</Text>
+                          </View>
+                        </TouchableOpacity>
+                      )}
+                    </LinearGradient>
+                  </Animated.View>
+
+                  <View style={styles.bankTipRow}>
                     {(
                       [
-                        { icon: 'sunny' as const, label: 'Good light' },
-                        { icon: 'person' as const, label: 'Face the camera' },
-                        { icon: 'hand-left' as const, label: 'Hold steady' },
+                        { icon: 'sunny-outline' as const, label: 'Good light' },
+                        { icon: 'person-outline' as const, label: 'Face forward' },
+                        { icon: 'hand-left-outline' as const, label: 'Hold still' },
                       ] as const
                     ).map((tip) => (
-                      <View key={tip.label} style={styles.fortressTipChip}>
-                        <Ionicons name={tip.icon} size={14} color={COLORS.blue} />
-                        <Text style={styles.fortressTipChipText}>{tip.label}</Text>
+                      <View key={tip.label} style={styles.bankTipChip}>
+                        <Ionicons name={tip.icon} size={14} color={COLORS.greenLight} />
+                        <Text style={styles.bankTipChipText}>{tip.label}</Text>
                       </View>
                     ))}
                   </View>
-                  <TextInput
-                    style={styles.emailInput}
-                    placeholder="Registered phone (+234...)"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={fortressPhoneInput}
-                    onChangeText={setFortressPhoneInput}
-                    keyboardType="phone-pad"
-                    autoCapitalize="none"
-                  />
-                  <TextInput
-                    style={styles.emailInput}
-                    placeholder={pinSetupRequired ? 'Create account PIN (4-8 digits)' : 'Driver account PIN'}
-                    placeholderTextColor={COLORS.textMuted}
-                    value={fortressPinInput}
-                    onChangeText={setFortressPinInput}
-                    keyboardType="number-pad"
-                    secureTextEntry
-                    maxLength={8}
-                  />
-                  {!!fortressFaceImage && (
-                    <View style={styles.fortressPreviewRow}>
-                      <View
-                        style={[
-                          styles.fortressPreviewImageWrap,
-                          { borderColor: COLORS.green, borderWidth: 2 },
-                        ]}
-                      >
-                        <Image source={{ uri: fortressFaceImage }} style={styles.fortressPreviewImage} />
+
+                  <View style={styles.bankFieldStack}>
+                    <View style={styles.bankFieldShell}>
+                      <View style={styles.bankFieldIconWrap}>
+                        <Ionicons name="call-outline" size={18} color="rgba(226,232,240,0.75)" />
                       </View>
-                      <View style={styles.fortressPreviewMeta}>
-                        <View style={styles.fortressPreviewCheck}>
-                          <Ionicons name="checkmark-circle" size={18} color={COLORS.green} />
-                          <Text style={styles.fortressPreviewCheckText}>Selfie ready</Text>
-                        </View>
-                        <TouchableOpacity
-                          onPress={handleRetakeFortressFace}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        >
-                          <Text style={styles.fortressRetakeText}>Retake photo</Text>
-                        </TouchableOpacity>
-                      </View>
+                      <TextInput
+                        style={styles.bankFieldInput}
+                        placeholder="Registered phone (+234...)"
+                        placeholderTextColor={COLORS.textMuted}
+                        value={fortressPhoneInput}
+                        onChangeText={setFortressPhoneInput}
+                        keyboardType="phone-pad"
+                        autoCapitalize="none"
+                      />
                     </View>
-                  )}
+                    <View style={styles.bankFieldShell}>
+                      <View style={styles.bankFieldIconWrap}>
+                        <Ionicons name="lock-closed-outline" size={18} color="rgba(226,232,240,0.75)" />
+                      </View>
+                      <TextInput
+                        style={styles.bankFieldInput}
+                        placeholder={pinSetupRequired ? 'Create account PIN (4-8 digits)' : 'Driver account PIN'}
+                        placeholderTextColor={COLORS.textMuted}
+                        value={fortressPinInput}
+                        onChangeText={setFortressPinInput}
+                        keyboardType="number-pad"
+                        secureTextEntry
+                        maxLength={8}
+                      />
+                    </View>
+                  </View>
+
                   <TouchableOpacity
                     style={[
-                      styles.fortressFaceButton,
-                      fortressFaceImage ? styles.fortressFaceButtonDone : null,
-                    ]}
-                    onPress={() => void handleCaptureFortressFace()}
-                    activeOpacity={0.88}
-                    accessibilityLabel={fortressFaceImage ? 'Retake or replace face photo' : 'Open camera for face photo'}
-                  >
-                    <Ionicons
-                      name="camera"
-                      size={20}
-                      color={fortressFaceImage ? COLORS.green : COLORS.white}
-                    />
-                    <Text
-                      style={[
-                        styles.fortressFaceButtonText,
-                        fortressFaceImage && { color: COLORS.green },
-                      ]}
-                    >
-                      {fortressFaceImage ? 'Replace selfie' : 'Take selfie'}
-                    </Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[
-                      styles.fortressCompleteWrap,
+                      styles.bankPrimaryOuter,
                       (!fortressPhoneInput.trim() ||
                         !fortressPinInput.trim() ||
                         !fortressFaceImage ||
                         fortressLoading) &&
-                        styles.fortressCompleteWrapDim,
+                        styles.bankPrimaryOuterDim,
                     ]}
                     onPress={() => void handleVerifyFortress()}
                     disabled={
@@ -708,73 +672,41 @@ export default function LoginScreen() {
                       !fortressPinInput.trim() ||
                       !fortressFaceImage
                     }
-                    activeOpacity={0.9}
-                    accessibilityLabel="Complete face unlock verification"
+                    activeOpacity={0.92}
+                    accessibilityLabel="Confirm identity and sign in"
                   >
-                    <LinearGradient
-                      colors={
-                        fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
-                          ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-                          : [COLORS.gray700, COLORS.gray700]
-                      }
-                      style={styles.fortressCompleteGradient}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 0 }}
-                    >
-                      {fortressLoading ? (
-                        <ActivityIndicator color={COLORS.primary} />
-                      ) : (
-                        <>
-                          <Ionicons
-                            name="lock-open"
-                            size={20}
-                            color={
-                              fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
-                                ? COLORS.primary
-                                : COLORS.textMuted
-                            }
-                            style={{ marginRight: 8 }}
-                          />
-                          <Text
-                            style={[
-                              styles.fortressCompleteText,
-                              fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
-                                ? { color: COLORS.primary }
-                                : { color: COLORS.textMuted },
-                            ]}
-                          >
-                            Unlock with face and sign in
-                          </Text>
-                        </>
-                      )}
-                    </LinearGradient>
+                    {fortressLoading ? (
+                      <ActivityIndicator color="#F8FAFC" />
+                    ) : (
+                      <>
+                        <Ionicons
+                          name="shield-checkmark"
+                          size={22}
+                          color={
+                            fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
+                              ? COLORS.bankInk
+                              : COLORS.textMuted
+                          }
+                          style={{ marginRight: 10 }}
+                        />
+                        <Text
+                          style={[
+                            styles.bankPrimaryText,
+                            fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
+                              ? styles.bankPrimaryTextOn
+                              : styles.bankPrimaryTextDim,
+                          ]}
+                        >
+                          Confirm identity & sign in
+                        </Text>
+                      </>
+                    )}
                   </TouchableOpacity>
-                </View>
-              ) : null}
 
-              {emailOtpRequired ? (
-                <View style={styles.emailContainer}>
-                  <Text style={styles.emailLabel}>Email Verification</Text>
-                  <Text style={styles.helpText}>Enter the OTP sent to {otpTargetEmail}</Text>
-                  <TextInput
-                    style={styles.emailInput}
-                    placeholder="6-digit OTP"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={emailOtp}
-                    onChangeText={setEmailOtp}
-                    keyboardType="number-pad"
-                    maxLength={6}
-                  />
-                  <TouchableOpacity
-                    style={[styles.loginButton, emailOtpLoading && styles.loginButtonDisabled]}
-                    onPress={handleVerifyEmailOtp}
-                    disabled={emailOtpLoading}
-                  >
-                    {emailOtpLoading ? <ActivityIndicator color={COLORS.white} /> : <Text style={styles.loginButtonText}>Verify Email OTP</Text>}
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={handleResendEmailOtp}>
-                    <Text style={styles.linkText}>Resend OTP</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.bankFootnote}>
+                    Your selfie is sent over TLS and verified against your registered driver profile — processed on Nexryde
+                    servers for security review.
+                  </Text>
                 </View>
               ) : null}
 
@@ -816,14 +748,180 @@ export default function LoginScreen() {
                 icon="location"
                 title="Premium Safety"
                 subtitle="Driver checks, support tools & live tracking"
-                color={COLORS.blue}
-                bgColor={COLORS.blueSoft}
+                color="#5EEAD4"
+                bgColor="rgba(94,234,212,0.12)"
               />
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+  );
+}
+
+type AuthEmailCardProps = {
+  authStep: 'email' | 'code';
+  email: string;
+  setEmail: (v: string) => void;
+  emailLoading: boolean;
+  emailOtp: string;
+  setEmailOtp: (v: string) => void;
+  emailOtpLoading: boolean;
+  otpTargetEmail: string;
+  onRequestCode: () => void | Promise<void>;
+  onVerifyCode: () => void;
+  onResend: () => void;
+  onChangeEmail: () => void;
+};
+
+function AuthEmailCardBody({
+  authStep,
+  email,
+  setEmail,
+  emailLoading,
+  emailOtp,
+  setEmailOtp,
+  emailOtpLoading,
+  otpTargetEmail,
+  onRequestCode,
+  onVerifyCode,
+  onResend,
+  onChangeEmail,
+}: AuthEmailCardProps) {
+  const normalizedReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const codeReady = emailOtp.trim().length >= 4;
+
+  return (
+    <>
+      <View style={styles.stepRow}>
+        <View style={[styles.stepDot, authStep === 'email' && styles.stepDotActive]} />
+        <LinearGradient
+          colors={['rgba(58,209,115,0.35)', 'rgba(58,140,209,0.35)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 0 }}
+          style={styles.stepLine}
+        />
+        <View style={[styles.stepDot, authStep === 'code' && styles.stepDotActive]} />
+      </View>
+      <Text style={styles.authStepCaption}>
+        {authStep === 'email' ? '1 · Your email' : '2 · Enter code'}
+      </Text>
+
+      {authStep === 'email' ? (
+        <>
+          <Text style={styles.authHeadline}>Sign in without a password</Text>
+          <Text style={styles.authSubcopy}>
+            We’ll email you a one-time NEXRYDE code. New or returning — same smooth flow.
+          </Text>
+          <View style={styles.emailFieldWrap}>
+            <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.emailFieldIcon} />
+            <TextInput
+              style={styles.emailInputInner}
+              placeholder="you@example.com"
+              placeholderTextColor={COLORS.textMuted}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              value={email}
+              onChangeText={setEmail}
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.primaryCtaWrap, !normalizedReady && styles.primaryCtaWrapDim]}
+            onPress={() => void onRequestCode()}
+            disabled={emailLoading || !normalizedReady}
+            activeOpacity={0.92}
+          >
+            <LinearGradient
+              colors={
+                normalizedReady && !emailLoading
+                  ? [COLORS.greenLight, COLORS.green, COLORS.blue]
+                  : [COLORS.gray700, COLORS.gray700]
+              }
+              style={styles.primaryCtaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              {emailLoading ? (
+                <ActivityIndicator color={COLORS.primary} />
+              ) : (
+                <>
+                  <Ionicons
+                    name="paper-plane"
+                    size={20}
+                    color={normalizedReady ? COLORS.primary : COLORS.textMuted}
+                    style={{ marginRight: 10 }}
+                  />
+                  <Text style={[styles.primaryCtaText, normalizedReady && styles.primaryCtaTextOn]}>
+                    Send verification code
+                  </Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <>
+          <Text style={styles.authHeadline}>Check your inbox</Text>
+          <Text style={styles.authSubcopy}>
+            We sent a code to{' '}
+            <Text style={styles.emailHighlight}>{otpTargetEmail}</Text>
+          </Text>
+          <TouchableOpacity onPress={onChangeEmail} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+            <Text style={styles.changeEmailLink}>Use a different email</Text>
+          </TouchableOpacity>
+          <View style={styles.codeFieldWrap}>
+            <TextInput
+              style={styles.codeInput}
+              placeholder="Enter code"
+              placeholderTextColor={COLORS.textMuted}
+              value={emailOtp}
+              onChangeText={setEmailOtp}
+              keyboardType="number-pad"
+              maxLength={8}
+              textContentType="oneTimeCode"
+              autoComplete="one-time-code"
+            />
+          </View>
+          <TouchableOpacity
+            style={[styles.primaryCtaWrap, !codeReady && styles.primaryCtaWrapDim]}
+            onPress={onVerifyCode}
+            disabled={emailOtpLoading || !codeReady}
+            activeOpacity={0.92}
+          >
+            <LinearGradient
+              colors={
+                codeReady && !emailOtpLoading
+                  ? [COLORS.greenLight, COLORS.green, COLORS.blue]
+                  : [COLORS.gray700, COLORS.gray700]
+              }
+              style={styles.primaryCtaGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 0 }}
+            >
+              {emailOtpLoading ? (
+                <ActivityIndicator color={COLORS.primary} />
+              ) : (
+                <>
+                  <Ionicons
+                    name="shield-checkmark"
+                    size={20}
+                    color={codeReady ? COLORS.primary : COLORS.textMuted}
+                    style={{ marginRight: 10 }}
+                  />
+                  <Text style={[styles.primaryCtaText, codeReady && styles.primaryCtaTextOn]}>
+                    Verify & continue
+                  </Text>
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.resendRow} onPress={onResend} disabled={emailOtpLoading}>
+            <Text style={styles.resendText}>Didn’t get it? Resend code</Text>
+          </TouchableOpacity>
+        </>
+      )}
+    </>
   );
 }
 
@@ -960,6 +1058,153 @@ const styles = StyleSheet.create({
     color: '#F0F4F8',
     marginBottom: 16,
     letterSpacing: -0.5,
+  },
+  authGlass: {
+    borderRadius: 26,
+    overflow: 'hidden',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    padding: 22,
+    backgroundColor: 'rgba(13,20,32,0.55)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 24 },
+    shadowOpacity: 0.45,
+    shadowRadius: 32,
+    elevation: 16,
+  },
+  authGlassWeb: {
+    backgroundColor: 'rgba(25,37,63,0.88)',
+  },
+  stepRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  stepDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  stepDotActive: {
+    backgroundColor: COLORS.green,
+    borderColor: 'rgba(128,238,80,0.9)',
+    shadowColor: COLORS.green,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  stepLine: {
+    flex: 1,
+    height: 3,
+    marginHorizontal: 8,
+    borderRadius: 2,
+    opacity: 0.95,
+  },
+  authStepCaption: {
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    color: 'rgba(148,163,184,0.95)',
+    textTransform: 'uppercase',
+    marginBottom: 14,
+  },
+  authHeadline: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.6,
+    marginBottom: 8,
+  },
+  authSubcopy: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  emailHighlight: {
+    color: COLORS.greenLight,
+    fontWeight: '800',
+  },
+  changeEmailLink: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: COLORS.blue,
+    marginTop: -10,
+    marginBottom: 14,
+    textDecorationLine: 'underline',
+  },
+  emailFieldWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(13,20,32,0.65)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  emailFieldIcon: {
+    marginRight: 10,
+  },
+  emailInputInner: {
+    flex: 1,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: COLORS.white,
+    fontWeight: '600',
+  },
+  primaryCtaWrap: {
+    borderRadius: 18,
+    overflow: 'hidden',
+  },
+  primaryCtaWrapDim: {
+    opacity: 0.72,
+  },
+  primaryCtaGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 17,
+    paddingHorizontal: 24,
+  },
+  primaryCtaText: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: COLORS.textMuted,
+  },
+  primaryCtaTextOn: {
+    color: COLORS.primary,
+  },
+  codeFieldWrap: {
+    marginBottom: 14,
+  },
+  codeInput: {
+    backgroundColor: 'rgba(13,20,32,0.65)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(58,209,115,0.35)',
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    color: COLORS.white,
+    fontSize: 22,
+    fontWeight: '800',
+    letterSpacing: 8,
+    textAlign: 'center',
+  },
+  resendRow: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  resendText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.textSecondary,
   },
   inputContainer: {
     flexDirection: 'row',
@@ -1240,138 +1485,193 @@ const styles = StyleSheet.create({
     color: '#94A3B8',
     fontWeight: '700',
   },
-  fortressPanel: {
-    marginBottom: 12,
-    padding: 16,
-    borderRadius: 18,
-    backgroundColor: 'rgba(25, 37, 63, 0.92)',
+  bankVaultCard: {
+    marginBottom: 14,
+    borderRadius: 22,
+    overflow: 'hidden',
+    padding: 20,
+    position: 'relative',
     borderWidth: 1,
-    borderColor: 'rgba(58, 209, 115, 0.28)',
-    gap: 12,
+    borderColor: 'rgba(212, 175, 55, 0.32)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 22 },
+    shadowOpacity: 0.48,
+    shadowRadius: 30,
+    elevation: 20,
+    gap: 14,
   },
-  fortressHeaderRow: {
+  bankVaultHeader: {
+    gap: 8,
+  },
+  bankVaultBadge: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-  },
-  fortressShieldIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    backgroundColor: COLORS.greenSoft,
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(212, 175, 55, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(212, 175, 55, 0.28)',
   },
-  fortressHeaderText: {
-    flex: 1,
-  },
-  fortressTitle: {
-    fontSize: 17,
+  bankVaultBadgeText: {
+    fontSize: 10,
     fontWeight: '900',
-    color: COLORS.white,
-    marginBottom: 4,
-    letterSpacing: -0.3,
+    letterSpacing: 1.4,
+    color: COLORS.bankGoldBright,
   },
-  fortressSubtitle: {
+  bankVaultTitle: {
+    fontSize: 23,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.9,
+  },
+  bankVaultBody: {
     fontSize: 13,
     fontWeight: '600',
     color: COLORS.textSecondary,
-    lineHeight: 19,
+    lineHeight: 20,
   },
-  fortressTipRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  bankVaultMasked: {
+    color: COLORS.greenLight,
+    fontWeight: '800',
   },
-  fortressTipChip: {
-    flexDirection: 'row',
+  bankFaceRingWrap: {
+    alignSelf: 'center',
+    marginVertical: 4,
+  },
+  bankFaceOuterRing: {
+    width: 174,
+    height: 174,
+    borderRadius: 87,
+    padding: 3,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: COLORS.blueSoft,
-    borderWidth: 1,
-    borderColor: 'rgba(58, 140, 209, 0.35)',
   },
-  fortressTipChipText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#BFDBFE',
-  },
-  fortressPreviewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-  },
-  fortressPreviewImageWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  bankFaceInnerCutout: {
+    width: 168,
+    height: 168,
+    borderRadius: 83,
+    backgroundColor: COLORS.bankInk,
     overflow: 'hidden',
-    backgroundColor: COLORS.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  fortressPreviewImage: {
+  bankFacePreviewImg: {
     width: '100%',
     height: '100%',
   },
-  fortressPreviewMeta: {
-    flex: 1,
-    gap: 6,
-  },
-  fortressPreviewCheck: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  fortressPreviewCheckText: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: COLORS.green,
-  },
-  fortressRetakeText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: COLORS.blue,
-    textDecorationLine: 'underline',
-  },
-  fortressFaceButton: {
-    flexDirection: 'row',
+  bankFaceRetakeFab: {
+    position: 'absolute',
+    bottom: 12,
+    right: 12,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(15,23,42,0.82)',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 16,
-    borderRadius: 16,
-    backgroundColor: COLORS.surface,
     borderWidth: 1,
-    borderColor: COLORS.surfaceLight,
+    borderColor: 'rgba(248,250,252,0.22)',
   },
-  fortressFaceButtonDone: {
-    borderColor: 'rgba(58, 209, 115, 0.45)',
-    backgroundColor: 'rgba(58, 209, 115, 0.08)',
+  bankFacePlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+    gap: 6,
   },
-  fortressFaceButtonText: {
-    fontSize: 16,
+  bankFaceScanIcon: {
+    marginBottom: 4,
+  },
+  bankFacePlaceholderTitle: {
+    fontSize: 15,
     fontWeight: '900',
+    color: '#E2E8F0',
+    textAlign: 'center',
+  },
+  bankFacePlaceholderSub: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 17,
+  },
+  bankTipRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    justifyContent: 'center',
+  },
+  bankTipChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 7,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  bankTipChipText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#CBD5E1',
+  },
+  bankFieldStack: {
+    gap: 10,
+  },
+  bankFieldShell: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 12,
+  },
+  bankFieldIconWrap: {
+    width: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bankFieldInput: {
+    flex: 1,
+    paddingVertical: 14,
+    fontSize: 16,
+    fontWeight: '600',
     color: COLORS.white,
   },
-  fortressCompleteWrap: {
-    borderRadius: 18,
-    overflow: 'hidden',
-    opacity: 1,
-  },
-  fortressCompleteWrapDim: {
-    opacity: 0.72,
-  },
-  fortressCompleteGradient: {
+  bankPrimaryOuter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    paddingVertical: 17,
+    borderRadius: 16,
+    backgroundColor: COLORS.green,
+    marginTop: 2,
   },
-  fortressCompleteText: {
+  bankPrimaryOuterDim: {
+    backgroundColor: '#1F2937',
+    opacity: 0.88,
+  },
+  bankPrimaryText: {
     fontSize: 16,
     fontWeight: '900',
+  },
+  bankPrimaryTextOn: {
+    color: COLORS.bankInk,
+  },
+  bankPrimaryTextDim: {
+    color: COLORS.textMuted,
+  },
+  bankFootnote: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    lineHeight: 16,
+    marginTop: 2,
   },
 });

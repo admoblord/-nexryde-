@@ -11,7 +11,7 @@ export const COLORS = {
   primaryLight: '#1E293B',      // Lighter navy
   primarySoft: 'rgba(15, 23, 42, 0.08)',
   
-  // Accent Green — product primary (Bolt-style)
+  // Accent Green — Nexryde signature (primary interaction / success motion)
   accentGreen: '#00D46A',
   accentGreenLight: '#4ADE80',  // Bright lime green
   accentGreenDark: '#16A34A',   // Darker green
@@ -308,4 +308,9 @@ export function useThemeColors() {
     colors: isDark ? DARK_COLORS : LIGHT_COLORS,
     isDark,
   };
+}
+
+/** Focused tab icon pill — tuned per appearance (main + legacy tab shells). */
+export function tabIconActivePillBg(isDark: boolean): string {
+  return isDark ? 'rgba(34, 197, 94, 0.12)' : 'rgba(22, 163, 74, 0.14)';
 }

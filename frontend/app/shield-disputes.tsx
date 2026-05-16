@@ -27,6 +27,9 @@ import {
   getShieldDispute,
 } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -140,6 +143,8 @@ export default function NexrydeShieldScreen() {
   const insets  = useSafeAreaInsets();
   const params  = useLocalSearchParams<{ tripId?: string; mode?: string }>();
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
+  const authed = useRequireUserOrLogin();
 
   // ── list state ──────────────────────────────────────────────────────────────
   const [disputes,    setDisputes]    = useState<any[]>([]);
@@ -168,15 +173,18 @@ export default function NexrydeShieldScreen() {
 
   // ── load ─────────────────────────────────────────────────────────────────────
   const loadDisputes = useCallback(async () => {
-    if (!user?.id) { setListLoading(false); return; }
+    if (!userId || !canCallAuthedApi) { setListLoading(false); return; }
     try {
       const res = await getMyShieldDisputes();
       setDisputes(res.data?.disputes || []);
     } catch { setDisputes([]); }
     finally { setListLoading(false); setRefreshing(false); }
-  }, [user?.id]);
+  }, [userId, canCallAuthedApi]);
 
-  useEffect(() => { void loadDisputes(); }, [loadDisputes]);
+  useEffect(() => {
+    if (!canCallAuthedApi) return;
+    void loadDisputes();
+  }, [loadDisputes, canCallAuthedApi]);
 
   // ── deep-link: auto-open report from trip screen ───────────────────────────
   useEffect(() => {
@@ -209,12 +217,12 @@ export default function NexrydeShieldScreen() {
 
   // A user can respond if they are the non-opener party AND no respondent_statement exists yet
   const canRespond = (d: any): boolean => {
-    if (!d || !user?.id) return false;
+    if (!d || !userId) return false;
     if (d.status !== 'awaiting_response') return false;
-    if (d.opened_by === user.id) return false;
+    if (d.opened_by === userId) return false;
     // Check if this user's role statement is already filed
-    if (d.rider_id === user.id && d.rider_statement) return false;
-    if (d.driver_id === user.id && d.driver_statement) return false;
+    if (d.rider_id === userId && d.rider_statement) return false;
+    if (d.driver_id === userId && d.driver_statement) return false;
     return true;
   };
 
@@ -298,6 +306,10 @@ export default function NexrydeShieldScreen() {
       Alert.alert('Error', e?.response?.data?.detail || 'Failed to submit response. Please try again.');
     } finally { setResponding(false); }
   };
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // REPORT MODAL

@@ -17,6 +17,7 @@ import {
   useThemeColors,
 } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SUPPORTED_LANGUAGES, type SupportedLanguage } from '@/src/i18n/translations';
 import {
@@ -27,13 +28,20 @@ import {
   toggleWomenOnlyMode,
 } from '@/src/services/api';
 import { DriverOfferSoundPreferences } from '@/src/components/profile/DriverOfferSoundPreferences';
+import {
+  applyThemePreference,
+  persistThemePreference,
+  loadStoredThemePreference,
+  type ThemePreference,
+} from '@/src/theme/appearanceTheme';
 
 type Variant = 'rider' | 'driver';
 
-type ThemePref = 'light' | 'dark' | 'auto';
+type ThemePref = ThemePreference;
 
 export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
   const { colors } = useThemeColors();
   const { language, setLanguage } = useLanguage();
 
@@ -103,13 +111,13 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   };
 
   const persistChannels = async (next: { push?: boolean; email?: boolean }) => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     const push = next.push ?? pushEnabled;
     const email = next.email ?? emailEnabled;
     try {
-      const res = await getUserPreferences(user.id);
+      const res = await getUserPreferences(userId);
       const prev = (res.data?.notification_channels || {}) as Record<string, boolean>;
-      await updateUserPreferences(user.id, {
+      await updateUserPreferences(userId, {
         notifications_enabled: push,
         notification_channels: {
           ...prev,
@@ -123,11 +131,25 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   };
 
   const applyTheme = async (next: ThemePref) => {
+    const prev = themePref;
     setThemePref(next);
-    if (!user?.id) return;
+    applyThemePreference(next);
     try {
-      await updateUserTheme(user.id, next);
+      await persistThemePreference(next);
     } catch {
+      /* non-fatal — appearance already updated */
+    }
+    if (!userId || !canCallAuthedApi) return;
+    try {
+      await updateUserTheme(userId, next);
+    } catch {
+      setThemePref(prev);
+      applyThemePreference(prev);
+      try {
+        await persistThemePreference(prev);
+      } catch {
+        /* ignore */
+      }
       Alert.alert('Error', 'Could not save theme preference.');
     }
   };
@@ -137,8 +159,8 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
     const lang = code as SupportedLanguage;
     try {
       await setLanguage(lang);
-      if (user?.id) {
-        await updateUserPreferences(user.id, { language: code });
+      if (userId && canCallAuthedApi) {
+        await updateUserPreferences(userId, { language: code });
       }
     } catch {
       Alert.alert('Error', 'Could not save language.');
@@ -146,10 +168,10 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   };
 
   const onWomenOnlyChange = async (value: boolean) => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     setWomenOnlyLoading(true);
     try {
-      const res = await toggleWomenOnlyMode(user.id, value);
+      const res = await toggleWomenOnlyMode(userId, value);
       setWomenOnly(Boolean(res.data?.women_only_mode));
     } catch (e: any) {
       const detail = e?.response?.data?.detail;
@@ -164,9 +186,20 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   }, [checkBiometricSupport]);
 
   useEffect(() => {
-    if (!user?.id) {
-      setLoading(false);
-      return;
+    if (!userId || !canCallAuthedApi) {
+      let alive = true;
+      void (async () => {
+        const stored = await loadStoredThemePreference();
+        if (!alive) return;
+        if (stored) {
+          setThemePref(stored);
+          applyThemePreference(stored);
+        }
+        setLoading(false);
+      })();
+      return () => {
+        alive = false;
+      };
     }
 
     let cancelled = false;
@@ -174,13 +207,19 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
       setLoading(true);
       try {
         const [prefRes, userRes] = await Promise.all([
-          getUserPreferences(user.id),
-          showFemaleDriverRow ? getUser(user.id) : Promise.resolve(null),
+          getUserPreferences(userId),
+          showFemaleDriverRow ? getUser(userId) : Promise.resolve(null),
         ]);
         if (cancelled) return;
         const pref = prefRes.data || {};
         if (pref.theme === 'light' || pref.theme === 'dark' || pref.theme === 'auto') {
           setThemePref(pref.theme);
+          applyThemePreference(pref.theme);
+          try {
+            await persistThemePreference(pref.theme);
+          } catch {
+            /* ignore */
+          }
         }
         if (typeof pref.notifications_enabled === 'boolean') {
           setPushEnabled(pref.notifications_enabled);
@@ -207,7 +246,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
     return () => {
       cancelled = true;
     };
-  }, [user?.id, showFemaleDriverRow, setLanguage]);
+  }, [userId, canCallAuthedApi, showFemaleDriverRow, setLanguage]);
 
   const currentLang =
     SUPPORTED_LANGUAGES.find((l) => l.code === language) || SUPPORTED_LANGUAGES[0];
@@ -346,39 +385,73 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
         )}
       </View>
 
-      <View style={[styles.themeBlock, { borderBottomColor: COLORS.gray100 }]}>
-        <Text style={[styles.themeLabel, { color: colors.text }]}>Theme (Light, Dark, Auto)</Text>
+      <View style={[styles.themeBlock, { borderBottomColor: colors.border }]}>
+        <View style={styles.themeHeaderRow}>
+          <View style={[styles.menuIcon, { backgroundColor: COLORS.accentBlueSoft }]}>
+            <Ionicons name="color-palette-outline" size={20} color={COLORS.accentBlue} />
+          </View>
+          <View style={styles.themeHeaderText}>
+            <Text style={[styles.themeLabel, { color: colors.text }]}>Appearance</Text>
+            <Text style={[styles.themeSubtitle, { color: colors.textMuted }]}>
+              Light or dark look, or match your device setting.
+            </Text>
+          </View>
+        </View>
         <View style={styles.themeRow}>
           {(
             [
-              { key: 'light' as const, icon: 'sunny-outline' as const, label: 'Light' },
-              { key: 'dark' as const, icon: 'moon-outline' as const, label: 'Dark' },
-              { key: 'auto' as const, icon: 'phone-portrait-outline' as const, label: 'Auto' },
+              {
+                key: 'light' as const,
+                icon: 'sunny-outline' as const,
+                label: 'Light',
+                hint: 'Always bright',
+              },
+              {
+                key: 'dark' as const,
+                icon: 'moon-outline' as const,
+                label: 'Dark',
+                hint: 'Easier at night',
+              },
+              {
+                key: 'auto' as const,
+                icon: 'contrast-outline' as const,
+                label: 'Auto',
+                hint: 'Follow system',
+              },
             ] as const
-          ).map(({ key, icon, label }) => {
+          ).map(({ key, icon, label, hint }) => {
             const active = themePref === key;
             return (
               <TouchableOpacity
                 key={key}
                 style={[
                   styles.themeChip,
-                  { borderColor: active ? COLORS.accentGreen : colors.border, backgroundColor: colors.surface },
-                  active && { backgroundColor: COLORS.accentGreenSoft },
+                  {
+                    borderColor: active ? COLORS.accentGreen : colors.border,
+                    backgroundColor: active ? COLORS.accentGreenSoft : colors.surface,
+                  },
+                  active && styles.themeChipActive,
                 ]}
-                onPress={() => applyTheme(key)}
+                onPress={() => void applyTheme(key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                accessibilityLabel={`${label}. ${hint}`}
               >
                 <Ionicons
                   name={icon}
-                  size={18}
+                  size={20}
                   color={active ? COLORS.accentGreen : colors.textMuted}
                 />
                 <Text
                   style={[
                     styles.themeChipText,
-                    { color: active ? COLORS.accentGreen : colors.textSecondary },
+                    { color: active ? COLORS.accentGreen : colors.text },
                   ]}
                 >
                   {label}
+                </Text>
+                <Text style={[styles.themeChipHint, { color: colors.textMuted }]} numberOfLines={1}>
+                  {hint}
                 </Text>
               </TouchableOpacity>
             );
@@ -491,27 +564,55 @@ const styles = StyleSheet.create({
     padding: SPACING.md,
     borderBottomWidth: 1,
   },
+  themeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: SPACING.md,
+    gap: SPACING.sm,
+  },
+  themeHeaderText: {
+    flex: 1,
+    paddingTop: 2,
+  },
   themeLabel: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    marginBottom: SPACING.sm,
+  },
+  themeSubtitle: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '500',
+    marginTop: 4,
+    lineHeight: 20,
   },
   themeRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: SPACING.sm,
   },
   themeChip: {
-    flex: 1,
-    flexDirection: 'row',
+    flexGrow: 1,
+    flexBasis: '30%',
+    minWidth: 96,
+    minHeight: 88,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
     paddingVertical: SPACING.sm,
-    borderRadius: BORDER_RADIUS.md,
-    borderWidth: 1,
+    paddingHorizontal: SPACING.xs,
+    borderRadius: BORDER_RADIUS.lg,
+    borderWidth: 1.5,
+  },
+  themeChipActive: {
+    borderWidth: 2,
   },
   themeChipText: {
-    fontSize: FONT_SIZE.xs,
-    fontWeight: '700',
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    marginTop: 4,
+  },
+  themeChipHint: {
+    fontSize: FONT_SIZE.xxs,
+    fontWeight: '600',
+    marginTop: 2,
+    textAlign: 'center',
   },
 });

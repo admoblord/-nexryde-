@@ -13,7 +13,7 @@ import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getUserTrips } from '@/src/services/api';
 import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
@@ -23,7 +23,7 @@ type TripTab = 'upcoming' | 'completed' | 'cancelled';
 
 export default function RiderTripsScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const [activeTab, setActiveTab] = useState<TripTab>('upcoming');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -32,13 +32,13 @@ export default function RiderTripsScreen() {
   const [trips, setTrips] = useState<any[]>([]);
 
   const loadTrips = useCallback(async () => {
-    if (!user?.id) {
+    if (!riderId || !canCallAuthedApi) {
       setTrips([]);
       setLoading(false);
       return;
     }
     try {
-      const res = await getUserTrips(user.id, 'rider');
+      const res = await getUserTrips(riderId, 'rider');
       setTrips(Array.isArray(res.data) ? res.data : []);
     } catch (e) {
       if (__DEV__) console.warn('Failed to load rider trips:', e);
@@ -47,11 +47,12 @@ export default function RiderTripsScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [user?.id]);
+  }, [riderId, canCallAuthedApi]);
 
   useEffect(() => {
-    loadTrips();
-  }, [loadTrips]);
+    if (!canCallAuthedApi) return;
+    void loadTrips();
+  }, [loadTrips, canCallAuthedApi]);
 
   const segmented = useMemo(() => {
     const upcoming = trips.filter((t) => isActiveTripStatus(t.status, t.payment_status));

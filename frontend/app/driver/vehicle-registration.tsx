@@ -15,7 +15,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import Constants from 'expo-constants';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
@@ -98,7 +98,7 @@ const CAR_BRANDS = [
 
 export default function VehicleRegistrationScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId } = useAuthedUserId();
   const [step, setStep] = useState(1);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [vehicleInfo, setVehicleInfo] = useState({
@@ -166,12 +166,12 @@ export default function VehicleRegistrationScreen() {
     setIsLoading(true);
 
     try {
-      if (!user?.id) {
+      if (!driverId) {
         Alert.alert('AUTH REQUIRED', 'Please login again to register your vehicle.');
         return;
       }
       
-      const response = await fetch(`${API_URL}/api/drivers/${user.id}/vehicle`, {
+      const response = await fetch(`${API_URL}/api/drivers/${driverId}/vehicle`, {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({

@@ -9,7 +9,7 @@
  *   4. Full transaction history with timeline
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -33,9 +33,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import * as ImagePicker from 'expo-image-picker';
 import * as Haptics from 'expo-haptics';
-import {
-  useAppStore,
-} from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   getDriverWithdrawals,
   withdrawDriverEarningsWithBiometric,
@@ -197,6 +195,215 @@ const wc = StyleSheet.create({
 
 // ── Quick amount presets ──────────────────────────────────────────────────────
 
+type StatementLine = {
+  id: string;
+  dateLabel: string;
+  timeLabel: string;
+  description: string;
+  debit: number;
+  credit: number;
+  balanceAfter: number;
+  status: string;
+  reference: string;
+};
+
+function formatNgn(n: number) {
+  return `₦${Math.floor(n).toLocaleString()}`;
+}
+
+function FlowStepper({
+  bankReady,
+  hasWithdrawals,
+  balance,
+}: {
+  bankReady: boolean;
+  hasWithdrawals: boolean;
+  balance: number;
+}) {
+  const steps = [
+    { key: 'bank', label: 'Link bank', icon: 'business-outline' as const, done: bankReady },
+    { key: 'withdraw', label: 'Withdraw', icon: 'arrow-up-circle-outline' as const, done: hasWithdrawals },
+    { key: 'debit', label: 'Debit', icon: 'remove-circle-outline' as const, done: hasWithdrawals },
+    { key: 'statement', label: 'Statement', icon: 'document-text-outline' as const, done: hasWithdrawals },
+    { key: 'balance', label: 'Final balance', icon: 'wallet-outline' as const, done: bankReady },
+  ];
+  return (
+    <View style={flow.wrap}>
+      {steps.map((step, i) => {
+        const active = step.key === 'bank' ? !step.done : step.key === 'balance' ? bankReady : step.done;
+        const color = step.done || active ? '#22C55E' : '#475569';
+        return (
+          <View key={step.key} style={flow.step}>
+            <View style={[flow.dot, { borderColor: color, backgroundColor: step.done ? '#22C55E' : '#0D1420' }]}>
+              {step.done ? (
+                <Ionicons name="checkmark" size={10} color="#022C22" />
+              ) : (
+                <Ionicons name={step.icon} size={11} color={color} />
+              )}
+            </View>
+            <Text style={[flow.label, { color: step.done || active ? '#e2e8f0' : '#64748b' }]} numberOfLines={1}>
+              {step.label}
+            </Text>
+            {i < steps.length - 1 ? <View style={[flow.connector, { backgroundColor: step.done ? '#22C55E' : '#334155' }]} /> : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const flow = StyleSheet.create({
+  wrap: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  step: { flex: 1, alignItems: 'center', position: 'relative' },
+  dot: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  label: { fontSize: 9, fontWeight: '800', textAlign: 'center' },
+  connector: { position: 'absolute', top: 13, left: '58%', right: '-42%', height: 2, zIndex: -1 },
+});
+
+function StatementLedger({ lines, loading }: { lines: StatementLine[]; loading: boolean }) {
+  if (loading) {
+    return (
+      <View style={st.empty}>
+        <ActivityIndicator color="#22C55E" />
+        <Text style={st.emptyText}>Loading statement…</Text>
+      </View>
+    );
+  }
+  if (lines.length === 0) {
+    return (
+      <View style={st.empty}>
+        <Ionicons name="document-text-outline" size={28} color="#334155" />
+        <Text style={st.emptyText}>No transactions yet</Text>
+        <Text style={st.emptySub}>Withdrawals and balance changes appear here</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={st.card}>
+      <View style={st.headerRow}>
+        <Text style={[st.colHead, { flex: 1.2 }]}>Date</Text>
+        <Text style={[st.colHead, { flex: 1.6 }]}>Description</Text>
+        <Text style={[st.colHead, { width: 72, textAlign: 'right' }]}>Debit</Text>
+        <Text style={[st.colHead, { width: 88, textAlign: 'right' }]}>Balance</Text>
+      </View>
+      {lines.map((line, idx) => (
+        <View key={line.id} style={[st.row, idx === lines.length - 1 && st.rowLast]}>
+          <View style={{ flex: 1.2 }}>
+            <Text style={st.date}>{line.dateLabel}</Text>
+            <Text style={st.time}>{line.timeLabel}</Text>
+          </View>
+          <View style={{ flex: 1.6, paddingRight: 6 }}>
+            <Text style={st.desc} numberOfLines={2}>{line.description}</Text>
+            {line.reference ? <Text style={st.ref}>{line.reference}</Text> : null}
+          </View>
+          <Text style={[st.debit, { width: 72 }]}>
+            {line.debit > 0 ? `−${formatNgn(line.debit)}` : line.credit > 0 ? `+${formatNgn(line.credit)}` : '—'}
+          </Text>
+          <Text style={[st.balance, { width: 88 }]}>{formatNgn(line.balanceAfter)}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const st = StyleSheet.create({
+  card: { backgroundColor: '#111827', borderRadius: 16, borderWidth: 1, borderColor: '#1e293b', overflow: 'hidden' },
+  headerRow: {
+    flexDirection: 'row',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    backgroundColor: '#0b111e',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1e293b',
+  },
+  colHead: { fontSize: 10, fontWeight: '800', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#1e293b',
+  },
+  rowLast: { borderBottomWidth: 0 },
+  date: { fontSize: 12, fontWeight: '800', color: '#e2e8f0' },
+  time: { fontSize: 10, color: '#64748b', marginTop: 2 },
+  desc: { fontSize: 12, fontWeight: '700', color: '#cbd5e1', lineHeight: 16 },
+  ref: { fontSize: 10, color: '#475569', marginTop: 3, fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace' },
+  debit: { fontSize: 12, fontWeight: '800', color: '#F87171', textAlign: 'right' },
+  balance: { fontSize: 12, fontWeight: '900', color: '#22C55E', textAlign: 'right' },
+  empty: { backgroundColor: '#111827', borderRadius: 14, padding: 28, alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#1e293b' },
+  emptyText: { fontSize: 14, fontWeight: '700', color: '#475569' },
+  emptySub: { fontSize: 12, color: '#334155', textAlign: 'center' },
+});
+
+function BankLinkCard({ bank, bankReady, onLink }: { bank: { bank_name: string; account_number: string; account_name: string }; bankReady: boolean; onLink: () => void }) {
+  if (bankReady) {
+    return (
+      <View style={bl.linked}>
+        <View style={bl.iconWrap}>
+          <Ionicons name="checkmark-circle" size={22} color="#22C55E" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={bl.title}>Payout account linked</Text>
+          <Text style={bl.sub}>
+            {bank.bank_name} · ****{bank.account_number.slice(-4)} · {bank.account_name}
+          </Text>
+        </View>
+        <TouchableOpacity style={bl.changeBtn} onPress={onLink}>
+          <Text style={bl.changeText}>Change</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity style={bl.prompt} onPress={onLink} activeOpacity={0.9}>
+      <LinearGradient colors={['rgba(245,158,11,0.15)', 'rgba(15,23,42,0.95)']} style={bl.promptGrad}>
+        <View style={bl.iconWrapAmber}>
+          <Ionicons name="business" size={22} color="#F59E0B" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={bl.promptTitle}>Step 1 · Link your bank</Text>
+          <Text style={bl.promptSub}>Required before withdrawals. We verify account name with your bank.</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#F59E0B" />
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+}
+
+const bl = StyleSheet.create({
+  linked: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderRadius: 14,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    marginBottom: 10,
+  },
+  iconWrap: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(34,197,94,0.15)', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 14, fontWeight: '800', color: '#86efac' },
+  sub: { fontSize: 12, color: '#64748b', marginTop: 3 },
+  changeBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#1e293b' },
+  changeText: { fontSize: 12, fontWeight: '800', color: '#94a3b8' },
+  prompt: { marginBottom: 10, borderRadius: 14, overflow: 'hidden' },
+  promptGrad: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderWidth: 1, borderColor: 'rgba(245,158,11,0.35)', borderRadius: 14 },
+  iconWrapAmber: { width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(245,158,11,0.2)', alignItems: 'center', justifyContent: 'center' },
+  promptTitle: { fontSize: 14, fontWeight: '900', color: '#FDE68A' },
+  promptSub: { fontSize: 12, color: '#94a3b8', marginTop: 4, lineHeight: 17 },
+});
+
 function AmountPresets({ balance, onSelect }: { balance: number; onSelect: (v: string) => void }) {
   const presets = [
     { label: '₦5,000',  value: 5000 },
@@ -237,7 +444,7 @@ function ProcessingSpinner({ color }: { color: string }) {
 export default function WithdrawalScreen() {
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
-  const { user } = useAppStore();
+  const { userId: driverId } = useAuthedUserId();
 
   const [walletBalance, setWalletBalance] = useState(0);
   const [earningsFrozen, setEarningsFrozen] = useState(false);
@@ -247,17 +454,58 @@ export default function WithdrawalScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [viewTab, setViewTab] = useState<'overview' | 'statement'>('overview');
 
   // Withdraw modal state
   const [showModal, setShowModal] = useState(false);
   const [amount, setAmount] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState<'amount' | 'confirm' | 'success'>('amount');
-  const [lastResult, setLastResult] = useState<{ amount: number; reference: string } | null>(null);
+  const [lastResult, setLastResult] = useState<{
+    amount: number;
+    reference: string;
+    balanceBefore: number;
+    balanceAfter: number;
+  } | null>(null);
 
   const modalAnim = useRef(new Animated.Value(0)).current;
+  const idempotencyRef = useRef(`wd_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`);
+
+  const statementLines = useMemo((): StatementLine[] => {
+    let running = walletBalance;
+    const sorted = [...withdrawals].sort(
+      (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime(),
+    );
+    return sorted.map((w) => {
+      const amt = Math.abs(w.amount);
+      const balanceAfter = running;
+      const failedRefund = w.status === 'failed' && w.reversed_to_wallet;
+      if (failedRefund) {
+        running -= amt;
+      } else {
+        running += amt;
+      }
+      const d = w.created_at ? new Date(w.created_at) : null;
+      const cfg = getStatusCfg(w.status);
+      return {
+        id: w.id,
+        dateLabel: d ? d.toLocaleDateString('en-NG', { day: 'numeric', month: 'short' }) : '—',
+        timeLabel: d ? d.toLocaleTimeString('en-NG', { hour: '2-digit', minute: '2-digit' }) : '',
+        description:
+          failedRefund
+            ? 'Withdrawal failed · refunded'
+            : `Withdrawal · ${w.bank_name || 'Bank'} (${cfg.label})`,
+        debit: failedRefund ? 0 : amt,
+        credit: failedRefund ? amt : 0,
+        balanceAfter,
+        status: w.status,
+        reference: w.reference || '',
+      };
+    });
+  }, [withdrawals, walletBalance]);
 
   const openModal = () => {
+    idempotencyRef.current = `wd_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     setStep('amount');
     setAmount('');
     setShowModal(true);
@@ -273,9 +521,9 @@ export default function WithdrawalScreen() {
   };
 
   const loadData = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const res = await getDriverWithdrawals(user.id);
+      const res = await getDriverWithdrawals(driverId);
       const d = res.data;
       setWalletBalance(d.wallet_balance);
       setEarningsFrozen(d.earnings_frozen);
@@ -287,7 +535,7 @@ export default function WithdrawalScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user?.id]);
+  }, [driverId]);
 
   useEffect(() => { void loadData(); }, [loadData]);
 
@@ -298,7 +546,7 @@ export default function WithdrawalScreen() {
   }, [loadData]);
 
   const handleWithdraw = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     const amt = parseFloat(amount.replace(/,/g, ''));
     if (!Number.isFinite(amt) || amt <= 0) {
       Alert.alert('Invalid amount', 'Please enter a valid withdrawal amount.');
@@ -314,7 +562,7 @@ export default function WithdrawalScreen() {
     }
     if (!bankReady) {
       Alert.alert('Bank required', 'Please add your bank details before withdrawing.', [
-        { text: 'Add Bank', onPress: () => { closeModal(); router.push('/driver/bank'); } },
+        { text: 'Add Bank', onPress: () => { closeModal(); goBank(); } },
         { text: 'Cancel', style: 'cancel' },
       ]);
       return;
@@ -325,7 +573,7 @@ export default function WithdrawalScreen() {
   };
 
   const handleFaceScan = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     const amt = parseFloat(amount.replace(/,/g, ''));
 
     const permission = await ImagePicker.requestCameraPermissionsAsync();
@@ -345,17 +593,25 @@ export default function WithdrawalScreen() {
 
     setSubmitting(true);
     try {
-      const res = await withdrawDriverEarningsWithBiometric(user.id, {
+      const balanceBefore = walletBalance;
+      const res = await withdrawDriverEarningsWithBiometric(driverId, {
         amount: amt,
         face_image: `data:image/jpeg;base64,${capture.assets[0].base64}`,
+        idempotency_key: idempotencyRef.current,
       });
       const d = res.data;
       if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setWalletBalance(d.remaining_balance);
-      setLastResult({ amount: d.withdrawn_amount, reference: `withdraw_${Date.now()}` });
+      const balanceAfter = Number(d.remaining_balance ?? balanceBefore - amt);
+      setWalletBalance(balanceAfter);
+      setLastResult({
+        amount: d.withdrawn_amount,
+        reference: d.reference || idempotencyRef.current,
+        balanceBefore,
+        balanceAfter,
+      });
       setStep('success');
-      // Refresh list after short delay
-      setTimeout(() => void loadData(), 1500);
+      setViewTab('statement');
+      void loadData();
     } catch (err: any) {
       const detail = err?.response?.data?.detail || err?.message || 'Withdrawal failed. Please try again.';
       Alert.alert('Withdrawal failed', detail);
@@ -366,8 +622,10 @@ export default function WithdrawalScreen() {
 
   const parsedAmount = parseFloat(amount.replace(/,/g, '')) || 0;
   const canSubmit = parsedAmount >= 500 && parsedAmount <= walletBalance && bankReady && !earningsFrozen;
+  const projectedBalanceAfter = Math.max(0, walletBalance - parsedAmount);
 
   const pendingCount = withdrawals.filter(w => w.status === 'pending_settlement' || w.status === 'processing').length;
+  const goBank = () => router.push('/driver/bank');
 
   return (
     <View style={s.root}>
@@ -382,8 +640,23 @@ export default function WithdrawalScreen() {
           <Text style={s.headerTitle}>Withdraw Earnings</Text>
           <Text style={s.headerSub}>Bank · {bank.bank_name || 'No bank added'}</Text>
         </View>
-        <TouchableOpacity style={s.backBtn} onPress={() => router.push('/driver/bank')}>
-          <Ionicons name="settings-outline" size={20} color="#64748b" />
+        <TouchableOpacity style={s.backBtn} onPress={goBank}>
+          <Ionicons name="business-outline" size={20} color="#64748b" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={[s.tabRow, { paddingHorizontal: flow.padH, maxWidth: flow.maxContentWidth, alignSelf: 'center', width: '100%' }]}>
+        <TouchableOpacity
+          style={[s.tab, viewTab === 'overview' && s.tabActive]}
+          onPress={() => setViewTab('overview')}
+        >
+          <Text style={[s.tabText, viewTab === 'overview' && s.tabTextActive]}>Overview</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[s.tab, viewTab === 'statement' && s.tabActive]}
+          onPress={() => setViewTab('statement')}
+        >
+          <Text style={[s.tabText, viewTab === 'statement' && s.tabTextActive]}>Statement</Text>
         </TouchableOpacity>
       </View>
 
@@ -403,6 +676,26 @@ export default function WithdrawalScreen() {
         ]}
       >
 
+        <FlowStepper bankReady={bankReady} hasWithdrawals={withdrawals.length > 0} balance={walletBalance} />
+
+        <BankLinkCard bank={bank} bankReady={bankReady} onLink={goBank} />
+
+        {viewTab === 'statement' ? (
+          <View style={s.section}>
+            <View style={s.sectionHeader}>
+              <Text style={s.sectionTitle}>Account statement</Text>
+              <Text style={s.sectionSub}>Debits, refunds & running balance</Text>
+            </View>
+            <View style={s.finalBalanceStrip}>
+              <Text style={s.finalBalanceLabel}>Current balance</Text>
+              <Text style={s.finalBalanceValue}>{loading ? '—' : formatNgn(walletBalance)}</Text>
+            </View>
+            <StatementLedger lines={statementLines} loading={loading} />
+          </View>
+        ) : null}
+
+        {viewTab === 'overview' ? (
+        <>
         {/* ── WALLET BALANCE HERO ────────────────────────────────────────── */}
         <LinearGradient
           colors={earningsFrozen ? ['#1f2937', '#111827'] : ['#052e16', '#064e3b', '#0D1420']}
@@ -438,7 +731,7 @@ export default function WithdrawalScreen() {
               <Text style={s.frozenText}>Earnings frozen — contact support to resolve</Text>
             </View>
           ) : !bankReady ? (
-            <TouchableOpacity style={s.bankNeededBtn} onPress={() => router.push('/driver/bank')}>
+            <TouchableOpacity style={s.bankNeededBtn} onPress={goBank}>
               <Ionicons name="alert-circle" size={14} color="#F59E0B" />
               <Text style={s.bankNeededText}>Add bank details to withdraw</Text>
               <Ionicons name="chevron-forward" size={14} color="#F59E0B" />
@@ -468,13 +761,13 @@ export default function WithdrawalScreen() {
 
         {/* ── HOW IT WORKS ──────────────────────────────────────────────── */}
         <View style={s.howCard}>
-          <Text style={s.howTitle}>How withdrawals work</Text>
+          <Text style={s.howTitle}>Payout flow</Text>
           <View style={s.howSteps}>
             {[
-              { icon: 'wallet-outline', label: 'Wallet rides auto-credit your balance instantly' },
-              { icon: 'arrow-up-circle-outline', label: 'Tap Withdraw, enter amount, scan your face' },
-              { icon: 'time-outline', label: 'Nexryde reviews and processes your payout' },
-              { icon: 'checkmark-circle-outline', label: 'Money arrives in your bank account' },
+              { icon: 'business-outline', label: 'Link & verify bank account (one-time)' },
+              { icon: 'arrow-up-circle-outline', label: 'Withdraw — wallet debited immediately' },
+              { icon: 'document-text-outline', label: 'Statement shows debit & balance after' },
+              { icon: 'checkmark-circle-outline', label: 'Bank transfer when review completes' },
             ].map((step, i) => (
               <View key={i} style={s.howStep}>
                 <View style={s.howDot}>
@@ -550,6 +843,8 @@ export default function WithdrawalScreen() {
             ))
           )}
         </View>
+        </>
+        ) : null}
 
       </ScrollView>
 
@@ -635,33 +930,36 @@ export default function WithdrawalScreen() {
                   <Text style={m.title}>Confirm Withdrawal</Text>
                   <Text style={m.sub}>Scan your face to verify your identity</Text>
 
-                  {/* Summary */}
+                  {/* Balance ledger preview */}
                   <View style={m.summaryCard}>
+                    <Text style={m.ledgerTitle}>Balance impact</Text>
                     <View style={m.summaryRow}>
-                      <Text style={m.summaryLabel}>Amount</Text>
-                      <Text style={m.summaryValue}>₦{parsedAmount.toLocaleString()}</Text>
+                      <Text style={m.summaryLabel}>Available now</Text>
+                      <Text style={m.summaryValue}>{formatNgn(walletBalance)}</Text>
+                    </View>
+                    <View style={m.summaryRow}>
+                      <Text style={[m.summaryLabel, { color: '#F87171' }]}>Debit (withdrawal)</Text>
+                      <Text style={[m.summaryValue, { color: '#F87171' }]}>−{formatNgn(parsedAmount)}</Text>
                     </View>
                     <View style={m.summaryDivider} />
                     <View style={m.summaryRow}>
-                      <Text style={m.summaryLabel}>Bank</Text>
+                      <Text style={[m.summaryLabel, { fontWeight: '800', color: '#f8fafc' }]}>Final balance</Text>
+                      <Text style={[m.summaryValue, { fontSize: 18, color: '#22C55E' }]}>
+                        {formatNgn(projectedBalanceAfter)}
+                      </Text>
+                    </View>
+                    <View style={m.summaryDivider} />
+                    <View style={m.summaryRow}>
+                      <Text style={m.summaryLabel}>Payout to</Text>
                       <Text style={m.summaryValue}>{bank.bank_name}</Text>
                     </View>
                     <View style={m.summaryRow}>
                       <Text style={m.summaryLabel}>Account</Text>
-                      <Text style={m.summaryValue}>{bank.account_name}</Text>
+                      <Text style={m.summaryValue}>{bank.account_name} · ****{bank.account_number.slice(-4)}</Text>
                     </View>
-                    <View style={m.summaryRow}>
-                      <Text style={m.summaryLabel}>Number</Text>
-                      <Text style={m.summaryValue}>****{bank.account_number.slice(-4)}</Text>
-                    </View>
-                    <View style={m.summaryDivider} />
                     <View style={m.summaryRow}>
                       <Text style={m.summaryLabel}>Fee</Text>
-                      <Text style={[m.summaryValue, { color: '#22C55E' }]}>₦0 (free)</Text>
-                    </View>
-                    <View style={m.summaryRow}>
-                      <Text style={[m.summaryLabel, { fontWeight: '800', color: '#f8fafc' }]}>You receive</Text>
-                      <Text style={[m.summaryValue, { fontSize: 18, color: '#22C55E' }]}>₦{parsedAmount.toLocaleString()}</Text>
+                      <Text style={[m.summaryValue, { color: '#22C55E' }]}>₦0</Text>
                     </View>
                   </View>
 
@@ -699,17 +997,34 @@ export default function WithdrawalScreen() {
                       <Ionicons name="checkmark-circle" size={44} color="#22C55E" />
                     </LinearGradient>
                   </View>
-                  <Text style={m.successTitle}>Withdrawal Submitted!</Text>
-                  <Text style={m.successAmount}>₦{Math.round(lastResult.amount).toLocaleString()}</Text>
+                  <Text style={m.successTitle}>Debit recorded</Text>
+                  <Text style={m.successAmount}>−{formatNgn(lastResult.amount)}</Text>
                   <Text style={m.successSub}>
-                    Your request is under review. We'll process it to {bank.bank_name} shortly.
+                    Wallet debited. Payout to {bank.bank_name} is under review.
                   </Text>
+
+                  <View style={m.successLedger}>
+                    <View style={m.successLedgerRow}>
+                      <Text style={m.successLedgerLabel}>Before</Text>
+                      <Text style={m.successLedgerVal}>{formatNgn(lastResult.balanceBefore)}</Text>
+                    </View>
+                    <Ionicons name="arrow-down" size={16} color="#64748b" style={{ alignSelf: 'center' }} />
+                    <View style={m.successLedgerRow}>
+                      <Text style={m.successLedgerLabel}>Final balance</Text>
+                      <Text style={[m.successLedgerVal, { color: '#22C55E', fontSize: 22 }]}>
+                        {formatNgn(lastResult.balanceAfter)}
+                      </Text>
+                    </View>
+                    {lastResult.reference ? (
+                      <Text style={m.successRef}>Ref: {lastResult.reference}</Text>
+                    ) : null}
+                  </View>
 
                   <View style={m.successSteps}>
                     {[
-                      { icon: 'checkmark-circle', color: '#22C55E', label: 'Submitted successfully' },
-                      { icon: 'time-outline', color: '#F59E0B', label: 'Under review by Nexryde' },
-                      { icon: 'card-outline', color: '#3B82F6', label: 'Transfer to your bank' },
+                      { icon: 'remove-circle', color: '#F87171', label: 'Wallet debited' },
+                      { icon: 'document-text', color: '#94a3b8', label: 'Added to your statement' },
+                      { icon: 'card-outline', color: '#3B82F6', label: 'Bank transfer when approved' },
                     ].map((s, i) => (
                       <View key={i} style={m.successStep}>
                         <Ionicons name={s.icon as any} size={16} color={s.color} />
@@ -718,8 +1033,17 @@ export default function WithdrawalScreen() {
                     ))}
                   </View>
 
-                  <TouchableOpacity style={[m.primaryBtn, { alignSelf: 'stretch', marginTop: 8 }]} onPress={closeModal}>
-                    <Text style={m.primaryText}>Done</Text>
+                  <TouchableOpacity
+                    style={[m.primaryBtn, { alignSelf: 'stretch', marginTop: 8 }]}
+                    onPress={() => {
+                      closeModal();
+                      setViewTab('statement');
+                    }}
+                  >
+                    <Text style={m.primaryText}>View statement</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={m.cancelBtn} onPress={closeModal}>
+                    <Text style={m.cancelText}>Done</Text>
                   </TouchableOpacity>
                 </>
               )}
@@ -789,6 +1113,25 @@ const s = StyleSheet.create({
   detailLabel: { fontSize: 12, color: '#64748b', fontWeight: '600' },
   detailValue: { fontSize: 12, color: '#cbd5e1', fontWeight: '700', maxWidth: '65%', textAlign: 'right' },
   timelineWrap: { borderTopWidth: 1, borderTopColor: '#1e293b', marginTop: 10, paddingTop: 12 },
+
+  tabRow: { flexDirection: 'row', gap: 8, marginTop: 4, marginBottom: 8 },
+  tab: { flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: '#111827', alignItems: 'center', borderWidth: 1, borderColor: '#1e293b' },
+  tabActive: { backgroundColor: 'rgba(34,197,94,0.12)', borderColor: 'rgba(34,197,94,0.35)' },
+  tabText: { fontSize: 13, fontWeight: '800', color: '#64748b' },
+  tabTextActive: { color: '#22C55E' },
+  finalBalanceStrip: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.2)',
+  },
+  finalBalanceLabel: { fontSize: 12, fontWeight: '700', color: '#86efac', textTransform: 'uppercase', letterSpacing: 0.5 },
+  finalBalanceValue: { fontSize: 22, fontWeight: '900', color: '#22C55E' },
 });
 
 // ── Modal styles ──────────────────────────────────────────────────────────────
@@ -818,6 +1161,7 @@ const m = StyleSheet.create({
 
   // Confirm step
   summaryCard: { backgroundColor: '#0D1420', borderRadius: 14, padding: 16, borderWidth: 1, borderColor: '#1e293b', marginBottom: 14 },
+  ledgerTitle: { fontSize: 11, fontWeight: '800', color: '#64748b', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 10 },
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 6 },
   summaryLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
   summaryValue: { fontSize: 14, color: '#f8fafc', fontWeight: '800' },
@@ -831,6 +1175,19 @@ const m = StyleSheet.create({
   successTitle: { fontSize: 22, fontWeight: '900', color: '#f8fafc', textAlign: 'center', marginBottom: 4 },
   successAmount: { fontSize: 40, fontWeight: '900', color: '#22C55E', textAlign: 'center', marginBottom: 6 },
   successSub: { fontSize: 14, color: '#64748b', textAlign: 'center', lineHeight: 20, marginBottom: 16 },
+  successLedger: {
+    backgroundColor: '#0D1420',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 14,
+    borderWidth: 1,
+    borderColor: '#1e293b',
+    gap: 8,
+  },
+  successLedgerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  successLedgerLabel: { fontSize: 13, color: '#64748b', fontWeight: '600' },
+  successLedgerVal: { fontSize: 16, fontWeight: '900', color: '#f8fafc' },
+  successRef: { fontSize: 11, color: '#475569', textAlign: 'center', fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', marginTop: 4 },
   successSteps: { backgroundColor: '#0D1420', borderRadius: 12, padding: 14, gap: 10, borderWidth: 1, borderColor: '#1e293b', marginBottom: 12 },
   successStep: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   successStepText: { fontSize: 13, color: '#94a3b8', fontWeight: '600' },

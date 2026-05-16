@@ -18,6 +18,10 @@ import { useRouter, useLocalSearchParams, useGlobalSearchParams } from 'expo-rou
 import { Ionicons } from '@expo/vector-icons';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 // Derive WebSocket URL from BACKEND_URL
 const getWsUrl = () => {
@@ -50,6 +54,9 @@ export default function ChatScreen() {
   const params = useLocalSearchParams();
   const globalParams = useGlobalSearchParams();
   const { user, token, currentTrip } = useAppStore();
+  const authed = useRequireUserOrLogin();
+  const { canCallAuthedApi } = useAuthedApiReady();
+  const { userId } = useAuthedUserId();
   const tripId =
     pickTripIdParam(params.tripId as string | string[] | undefined) ||
     pickTripIdParam(globalParams.tripId as string | string[] | undefined);
@@ -109,14 +116,14 @@ export default function ChatScreen() {
 
   // ==================== WebSocket Connection ====================
   const connectWebSocket = useCallback(() => {
-    if (!effectiveTripId || !user?.id || !token) return;
+    if (!effectiveTripId || !userId || !token || !canCallAuthedApi) return;
     // Cleanup existing connection
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
 
-    const wsEndpoint = `${WS_URL}/api/ws/chat/${effectiveTripId}/${user.id}?token=${encodeURIComponent(token)}`;
+    const wsEndpoint = `${WS_URL}/api/ws/chat/${effectiveTripId}/${userId}?token=${encodeURIComponent(token)}`;
     const ws = new WebSocket(wsEndpoint);
     wsRef.current = ws;
 
@@ -143,12 +150,12 @@ export default function ChatScreen() {
             return [...prev, newMsg];
           });
           // Send read receipt if the message is from others
-          if (data.sender_id !== user?.id) {
+          if (data.sender_id !== userId) {
             ws.send(JSON.stringify({ type: 'read' }));
           }
           setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
         } else if (data.type === 'typing') {
-          if (data.user_id !== user?.id) {
+          if (data.user_id !== userId) {
             setOtherTyping(data.is_typing);
             if (data.is_typing) {
               if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
@@ -182,11 +189,11 @@ export default function ChatScreen() {
         reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
       }
     };
-  }, [effectiveTripId, user?.id, user?.role, token, mapBackendMsg]);
+  }, [effectiveTripId, userId, user?.role, token, canCallAuthedApi, mapBackendMsg]);
 
   // Connect/disconnect WebSocket based on tab and tripId
   useEffect(() => {
-    if (activeTab === 'driver' && effectiveTripId && user?.id && token) {
+    if (activeTab === 'driver' && effectiveTripId && userId && token && canCallAuthedApi) {
       connectWebSocket();
     }
     return () => {
@@ -199,12 +206,13 @@ export default function ChatScreen() {
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [activeTab, effectiveTripId, user?.id, token, connectWebSocket]);
+  }, [activeTab, effectiveTripId, userId, token, canCallAuthedApi, connectWebSocket]);
 
   useEffect(() => {
+    if (!canCallAuthedApi) return;
     loadAIChatHistory();
     loadPresetMessages();
-  }, []);
+  }, [canCallAuthedApi, userId]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -214,9 +222,9 @@ export default function ChatScreen() {
   }, []);
 
   const loadAIChatHistory = async () => {
-    if (!user?.id) return;
+    if (!userId || !canCallAuthedApi) return;
     try {
-      const response = await fetch(`${BACKEND_URL}/api/chat/ai/history/${user.id}`, {
+      const response = await fetch(`${BACKEND_URL}/api/chat/ai/history/${userId}`, {
         headers: getAuthHeaders(),
       });
       const data = await response.json();
@@ -250,7 +258,7 @@ export default function ChatScreen() {
   };
 
   const sendAIMessage = async (messageText: string) => {
-    if (!messageText.trim() || !user?.id) return;
+    if (!messageText.trim() || !userId || !canCallAuthedApi || !user) return;
     const userMsg: Message = {
       id: Date.now().toString(),
       text: messageText.trim(),
@@ -267,7 +275,7 @@ export default function ChatScreen() {
         method: 'POST',
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          user_id: user.id,
+          user_id: userId,
           message: messageText.trim(),
           user_role: user.role || 'rider',
           session_id: sessionId,
@@ -297,7 +305,7 @@ export default function ChatScreen() {
   };
 
   const sendDriverMessage = async (messageText: string) => {
-    if (!messageText.trim() || !effectiveTripId || !user?.id) return;
+    if (!messageText.trim() || !effectiveTripId || !userId || !canCallAuthedApi || !user) return;
     const text = messageText.trim();
     setMessage('');
 
@@ -363,13 +371,13 @@ export default function ChatScreen() {
   };
 
   const callDriver = async () => {
-    if (!effectiveTripId || !user?.id) {
+    if (!effectiveTripId || !userId || !canCallAuthedApi || !user) {
       Alert.alert('No Active Trip', 'You need an active trip to call.');
       return;
     }
     setCalling(true);
     try {
-      const targetLabel = user?.role === 'driver' ? 'Rider' : 'Driver';
+      const targetLabel = user.role === 'driver' ? 'Rider' : 'Driver';
       let dialNumber = '';
       try {
         const response = await fetch(`${BACKEND_URL}/api/call/session`, {
@@ -460,6 +468,10 @@ export default function ChatScreen() {
       </View>
     );
   };
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <View style={styles.container}>

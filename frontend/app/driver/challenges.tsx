@@ -11,23 +11,27 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, CURRENCY } from '@/src/constants/theme';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getActiveChallenges, getDriverChallengeProgress } from '@/src/services/api';
 
 export default function ChallengesScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [activeTab, setActiveTab] = useState<'active' | 'completed'>('active');
   const [loading, setLoading] = useState(true);
   const [activeChallenges, setActiveChallenges] = useState<any[]>([]);
   const [completedChallenges, setCompletedChallenges] = useState<any[]>([]);
 
   useEffect(() => {
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     const load = async () => {
       try {
         const [activeRes, progressRes] = await Promise.all([
           getActiveChallenges(),
-          user?.id ? getDriverChallengeProgress(user.id) : Promise.resolve({ data: { challenge_progress: [] } }),
+          driverId ? getDriverChallengeProgress(driverId) : Promise.resolve({ data: { challenge_progress: [] } }),
         ]);
         const progressRows = Array.isArray(progressRes.data?.challenge_progress) ? progressRes.data.challenge_progress : [];
         const progressMap: Record<string, any> = {};
@@ -63,8 +67,8 @@ export default function ChallengesScreen() {
         setLoading(false);
       }
     };
-    load();
-  }, [user?.id]);
+    void load();
+  }, [canCallAuthedApi, driverId]);
 
   const renderReward = (reward: any, positive: boolean = false) => {
     if (typeof reward === 'number') {

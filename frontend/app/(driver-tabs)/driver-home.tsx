@@ -50,6 +50,7 @@ import {
 
 
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useDriverOfferAlert } from '@/src/hooks/useDriverOfferAlert';
 import {
   driverTermsRouteParams,
@@ -309,6 +310,7 @@ export default function ModernDriverHome() {
     setIsOnline: setStoreIsOnline,
     driverProfile,
   } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
   // ── Quick-access action (from widget tap or app shortcut) ─────────────────
   const { action: rawAction } = useLocalSearchParams<{ action?: string }>();
@@ -323,11 +325,11 @@ export default function ModernDriverHome() {
 
   // Load destination mode state whenever driver comes online
   useEffect(() => {
-    if (!isOnline || !user?.id) return;
+    if (!isOnline || !driverId) return;
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/destination`, { headers: getAuthHeaders() });
+        const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, { headers: getAuthHeaders() });
         if (res.ok && mounted) {
           const data = await res.json();
           setDestinationActive(!!data.active);
@@ -337,7 +339,7 @@ export default function ModernDriverHome() {
       } catch { /* silent */ }
     })();
     return () => { mounted = false; };
-  }, [isOnline, user?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isOnline, driverId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const priorityFeatures = useMemo(
     () => buildDriverPriorityFeatures(t),
@@ -357,16 +359,16 @@ export default function ModernDriverHome() {
 
   // Load real earnings from backend
   useEffect(() => {
-    if (!user?.id) return;
+    if (!driverId) return;
     let mounted = true;
     const fetchEarnings = async (isInitial = false) => {
       if (isInitial) { setEarningsLoading(true); setEarningsError(false); }
       try {
         const [todayRes, weekRes] = await Promise.all([
-          fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=today`, {
+          fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
             headers: getAuthHeaders(),
           }),
-          fetch(`${BACKEND_URL}/api/driver/earnings/${user.id}?period=week`, {
+          fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`, {
             headers: getAuthHeaders(),
           }),
         ]);
@@ -401,14 +403,14 @@ export default function ModernDriverHome() {
     fetchEarnings(true);
     const interval = setInterval(() => fetchEarnings(false), 60000);
     // Fetch wallet balance in background
-    getDriverWithdrawals(user.id).then(r => {
+    getDriverWithdrawals(driverId).then(r => {
       if (mounted) setWalletBalance(r.data.wallet_balance ?? 0);
     }).catch(() => {});
     return () => {
       mounted = false;
       clearInterval(interval);
     };
-  }, [user?.id, user?.total_trips]);
+  }, [driverId, user?.total_trips]);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
   const [trialTripsCompleted, setTrialTripsCompleted] = useState<number>(0);
@@ -472,11 +474,11 @@ export default function ModernDriverHome() {
 
   // Load driver categories on mount
   useEffect(() => {
-    if (!user?.id) return;
+    if (!driverId) return;
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/categories`, {
+        const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
           headers: getAuthHeaders(),
         });
         if (res.ok && mounted) {
@@ -488,10 +490,10 @@ export default function ModernDriverHome() {
       } catch { /* silent — default to economy */ }
     })();
     return () => { mounted = false; };
-  }, [user?.id]);
+  }, [driverId]);
 
   const toggleCategory = async (catId: string) => {
-    if (categorySyncing) return;
+    if (categorySyncing || !driverId || !canCallAuthedApi) return;
     let next: string[];
     if (activeCategories.includes(catId)) {
       if (activeCategories.length === 1) {
@@ -505,7 +507,7 @@ export default function ModernDriverHome() {
     setActiveCategories(next);
     setCategorySyncing(true);
     try {
-      await fetch(`${BACKEND_URL}/api/drivers/${user!.id}/categories`, {
+      await fetch(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
         method: 'PUT',
         headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ active_categories: next }),
@@ -563,10 +565,10 @@ export default function ModernDriverHome() {
   }, [currentTrip]);
 
   const handleTripMarkArrived = useCallback(async () => {
-    if (!currentTrip?.id || !user?.id) return;
+    if (!currentTrip?.id || !driverId) return;
     setTripActionBusy('arrive');
     try {
-      const res = await arriveTrip(currentTrip.id, user.id);
+      const res = await arriveTrip(currentTrip.id, driverId);
       setCurrentTrip(res.data as Trip);
     } catch (e: unknown) {
       let msg = 'Try again.';
@@ -578,14 +580,14 @@ export default function ModernDriverHome() {
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+  }, [currentTrip?.id, driverId, setCurrentTrip]);
 
   const handleTripStart = useCallback(() => {
-    if (!currentTrip?.id || !user?.id) return;
+    if (!currentTrip?.id || !driverId) return;
     guardedPush(
-      `/driver/verify-rider-code?trip_id=${encodeURIComponent(currentTrip.id)}&driver_id=${encodeURIComponent(user.id)}&auto=0`
+      `/driver/verify-rider-code?trip_id=${encodeURIComponent(currentTrip.id)}&driver_id=${encodeURIComponent(driverId)}&auto=0`
     );
-  }, [currentTrip?.id, user?.id, guardedPush]);
+  }, [currentTrip?.id, driverId, guardedPush]);
 
   const handleTripConfirmStart = useCallback(async () => {
     if (!currentTrip?.id) return;
@@ -604,10 +606,10 @@ export default function ModernDriverHome() {
   }, [currentTrip, setCurrentTrip]);
 
   const handleTripCancelFromDock = useCallback(async () => {
-    if (!currentTrip?.id || !user?.id) return;
+    if (!currentTrip?.id || !driverId) return;
     setTripActionBusy('cancel');
     try {
-      await cancelTrip(currentTrip.id, user.id);
+      await cancelTrip(currentTrip.id, driverId);
       setCurrentTrip(null);
       if (Platform.OS !== 'web') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -617,7 +619,7 @@ export default function ModernDriverHome() {
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+  }, [currentTrip?.id, driverId, setCurrentTrip]);
 
   const handleTripPauseFromDock = useCallback(() => {
     Alert.alert(
@@ -678,12 +680,12 @@ export default function ModernDriverHome() {
 
   const handleCompletionRate = useCallback(
     async (stars: number, comment: string) => {
-      if (!user?.id) throw new Error('Not signed in');
+      if (!driverId) throw new Error('Not signed in');
       const tid = tripCompletion?.tripId;
       if (!tid) throw new Error('Missing trip');
-      await rateTrip(tid, user.id, stars, comment);
+      await rateTrip(tid, driverId, stars, comment);
     },
-    [user?.id, tripCompletion?.tripId],
+    [driverId, tripCompletion?.tripId],
   );
 
   const handleTripCallRider = useCallback(() => {
@@ -702,9 +704,9 @@ export default function ModernDriverHome() {
   }, [currentTrip?.id, guardedPush]);
 
   const hydrateOnlineState = async () => {
-    if (!user?.id) return;
+    if (!driverId) return;
     try {
-      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/profile`, {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/profile`, {
         headers: getAuthHeaders(),
       });
       if (!response.ok) return;
@@ -712,14 +714,14 @@ export default function ModernDriverHome() {
       const serverOnline = Boolean(profile?.is_online);
       setIsOnline(serverOnline);
       // Persist authoritative server state so the widget and smart-resume reflect reality
-      void updateDriverOnlineStatus(serverOnline, user.id);
+      void updateDriverOnlineStatus(serverOnline, driverId);
     } catch {}
   };
   const fetchIncomingRide = useCallback(async () => {
-    if (!user?.id) return;
+    if (!driverId || !canCallAuthedApi) return;
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/trips/offers/${user.id}`,
+        `${BACKEND_URL}/api/trips/offers/${driverId}`,
         { headers: getAuthHeaders() }
       );
       const trips = await res.json();
@@ -730,7 +732,7 @@ export default function ModernDriverHome() {
     } catch (e) {
       if (__DEV__) console.warn('Offer polling error', e);
     }
-  }, [user?.id]);
+  }, [driverId, canCallAuthedApi]);
   
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(30)).current;
@@ -741,22 +743,24 @@ export default function ModernDriverHome() {
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
     ]).start();
 
-    // Check onboarding status first — this is the verification gate
     initializeOfflineMode();
+    void getQueueSize().then(setOfflineQueueCount);
+  }, []);
+
+  useEffect(() => {
+    if (!driverId) return;
+
+    // Check onboarding status first — this is the verification gate
     checkOnboardingStatus();
     hydrateOnlineState();
-    void getQueueSize().then(setOfflineQueueCount);
 
-    // Persist last-screen so smart resume and widget know where we are
-    if (user?.id) {
-      void saveDriverState({
-        isOnline: isOnlineRef.current,
-        lastScreen: 'home',
-        activeTripId: null,
-        userId: user.id,
-      });
-    }
-  }, []);
+    void saveDriverState({
+      isOnline: isOnlineRef.current,
+      lastScreen: 'home',
+      activeTripId: null,
+      userId: driverId,
+    });
+  }, [driverId]);
 
   // ── Auto go-online from widget / shortcut / notification ─────────────────
   useEffect(() => {
@@ -790,7 +794,7 @@ export default function ModernDriverHome() {
     return () => {
       sub.remove();
     };
-  }, [user?.id]);
+  }, [driverId]);
 
   useEffect(() => {
     let mounted = true;
@@ -847,7 +851,7 @@ export default function ModernDriverHome() {
 
   // Push live location to backend — smart throttle to minimise API calls
   useEffect(() => {
-    if (!isOnline || !user?.id || !driverCoords) return;
+    if (!isOnline || !driverId || !driverCoords) return;
     const now = Date.now();
     const lastAt = lastLocationPushAtRef.current;
     const lastCoords = lastLocationPushCoordsRef.current;
@@ -866,7 +870,7 @@ export default function ModernDriverHome() {
 
     const pushLocation = async () => {
       try {
-        await fetch(`${BACKEND_URL}/api/drivers/${user.id}/location`, {
+        await fetch(`${BACKEND_URL}/api/drivers/${driverId}/location`, {
           method: 'PUT',
           headers: getAuthHeaders(),
           body: JSON.stringify({ latitude: driverCoords.lat, longitude: driverCoords.lng }),
@@ -876,16 +880,16 @@ export default function ModernDriverHome() {
       } catch {}
     };
     pushLocation();
-  }, [isOnline, user?.id, driverCoords?.lat, driverCoords?.lng]);
+  }, [isOnline, driverId, driverCoords?.lat, driverCoords?.lng]);
 
   // SIM Swap Protection — runs at most once per 24h per device, never blocks UI
   const [simSwapAlert, setSimSwapAlert] = useState(false);
   useEffect(() => {
-    if (!user?.id || simSignalSent) return;
+    if (!driverId || simSignalSent) return;
     const sendSimRiskSignal = async () => {
       try {
-        const fpKey = `nexryde_sim_fp_${user.id}`;
-        const cooldownKey = `nexryde_sim_check_ts_${user.id}`;
+        const fpKey = `nexryde_sim_fp_${driverId}`;
+        const cooldownKey = `nexryde_sim_check_ts_${driverId}`;
 
         // Local 24h cooldown — skip if checked within the last 24 hours
         const lastCheckTs = await SecureStore.getItemAsync(cooldownKey);
@@ -897,14 +901,14 @@ export default function ModernDriverHome() {
         let fingerprint = await SecureStore.getItemAsync(fpKey);
         if (!fingerprint) {
           // First-time: generate a stable ID based on user + platform (no random)
-          fingerprint = `simfp_${user.id.slice(-8)}_${Platform.OS}_${String(Platform.Version).replace(/\./g, '')}_v1`;
+          fingerprint = `simfp_${driverId.slice(-8)}_${Platform.OS}_${String(Platform.Version).replace(/\./g, '')}_v1`;
           await SecureStore.setItemAsync(fpKey, fingerprint);
         }
 
         // NOTE: we do NOT send phone — the backend already has the registered phone.
         // Sending app-state phone caused false positives due to format differences
         // (e.g. "08012345678" vs "+2348012345678" for the same number).
-        await reportDriverSimSwapSignal(user.id, {
+        await reportDriverSimSwapSignal(driverId, {
           sim_fingerprint: fingerprint,
           carrier_name: 'unknown',
         });
@@ -922,11 +926,11 @@ export default function ModernDriverHome() {
       }
     };
     void sendSimRiskSignal();
-  }, [simSignalSent, user?.id]);
+  }, [simSignalSent, driverId]);
 
   // Real-time ride offers via WebSocket; HTTP polling only as fallback (slower when WS is up).
   useEffect(() => {
-    if (!isOnline || !user?.id || !token) {
+    if (!isOnline || !driverId || !token) {
       setDriverOffersWsConnected(false);
       if (driverOffersReconnectTimerRef.current) {
         clearTimeout(driverOffersReconnectTimerRef.current);
@@ -954,7 +958,7 @@ export default function ModernDriverHome() {
     };
 
     const connect = () => {
-      if (cancelled || !isOnlineRef.current || !user?.id || !token) return;
+      if (cancelled || !isOnlineRef.current || !driverId || !token) return;
       if (driverOffersReconnectTimerRef.current) {
         clearTimeout(driverOffersReconnectTimerRef.current);
         driverOffersReconnectTimerRef.current = null;
@@ -969,7 +973,7 @@ export default function ModernDriverHome() {
       }
 
       const base = getWsBaseUrl();
-      const wsUrl = `${base}/api/ws/driver/offers/${encodeURIComponent(user.id)}?token=${encodeURIComponent(token)}`;
+      const wsUrl = `${base}/api/ws/driver/offers/${encodeURIComponent(driverId)}?token=${encodeURIComponent(token)}`;
       const ws = new WebSocket(wsUrl);
       driverOffersWsRef.current = ws;
 
@@ -1032,7 +1036,7 @@ export default function ModernDriverHome() {
       }
       setDriverOffersWsConnected(false);
     };
-  }, [isOnline, user?.id, token, fetchIncomingRide]);
+  }, [isOnline, driverId, token, fetchIncomingRide]);
 
   // Fallback polling when no active modal; slow interval while WebSocket is healthy.
   useEffect(() => {
@@ -1049,15 +1053,15 @@ export default function ModernDriverHome() {
     return () => {
       if (pollInterval) clearInterval(pollInterval);
     };
-  }, [isOnline, incomingRide, user?.id, driverOffersWsConnected, fetchIncomingRide]);
+  }, [isOnline, incomingRide, driverId, driverOffersWsConnected, fetchIncomingRide]);
 
   // Restore accepted / in-progress trip when driver goes online (resume after kill or refresh).
   useEffect(() => {
-    if (!isOnline || !user?.id) return;
+    if (!isOnline || !driverId) return;
     let cancelled = false;
     void (async () => {
       try {
-        const response = await fetch(`${BACKEND_URL}/api/trips/active/${user.id}`, {
+        const response = await fetch(`${BACKEND_URL}/api/trips/active/${driverId}`, {
           headers: getAuthHeaders(),
         });
         if (!response.ok || cancelled) return;
@@ -1081,11 +1085,11 @@ export default function ModernDriverHome() {
     return () => {
       cancelled = true;
     };
-  }, [isOnline, user?.id, setCurrentTrip]);
+  }, [isOnline, driverId, setCurrentTrip]);
 
   // Keep trip snapshot fresh (pickup coords, rider phone, status transitions).
   useEffect(() => {
-    if (!user?.id || !currentTrip?.id) return;
+    if (!driverId || !currentTrip?.id) return;
     let cancelled = false;
     const tripId = currentTrip.id;
 
@@ -1120,7 +1124,7 @@ export default function ModernDriverHome() {
       cancelled = true;
       clearInterval(iv);
     };
-  }, [currentTrip?.id, user?.id, setCurrentTrip]);
+  }, [currentTrip?.id, driverId, setCurrentTrip]);
 
   useEffect(() => {
     if (!incomingRide?.id) return;
@@ -1137,17 +1141,17 @@ export default function ModernDriverHome() {
     const ride = incomingRide;
     if (!ride) return;
     try {
-      if (ride.offer_id && user?.id) {
+      if (ride.offer_id && driverId) {
         await fetch(`${BACKEND_URL}/api/trips/offers/${ride.offer_id}/decline`, {
           method: 'PUT',
           headers: getAuthHeaders(),
-          body: JSON.stringify({ driver_id: user.id }),
+          body: JSON.stringify({ driver_id: driverId }),
         });
       }
     } catch {}
     setIncomingRide(null);
     setRideCountdown(DRIVER_OFFER_COUNTDOWN_SECONDS);
-  }, [incomingRide, user?.id]);
+  }, [incomingRide, driverId]);
 
   // Snooze — timer ran out without explicit action. Hide modal, re-poll in 4s.
   // Does NOT call the backend decline endpoint so the offer stays alive and repeats.
@@ -1197,7 +1201,7 @@ export default function ModernDriverHome() {
   const submitIncomingAcceptance = useCallback(
     async (proposed: number) => {
       if (!incomingRide) return;
-      if (!user?.id) {
+      if (!driverId) {
         Alert.alert('Profile Required', 'Please login again to accept rides.');
         return;
       }
@@ -1237,7 +1241,7 @@ export default function ModernDriverHome() {
           await queueDriverRideAcceptance(
             tripId,
             {
-              driver_id: user.id,
+              driver_id: driverId,
               offer_id: incomingRide?.offer_id,
               proposed_fare: proposed,
             },
@@ -1251,7 +1255,7 @@ export default function ModernDriverHome() {
           method: 'PUT',
           headers: getAuthHeaders(),
           body: JSON.stringify({
-            driver_id: user.id,
+            driver_id: driverId,
             offer_id: incomingRide?.offer_id,
             proposed_fare: proposed,
           }),
@@ -1290,7 +1294,7 @@ export default function ModernDriverHome() {
         await queueDriverRideAcceptance(
           incomingRide.id,
           {
-            driver_id: user.id,
+            driver_id: driverId,
             offer_id: incomingRide?.offer_id,
             proposed_fare: fallbackProposed,
           },
@@ -1302,7 +1306,7 @@ export default function ModernDriverHome() {
         setAcceptingRide(false);
       }
     },
-    [incomingRide, user?.id, token]
+    [incomingRide, driverId, token]
   );
 
   const handleAcceptRide = useCallback(() => {
@@ -1327,7 +1331,7 @@ export default function ModernDriverHome() {
 
   const handleToggleOnline = async () => {
     if (onlineToggleInFlightRef.current) return;
-    if (!user?.id) {
+    if (!driverId) {
       Alert.alert('Profile Required', 'Please login again to continue.');
       return;
     }
@@ -1355,7 +1359,7 @@ export default function ModernDriverHome() {
     setToggleSyncing(true);
     try {
       const res = await fetch(
-        `${BACKEND_URL}/api/drivers/${user.id}/online?is_online=${nextStatus}`,
+        `${BACKEND_URL}/api/drivers/${driverId}/online?is_online=${nextStatus}`,
         { method: 'PUT', headers: getAuthHeaders() }
       );
       const data = await res.json();
@@ -1400,8 +1404,8 @@ export default function ModernDriverHome() {
         setIncomingRide(null);
       }
       // Persist so widget and smart-resume reflect the new status instantly
-      if (user?.id) {
-        void updateDriverOnlineStatus(nextStatus, user.id);
+      if (driverId) {
+        void updateDriverOnlineStatus(nextStatus, driverId);
       }
     } catch {
       Alert.alert('Network Error', 'Could not update online status. Check your connection.');
@@ -1413,13 +1417,13 @@ export default function ModernDriverHome() {
   
   const checkOnboardingStatus = async (retryCount = 0) => {
     try {
-      if (!user?.id) {
+      if (!driverId || !user) {
         setCheckingOnboarding(false);
         return;
       }
-      
+
       // Check if driver has completed onboarding
-      const response = await fetch(`${BACKEND_URL}/api/drivers/${user.id}/onboarding-status`, {
+      const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`, {
         headers: getAuthHeaders(),
       });
 
@@ -1438,11 +1442,15 @@ export default function ModernDriverHome() {
 
       if (response.ok) {
         const status = await response.json();
-        
-        setVerificationStatus(status.verification_status || (status.completed ? 'approved' : 'pending_review'));
+        const lockedPendingApproval =
+          status.completed === true && status.can_go_online === false;
 
-        // Backend uses completed:true + can_go_online:false while docs wait for approval (dashboard_limited).
-        if (status.completed === true && status.can_go_online === false) {
+        setVerificationStatus(
+          status.verification_status ||
+            (status.completed && !lockedPendingApproval ? 'approved' : 'pending_review'),
+        );
+
+        if (lockedPendingApproval) {
           setSubscriptionStatus('locked_until_approval');
           setIsOnline(false);
         }
@@ -1467,7 +1475,7 @@ export default function ModernDriverHome() {
               params: driverDocumentsRouteParams(user),
             });
             return;
-          } else if (status.step === 'dashboard_limited' || status.step === 'documents_review') {
+          } else if (status.step === 'documents_review') {
             setSubscriptionStatus('locked_until_approval');
             setIsOnline(false);
             setCheckingOnboarding(false);
@@ -1485,9 +1493,11 @@ export default function ModernDriverHome() {
           setCheckingOnboarding(false);
           return;
         }
-        
+
         // Driver completed onboarding API flow — verification may still be pending until admin approves
-        setVerificationStatus(status.verification_status || 'approved');
+        setVerificationStatus(
+          status.verification_status || (lockedPendingApproval ? 'pending_review' : 'approved'),
+        );
         try {
           const subRes = await getDriverSubscriptionStatus();
           const sub = subRes.data || {};
@@ -1496,7 +1506,13 @@ export default function ModernDriverHome() {
           setTrialTripsTarget(sub.trial_trips_target ?? 20);
           setTrialExtended(sub.trial_extended ?? false);
         } catch {
-          setSubscriptionStatus('none');
+          if (!lockedPendingApproval) {
+            setSubscriptionStatus('none');
+          }
+        }
+        if (lockedPendingApproval) {
+          setSubscriptionStatus('locked_until_approval');
+          setIsOnline(false);
         }
       }
     } catch (error) {

@@ -11,6 +11,7 @@ import {
   Alert,
   Dimensions,
   ScrollView,
+  type ImageStyle,
 } from 'react-native';
 import MapView, {
   Marker,
@@ -23,6 +24,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
+import { COLORS } from '@/src/constants/theme';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 
 /* ─── Map Styles ──────────────────────────────────────────────── */
 const DARK_MAP_STYLE = [
@@ -64,6 +67,13 @@ function parseCoordPair(
   return { lat, lng };
 }
 
+/** Non-negative finite km for UI (guards NaN, strings, partial API values). */
+function finiteDistanceKm(distanceKm: unknown): number | null {
+  if (distanceKm == null) return null;
+  const km = Number(distanceKm);
+  return Number.isFinite(km) && km >= 0 ? km : null;
+}
+
 function sanitizePolyline(raw: unknown): LatLng[] {
   if (!Array.isArray(raw)) return [];
   const out: LatLng[] = [];
@@ -102,6 +112,36 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
       Math.cos((lat2 * Math.PI) / 180) *
       Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Rider/driver portrait with absolute URL resolution + graceful decode failures. */
+function ResolvedProfilePhoto({
+  uri,
+  imageStyle,
+  fallback,
+  accessibilityLabel,
+}: {
+  uri?: string | null;
+  imageStyle: ImageStyle | ImageStyle[];
+  fallback: React.ReactNode;
+  accessibilityLabel?: string;
+}) {
+  const resolved = useMemo(() => resolvePublicMediaUri(uri ?? null), [uri]);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [resolved]);
+  if (resolved && !failed) {
+    return (
+      <Image
+        source={{ uri: resolved }}
+        style={imageStyle}
+        resizeMode="cover"
+        accessibilityLabel={accessibilityLabel}
+        onError={() => setFailed(true)}
+        {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
+      />
+    );
+  }
+  return <>{fallback}</>;
 }
 
 /* ─── Pulsing location dot ────────────────────────────────────── */
@@ -233,17 +273,15 @@ function DriverMarkerView({
           elevation: 12,
         }}
       >
-        {profileImage ? (
-          <Image
-            source={{ uri: profileImage }}
-            style={{ width: 40, height: 40, borderRadius: 20 }}
-            resizeMode="cover"
-          />
-        ) : (
-          <Text style={{ fontSize: 14, fontWeight: '900', color: '#FFF' }}>
-            {initial.toUpperCase()}
-          </Text>
-        )}
+        <ResolvedProfilePhoto
+          uri={profileImage}
+          imageStyle={{ width: 40, height: 40, borderRadius: 20 }}
+          fallback={
+            <Text style={{ fontSize: 14, fontWeight: '900', color: '#FFF' }}>
+              {initial.toUpperCase()}
+            </Text>
+          }
+        />
       </LinearGradient>
       {/* Car badge */}
       <View
@@ -363,7 +401,7 @@ function NexRydeWordmarkMini() {
   );
 }
 
-/* ─── Embedded assignment / pickup sheet (Bolt / Uber style) ─── */
+/* ─── Embedded assignment / pickup sheet ─── */
 function DriverAssignmentSheet({
   name,
   vehicle,
@@ -446,7 +484,7 @@ function DriverAssignmentSheet({
     ]).start();
   }, [slideAnim, fadeAnim]);
 
-  const initial = (name || 'D').charAt(0).toUpperCase();
+  const initial = String(name ?? 'D').charAt(0).toUpperCase();
   const vehicleLine = [vehicle, vehicleColor].filter(Boolean).join(' · ') || '';
 
   const isArrived = tripStatus === 'arrived';
@@ -514,18 +552,16 @@ function DriverAssignmentSheet({
 
             <View style={assignStyles.topRow}>
               <View style={assignStyles.avatarRing}>
-                {profileImage ? (
-                  <Image
-                    source={{ uri: profileImage }}
-                    style={assignStyles.avatarImg}
-                    resizeMode="cover"
-                    {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
-                  />
-                ) : (
-                  <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPh}>
-                    <Text style={assignStyles.avatarInitial}>{initial}</Text>
-                  </LinearGradient>
-                )}
+                <ResolvedProfilePhoto
+                  uri={profileImage}
+                  imageStyle={assignStyles.avatarImg}
+                  accessibilityLabel={`Photo of ${name}`}
+                  fallback={
+                    <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPh}>
+                      <Text style={assignStyles.avatarInitial}>{initial}</Text>
+                    </LinearGradient>
+                  }
+                />
                 <View
                   style={[
                     assignStyles.onlineDot,
@@ -603,21 +639,24 @@ function DriverAssignmentSheet({
               >
                 <Text style={assignStyles.metricTileLabel}>Proximity</Text>
                 <View style={assignStyles.metricHeroRow}>
-                  {distanceKm == null ? (
-                    <Text style={assignStyles.metricHeroMuted}>—</Text>
-                  ) : distanceKm < 1 ? (
-                    <View style={assignStyles.metricHeroRow}>
-                      <Text style={[assignStyles.metricHeroNum, { color: '#E2E8F0' }]}>
-                        {Math.round(distanceKm * 1000)}
-                      </Text>
-                      <Text style={assignStyles.metricHeroUnit}>m</Text>
-                    </View>
-                  ) : (
-                    <View style={assignStyles.metricHeroRow}>
-                      <Text style={[assignStyles.metricHeroNum, { color: '#E2E8F0' }]}>{distanceKm.toFixed(1)}</Text>
-                      <Text style={assignStyles.metricHeroUnit}>km</Text>
-                    </View>
-                  )}
+                  {(() => {
+                    const proxKm = finiteDistanceKm(distanceKm);
+                    return proxKm == null ? (
+                      <Text style={assignStyles.metricHeroMuted}>—</Text>
+                    ) : proxKm < 1 ? (
+                      <View style={assignStyles.metricHeroRow}>
+                        <Text style={[assignStyles.metricHeroNum, { color: '#E2E8F0' }]}>
+                          {Math.round(proxKm * 1000)}
+                        </Text>
+                        <Text style={assignStyles.metricHeroUnit}>m</Text>
+                      </View>
+                    ) : (
+                      <View style={assignStyles.metricHeroRow}>
+                        <Text style={[assignStyles.metricHeroNum, { color: '#E2E8F0' }]}>{proxKm.toFixed(1)}</Text>
+                        <Text style={assignStyles.metricHeroUnit}>km</Text>
+                      </View>
+                    );
+                  })()}
                 </View>
                 <Text style={assignStyles.metricTileHint} numberOfLines={2}>
                   Driver marker shows live GPS at the pickup zone — walk to the mint pin.
@@ -675,38 +714,38 @@ function DriverAssignmentSheet({
                 <View style={assignStyles.acceptedStatIconBlue}>
                   <Ionicons name="location" size={20} color="#2563EB" />
                 </View>
-                {distanceKm == null ? (
-                  <Text style={assignStyles.acceptedStatBigMuted} numberOfLines={1}>
-                    —
-                  </Text>
-                ) : distanceKm < 1 ? (
-                  <Text style={assignStyles.acceptedStatBig} numberOfLines={1}>
-                    {`${Math.round(distanceKm * 1000)} m`}
-                  </Text>
-                ) : (
-                  <Text style={assignStyles.acceptedStatBig} numberOfLines={1}>
-                    {`${distanceKm.toFixed(1)} km`}
-                  </Text>
-                )}
+                {(() => {
+                  const dk = finiteDistanceKm(distanceKm);
+                  return dk == null ? (
+                    <Text style={assignStyles.acceptedStatBigMuted} numberOfLines={1}>
+                      —
+                    </Text>
+                  ) : dk < 1 ? (
+                    <Text style={assignStyles.acceptedStatBig} numberOfLines={1}>
+                      {`${Math.round(dk * 1000)} m`}
+                    </Text>
+                  ) : (
+                    <Text style={assignStyles.acceptedStatBig} numberOfLines={1}>
+                      {`${dk.toFixed(1)} km`}
+                    </Text>
+                  );
+                })()}
                 <Text style={assignStyles.acceptedStatCaption}>Distance away</Text>
               </View>
             </View>
 
             <View style={assignStyles.acceptedDriverCard}>
               <View style={assignStyles.avatarRingLg}>
-                {profileImage ? (
-                  <Image
-                    source={{ uri: profileImage }}
-                    style={assignStyles.avatarImgLg}
-                    resizeMode="cover"
-                    accessibilityLabel={`Photo of ${name}`}
-                    {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
-                  />
-                ) : (
-                  <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPhLg}>
-                    <Text style={assignStyles.avatarInitialLg}>{initial}</Text>
-                  </LinearGradient>
-                )}
+                <ResolvedProfilePhoto
+                  uri={profileImage}
+                  imageStyle={assignStyles.avatarImgLg}
+                  accessibilityLabel={`Photo of ${name}`}
+                  fallback={
+                    <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPhLg}>
+                      <Text style={assignStyles.avatarInitialLg}>{initial}</Text>
+                    </LinearGradient>
+                  }
+                />
                 <View
                   style={[
                     assignStyles.onlineDotLg,
@@ -1637,14 +1676,11 @@ function OngoingRidePanel({
   const elapsedMs =
     Number.isFinite(startedMs) && !Number.isNaN(startedMs) ? Math.max(0, nowTick - startedMs) : 0;
   const timeLabel = elapsedMs > 0 ? formatTripElapsed(elapsedMs) : '—';
+  const dkOngoing = finiteDistanceKm(distanceKm);
   const distLabel =
-    distanceKm == null
-      ? '—'
-      : distanceKm < 1
-        ? `${Math.round(distanceKm * 1000)} m`
-        : `${distanceKm.toFixed(1)} km`;
+    dkOngoing == null ? '—' : dkOngoing < 1 ? `${Math.round(dkOngoing * 1000)} m` : `${dkOngoing.toFixed(1)} km`;
   const etaLabel = etaMin != null && etaMin >= 1 ? `~${etaMin} min` : '—';
-  const initial = (name || 'D').charAt(0).toUpperCase();
+  const initial = String(name ?? 'D').charAt(0).toUpperCase();
   const vehicleOnly = vehicle?.trim() || '';
 
   return (
@@ -1718,18 +1754,16 @@ function OngoingRidePanel({
 
           <View style={styles.ongoingDriverRow}>
             <View style={styles.ongoingAvatarWrap}>
-              {profileImage ? (
-                <Image
-                  source={{ uri: profileImage }}
-                  style={styles.ongoingAvatarImg}
-                  resizeMode="cover"
-                  {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
-                />
-              ) : (
-                <LinearGradient colors={['#1E3A5F', '#2563EB']} style={styles.ongoingAvatarPh}>
-                  <Text style={styles.ongoingAvatarInitial}>{initial}</Text>
-                </LinearGradient>
-              )}
+              <ResolvedProfilePhoto
+                uri={profileImage}
+                imageStyle={styles.ongoingAvatarImg}
+                accessibilityLabel={`Photo of ${name}`}
+                fallback={
+                  <LinearGradient colors={['#1E3A5F', '#2563EB']} style={styles.ongoingAvatarPh}>
+                    <Text style={styles.ongoingAvatarInitial}>{initial}</Text>
+                  </LinearGradient>
+                }
+              />
               <View
                 style={[
                   styles.ongoingOnlineDot,
@@ -1791,7 +1825,7 @@ function OngoingRidePanel({
   );
 }
 
-/* ─── Driver overlay card (Uber-style — call/chat + identity) ─ */
+/* ─── Driver overlay card — call/chat + identity ─ */
 function DriverPreviewCard({
   name,
   vehicle,
@@ -1942,7 +1976,8 @@ function DriverPreviewCard({
     );
   }
 
-  const initial = (name || 'D').charAt(0).toUpperCase();
+  const initial = String(name ?? 'D').charAt(0).toUpperCase();
+  const dkStatus = finiteDistanceKm(distanceKm);
   const statusText =
     tripStatus === 'arrived'
       ? 'Driver arrived · meet at pickup'
@@ -1950,8 +1985,8 @@ function DriverPreviewCard({
       ? 'In progress'
       : etaMin != null
       ? `${etaMin} min to pickup`
-      : distanceKm != null
-      ? `${distanceKm < 1 ? Math.round(distanceKm * 1000) + ' m' : distanceKm.toFixed(1) + ' km'} to pickup`
+      : dkStatus != null
+      ? `${dkStatus < 1 ? Math.round(dkStatus * 1000) + ' m' : dkStatus.toFixed(1) + ' km'} to pickup`
       : 'Driver en route';
 
   const statusColor =
@@ -1995,13 +2030,16 @@ function DriverPreviewCard({
         <View style={{ flexDirection: 'row', gap: 12 }}>
           {/* Avatar */}
           <View style={styles.driverAvatarWrap}>
-            {profileImage ? (
-              <Image source={{ uri: profileImage }} style={styles.driverAvatarImg} resizeMode="cover" />
-            ) : (
-              <LinearGradient colors={['#1E3A5F', '#0EA5E9']} style={styles.driverAvatarGrad}>
-                <Text style={styles.driverAvatarInitial}>{initial}</Text>
-              </LinearGradient>
-            )}
+            <ResolvedProfilePhoto
+              uri={profileImage}
+              imageStyle={styles.driverAvatarImg}
+              accessibilityLabel={`Photo of ${name}`}
+              fallback={
+                <LinearGradient colors={['#1E3A5F', '#0EA5E9']} style={styles.driverAvatarGrad}>
+                  <Text style={styles.driverAvatarInitial}>{initial}</Text>
+                </LinearGradient>
+              }
+            />
             <View
               style={[
                 styles.driverOnlineDot,
@@ -2013,24 +2051,24 @@ function DriverPreviewCard({
           <View style={styles.driverCardInfo}>
             <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.driverCardNameUber} numberOfLines={2} ellipsizeMode="tail">
+                <Text style={styles.driverCardDriverName} numberOfLines={2} ellipsizeMode="tail">
                   {name}
                 </Text>
                 {vehicleLine ? (
-                  <Text style={styles.driverCardVehicleUber} numberOfLines={2}>
+                  <Text style={styles.driverCardVehicleLine} numberOfLines={2}>
                     {vehicleLine}
                   </Text>
                 ) : null}
                 {rating != null && rating > 0 ? (
-                  <View style={styles.ratingBadgeUber}>
+                  <View style={styles.driverCardRatingBadge}>
                     <Ionicons name="star" size={14} color="#FBBF24" />
-                    <Text style={styles.ratingTextUber}>{rating.toFixed(1)}</Text>
+                    <Text style={styles.driverCardRatingText}>{rating.toFixed(1)}</Text>
                   </View>
                 ) : null}
               </View>
               {plate ? (
-                <View style={styles.plateBadgeUber}>
-                  <Text style={styles.plateBadgeTextUber}>{plate}</Text>
+                <View style={styles.driverCardPlateBadge}>
+                  <Text style={styles.driverCardPlateText}>{plate}</Text>
                 </View>
               ) : null}
             </View>
@@ -2051,9 +2089,9 @@ function DriverPreviewCard({
               </TouchableOpacity>
             ) : null}
 
-            <View style={styles.driverCardStatusRowUber}>
+            <View style={styles.driverCardStatusRow}>
               <View style={[styles.statusDotSmall, { backgroundColor: statusColor }]} />
-              <Text style={[styles.driverCardStatusUber, { color: statusColor }]}>
+              <Text style={[styles.driverCardStatusLabel, { color: statusColor }]}>
                 {statusText}
               </Text>
             </View>
@@ -2098,11 +2136,10 @@ function DriverPreviewCard({
             <View style={styles.inRideMetric}>
               <Text style={styles.inRideMetricLabel}>Distance</Text>
               <Text style={styles.inRideMetricValue}>
-                {distanceKm != null
-                  ? distanceKm < 1
-                    ? `${Math.round(distanceKm * 1000)} m`
-                    : `${distanceKm.toFixed(1)} km`
-                  : '—'}
+                {(() => {
+                  const dk = finiteDistanceKm(distanceKm);
+                  return dk == null ? '—' : dk < 1 ? `${Math.round(dk * 1000)} m` : `${dk.toFixed(1)} km`;
+                })()}
               </Text>
             </View>
             <View style={styles.inRideMetricDivider} />
@@ -2216,13 +2253,13 @@ function DriverPreviewCard({
   );
 }
 
-/** Floating “Driver is on the way” card on map (embedded accepted) — light card per product reference. */
+/** Floating live status on map (embedded accepted) — dark glass + Nexryde mint, reflects movement. */
 function DriverEnRouteMapPill({
   top,
   remainingSec,
   etaMin,
   distanceKm,
-  moving: _moving,
+  moving,
 }: {
   top: number;
   remainingSec: number | null;
@@ -2230,12 +2267,9 @@ function DriverEnRouteMapPill({
   distanceKm: number | null;
   moving: boolean;
 }) {
+  const kmEnRoute = finiteDistanceKm(distanceKm);
   const distLine =
-    distanceKm == null
-      ? '…'
-      : distanceKm < 1
-        ? `${Math.round(distanceKm * 1000)} m`
-        : `${distanceKm.toFixed(1)} km`;
+    kmEnRoute == null ? '…' : kmEnRoute < 1 ? `${Math.round(kmEnRoute * 1000)} m` : `${kmEnRoute.toFixed(1)} km`;
   const etaLine =
     remainingSec != null && remainingSec > 0
       ? `~${Math.max(1, Math.ceil(remainingSec / 60))} min`
@@ -2243,18 +2277,23 @@ function DriverEnRouteMapPill({
         ? `~${etaMin} min`
         : '—';
 
+  const motionLine = moving ? 'Moving toward you' : 'Paused nearby · map live';
+
   return (
     <View style={[enRouteMapPillStyles.wrap, { top }]} pointerEvents="none">
       <View style={enRouteMapPillStyles.card}>
         <View style={enRouteMapPillStyles.iconWrap}>
-          <Ionicons name="car-sport" size={24} color="#2563EB" />
+          <Ionicons name="navigate-circle" size={22} color="#34D399" />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={enRouteMapPillStyles.title} numberOfLines={1}>
-            Driver is on the way
+            Driver heading to you
           </Text>
           <Text style={enRouteMapPillStyles.sub} numberOfLines={2}>
-            {distLine} away • ETA {etaLine}
+            {distLine} away · ETA {etaLine}
+          </Text>
+          <Text style={enRouteMapPillStyles.motion} numberOfLines={1}>
+            {motionLine}
           </Text>
         </View>
       </View>
@@ -2277,37 +2316,46 @@ const enRouteMapPillStyles = StyleSheet.create({
     gap: 12,
     paddingVertical: 14,
     paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#FFFFFF',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(15,23,42,0.08)',
-    shadowColor: '#0f172a',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.12,
-    shadowRadius: 16,
-    elevation: 10,
+    borderRadius: 18,
+    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.35)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 20,
+    elevation: 12,
   },
   iconWrap: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#E0F2FE',
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(52,211,153,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(52,211,153,0.35)',
   },
   title: {
-    fontSize: 17,
-    fontWeight: '800',
-    color: '#0f172a',
-    letterSpacing: -0.35,
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.3,
   },
   sub: {
-    marginTop: 3,
+    marginTop: 4,
     fontSize: 13,
-    fontWeight: '600',
-    color: '#64748B',
+    fontWeight: '700',
+    color: '#CBD5E1',
     lineHeight: 18,
-    letterSpacing: 0.05,
+  },
+  motion: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#34D399',
+    letterSpacing: 0.3,
+    textTransform: 'uppercase',
   },
 });
 
@@ -2323,15 +2371,16 @@ function DriverArrivedMapPill({
   plate?: string | null;
   hasDriverLocation: boolean;
 }) {
+  const kmArrived = finiteDistanceKm(distanceKm);
   const prox = !hasDriverLocation
     ? 'Pickup pin is on the map · driver GPS may take a moment'
-    : distanceKm == null
+    : kmArrived == null
       ? 'Live GPS on map'
-      : distanceKm < 0.05
+      : kmArrived < 0.05
         ? 'At your pickup pin'
-        : distanceKm < 1
-          ? `~${Math.round(distanceKm * 1000)} m to pin`
-          : `~${distanceKm.toFixed(1)} km to pin`;
+        : kmArrived < 1
+          ? `~${Math.round(kmArrived * 1000)} m to pin`
+          : `~${kmArrived.toFixed(1)} km to pin`;
   const plateLine = plate ? String(plate).trim() : '';
 
   return (
@@ -2459,8 +2508,10 @@ const riderCountdownStyles = StyleSheet.create({
 });
 
 /* ─── Driver Approaching Counter ─────────────────────────────── */
-function DriverApproachingBar({ distanceKm, topOffset = 8 }: { distanceKm: number; topOffset?: number }) {
-  const distM = Math.round(distanceKm * 1000);
+function DriverApproachingBar({ distanceKm, topOffset = 8 }: { distanceKm: unknown; topOffset?: number }) {
+  const kmBar = finiteDistanceKm(distanceKm);
+  if (kmBar == null || kmBar >= 0.8) return null;
+  const distM = Math.round(kmBar * 1000);
   const fillAnim = useRef(new Animated.Value(0)).current;
   const maxShow = 800; // show this bar when < 800 m away
 
@@ -2475,7 +2526,7 @@ function DriverApproachingBar({ distanceKm, topOffset = 8 }: { distanceKm: numbe
 
   const color = distM > 400 ? '#22C55E' : distM > 150 ? '#F59E0B' : '#EF4444';
   const label =
-    distM < 50 ? 'Almost there!' : distM < 1000 ? `${distM} m away` : `${distanceKm.toFixed(1)} km`;
+    distM < 50 ? 'Almost there!' : distM < 1000 ? `${distM} m away` : `${kmBar.toFixed(1)} km`;
 
   return (
     <View style={[approachStyles.wrap, { top: topOffset }]}>
@@ -2642,15 +2693,16 @@ function EtaChip({
   /** True when ETA comes from Google traffic-aware Directions. */
   trafficModel?: boolean;
 }) {
-  if (etaMin == null && distanceKm == null) return null;
+  const kmEta = finiteDistanceKm(distanceKm);
+  if (etaMin == null && kmEta == null) return null;
   const label =
     etaMin != null
       ? trafficModel
         ? `${etaMin} min · traffic`
         : `${etaMin} min`
-      : distanceKm != null && distanceKm < 1
-      ? `${Math.round(distanceKm * 1000)} m`
-      : `${distanceKm?.toFixed(1)} km`;
+      : kmEta != null && kmEta < 1
+      ? `${Math.round(kmEta * 1000)} m`
+      : `${kmEta!.toFixed(1)} km`;
 
   return (
     <View style={styles.etaChip}>
@@ -2721,6 +2773,8 @@ export interface RideMapProps {
   tripStartedAtIso?: string | null;
   onPauseRide?: () => void;
   onEmergencyRide?: () => void;
+  /** Parent renders map-first dock — hide embedded assignment / driver sheets on the map. */
+  suppressDriverOverlay?: boolean;
 }
 
 /* ─── Main component ──────────────────────────────────────────── */
@@ -2755,6 +2809,7 @@ export default function RideMap({
   tripStartedAtIso = null,
   onPauseRide,
   onEmergencyRide,
+  suppressDriverOverlay = false,
 }: RideMapProps) {
   const insets = useSafeAreaInsets();
   const internalRef = useRef<MapView>(null);
@@ -3147,11 +3202,7 @@ export default function RideMap({
       ) : null}
 
       {/* ── Driver approaching distance bar (when within 800 m) — hidden when embedded sheet shows distance ── */}
-      {!assignmentSheet &&
-      tripStatus === 'accepted' &&
-      activeLL &&
-      distanceKm != null &&
-      distanceKm < 0.8 ? (
+      {!assignmentSheet && tripStatus === 'accepted' && activeLL ? (
         <DriverApproachingBar distanceKm={distanceKm} topOffset={approachingBarTopOffset} />
       ) : null}
 
@@ -3170,8 +3221,10 @@ export default function RideMap({
       {/* ── Re-center button (shows after user pans) ── */}
       {userPanned && activeLL ? <RecenterButton onPress={handleRecenter} /> : null}
 
-      {/* ── Driver overlay (assigned / arrived / ongoing) — sheet uses meta even if GPS briefly missing ── */}
-      {activeDriverMeta && ['accepted', 'arrived', 'ongoing'].includes(String(tripStatus || '')) ? (
+      {/* ── Driver overlay — skipped when tracking/book uses RiderLiveTripDock etc. ── */}
+      {!suppressDriverOverlay &&
+      activeDriverMeta &&
+      ['accepted', 'arrived', 'ongoing'].includes(String(tripStatus || '')) ? (
         <DriverPreviewCard
           name={String(activeDriverMeta.name || 'Driver')}
           vehicle={activeDriverMeta.vehicle}
@@ -3398,14 +3451,14 @@ const styles = StyleSheet.create({
     gap: 8,
     justifyContent: 'center',
   },
-  driverCardNameUber: {
+  driverCardDriverName: {
     fontSize: 18,
     fontWeight: '900',
     color: '#F8FAFC',
     letterSpacing: -0.4,
     lineHeight: 23,
   },
-  driverCardVehicleUber: {
+  driverCardVehicleLine: {
     marginTop: 3,
     fontSize: 14,
     fontWeight: '600',
@@ -3413,7 +3466,7 @@ const styles = StyleSheet.create({
     letterSpacing: -0.12,
     lineHeight: 19,
   },
-  ratingBadgeUber: {
+  driverCardRatingBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
@@ -3426,12 +3479,12 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(251,191,36,0.28)',
   },
-  ratingTextUber: {
+  driverCardRatingText: {
     fontSize: 13,
     fontWeight: '800',
     color: '#FBBF24',
   },
-  plateBadgeUber: {
+  driverCardPlateBadge: {
     backgroundColor: 'rgba(14,165,233,0.15)',
     borderRadius: 8,
     paddingHorizontal: 8,
@@ -3441,7 +3494,7 @@ const styles = StyleSheet.create({
     maxWidth: 100,
     alignSelf: 'flex-start',
   },
-  plateBadgeTextUber: {
+  driverCardPlateText: {
     fontSize: 11,
     fontWeight: '800',
     color: '#38BDF8',
@@ -3477,7 +3530,7 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#022C22',
   },
-  driverCardStatusRowUber: {
+  driverCardStatusRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -3488,7 +3541,7 @@ const styles = StyleSheet.create({
     height: 6,
     borderRadius: 3,
   },
-  driverCardStatusUber: {
+  driverCardStatusLabel: {
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.2,

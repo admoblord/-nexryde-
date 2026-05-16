@@ -96,11 +96,6 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 
-# Termii SMS OTP Configuration
-TERMII_API_KEY = os.environ.get('TERMII_API_KEY', '')
-TERMII_BASE_URL = os.environ.get('TERMII_BASE_URL', 'https://v3.api.termii.com')
-TERMII_FROM_ID = os.environ.get('TERMII_FROM_ID', 'NEXRYDE')
-
 # Emergent Auth URL
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
@@ -1032,7 +1027,7 @@ async def _store_route_in_db(cache_key: str, result: dict):
         logger.warning(f"Route DB cache write failed: {e}")
 
 
-async def _get_route_from_db(cache_key: str) -> dict | None:
+async def _get_route_from_db(cache_key: str) -> Optional[dict]:
     """Retrieve route from MongoDB persistent cache (24-hour TTL)."""
     try:
         entry = await db.route_cache_v2.find_one({"cache_key": cache_key})
@@ -1147,10 +1142,10 @@ def calculate_fare(
     city: str = "lagos",
     demand_ratio: float = 0.0,
     is_raining: bool = False,
-    pickup_lat: float | None = None,
-    pickup_lng: float | None = None,
-    dropoff_lat: float | None = None,
-    dropoff_lng: float | None = None,
+    pickup_lat: Optional[float] = None,
+    pickup_lng: Optional[float] = None,
+    dropoff_lat: Optional[float] = None,
+    dropoff_lng: Optional[float] = None,
 ) -> dict:
     """
     **Lagos** — NEXRYDE exact Lagride-style (see ``lagride_lagos_pricing``):
@@ -1608,6 +1603,18 @@ async def _deferred_startup():
     Runs in a task so lifespan returns quickly — Cloud Run requires the process to listen on PORT promptly.
     """
     try:
+        try:
+            await db.command("ping")
+        except Exception as ping_exc:
+            logger.warning(
+                "MongoDB is not reachable; skipping deferred startup (indexes, seeds, background jobs). "
+                "Most API routes need the database — start MongoDB locally (e.g. "
+                "`docker run -d -p 27017:27017 --name nexryde-mongo mongo:7`) "
+                "or set MONGO_URL / MONGODB_URI to a running cluster. Detail: %s",
+                ping_exc,
+            )
+            return
+
         await ensure_otp_indexes()
         from routers.admin import seed_promo_codes as _seed_promos
 

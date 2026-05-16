@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS, HANDLE_GRADIENT_DEFAULT } from '@/src/components/driver/driverDockTheme';
+import { COLORS as THEME_COLORS } from '@/src/constants/theme';
 
 type TripOffer = Record<string, any>;
 
@@ -719,7 +720,7 @@ const s = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(96,165,250,0.55)',
   },
-  counterBtnTxt: { fontSize: 11, fontWeight: '900', color: '#E0F2FE', textAlign: 'center' },
+  counterBtnTxt: { fontSize: 11, fontWeight: '900', color: THEME_COLORS.accentMuted, textAlign: 'center' },
   rejectBtn: {
     borderRadius: 16,
     paddingVertical: 14,

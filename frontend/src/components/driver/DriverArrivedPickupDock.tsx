@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS, HANDLE_GRADIENT_DEFAULT } from '@/src/components/driver/driverDockTheme';
+import { COLORS as THEME_COLORS } from '@/src/constants/theme';
 
 export type DriverArrivedPickupDockProps = {
   riderName: string;
@@ -245,7 +246,7 @@ export default function DriverArrivedPickupDock({
             end={{ x: 1, y: 1 }}
             style={s.commInner}
           >
-            <Ionicons name="chatbubble-ellipses" size={19} color={canMessage ? '#E0F2FE' : '#64748B'} />
+            <Ionicons name="chatbubble-ellipses" size={19} color={canMessage ? THEME_COLORS.accentMuted : '#64748B'} />
             <Text style={[s.commTxt, !canMessage && s.commTxtMuted]} numberOfLines={2}>
               MESSAGE RIDER
             </Text>

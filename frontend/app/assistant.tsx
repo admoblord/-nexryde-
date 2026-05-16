@@ -22,6 +22,9 @@ import {
   askDriverAssistantPidgin,
   predictEarnings
 } from '@/src/services/api';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 interface Message {
   id: string;
@@ -34,7 +37,10 @@ interface Message {
 
 export default function AIAssistantScreen() {
   const router = useRouter();
+  const authed = useRequireUserOrLogin();
   const { user } = useAppStore();
+  const { userId, canCallAuthedApi } = useAuthedUserId();
+
   const flatListRef = useRef<FlatList>(null);
   
   const [messages, setMessages] = useState<Message[]>([]);
@@ -63,7 +69,7 @@ export default function AIAssistantScreen() {
   }, [isDriver, language]);
 
   const handleSend = async () => {
-    if (!inputText.trim() || !user?.id || loading) return;
+    if (!inputText.trim() || !userId || !canCallAuthedApi || loading) return;
     
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -81,12 +87,12 @@ export default function AIAssistantScreen() {
       let response;
       if (language === 'pidgin') {
         response = isDriver 
-          ? await askDriverAssistantPidgin(user.id, question)
-          : await askRiderAssistantPidgin(user.id, question);
+          ? await askDriverAssistantPidgin(userId, question)
+          : await askRiderAssistantPidgin(userId, question);
       } else {
         response = isDriver 
-          ? await askDriverAssistant(user.id, question)
-          : await askRiderAssistant(user.id, question);
+          ? await askDriverAssistant(userId, question)
+          : await askRiderAssistant(userId, question);
       }
       
       const aiMessage: Message = {
@@ -214,6 +220,10 @@ export default function AIAssistantScreen() {
       </View>
     </View>
   );
+
+  if (!authed) {
+    return <AuthLoadingGate />;
+  }
 
   return (
     <SafeAreaView style={styles.container}>

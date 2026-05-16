@@ -11,22 +11,22 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS } from '@/src/constants/theme';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { getDriverStats } from '@/src/services/api';
 
 export default function PerformanceScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<any>(null);
   const [loadError, setLoadError] = useState(false);
 
   const loadStats = async () => {
-    if (!user?.id) { setLoading(false); return; }
+    if (!driverId) { setLoading(false); return; }
     setLoadError(false);
     setLoading(true);
     try {
-      const res = await getDriverStats(user.id);
+      const res = await getDriverStats(driverId);
       setStats(res.data || null);
     } catch {
       setLoadError(true);
@@ -37,7 +37,7 @@ export default function PerformanceScreen() {
 
   useEffect(() => {
     loadStats();
-  }, [user?.id]);
+  }, [driverId]);
 
   const metrics = useMemo(() => {
     const completionRate = Number(stats?.completion_rate || 0);

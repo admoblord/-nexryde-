@@ -14,7 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 
 const { width } = Dimensions.get('window');
@@ -44,7 +44,7 @@ const PACKAGE_SIZES = [
 
 export default function DeliveryScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: riderId, canCallAuthedApi } = useAuthedUserId();
   
   const [recipientName, setRecipientName] = useState('');
   const [recipientPhone, setRecipientPhone] = useState('');
@@ -58,12 +58,14 @@ export default function DeliveryScreen() {
   const [deliveryId, setDeliveryId] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!canCallAuthedApi) return;
     if (pickup.lat && dropoff.lat) {
       estimateFare();
     }
-  }, [pickup, dropoff, selectedSize]);
+  }, [canCallAuthedApi, pickup, dropoff, selectedSize]);
 
   const estimateFare = async () => {
+    if (!canCallAuthedApi) return;
     try {
       const basePrice = PACKAGE_SIZES.find(s => s.id === selectedSize)?.price || 500;
       if (pickup.lat && pickup.lng && dropoff.lat && dropoff.lng) {
@@ -94,7 +96,7 @@ export default function DeliveryScreen() {
   };
 
   const requestDelivery = async () => {
-    if (!user?.id) {
+    if (!riderId) {
       Alert.alert('Error', 'Please login first');
       return;
     }

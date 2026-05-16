@@ -290,6 +290,12 @@ export const updateUser = (userId: string, data: { name?: string; email?: string
 export const getRiderVerificationStatus = (userId: string) =>
   api.get(`/users/${userId}/rider-verification-status`);
 
+export const verifyRiderNin = (userId: string, nin: string, fullName: string) =>
+  api.post(`/users/${userId}/verify-rider-nin`, {
+    nin: nin.trim(),
+    full_name: fullName.trim(),
+  });
+
 export const completeRiderVerification = (
   userId: string,
   data: { name: string; phone: string; address: string; nin: string }
@@ -782,7 +788,7 @@ export const getDriverWithdrawals = (driverId: string, params?: { limit?: number
 
 export const withdrawDriverEarningsWithBiometric = (
   driverId: string,
-  payload: { amount: number; face_image: string }
+  payload: { amount: number; face_image: string; idempotency_key?: string }
 ) =>
   api.post<{
     success: boolean;
@@ -790,6 +796,9 @@ export const withdrawDriverEarningsWithBiometric = (
     withdrawn_amount: number;
     remaining_balance: number;
     face_match_confidence: number;
+    reference?: string;
+    status?: string;
+    duplicate?: boolean;
   }>(`/drivers/${driverId}/withdraw-earnings`, payload);
 
 export type EarningsVaultPendingRelease = {
@@ -1254,8 +1263,16 @@ export const requestGracePeriod = (driverId: string, reason: string, days: numbe
   api.post(`/subscriptions/${driverId}/grace-period`, { reason, days_requested: days });
 
 // Face Verification
-export const verifyFace = (userId: string, faceImage: string) =>
-  api.post(`/users/${userId}/verify-face`, { face_image: faceImage });
+export const verifyFace = (
+  userId: string,
+  faceImage: string,
+  opts?: { livenessProbeImage?: string; captureMeta?: Record<string, unknown> }
+) =>
+  api.post(`/users/${userId}/verify-face`, {
+    face_image: faceImage,
+    ...(opts?.livenessProbeImage ? { liveness_probe_image: opts.livenessProbeImage } : {}),
+    ...(opts?.captureMeta ? { capture_meta: opts.captureMeta } : {}),
+  });
 
 export const verifyFaceAtRideStart = (userId: string, faceImage: string) =>
   api.post(`/drivers/${userId}/verify-face-at-start`, { face_image: faceImage });

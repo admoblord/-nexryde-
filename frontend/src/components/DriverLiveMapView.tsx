@@ -46,16 +46,26 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import notificationService from '@/src/services/notifications';
 import { DriverBrandHeaderRow } from '@/src/components/driver/DriverBrandChrome';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import DriverMapOfferDock, { offerTripPickupDropCoords } from '@/src/components/driver/DriverMapOfferDock';
 import DriverNavigatePickupDock from '@/src/components/driver/DriverNavigatePickupDock';
+import {
+  DriverTripPhaseChrome,
+  type DriverTripPhase,
+} from '@/src/components/driver/DriverTripPhaseChrome';
 import DriverArrivedPickupDock from '@/src/components/driver/DriverArrivedPickupDock';
 import DriverStartTripDock from '@/src/components/driver/DriverStartTripDock';
 import DriverOngoingTripDock from '@/src/components/driver/DriverOngoingTripDock';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
+import {
+  DOCK_BLUR_INTENSITY,
+  DOCK_TOP_RADIUS,
+  HANDLE_GRADIENT_DEFAULT,
+} from '@/src/components/driver/driverDockTheme';
 import {
   fetchGoogleDrivingRoutes,
   fetchDirections,
@@ -64,10 +74,11 @@ import {
   haversineM,
   type NavStep,
 } from '@/src/navigation/navUtils';
+import { COLORS as THEME_COLORS } from '@/src/constants/theme';
 
 /** Advance to next Directions step when the driver is this close to the step end (metres). */
 const NAV_STEP_END_PROXIMITY_M = 40;
-/** Driver may mark “arrived” when within this distance of the pickup pin (Bolt-style). */
+/** Driver may mark “arrived” when within this radius of pickup (GPS tolerance). */
 const PICKUP_ARRIVAL_RADIUS_M = 50;
 
 function formatCountdownMmSs(totalSec: number): string {
@@ -212,9 +223,8 @@ function serializeMapsNativePayload(error: { nativeEvent?: unknown } | null | un
 
 /* ─────────────────────── Dark "Nexryde Night" map style ───────────────────────── */
 /**
- * NEXRYDE dark map style — city + road labels visible (like Uber/Bolt)
+ * NEXRYDE night map — city + road labels stay readable while driving.
  * Exported so other components (e.g. offline home) can reuse it.
- * Key: labels ON so drivers can see where they are.
  */
 export const NEXRYDE_MAP_STYLE: MapStyleElement[] = [
   /* ── Base geometry ── */
@@ -245,7 +255,7 @@ export const NEXRYDE_MAP_STYLE: MapStyleElement[] = [
   { featureType: 'road.local',         elementType: 'geometry',            stylers: [{ color: '#111e33' }] },
   { featureType: 'road.local',         elementType: 'labels.text.fill',    stylers: [{ color: '#4a6580' }] },
 
-  /* ── Cities & admin labels — VISIBLE like Uber ── */
+  /* ── Cities & admin labels (readable while moving) ── */
   { featureType: 'administrative',                    elementType: 'geometry',            stylers: [{ color: '#1a2a42' }] },
   { featureType: 'administrative',                    elementType: 'geometry.stroke',     stylers: [{ color: '#1e3660' }] },
   { featureType: 'administrative.country',            elementType: 'labels.text.fill',    stylers: [{ color: '#94a3b8' }] },
@@ -559,7 +569,8 @@ export default function DriverLiveMapView({
   const insets = useSafeAreaInsets();
   const flow = useFlowLayout();
   const router = useRouter();
-  const { user, token } = useAppStore();
+  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi, token } = useAuthedUserId();
   const [mapInboxUnread, setMapInboxUnread] = useState(0);
   const mapRef = useRef<MapView>(null);
   const cameraZoomRef = useRef(15);
@@ -643,12 +654,12 @@ export default function DriverLiveMapView({
 
   /* Unread app notifications (same source as driver tab badge — includes enforcement inserts). */
   useEffect(() => {
-    if (!user?.id || !token) return;
+    if (!driverId || !canCallAuthedApi) return;
     let cancelled = false;
     const fetchUnread = async () => {
       try {
         const res = await fetch(
-          `${BACKEND_URL}/api/users/${user.id}/notifications?unread_only=true&limit=1`,
+          `${BACKEND_URL}/api/users/${driverId}/notifications?unread_only=true&limit=1`,
           { headers: getAuthHeaders() }
         );
         if (!res.ok) return;
@@ -669,7 +680,7 @@ export default function DriverLiveMapView({
       clearInterval(iv);
       appSub.remove();
     };
-  }, [user?.id, token]);
+  }, [driverId, canCallAuthedApi]);
 
   const handleMapInboxPress = useCallback(() => {
     if (onInboxPress) {
@@ -953,9 +964,11 @@ export default function DriverLiveMapView({
     isOnline && !activeTrip && !hasEmbeddedOffer && !destinationActive;
   const onlineIdleMapPadBottom = useMemo(() => {
     if (!showOnlineIdleChrome) return 0;
-    return Math.round(insets.bottom + 392);
+    return Math.round(insets.bottom + 308);
   }, [showOnlineIdleChrome, insets.bottom]);
-  const showLegacyTopBar = !showOnlineIdleChrome && !hasEmbeddedOffer;
+  const showLegacyTopBar = !showOnlineIdleChrome && !hasEmbeddedOffer && !activeTrip;
+  const tripPhaseChromeTop = insets.top + 52;
+  const tripPhaseChromeHeight = 72;
 
   const tripTargetCoord = useMemo(() => {
     const st = String(activeTrip?.status || '');
@@ -1560,6 +1573,35 @@ export default function DriverLiveMapView({
     return () => clearInterval(id);
   }, [activeTrip?.status, activeTrip?.id, startedAtMs]);
 
+  const activeTripPhase = useMemo((): DriverTripPhase | null => {
+    if (isHeadingToPickup) return 'heading_pickup';
+    if (isWaitingAtPickupNoCode) return 'arrived';
+    if (isReadyToStartTrip) return 'rider_in_car';
+    if (isOngoingTrip) return 'ongoing';
+    return null;
+  }, [isHeadingToPickup, isWaitingAtPickupNoCode, isReadyToStartTrip, isOngoingTrip]);
+
+  const tripPhaseMetricPrimary = useMemo(() => {
+    if (activeTripPhase === 'heading_pickup' && distKmForPickupUi != null && Number.isFinite(distKmForPickupUi)) {
+      return distKmForPickupUi < 1
+        ? `${Math.round(distKmForPickupUi * 1000)} m away`
+        : `${distKmForPickupUi.toFixed(1)} km away`;
+    }
+    if (activeTripPhase === 'ongoing' && ongoingDistanceLabel !== '—') return ongoingDistanceLabel;
+    return null;
+  }, [activeTripPhase, distKmForPickupUi, ongoingDistanceLabel]);
+
+  const tripPhaseMetricSecondary = useMemo(() => {
+    if (activeTripPhase === 'heading_pickup' && displayTripEtaMin != null) {
+      return `ETA ~${displayTripEtaMin} min`;
+    }
+    if (activeTripPhase === 'ongoing' && ongoingEtaToDropLabel !== '—') return ongoingEtaToDropLabel;
+    if (activeTripPhase === 'arrived' && pickupWaitSec > 0) {
+      return `Waiting ${formatCountdownMmSs(pickupWaitSec)}`;
+    }
+    return null;
+  }, [activeTripPhase, displayTripEtaMin, ongoingEtaToDropLabel, pickupWaitSec]);
+
   const currentNavStep = useMemo(() => {
     if (!tripNavSteps.length) return null;
     const i = Math.min(Math.max(0, navStepIndex), tripNavSteps.length - 1);
@@ -1692,7 +1734,12 @@ export default function DriverLiveMapView({
     const t = setTimeout(() => {
       try {
         mapRef.current?.fitToCoordinates(pts, {
-          edgePadding: { top: 116, right: 36, bottom: activeTrip ? 488 : 276, left: 36 },
+          edgePadding: {
+            top: activeTrip ? tripPhaseChromeTop + tripPhaseChromeHeight + 24 : 116,
+            right: 36,
+            bottom: activeTrip ? 420 : 276,
+            left: 36,
+          },
           animated: true,
         });
       } catch { /* noop */ }
@@ -2124,12 +2171,19 @@ export default function DriverLiveMapView({
       </MapView>
       </View>
 
-      {/* ── Top gradient overlay — keeps controls readable ── */}
+      {/* ── Top / bottom gradients — map readable under chrome + dock ── */}
       <LinearGradient
         colors={['rgba(6,11,24,0.9)', 'transparent']}
         style={styles.topGradient}
         pointerEvents="none"
       />
+      {activeTrip ? (
+        <LinearGradient
+          colors={['transparent', 'rgba(2,6,23,0.55)', 'rgba(2,6,23,0.92)']}
+          style={[styles.bottomMapFade, { height: Math.min(320, 200 + insets.bottom) }]}
+          pointerEvents="none"
+        />
+      ) : null}
 
       <View style={styles.brandChromeWrap} pointerEvents="box-none">
         <DriverBrandHeaderRow
@@ -2140,179 +2194,29 @@ export default function DriverLiveMapView({
         />
       </View>
 
-      {isHeadingToPickup && onFeatureHub ? (
-        <View style={[styles.pickupHeadingStrip, { top: insets.top + 56 }]} pointerEvents="box-none">
-          {Platform.OS === 'ios' || Platform.OS === 'android' ? (
-            <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(6,11,22,0.88)' }]} />
-          )}
-          <View style={styles.pickupHeadingRow}>
-            <TouchableOpacity
-              style={styles.pickupHeadingIconBtn}
-              onPress={onFeatureHub}
-              activeOpacity={0.82}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel="Menu"
-            >
-              <Ionicons name="menu" size={22} color="#E2E8F0" />
-            </TouchableOpacity>
-            <View style={styles.pickupHeadingCenter} pointerEvents="none">
-              <Text style={styles.pickupHeadingTitle}>HEADING TO PICKUP</Text>
-              <Text style={styles.pickupHeadingEta}>
-                {displayTripEtaMin != null ? `ETA ~${displayTripEtaMin} min` : 'ETA —'}
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.pickupHeadingIconBtn}
-              onPress={() => setPickupNavDockExpanded((v) => !v)}
-              activeOpacity={0.82}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel={pickupNavDockExpanded ? 'Hide trip card' : 'Show trip card'}
-            >
-              <Ionicons
-                name={pickupNavDockExpanded ? 'chevron-down' : 'chevron-up'}
-                size={22}
-                color="#94A3B8"
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      {isWaitingAtPickupNoCode ? (
-        <View style={[styles.arrivedHeadingStrip, { top: insets.top + 56 }]} pointerEvents="box-none">
-          {Platform.OS === 'ios' || Platform.OS === 'android' ? (
-            <BlurView intensity={44} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(6,11,22,0.9)' }]} />
-          )}
-          <View style={styles.pickupHeadingRow}>
-            <View style={styles.arrivedHeadingCheckWrap} pointerEvents="none">
-              <Ionicons name="checkmark" size={20} color="#022C22" />
-            </View>
-            <View style={styles.pickupHeadingCenter} pointerEvents="none">
-              <Text style={styles.arrivedHeadingKicker}>YOU&apos;VE ARRIVED</Text>
-              <Text style={styles.arrivedHeadingSubline} numberOfLines={1}>
-                You&apos;ve reached the pickup location
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.pickupHeadingIconBtn}
-              onPress={() => setArrivedDockExpanded((v) => !v)}
-              activeOpacity={0.82}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel={arrivedDockExpanded ? 'Hide rider card' : 'Show rider card'}
-            >
-              <Ionicons
-                name={arrivedDockExpanded ? 'chevron-down' : 'chevron-up'}
-                size={22}
-                color="#94A3B8"
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      {isReadyToStartTrip ? (
-        <View style={[styles.riderInCarHeadingStrip, { top: insets.top + 56 }]} pointerEvents="box-none">
-          {Platform.OS === 'ios' || Platform.OS === 'android' ? (
-            <BlurView intensity={44} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(6,11,22,0.9)' }]} />
-          )}
-          <View style={styles.pickupHeadingRow}>
-            <View style={styles.riderInCarIconWrap} pointerEvents="none">
-              <Ionicons name="car-sport" size={18} color="#022C22" />
-            </View>
-            <View style={styles.pickupHeadingCenter} pointerEvents="none">
-              <Text style={styles.riderInCarKicker}>RIDER IN CAR</Text>
-              <Text style={styles.riderInCarSubline} numberOfLines={1}>
-                Ready to start trip
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.pickupHeadingIconBtn}
-              onPress={() => setStartTripDockExpanded((v) => !v)}
-              activeOpacity={0.82}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel={startTripDockExpanded ? 'Hide trip card' : 'Show trip card'}
-            >
-              <Ionicons
-                name={startTripDockExpanded ? 'chevron-down' : 'chevron-up'}
-                size={22}
-                color="#94A3B8"
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      {isOngoingTrip ? (
-        <View style={[styles.tripProgressHeadingStrip, { top: insets.top + 56 }]} pointerEvents="box-none">
-          {Platform.OS === 'ios' || Platform.OS === 'android' ? (
-            <BlurView intensity={44} tint="dark" style={StyleSheet.absoluteFillObject} />
-          ) : (
-            <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(6,11,22,0.9)' }]} />
-          )}
-          <View style={styles.pickupHeadingRow}>
-            <View style={styles.tripProgressIconWrap} pointerEvents="none">
-              <Ionicons name="flag" size={18} color="#022C22" />
-            </View>
-            <View style={styles.pickupHeadingCenter} pointerEvents="none">
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-                <View style={styles.tripProgressStatusDot} />
-                <Text style={styles.tripProgressKicker}>TRIP IN PROGRESS</Text>
-              </View>
-              <Text style={styles.tripProgressSubline} numberOfLines={1}>
-                Heading to destination
-              </Text>
-            </View>
-            <TouchableOpacity
-              style={styles.pickupHeadingIconBtn}
-              onPress={() => setOngoingDockExpanded((v) => !v)}
-              activeOpacity={0.82}
-              hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-              accessibilityRole="button"
-              accessibilityLabel={ongoingDockExpanded ? 'Hide trip in progress card' : 'Show trip in progress card'}
-            >
-              <Ionicons
-                name={ongoingDockExpanded ? 'chevron-down' : 'chevron-up'}
-                size={22}
-                color="#94A3B8"
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-      ) : null}
-
-      {isOngoingTrip && ongoingDistanceLabel !== '—' ? (
-        <View style={[styles.ongoingDistRemainChip, { top: insets.top + 120 }]} pointerEvents="none">
-          <Ionicons name="git-network-outline" size={22} color="#60A5FA" style={{ marginRight: 10 }} />
-          <View style={{ flexShrink: 1 }}>
-            <Text style={styles.ongoingDistRemainValue} numberOfLines={1}>
-              {ongoingDistanceLabel}
-            </Text>
-            <Text style={styles.ongoingDistRemainCap} numberOfLines={1}>
-              Distance remaining
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {isHeadingToPickup && distKmForPickupUi != null && Number.isFinite(distKmForPickupUi) ? (
-        <View style={[styles.pickupDistChipFloat, { top: insets.top + 118 }]} pointerEvents="none">
-          <Ionicons name="navigate" size={14} color="#34F5B8" style={{ marginRight: 6 }} />
-          <Text style={styles.pickupDistChipFloatTxt}>
-            {distKmForPickupUi < 1
-              ? `${Math.round(distKmForPickupUi * 1000)} m`
-              : `${distKmForPickupUi.toFixed(1)} km`}
-          </Text>
-        </View>
+      {activeTripPhase ? (
+        <DriverTripPhaseChrome
+          phase={activeTripPhase}
+          top={tripPhaseChromeTop}
+          metricPrimary={tripPhaseMetricPrimary}
+          metricSecondary={tripPhaseMetricSecondary}
+          dockExpanded={
+            activeTripPhase === 'heading_pickup'
+              ? pickupNavDockExpanded
+              : activeTripPhase === 'arrived'
+                ? arrivedDockExpanded
+                : activeTripPhase === 'rider_in_car'
+                  ? startTripDockExpanded
+                  : ongoingDockExpanded
+          }
+          onToggleDock={() => {
+            if (activeTripPhase === 'heading_pickup') setPickupNavDockExpanded((v) => !v);
+            else if (activeTripPhase === 'arrived') setArrivedDockExpanded((v) => !v);
+            else if (activeTripPhase === 'rider_in_car') setStartTripDockExpanded((v) => !v);
+            else setOngoingDockExpanded((v) => !v);
+          }}
+          onMenuPress={onFeatureHub}
+        />
       ) : null}
 
       {/* ── Top header (hidden on reference online-idle chrome — earnings live in bottom status row) ── */}
@@ -2555,7 +2459,9 @@ export default function DriverLiveMapView({
             {
               top: showLegacyTopBar
                 ? insets.top + 52 + (activeTrip ? 168 : 72)
-                : insets.top + 96,
+                : showOnlineIdleChrome
+                  ? insets.top + 72
+                  : insets.top + 96,
               opacity: statsSlide,
               transform: [
                 {
@@ -3271,182 +3177,189 @@ export default function DriverLiveMapView({
         </View>
       )}
 
-      {/* ── Online idle: reference stack (status, stats, messages, waiting, actions) ── */}
+      {/* ── Online idle: unified bottom dock (earnings, metrics, listening, actions) ── */}
       {showOnlineIdleChrome && (
         <>
           <LinearGradient
-            colors={['rgba(2,6,23,0)', 'rgba(2,6,23,0.72)', 'rgba(2,6,23,0.94)', '#020617']}
-            locations={[0, 0.32, 0.62, 1]}
-            style={[styles.onlineIdleFade, { height: Math.min(500, onlineIdleMapPadBottom + 56) }]}
+            colors={['rgba(2,6,23,0)', 'rgba(2,6,23,0.55)', 'rgba(2,6,23,0.88)']}
+            locations={[0, 0.45, 1]}
+            style={[styles.onlineIdleFade, { height: Math.min(420, onlineIdleMapPadBottom + 48) }]}
             pointerEvents="none"
           />
           <View
             style={[
               styles.onlineIdleRoot,
-              { paddingBottom: insets.bottom + 10, paddingHorizontal: Math.max(16, flow.padH) },
+              { paddingBottom: insets.bottom + 8, paddingHorizontal: Math.max(14, flow.padH) },
             ]}
             pointerEvents="box-none"
           >
-            <View style={styles.oiStatusBar}>
-              <View style={styles.oiOnlinePill}>
-                <View style={styles.oiOnlineDot} />
-                <Text style={styles.oiOnlineTxt}>ONLINE</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.oiTodayBlock}
-                onPress={toggleStats}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Today earnings, show breakdown"
-              >
-                <View style={styles.oiTodayLabelRow}>
-                  <Text style={styles.oiTodayLabel}>TODAY</Text>
-                  <Ionicons name="chevron-down" size={12} color="#93C5FD" />
-                </View>
-                <Text style={styles.oiTodayAmount} numberOfLines={1}>
-                  ₦{todayEarnings > 0 ? earningsDisplay.replace('₦', '') : '0.00'}
-                </Text>
-              </TouchableOpacity>
-              <View style={styles.oiLiveBlock}>
-                <View style={[styles.oiLiveDot, mapLoaded && styles.oiLiveDotOn]} />
-                <Text style={styles.oiLiveTxt}>LIVE</Text>
-              </View>
-            </View>
+            <View style={styles.oiDockShell}>
+              <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
+              <LinearGradient
+                colors={['rgba(52,245,184,0.08)', 'transparent']}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.oiDockSheen}
+                pointerEvents="none"
+              />
 
-            <View style={styles.oiStatsRow}>
-              <View style={styles.oiStatCard}>
-                <View style={styles.oiStatIconRing}>
-                  <Ionicons name="briefcase-outline" size={20} color="#7DD3FC" />
-                </View>
-                <Text style={styles.oiStatLabel}>TRIPS</Text>
-                <Text style={styles.oiStatValue}>{todayTrips}</Text>
+              <View style={styles.oiHandleWrap} pointerEvents="none">
+                <LinearGradient
+                  colors={[...HANDLE_GRADIENT_DEFAULT]}
+                  start={{ x: 0, y: 0.5 }}
+                  end={{ x: 1, y: 0.5 }}
+                  style={styles.oiHandle}
+                />
               </View>
-              <View style={styles.oiStatCard}>
-                <View style={styles.oiStatIconRing}>
-                  <Ionicons name="time-outline" size={20} color="#7DD3FC" />
+
+              <View style={styles.oiHeroRow}>
+                <View style={styles.oiOnlinePill}>
+                  <View style={styles.oiOnlineDot} />
+                  <Text style={styles.oiOnlineTxt}>ONLINE</Text>
                 </View>
-                <Text style={styles.oiStatLabel}>HOURS</Text>
-                <Text style={styles.oiStatValue}>
-                  {todayTripHours > 0 ? todayTripHours.toFixed(1) : '0'}
-                </Text>
+                <TouchableOpacity
+                  style={styles.oiEarnCenter}
+                  onPress={toggleStats}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Today earnings, show breakdown"
+                >
+                  <View style={styles.oiTodayLabelRow}>
+                    <Text style={styles.oiTodayLabel}>TODAY</Text>
+                    <Ionicons name="chevron-down" size={11} color="#93C5FD" />
+                  </View>
+                  <Text style={styles.oiTodayAmount} numberOfLines={1}>
+                    ₦{todayEarnings > 0 ? earningsDisplay.replace('₦', '') : '0.00'}
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.oiHeroRight}>
+                  <View style={styles.oiLiveChip}>
+                    <View style={[styles.oiLiveDot, mapLoaded && styles.oiLiveDotOn]} />
+                    <Text style={styles.oiLiveTxt}>LIVE</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.oiInboxBtn}
+                    onPress={handleMapInboxPress}
+                    activeOpacity={0.88}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open messages and notifications"
+                  >
+                    <Ionicons name="chatbubble-ellipses-outline" size={19} color="#BFDBFE" />
+                    {mapInboxUnread > 0 ? (
+                      <View style={styles.oiInboxBadge}>
+                        <Text style={styles.oiInboxBadgeTxt}>
+                          {mapInboxUnread > 99 ? '99+' : mapInboxUnread}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                </View>
               </View>
-              <View style={styles.oiStatCard}>
-                <View style={styles.oiStatIconRing}>
-                  <Ionicons name="star" size={20} color="#7DD3FC" />
+
+              <View style={styles.oiMetricsStrip}>
+                <View style={styles.oiMetric}>
+                  <Ionicons name="briefcase-outline" size={15} color="#7DD3FC" />
+                  <Text style={styles.oiMetricVal}>{todayTrips}</Text>
+                  <Text style={styles.oiMetricLbl}>Trips</Text>
                 </View>
-                <Text style={styles.oiStatLabel}>RATING</Text>
-                <View style={styles.oiRatingRow}>
-                  <Text style={styles.oiStatValue}>
+                <View style={styles.oiMetricDivider} />
+                <View style={styles.oiMetric}>
+                  <Ionicons name="time-outline" size={15} color="#7DD3FC" />
+                  <Text style={styles.oiMetricVal}>
+                    {todayTripHours > 0 ? todayTripHours.toFixed(1) : '0'}
+                  </Text>
+                  <Text style={styles.oiMetricLbl}>Hours</Text>
+                </View>
+                <View style={styles.oiMetricDivider} />
+                <View style={styles.oiMetric}>
+                  <Ionicons name="star" size={15} color="#FBBF24" />
+                  <Text style={styles.oiMetricVal}>
                     {driverRating != null && driverRating > 0 ? driverRating.toFixed(1) : '—'}
                   </Text>
-                  {driverRating != null && driverRating > 0 ? (
-                    <Ionicons name="star" size={14} color="#FBBF24" />
-                  ) : null}
+                  <Text style={styles.oiMetricLbl}>Rating</Text>
                 </View>
               </View>
-            </View>
 
-            <TouchableOpacity
-              style={styles.oiMsgRow}
-              onPress={handleMapInboxPress}
-              activeOpacity={0.88}
-              accessibilityRole="button"
-              accessibilityLabel="Open messages and notifications"
-            >
-              <View style={styles.oiMsgIconWrap}>
-                <Ionicons name="chatbubble-ellipses-outline" size={20} color="#93C5FD" />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.oiMsgTitle} numberOfLines={1}>
-                  Messages
-                </Text>
-                <Text
-                  style={[styles.oiMsgSub, mapInboxUnread > 0 && styles.oiMsgSubUnread]}
-                  numberOfLines={1}
-                >
-                  {mapInboxUnread > 0
-                    ? `${mapInboxUnread > 99 ? '99+' : mapInboxUnread} unread`
-                    : 'Policy · trips · alerts'}
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={18} color="#64748B" />
-            </TouchableOpacity>
-
-            <LinearGradient
-              colors={['rgba(30,58,138,0.35)', 'rgba(15,23,42,0.98)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.oiWaitCard}
-            >
-              <View style={styles.oiWaitRow}>
-                <View style={styles.oiWaitIconCol}>
-                  <Animated.View
-                    style={[
-                      styles.oiWaitSonar,
-                      {
-                        opacity: sonarAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.2, 0.55, 0.2] }),
-                        transform: [
-                          {
-                            scale: sonarAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.35] }),
-                          },
-                        ],
-                      },
-                    ]}
-                  />
-                  <View style={styles.oiWaitCarRing}>
-                    <Ionicons name="car-sport" size={22} color="#BFDBFE" />
+              <View style={styles.oiListenCard}>
+                <View style={styles.oiListenRow}>
+                  <View style={styles.oiWaitIconCol}>
+                    <Animated.View
+                      style={[
+                        styles.oiWaitSonar,
+                        {
+                          opacity: sonarAnim.interpolate({
+                            inputRange: [0, 0.5, 1],
+                            outputRange: [0.15, 0.5, 0.15],
+                          }),
+                          transform: [
+                            {
+                              scale: sonarAnim.interpolate({
+                                inputRange: [0, 1],
+                                outputRange: [1, 1.28],
+                              }),
+                            },
+                          ],
+                        },
+                      ]}
+                    />
+                    <LinearGradient
+                      colors={['rgba(37,99,235,0.55)', 'rgba(15,23,42,0.95)']}
+                      style={styles.oiWaitCarRing}
+                    >
+                      <Ionicons name="car-sport" size={20} color={THEME_COLORS.accentMuted} />
+                    </LinearGradient>
                   </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.oiWaitTitle}>
+                      {isFindingRide ? 'Listening for rides' : 'Offers paused'}
+                    </Text>
+                    <Text style={styles.oiWaitSub}>
+                      {isFindingRide
+                        ? 'Stay in a busy area for faster matches.'
+                        : 'Complete account steps to receive offers.'}
+                    </Text>
+                  </View>
+                  {isFindingRide ? <SeekingDotsFour /> : null}
                 </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={styles.oiWaitTitle}>
-                    {isFindingRide ? 'Waiting for ride requests…' : 'Listening paused'}
-                  </Text>
-                  <Text style={styles.oiWaitSub}>
-                    {isFindingRide
-                      ? 'Stay in a busy area for faster matches.'
-                      : 'Complete account steps to receive offers.'}
-                  </Text>
-                </View>
-                <SeekingDotsFour />
               </View>
-            </LinearGradient>
 
-            <View style={styles.oiBottomActions}>
-              <TouchableOpacity
-                style={styles.oiCircleBtn}
-                onPress={onShieldPress}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Safety"
-              >
-                <Ionicons name="checkmark-circle" size={24} color="#60A5FA" />
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.oiGoOfflinePill}
-                onPress={onGoOffline}
-                disabled={toggling}
-                activeOpacity={0.82}
-                accessibilityRole="button"
-                accessibilityLabel="Go offline"
-              >
-                {toggling ? (
-                  <ActivityIndicator size="small" color="#FCA5A5" />
-                ) : (
-                  <>
-                    <Ionicons name="power" size={18} color="#F87171" />
-                    <Text style={styles.oiGoOfflineText}>Go Offline</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.oiCircleBtn}
-                onPress={onFeatureHub}
-                activeOpacity={0.85}
-                accessibilityRole="button"
-                accessibilityLabel="Menu"
-              >
-                <Ionicons name="menu" size={24} color="#93C5FD" />
-              </TouchableOpacity>
+              <View style={styles.oiActionRow}>
+                <TouchableOpacity
+                  style={styles.oiSideBtn}
+                  onPress={onShieldPress}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Safety"
+                >
+                  <Ionicons name="shield-checkmark" size={22} color="#60A5FA" />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.oiGoOfflinePill}
+                  onPress={onGoOffline}
+                  disabled={toggling}
+                  activeOpacity={0.82}
+                  accessibilityRole="button"
+                  accessibilityLabel="Go offline"
+                >
+                  {toggling ? (
+                    <ActivityIndicator size="small" color="#FCA5A5" />
+                  ) : (
+                    <>
+                      <Ionicons name="power" size={17} color="#F87171" />
+                      <Text style={styles.oiGoOfflineText}>Go Offline</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.oiSideBtn}
+                  onPress={onFeatureHub}
+                  activeOpacity={0.85}
+                  accessibilityRole="button"
+                  accessibilityLabel="Menu"
+                >
+                  <Ionicons name="menu" size={22} color="#93C5FD" />
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </>
@@ -3665,7 +3578,11 @@ export default function DriverLiveMapView({
           insets.bottom +
           (activeTrip ? 320 : hasEmbeddedOffer ? 340 : isFindingRide && !destinationActive ? 220 : 78)
         }
-        cornerTop={insets.top + 118 + (routeChangeBanner ? 46 : 0)}
+        cornerTop={
+          activeTrip
+            ? tripPhaseChromeTop + tripPhaseChromeHeight + 12 + (routeChangeBanner ? 46 : 0)
+            : insets.top + 118 + (routeChangeBanner ? 46 : 0)
+        }
         compact={Boolean(
           (isFindingRide && !destinationActive && !activeTrip) ||
             (hasEmbeddedOffer && !activeTrip) ||
@@ -4037,6 +3954,13 @@ const styles = StyleSheet.create({
     height: 124,
     zIndex: 9,
   },
+  bottomMapFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 8,
+  },
 
   brandChromeWrap: {
     position: 'absolute',
@@ -4086,23 +4010,44 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 14,
-    gap: 12,
   },
-  oiStatusBar: {
+  oiDockShell: {
+    borderTopLeftRadius: DOCK_TOP_RADIUS,
+    borderTopRightRadius: DOCK_TOP_RADIUS,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderBottomWidth: 0,
+    borderColor: 'rgba(52,245,184,0.14)',
+    paddingTop: 6,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+    gap: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 24,
+    elevation: 16,
+  },
+  oiDockSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 72,
+  },
+  oiHandleWrap: {
+    alignItems: 'center',
+    paddingBottom: 2,
+  },
+  oiHandle: {
+    width: 44,
+    height: 4,
+    borderRadius: 2,
+  },
+  oiHeroRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(15,23,42,0.88)',
-    borderRadius: 20,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.22)',
-    gap: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
-    elevation: 8,
+    gap: 10,
   },
   oiOnlinePill: {
     flexDirection: 'row',
@@ -4132,12 +4077,57 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     letterSpacing: 1,
   },
-  oiTodayBlock: {
+  oiEarnCenter: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     minWidth: 0,
-    paddingHorizontal: 6,
+    paddingHorizontal: 4,
+  },
+  oiHeroRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  oiLiveChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 10,
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.22)',
+  },
+  oiInboxBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(30,58,138,0.45)',
+    borderWidth: 1,
+    borderColor: 'rgba(147,197,253,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  oiInboxBadge: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    minWidth: 17,
+    height: 17,
+    borderRadius: 9,
+    backgroundColor: '#EF4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    borderWidth: 1.5,
+    borderColor: '#0F172A',
+  },
+  oiInboxBadgeTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#FFF',
   },
   oiTodayLabelRow: {
     flexDirection: 'row',
@@ -4158,13 +4148,6 @@ const styles = StyleSheet.create({
     letterSpacing: -0.6,
     fontVariant: ['tabular-nums'],
   },
-  oiLiveBlock: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
   oiLiveDot: {
     width: 7,
     height: 7,
@@ -4184,189 +4167,118 @@ const styles = StyleSheet.create({
     color: '#86EFAC',
     letterSpacing: 1.2,
   },
-  oiStatsRow: {
+  oiMetricsStrip: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,23,42,0.5)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(59,130,246,0.14)',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
   },
-  oiStatCard: {
+  oiMetric: {
     flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.82)',
-    borderRadius: 18,
-    paddingVertical: 13,
-    paddingHorizontal: 6,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.2)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 5,
+    gap: 2,
   },
-  oiStatIconRing: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: 'rgba(30,64,175,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(147,197,253,0.32)',
+  oiMetricDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 28,
+    backgroundColor: 'rgba(148,163,184,0.25)',
   },
-  oiStatLabel: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#94A3B8',
-    letterSpacing: 0.85,
-    marginBottom: 4,
-  },
-  oiStatValue: {
-    fontSize: 18,
+  oiMetricVal: {
+    fontSize: 16,
     fontWeight: '900',
-    color: '#F1F5F9',
+    color: '#F8FAFC',
+    fontVariant: ['tabular-nums'],
   },
-  oiRatingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  oiMsgRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: 'rgba(15,23,42,0.88)',
-    borderRadius: 18,
-    paddingVertical: 13,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.16)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
-    elevation: 4,
-  },
-  oiMsgIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(30,58,138,0.35)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  oiMsgTitle: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: '#F1F5F9',
-  },
-  oiMsgSub: {
-    fontSize: 12,
+  oiMetricLbl: {
+    fontSize: 10,
     fontWeight: '700',
     color: '#64748B',
-    marginTop: 2,
+    letterSpacing: 0.3,
   },
-  oiMsgSubUnread: {
-    color: '#93C5FD',
-  },
-  oiWaitCard: {
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 17,
+  oiListenCard: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(30,58,138,0.22)',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.28)',
-    overflow: 'hidden',
-    shadowColor: '#1E3A8A',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.28,
-    shadowRadius: 16,
-    elevation: 6,
+    borderColor: 'rgba(59,130,246,0.22)',
   },
-  oiWaitRow: {
+  oiListenRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
   oiWaitIconCol: {
-    width: 56,
-    height: 56,
+    width: 48,
+    height: 48,
     alignItems: 'center',
     justifyContent: 'center',
   },
   oiWaitSonar: {
     position: 'absolute',
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 46,
+    height: 46,
+    borderRadius: 23,
     borderWidth: 2,
-    borderColor: 'rgba(96,165,250,0.45)',
-    backgroundColor: 'rgba(37,99,235,0.12)',
+    borderColor: 'rgba(96,165,250,0.4)',
+    backgroundColor: 'rgba(37,99,235,0.1)',
   },
   oiWaitCarRing: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(30,58,138,0.55)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(147,197,253,0.5)',
-  },
-  oiWaitTitle: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: 0.15,
-    lineHeight: 22,
-  },
-  oiWaitSub: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#94A3B8',
-    marginTop: 5,
-    lineHeight: 19,
-  },
-  oiBottomActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 6,
-    gap: 12,
-  },
-  oiCircleBtn: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
-    backgroundColor: 'rgba(15,23,42,0.92)',
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    borderColor: 'rgba(96,165,250,0.42)',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 6,
+    borderColor: 'rgba(147,197,253,0.45)',
+  },
+  oiWaitTitle: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: 0.1,
+    lineHeight: 20,
+  },
+  oiWaitSub: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 3,
+    lineHeight: 17,
+  },
+  oiActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingTop: 2,
+  },
+  oiSideBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.28)',
   },
   oiGoOfflinePill: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 9,
-    paddingVertical: 15,
-    paddingHorizontal: 22,
-    borderRadius: 999,
-    backgroundColor: 'rgba(127,29,29,0.32)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(252,165,165,0.5)',
-    minHeight: 54,
-    shadowColor: '#7F1D1D',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 5,
+    gap: 8,
+    paddingVertical: 13,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    backgroundColor: 'rgba(127,29,29,0.28)',
+    borderWidth: 1,
+    borderColor: 'rgba(252,165,165,0.38)',
+    minHeight: 48,
   },
   oiGoOfflineText: {
     fontSize: 15,
@@ -5580,7 +5492,7 @@ const styles = StyleSheet.create({
   arrivedMeetTitle: {
     fontSize: 14,
     fontWeight: '900',
-    color: '#E0F2FE',
+    color: THEME_COLORS.accentMuted,
     letterSpacing: -0.15,
   },
   arrivedMeetSub: {
@@ -5929,7 +5841,7 @@ const styles = StyleSheet.create({
   },
   tripCommChat: {
     backgroundColor: '#38BDF8',
-    borderColor: '#0284C7',
+    borderColor: THEME_COLORS.accentGreen,
   },
   tripCommChatDisabled: {
     opacity: 0.55,

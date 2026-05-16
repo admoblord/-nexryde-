@@ -11,12 +11,12 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '@/src/services/api';
-import { useAppStore } from '@/src/store/appStore';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { COLORS } from '@/src/constants/theme';
 
 export default function CreatePostScreen() {
   const router = useRouter();
-  const { user } = useAppStore();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [content, setContent] = useState('');
   const [postType, setPostType] = useState('text');
   const [loading, setLoading] = useState(false);
@@ -34,9 +34,14 @@ export default function CreatePostScreen() {
       return;
     }
 
+    if (!driverId || !canCallAuthedApi) {
+      Alert.alert('Session', 'Please wait for sign-in to finish, then try again.');
+      return;
+    }
+
     setLoading(true);
     try {
-      await api.post(`/community/posts/create?driver_id=${user?.id}`, {
+      await api.post(`/community/posts/create?driver_id=${driverId}`, {
         content: content.trim(),
         post_type: postType,
         images: [],

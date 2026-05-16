@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -6,6 +6,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BACKEND_URL, formatApiDetail, getAuthHeaders } from '@/src/services/api';
 import { COLORS, FONT_SIZE, SPACING, BORDER_RADIUS } from '@/src/constants/theme';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
+import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 type VerificationState = {
   step?: string;
@@ -23,13 +26,22 @@ type VerificationState = {
 export default function DriverVerificationStatusScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const { storeReady, token, canCallAuthedApi } = useAuthedApiReady();
+  const surf = useOnboardingSurfaces();
   const driverId = String(params.driver_id || '');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => Boolean(driverId));
   const [status, setStatus] = useState<VerificationState>({});
 
-  const loadStatus = async () => {
+  const loadStatus = useCallback(async () => {
     if (!driverId) {
       setLoading(false);
+      return;
+    }
+    if (!token) {
+      setLoading(false);
+      Alert.alert('Session expired', 'Please sign in again to check your verification status.', [
+        { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
+      ]);
       return;
     }
     setLoading(true);
@@ -61,11 +73,20 @@ export default function DriverVerificationStatusScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [driverId, params.phone, params.name, params.email, router, token]);
 
   useEffect(() => {
+    if (!driverId) {
+      setLoading(false);
+      return;
+    }
+    if (!storeReady) return;
+    if (!canCallAuthedApi) {
+      setLoading(false);
+      return;
+    }
     void loadStatus();
-  }, [driverId]);
+  }, [driverId, storeReady, canCallAuthedApi, loadStatus]);
 
   const isRejected = status.step === 'documents_rejected' || status.verification_status === 'rejected';
   const title = isRejected ? 'Documents need correction' : 'Documents under review';
@@ -73,24 +94,43 @@ export default function DriverVerificationStatusScreen() {
     ? (status.verification?.rejection_reason || 'Your documents need correction. Please retake and resubmit the required files.')
     : 'Your documents have been submitted and are waiting for review. You do not need to upload them again unless they are rejected.';
 
+  if (!storeReady) {
+    return <AuthLoadingGate />;
+  }
+
+  const needsSignIn = storeReady && driverId.length > 0 && !token;
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: surf.screen }]}>
       <SafeAreaView style={styles.safe}>
-        <View style={styles.card}>
+        <View style={[styles.card, { backgroundColor: surf.card, borderWidth: StyleSheet.hairlineWidth, borderColor: surf.border }]}>
           <LinearGradient
             colors={isRejected ? ['#F97316', '#EF4444'] : [COLORS.accentGreen, COLORS.accentBlue]}
             style={styles.iconCircle}
           >
             <Ionicons name={isRejected ? 'alert-circle' : 'shield-checkmark'} size={42} color={COLORS.white} />
           </LinearGradient>
-          <Text style={styles.title}>{loading ? 'Checking verification...' : title}</Text>
+          <Text style={[styles.title, { color: surf.text }]}>
+            {needsSignIn ? 'Sign in required' : loading ? 'Checking verification...' : title}
+          </Text>
           {loading ? (
-            <ActivityIndicator color={COLORS.accentGreen} style={{ marginTop: SPACING.lg }} />
+            <ActivityIndicator color={surf.accent} style={{ marginTop: SPACING.lg }} />
+          ) : needsSignIn ? (
+            <>
+              <Text style={[styles.message, { color: surf.textSecondary }]}>
+                Your session is not active. Sign in to refresh your document review status.
+              </Text>
+              <TouchableOpacity style={styles.primaryBtn} onPress={() => router.replace('/(auth)/login')}>
+                <Text style={styles.primaryText}>Sign in</Text>
+              </TouchableOpacity>
+            </>
           ) : (
             <>
-              <Text style={styles.message}>{message}</Text>
+              <Text style={[styles.message, { color: surf.textSecondary }]}>{message}</Text>
               {status.verification?.submitted_at && (
-                <Text style={styles.meta}>Submitted: {String(status.verification.submitted_at).slice(0, 19).replace('T', ' ')}</Text>
+                <Text style={[styles.meta, { color: surf.textMuted }]}>
+                  Submitted: {String(status.verification.submitted_at).slice(0, 19).replace('T', ' ')}
+                </Text>
               )}
               <TouchableOpacity style={styles.primaryBtn} onPress={() => void loadStatus()}>
                 <Text style={styles.primaryText}>Refresh status</Text>
@@ -111,8 +151,11 @@ export default function DriverVerificationStatusScreen() {
                   <Text style={styles.secondaryText}>Resubmit documents</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity style={styles.secondaryBtn} onPress={() => router.replace('/(auth)/login')}>
-                  <Text style={styles.secondaryText}>Back to sign in</Text>
+                <TouchableOpacity
+                  style={[styles.secondaryBtn, { borderColor: surf.border }]}
+                  onPress={() => router.replace('/(auth)/login')}
+                >
+                  <Text style={[styles.secondaryText, { color: surf.text }]}>Back to sign in</Text>
                 </TouchableOpacity>
               )}
             </>

@@ -32,6 +32,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -155,6 +157,8 @@ export default function RiderProfileScreen() {
     [flow.padH, flow.width],
   );
   const { user, logout, setUser } = useAppStore();
+  const { canCallAuthedApi } = useAuthedApiReady();
+  const { userId } = useAuthedUserId();
 
   const [profileImage, setProfileImage] = useState<string | null>(user?.profile_image || null);
   const [showDriverModal, setShowDriverModal] = useState(false);
@@ -182,16 +186,16 @@ export default function RiderProfileScreen() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      if (!user?.id) return;
+      if (!userId || !canCallAuthedApi) return;
       setLoadingTrust(true);
 
       try {
-        const trustRes = await getUserTrustSummary(user.id);
+        const trustRes = await getUserTrustSummary(userId);
         if (mounted) setTrustSummary(trustRes.data);
       } catch { /* non-critical */ }
 
       try {
-        const userRes = await getUser(user.id);
+        const userRes = await getUser(userId);
         if (mounted && userRes?.data) {
           const d = userRes.data as Record<string, unknown>;
           setAchievementStats({
@@ -209,11 +213,11 @@ export default function RiderProfileScreen() {
     };
     void load();
     return () => { mounted = false; };
-  }, [user?.id, user?.rating, user?.total_trips]);
+  }, [canCallAuthedApi, userId, user?.rating, user?.total_trips]);
 
   useEffect(() => {
     let mounted = true;
-    if (!user?.id) return undefined;
+    if (!userId || !canCallAuthedApi) return undefined;
     void (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/incentives/referral-code`, { headers: getAuthHeaders() });
@@ -229,13 +233,13 @@ export default function RiderProfileScreen() {
     return () => {
       mounted = false;
     };
-  }, [user?.id]);
+  }, [canCallAuthedApi, userId]);
 
   const saveProfileImage = async (uri: string) => {
     setProfileImage(uri);
-    if (user) {
+    if (user && userId && canCallAuthedApi) {
       setUser({ ...user, profile_image: uri });
-      try { await updateUser(user.id, { profile_image: uri }); } catch { /* silent */ }
+      try { await updateUser(userId, { profile_image: uri }); } catch { /* silent */ }
     }
   };
 
@@ -275,7 +279,7 @@ export default function RiderProfileScreen() {
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try {
-          if (user?.id) await deleteUserAccount(user.id);
+          if (userId && canCallAuthedApi) await deleteUserAccount(userId);
           await logout();
           router.replace('/(auth)/login');
         } catch { Alert.alert('Error', 'Could not delete account right now.'); }
@@ -465,8 +469,8 @@ export default function RiderProfileScreen() {
           <View style={s.grid}>
             <ActionTile icon="create" label="Edit Profile" gradColors={['#1D4ED8', '#2563EB']} tileWidth={actionTileW} onPress={() => router.push('/edit-profile')} />
             <ActionTile icon="time" label="Ride History" gradColors={['#5B21B6', '#7C3AED']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-trips' as any)} />
-            <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/saved-places')} />
-            <ActionTile icon="heart" label="Fav Drivers" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
+            <ActionTile icon="location" label="Saved Places" gradColors={['#065F46', '#059669']} tileWidth={actionTileW} onPress={() => router.push('/rider/saved-places' as any)} />
+            <ActionTile icon="heart-circle" label="Favourites" gradColors={['#9D174D', '#EC4899']} tileWidth={actionTileW} onPress={() => router.push('/rider/favorite-drivers')} />
             <ActionTile icon="wallet" label="Wallet" gradColors={['#0369A1', '#0EA5E9']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)} />
             <ActionTile icon="notifications" label="Alerts" gradColors={['#7C2D12', '#EA580C']} tileWidth={actionTileW} onPress={() => router.push('/(rider-tabs)/rider-notifications' as any)} />
           </View>

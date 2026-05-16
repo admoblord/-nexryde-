@@ -43,6 +43,7 @@ import {
 } from '@/src/services/walletCheckoutSession';
 import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
 // ── Palette ──────────────────────────────────────────────────────────────────
 const C = {
@@ -81,6 +82,7 @@ type TopupState =
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function RiderWalletScreen() {
   const { user } = useAppStore();
+  const { userId: uid, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
 
@@ -108,8 +110,6 @@ export default function RiderWalletScreen() {
   const successPulse = useRef(new Animated.Value(1)).current;
   const verifyShake = useRef(new Animated.Value(0)).current;
   const spinAnim = useRef(new Animated.Value(0)).current;
-
-  const uid = user?.id;
 
   // ── Spin animation for verify loading ───────────────────────────────────────
   useEffect(() => {
@@ -144,7 +144,7 @@ export default function RiderWalletScreen() {
 
   // ── Data load ────────────────────────────────────────────────────────────────
   const load = useCallback(async (): Promise<number | null> => {
-    if (!uid) { setLoading(false); return null; }
+    if (!uid || !canCallAuthedApi) { setLoading(false); return null; }
     try {
       const w = await getWalletMe(15);
       const bal = Number(w.data?.balance ?? 0);
@@ -162,12 +162,12 @@ export default function RiderWalletScreen() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [uid]);
+  }, [uid, canCallAuthedApi]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (!uid) { setReferralCode(''); setReferralUsername(''); setInviteUrl(''); setReferralStats(null); return; }
+    if (!uid || !canCallAuthedApi) { setReferralCode(''); setReferralUsername(''); setInviteUrl(''); setReferralStats(null); return; }
     let cancelled = false;
     const loadIncentives = async () => {
       try {
@@ -206,10 +206,10 @@ export default function RiderWalletScreen() {
     };
     void loadIncentives();
     return () => { cancelled = true; };
-  }, [uid]);
+  }, [uid, canCallAuthedApi]);
 
   const syncPendingCheckout = useCallback(async () => {
-    if (!uid) { setPendingMeta(null); return; }
+    if (!uid || !canCallAuthedApi) { setPendingMeta(null); return; }
     try {
       const res = await getPendingWalletCheckout();
       const d = res.data;
@@ -225,9 +225,11 @@ export default function RiderWalletScreen() {
       const local = await loadWalletCheckoutSession(uid);
       if (local) setPendingMeta({ ref: local.transaction_ref, url: local.checkout_url, amount: local.amount_ngn });
     }
-  }, [uid]);
+  }, [uid, canCallAuthedApi]);
 
-  useEffect(() => { if (uid) void syncPendingCheckout(); }, [uid, syncPendingCheckout]);
+  useEffect(() => {
+    if (uid && canCallAuthedApi) void syncPendingCheckout();
+  }, [uid, canCallAuthedApi, syncPendingCheckout]);
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') { void syncPendingCheckout(); void load(); }
