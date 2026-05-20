@@ -25,7 +25,9 @@ import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
 import {
   buildAchievementWhatsAppMessage,
   computeEarnedRiderBadgeIds,
+  getNextRiderBadgeGoal,
   RIDER_BADGE_META,
+  type RiderAchievementBadgeMeta,
   type RiderBadgeId,
 } from '@/src/utils/riderAchievementBadges';
 import * as ImagePicker from 'expo-image-picker';
@@ -45,6 +47,66 @@ function StatChip({ value, label, color }: { value: string; label: string; color
     <View style={s.statChip}>
       <Text style={[s.statValue, { color }]}>{value}</Text>
       <Text style={s.statLabel}>{label}</Text>
+    </View>
+  );
+}
+
+/* ─── Earned achievement card ───────────────────────────────── */
+function RiderBadgeCard({
+  badge,
+  onShare,
+}: {
+  badge: RiderAchievementBadgeMeta;
+  onShare: () => void;
+}) {
+  return (
+    <LinearGradient
+      colors={[`${badge.accent}22`, 'rgba(15,23,42,0.55)']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={s.badgeCard}
+    >
+      <View style={[s.badgeIconRing, { borderColor: `${badge.accent}66`, backgroundColor: `${badge.accent}18` }]}>
+        <Ionicons name={badge.icon} size={20} color={badge.accent} />
+      </View>
+      <View style={s.badgeTextCol}>
+        <View style={s.badgeTitleRow}>
+          <Text style={s.badgeTitle}>{badge.title}</Text>
+          <View style={[s.badgeEarnedPill, { backgroundColor: `${badge.accent}22`, borderColor: `${badge.accent}44` }]}>
+            <Ionicons name="checkmark-circle" size={11} color={badge.accent} />
+            <Text style={[s.badgeEarnedText, { color: badge.accent }]}>Earned</Text>
+          </View>
+        </View>
+        <Text style={s.badgeSub} numberOfLines={2}>
+          {badge.description}
+        </Text>
+      </View>
+      <TouchableOpacity
+        style={[s.badgeWaBtn, { backgroundColor: 'rgba(37,211,102,0.12)', borderColor: 'rgba(37,211,102,0.28)' }]}
+        onPress={onShare}
+        accessibilityRole="button"
+        accessibilityLabel={`Share ${badge.title} on WhatsApp`}
+        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
+      >
+        <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
+      </TouchableOpacity>
+    </LinearGradient>
+  );
+}
+
+/* ─── Locked badge preview ──────────────────────────────────── */
+function LockedBadgeChip({ badge }: { badge: RiderAchievementBadgeMeta }) {
+  return (
+    <View style={s.lockedBadgeChip}>
+      <View style={s.lockedBadgeIcon}>
+        <Ionicons name={badge.icon} size={14} color="#475569" />
+        <View style={s.lockedBadgeLock}>
+          <Ionicons name="lock-closed" size={9} color="#64748B" />
+        </View>
+      </View>
+      <Text style={s.lockedBadgeTitle} numberOfLines={1}>
+        {badge.title}
+      </Text>
     </View>
   );
 }
@@ -299,13 +361,28 @@ export default function RiderProfileScreen() {
   const tripsFallback = user?.total_trips ?? 0;
   const isVerified = Boolean(user?.is_verified);
 
-  const badgeStats = achievementStats ?? {
-    totalTrips: tripsFallback,
-    rating: Number(user?.rating ?? 5),
-    riderReputationTripCount: user?.rider_reputation_trip_count,
-  };
+  const badgeStats = useMemo(() => {
+    const trips = Math.max(
+      Number(achievementStats?.totalTrips ?? tripsFallback ?? 0),
+      Number(tripsFallback ?? 0),
+    );
+    return {
+      totalTrips: trips,
+      rating: Number(achievementStats?.rating ?? user?.rating ?? 5),
+      riderReputationTripCount:
+        achievementStats?.riderReputationTripCount ?? user?.rider_reputation_trip_count,
+    };
+  }, [
+    achievementStats,
+    tripsFallback,
+    user?.rating,
+    user?.rider_reputation_trip_count,
+  ]);
   const earnedBadgeIds = computeEarnedRiderBadgeIds(badgeStats);
   const earnedBadges = RIDER_BADGE_META.filter((b) => earnedBadgeIds.has(b.id));
+  const lockedBadges = RIDER_BADGE_META.filter((b) => !earnedBadgeIds.has(b.id));
+  const nextBadgeGoal = getNextRiderBadgeGoal(badgeStats);
+  const allBadgesEarned = earnedBadges.length === RIDER_BADGE_META.length;
 
   const resolvedInviteUrl =
     referralInviteUrl.trim() ||
@@ -355,8 +432,21 @@ export default function RiderProfileScreen() {
         {/* ── HERO ── */}
         <LinearGradient colors={['#0A0F1A', '#111827', '#0A1628']} style={s.hero}>
           {/* Top right settings shortcut */}
-          <TouchableOpacity style={s.heroSettings} onPress={() => router.push('/settings')}>
-            <Ionicons name="settings-outline" size={22} color="rgba(255,255,255,0.5)" />
+          <TouchableOpacity
+            style={s.heroSettings}
+            onPress={() => router.push('/settings')}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+          >
+            <Ionicons name="settings-outline" size={20} color="#E2E8F0" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.heroEdit}
+            onPress={() => router.push('/edit-profile')}
+            accessibilityRole="button"
+            accessibilityLabel="Edit profile"
+          >
+            <Ionicons name="create-outline" size={20} color="#E2E8F0" />
           </TouchableOpacity>
 
           <Animated.View style={[s.avatarWrap, { transform: [{ scale: avatarScale }] }]}>
@@ -394,73 +484,110 @@ export default function RiderProfileScreen() {
             </View>
 
             {/* Stats row */}
-            <View style={s.statsRow}>
+            <View style={s.statsGlass}>
               <StatChip value={String(badgeStats.totalTrips)} label="Trips" color="#00D46A" />
               <View style={s.statsDivider} />
               <StatChip value={`${badgeStats.rating.toFixed(1)}★`} label="Rating" color="#FBBF24" />
               <View style={s.statsDivider} />
               <StatChip value={String(memberYear)} label="Member" color="#60A5FA" />
             </View>
-
-            {/* Achievement badges */}
-            <View style={s.achievementsInHero}>
-              <Text style={s.achievementsLabel}>Achievement badges</Text>
-              {earnedBadges.length === 0 ? (
-                <Text style={s.achievementsEmpty}>
-                  Ride with Nexryde to unlock badges like First Ride, 100 Rides, and 5★ Rider.
-                </Text>
-              ) : (
-                <ScrollView
-                  horizontal
-                  nestedScrollEnabled
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={s.badgesRow}
-                >
-                  {earnedBadges.map((b) => (
-                    <LinearGradient
-                      key={b.id}
-                      colors={[`${b.accent}26`, 'rgba(15,23,42,0.4)']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={s.badgeCard}
-                    >
-                      <View style={[s.badgeIconRing, { borderColor: `${b.accent}55` }]}>
-                        <Ionicons name={b.icon} size={17} color={b.accent} />
-                      </View>
-                      <View style={s.badgeTextCol}>
-                        <Text style={s.badgeTitle}>{b.title}</Text>
-                        <Text style={s.badgeSub} numberOfLines={2}>
-                          {b.description}
-                        </Text>
-                      </View>
-                      <TouchableOpacity
-                        style={s.badgeWaBtn}
-                        onPress={() => shareAchievementWhatsApp(b.id)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`Share ${b.title} on WhatsApp`}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}
-                      >
-                        <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
-                      </TouchableOpacity>
-                    </LinearGradient>
-                  ))}
-                </ScrollView>
-              )}
-              {referralCode ? (
-                <TouchableOpacity
-                  style={s.referralWaRow}
-                  onPress={shareReferralWhatsApp}
-                  activeOpacity={0.85}
-                  accessibilityRole="button"
-                  accessibilityLabel="Share referral link on WhatsApp"
-                >
-                  <Ionicons name="logo-whatsapp" size={20} color="#25D366" />
-                  <Text style={s.referralWaText}>Share referral link on WhatsApp</Text>
-                  <Ionicons name="chevron-forward" size={16} color="#64748B" />
-                </TouchableOpacity>
-              ) : null}
-            </View>
           </Animated.View>
+
+          {/* Achievements — outside fade animation (Android layout safe) */}
+          <View style={s.achievementsPanel}>
+            <View style={s.achievementsHeader}>
+              <View style={s.achievementsHeaderLeft}>
+                <View style={s.achievementsIconWrap}>
+                  <Ionicons name="ribbon" size={16} color="#00D46A" />
+                </View>
+                <Text style={s.achievementsTitle}>Achievements</Text>
+              </View>
+              <View style={s.achievementsCountPill}>
+                <Text style={s.achievementsCountText}>
+                  {earnedBadges.length}/{RIDER_BADGE_META.length}
+                </Text>
+              </View>
+            </View>
+
+            {allBadgesEarned ? (
+              <View style={s.achievementsCompleteBanner}>
+                <Ionicons name="sparkles" size={16} color="#FBBF24" />
+                <Text style={s.achievementsCompleteText}>You unlocked every rider badge — nice work!</Text>
+              </View>
+            ) : nextBadgeGoal ? (
+              <View style={s.progressBlock}>
+                <View style={s.progressHeader}>
+                  <Text style={s.progressLabel}>Next: {nextBadgeGoal.title}</Text>
+                  <Text style={[s.progressPct, { color: nextBadgeGoal.accent }]}>
+                    {Math.round(nextBadgeGoal.progress * 100)}%
+                  </Text>
+                </View>
+                <View style={s.progressTrack}>
+                  <View
+                    style={[
+                      s.progressFill,
+                      {
+                        width: `${Math.max(4, Math.round(nextBadgeGoal.progress * 100))}%` as any,
+                        backgroundColor: nextBadgeGoal.accent,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={s.progressDetail}>{nextBadgeGoal.detail}</Text>
+              </View>
+            ) : null}
+
+            {earnedBadges.length > 0 ? (
+              <View style={s.badgesRow}>
+                {earnedBadges.map((b) => (
+                  <RiderBadgeCard
+                    key={b.id}
+                    badge={b}
+                    onShare={() => shareAchievementWhatsApp(b.id)}
+                  />
+                ))}
+              </View>
+            ) : (
+              <Text style={s.achievementsEmpty}>
+                Complete your first trip to earn the First Ride badge and share it with friends.
+              </Text>
+            )}
+
+            {lockedBadges.length > 0 ? (
+              <>
+                <Text style={s.lockedSectionLabel}>Up next</Text>
+                <View style={s.lockedRow}>
+                  {lockedBadges.map((b) => (
+                    <LockedBadgeChip key={b.id} badge={b} />
+                  ))}
+                </View>
+              </>
+            ) : null}
+
+            {referralCode ? (
+              <TouchableOpacity
+                style={s.referralWaRow}
+                onPress={shareReferralWhatsApp}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Share referral link on WhatsApp"
+              >
+                <LinearGradient
+                  colors={['rgba(37,211,102,0.14)', 'rgba(37,211,102,0.06)']}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={s.referralWaGrad}
+                >
+                  <Ionicons name="logo-whatsapp" size={22} color="#25D366" />
+                  <View style={s.referralWaCopy}>
+                    <Text style={s.referralWaTitle}>Invite friends</Text>
+                    <Text style={s.referralWaSub}>Share your link — earn ₦500 each</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#64748B" />
+                </LinearGradient>
+              </TouchableOpacity>
+            ) : null}
+          </View>
         </LinearGradient>
 
         {/* ── QUICK ACTIONS GRID ── */}
@@ -630,12 +757,27 @@ const s = StyleSheet.create({
   },
   heroSettings: {
     position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    top: 16,
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroEdit: {
+    position: 'absolute',
+    top: 16,
+    right: 64,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -703,76 +845,199 @@ const s = StyleSheet.create({
     marginBottom: 18,
   },
   roleBadgeText: { fontSize: 11, fontWeight: '700', color: '#60A5FA' },
-  statsRow: { flexDirection: 'row', alignItems: 'center', gap: 0 },
-  statChip: { alignItems: 'center', paddingHorizontal: 20 },
+  statsGlass: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginHorizontal: 20,
+    marginTop: 4,
+    paddingVertical: 14,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  statChip: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
   statValue: { fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
   statLabel: { fontSize: 11, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   statsDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.07)' },
 
-  achievementsInHero: {
+  achievementsPanel: {
     alignSelf: 'stretch',
-    marginTop: 20,
-    paddingHorizontal: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.06)',
+    marginTop: 18,
+    marginHorizontal: 16,
+    paddingHorizontal: 14,
     paddingTop: 14,
+    paddingBottom: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
   },
-  achievementsLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#475569',
-    letterSpacing: 1.2,
-    marginBottom: 10,
-    textAlign: 'center',
+  achievementsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
   },
+  achievementsHeaderLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  achievementsIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0,212,106,0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(0,212,106,0.25)',
+  },
+  achievementsTitle: { fontSize: 14, fontWeight: '800', color: '#E2E8F0', letterSpacing: -0.2 },
+  achievementsCountPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  achievementsCountText: { fontSize: 11, fontWeight: '800', color: '#94A3B8' },
+  achievementsCompleteBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(251,191,36,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,0.2)',
+    marginBottom: 12,
+  },
+  achievementsCompleteText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#CBD5E1', lineHeight: 17 },
+  progressBlock: { marginBottom: 12, gap: 6 },
+  progressHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  progressLabel: { fontSize: 12, fontWeight: '700', color: '#94A3B8' },
+  progressPct: { fontSize: 12, fontWeight: '900' },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  progressFill: { height: '100%', borderRadius: 3 },
+  progressDetail: { fontSize: 11, fontWeight: '600', color: '#64748B' },
   achievementsEmpty: {
     fontSize: 12,
     fontWeight: '600',
     color: '#64748B',
     textAlign: 'center',
-    lineHeight: 17,
-    paddingHorizontal: 8,
+    lineHeight: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 4,
   },
-  badgesRow: { gap: 10, paddingBottom: 2, justifyContent: 'center', flexGrow: 1 },
+  badgesRow: { flexDirection: 'column', gap: 10, width: '100%', marginBottom: 4 },
   badgeCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     borderRadius: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    maxWidth: 220,
-    minWidth: 168,
+    borderColor: 'rgba(255,255,255,0.1)',
+    width: '100%',
   },
   badgeIconRing: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1.5,
-    backgroundColor: 'rgba(0,0,0,0.2)',
   },
-  badgeTextCol: { flex: 1, gap: 2 },
-  badgeTitle: { fontSize: 12, fontWeight: '900', color: '#F1F5F9' },
-  badgeSub: { fontSize: 10, fontWeight: '600', color: '#94A3B8', lineHeight: 14 },
-  badgeWaBtn: { padding: 4, justifyContent: 'center' },
-  referralWaRow: {
+  badgeTextCol: { flexShrink: 1, flexGrow: 1, minWidth: 0, gap: 3 },
+  badgeTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  badgeTitle: { fontSize: 13, fontWeight: '900', color: '#F1F5F9' },
+  badgeEarnedPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 14,
-    marginHorizontal: 4,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    backgroundColor: 'rgba(37,211,102,0.08)',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(37,211,102,0.22)',
   },
-  referralWaText: { flex: 1, fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
+  badgeEarnedText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.3 },
+  badgeSub: { fontSize: 11, fontWeight: '600', color: '#94A3B8', lineHeight: 15 },
+  badgeWaBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+  },
+  lockedSectionLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#475569',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  lockedRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, justifyContent: 'center' },
+  lockedBadgeChip: {
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.06)',
+    minWidth: 96,
+    flex: 1,
+    maxWidth: 120,
+  },
+  lockedBadgeIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
+  lockedBadgeLock: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: '#1E293B',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  lockedBadgeTitle: { fontSize: 10, fontWeight: '700', color: '#64748B', textAlign: 'center' },
+  referralWaRow: { marginTop: 12, borderRadius: 14, overflow: 'hidden' },
+  referralWaGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(37,211,102,0.25)',
+    borderRadius: 14,
+  },
+  referralWaCopy: { flex: 1, gap: 2 },
+  referralWaTitle: { fontSize: 13, fontWeight: '800', color: '#E2E8F0' },
+  referralWaSub: { fontSize: 11, fontWeight: '600', color: '#64748B' },
 
   /* Grid */
   gridSection: { paddingTop: 24, paddingBottom: 4 },

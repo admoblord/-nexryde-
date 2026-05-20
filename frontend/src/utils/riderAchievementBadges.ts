@@ -55,6 +55,69 @@ export function computeEarnedRiderBadgeIds(stats: {
   return earned;
 }
 
+export type RiderBadgeGoal = {
+  badgeId: RiderBadgeId;
+  title: string;
+  accent: string;
+  /** 0–1 progress toward unlocking this badge */
+  progress: number;
+  detail: string;
+};
+
+/** Next badge the rider is working toward; null when all three are earned. */
+export function getNextRiderBadgeGoal(stats: {
+  totalTrips: number;
+  rating: number;
+  riderReputationTripCount?: number;
+}): RiderBadgeGoal | null {
+  const earned = computeEarnedRiderBadgeIds(stats);
+  const meta = (id: RiderBadgeId) => RIDER_BADGE_META.find((b) => b.id === id)!;
+
+  if (!earned.has('first_ride')) {
+    const m = meta('first_ride');
+    return {
+      badgeId: m.id,
+      title: m.title,
+      accent: m.accent,
+      progress: Math.min(1, Math.max(0, stats.totalTrips)),
+      detail: 'Book and complete your first trip',
+    };
+  }
+
+  if (!earned.has('rides_100')) {
+    const m = meta('rides_100');
+    const remaining = Math.max(0, 100 - stats.totalTrips);
+    return {
+      badgeId: m.id,
+      title: m.title,
+      accent: m.accent,
+      progress: Math.min(1, stats.totalTrips / 100),
+      detail: remaining === 0 ? 'Almost there' : `${remaining} trip${remaining === 1 ? '' : 's'} to go`,
+    };
+  }
+
+  if (!earned.has('five_star_rider')) {
+    const m = meta('five_star_rider');
+    const count = stats.riderReputationTripCount ?? 0;
+    const need = Math.max(0, MIN_DRIVER_RATINGS_FOR_FIVE_STAR_BADGE - count);
+    const ratingOk = Math.round(Number(stats.rating || 0) * 10) / 10 >= 5.0;
+    return {
+      badgeId: m.id,
+      title: m.title,
+      accent: m.accent,
+      progress: Math.min(1, count / MIN_DRIVER_RATINGS_FOR_FIVE_STAR_BADGE),
+      detail:
+        need > 0
+          ? `${need} more driver rating${need === 1 ? '' : 's'}`
+          : ratingOk
+            ? 'Keep your 5.0★ average'
+            : 'Hold a 5.0★ average after 5 ratings',
+    };
+  }
+
+  return null;
+}
+
 /** Full WhatsApp body: achievement line + referral CTA (invite URL appended by caller). */
 export function buildAchievementWhatsAppMessage(
   badgeId: RiderBadgeId,
