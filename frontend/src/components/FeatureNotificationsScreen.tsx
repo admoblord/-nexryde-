@@ -49,11 +49,33 @@ const NOTIF_ICON: Record<string, { icon: string; color: string }> = {
   guarantee_topup:       { icon: 'wallet', color: '#16A34A' },
   shield_update:         { icon: 'shield-checkmark', color: '#0891B2' },
   payment_received:      { icon: 'cash', color: '#16A34A' },
+  enforcement:           { icon: 'shield-half', color: '#D97706' },
+  enforcement_warning:   { icon: 'alert-circle-outline', color: '#F59E0B' },
+  enforcement_timeout:   { icon: 'time-outline', color: '#EA580C' },
+  enforcement_suspended: { icon: 'pause-circle', color: '#EF4444' },
+  enforcement_deactivated: { icon: 'ban', color: '#991B1B' },
+  enforcement_booking_blocked: { icon: 'calendar-outline', color: '#EA580C' },
+  enforcement_suspended_long: { icon: 'lock-closed', color: '#991B1B' },
+  surge_active:          { icon: 'flash-outline', color: '#F59E0B' },
+  surge_elevated:        { icon: 'flash', color: '#EA580C' },
+  surge_high:            { icon: 'thunderstorm', color: '#EF4444' },
+  surge_peak_guide:      { icon: 'time-outline', color: '#7C3AED' },
   default:               { icon: 'notifications', color: '#6B7280' },
 };
 
 function notifMeta(type: string) {
+  if (type.startsWith('enforcement_')) {
+    return NOTIF_ICON[type] || NOTIF_ICON.enforcement;
+  }
+  if (type.startsWith('surge_')) {
+    return NOTIF_ICON[type] || NOTIF_ICON.surge_active;
+  }
   return NOTIF_ICON[type] || NOTIF_ICON.default;
+}
+
+function surgeNotifRoute(data?: Record<string, unknown>): string | null {
+  const route = data?.action_route;
+  return typeof route === 'string' && route.length > 0 ? route : null;
 }
 
 function relativeTime(raw: string): string {
@@ -263,11 +285,15 @@ export default function FeatureNotificationsScreen({ role }: Props) {
               ) : (
                 backendNotifs.map((notif) => {
                   const meta = notifMeta(notif.type);
+                  const heatmapRoute = role === 'driver' ? surgeNotifRoute(notif.data) : null;
                   return (
                     <TouchableOpacity
                       key={notif.id}
                       style={[styles.notifCard, !notif.read && styles.notifCardUnread]}
-                      onPress={() => void markNotifRead(notif.id)}
+                      onPress={() => {
+                        void markNotifRead(notif.id);
+                        if (heatmapRoute) router.push(heatmapRoute as any);
+                      }}
                       activeOpacity={0.8}
                     >
                       <View style={[styles.notifIconWrap, { backgroundColor: meta.color + '18' }]}>
@@ -278,7 +304,13 @@ export default function FeatureNotificationsScreen({ role }: Props) {
                           <Text style={styles.notifTitle} numberOfLines={1}>{notif.title}</Text>
                           {!notif.read && <View style={styles.unreadDot} />}
                         </View>
-                        <Text style={styles.notifMessage} numberOfLines={3}>{notif.message}</Text>
+                        <Text style={styles.notifMessage} numberOfLines={6}>{notif.message}</Text>
+                        {heatmapRoute ? (
+                          <View style={styles.surgeCtaRow}>
+                            <Ionicons name="flame" size={13} color={COLORS.accentBlue} />
+                            <Text style={styles.surgeCtaText}>Open Demand Heatmap</Text>
+                          </View>
+                        ) : null}
                         <Text style={styles.notifTime}>{relativeTime(notif.created_at)}</Text>
                       </View>
                     </TouchableOpacity>
@@ -448,6 +480,20 @@ const styles = StyleSheet.create({
   unreadDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: COLORS.accentBlue, flexShrink: 0 },
   notifMessage: { fontSize: FONT_SIZE.sm, color: COLORS.lightTextSecondary, lineHeight: 19, fontWeight: '600' },
   notifTime: { fontSize: FONT_SIZE.xs, color: COLORS.lightTextMuted, fontWeight: '700', marginTop: 2 },
+  surgeCtaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    marginTop: 6,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: BORDER_RADIUS.full,
+    backgroundColor: COLORS.infoSoft,
+    borderWidth: 1,
+    borderColor: COLORS.info,
+  },
+  surgeCtaText: { fontSize: FONT_SIZE.xs, fontWeight: '800', color: COLORS.accentBlue },
   // Feature update cards
   featCard: {
     backgroundColor: COLORS.white,

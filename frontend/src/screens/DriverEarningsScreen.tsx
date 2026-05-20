@@ -19,10 +19,18 @@ import { getDriverBankDetails, getDriverEarningsDashboard } from '@/src/services
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 
+function formatTripHours(totalTimeMins: number): string {
+  const hrs = totalTimeMins / 60;
+  if (hrs <= 0) return '0';
+  if (hrs < 10) return hrs.toFixed(1);
+  return String(Math.round(hrs));
+}
+
 type Period = 'today' | 'week' | 'month';
 
 export default function DriverEarningsScreen() {
   const router = useRouter();
+  const user = useAppStore((s) => s.user);
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [period, setPeriod] = useState<Period>('today');
   const [loading, setLoading] = useState(true);
@@ -170,12 +178,37 @@ export default function DriverEarningsScreen() {
           </View>
         </View>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statBox}>
-            <Ionicons name="car" size={24} color={COLORS.info} />
-            <Text style={styles.statValue}>{Number(summary.total_trips || 0)}</Text>
-            <Text style={styles.statLabel}>Trips ({periodLabel})</Text>
+        <View style={styles.driverStatsCard}>
+          <Text style={styles.driverStatsTitle}>Your stats</Text>
+          <View style={styles.driverStatsRow}>
+            <View style={styles.driverStatCell}>
+              <Ionicons name="briefcase-outline" size={22} color={COLORS.info} />
+              <Text style={styles.driverStatValue}>{Number(summary.total_trips || 0)}</Text>
+              <Text style={styles.driverStatLabel}>Trips</Text>
+              <Text style={styles.driverStatHint}>{periodLabel}</Text>
+            </View>
+            <View style={styles.driverStatDivider} />
+            <View style={styles.driverStatCell}>
+              <Ionicons name="time-outline" size={22} color={COLORS.accentBlue} />
+              <Text style={styles.driverStatValue}>
+                {formatTripHours(Number(summary.total_time_mins || 0))}
+              </Text>
+              <Text style={styles.driverStatLabel}>Hours</Text>
+              <Text style={styles.driverStatHint}>On trip</Text>
+            </View>
+            <View style={styles.driverStatDivider} />
+            <View style={styles.driverStatCell}>
+              <Ionicons name="star" size={22} color="#FBBF24" />
+              <Text style={styles.driverStatValue}>
+                {typeof user?.rating === 'number' && user.rating > 0 ? user.rating.toFixed(1) : '—'}
+              </Text>
+              <Text style={styles.driverStatLabel}>Rating</Text>
+              <Text style={styles.driverStatHint}>Lifetime</Text>
+            </View>
           </View>
+        </View>
+
+        <View style={styles.statsRow}>
           <View style={styles.statBox}>
             <Ionicons name="speedometer" size={24} color={COLORS.accent} />
             <Text style={styles.statValue}>{Number(summary.total_distance_km || 0).toFixed(1)}km</Text>
@@ -185,6 +218,11 @@ export default function DriverEarningsScreen() {
             <Ionicons name="stats-chart" size={24} color={COLORS.success} />
             <Text style={styles.statValue}>{CURRENCY}{Number(averages.per_trip || 0).toFixed(0)}</Text>
             <Text style={styles.statLabel}>Per Trip</Text>
+          </View>
+          <View style={styles.statBox}>
+            <Ionicons name="trending-up" size={24} color={COLORS.info} />
+            <Text style={styles.statValue}>{CURRENCY}{Number(projections.daily || 0).toLocaleString()}</Text>
+            <Text style={styles.statLabel}>Projected</Text>
           </View>
         </View>
 
@@ -465,6 +503,53 @@ const styles = StyleSheet.create({
   periodBtnActive: { backgroundColor: COLORS.accent },
   periodText: { fontSize: FONT_SIZE.sm, fontWeight: '700', color: COLORS.gray400 },
   periodTextActive: { fontWeight: '900', color: COLORS.primary },
+  driverStatsCard: {
+    backgroundColor: COLORS.white,
+    borderRadius: BORDER_RADIUS.xl,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    ...SHADOWS.sm,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  driverStatsTitle: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 1.1,
+    textTransform: 'uppercase',
+    marginBottom: SPACING.md,
+  },
+  driverStatsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  driverStatCell: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 4,
+  },
+  driverStatDivider: {
+    width: StyleSheet.hairlineWidth,
+    height: 52,
+    backgroundColor: '#E2E8F0',
+  },
+  driverStatValue: {
+    fontSize: FONT_SIZE.xl,
+    fontWeight: '900',
+    color: '#0F172A',
+    fontVariant: ['tabular-nums'],
+  },
+  driverStatLabel: {
+    fontSize: FONT_SIZE.sm,
+    fontWeight: '800',
+    color: '#334155',
+  },
+  driverStatHint: {
+    fontSize: FONT_SIZE.xs,
+    fontWeight: '600',
+    color: '#94A3B8',
+  },
   statsRow: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
   statBox: { flex: 1, backgroundColor: COLORS.white, borderRadius: BORDER_RADIUS.xl, padding: SPACING.md, alignItems: 'center', ...SHADOWS.sm },
   statValue: { fontSize: FONT_SIZE.lg, fontWeight: '900', color: '#0F172A', marginTop: SPACING.sm },

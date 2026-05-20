@@ -27,6 +27,7 @@ import {
   AppState,
   ScrollView,
   Linking,
+  useWindowDimensions,
   type NativeSyntheticEvent,
 } from 'react-native';
 import * as Haptics from 'expo-haptics';
@@ -60,12 +61,15 @@ import {
 import DriverArrivedPickupDock from '@/src/components/driver/DriverArrivedPickupDock';
 import DriverStartTripDock from '@/src/components/driver/DriverStartTripDock';
 import DriverOngoingTripDock from '@/src/components/driver/DriverOngoingTripDock';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { DRIVER_OFFER_COUNTDOWN_SECONDS } from '@/src/constants/driverOffer';
 import {
   DOCK_BLUR_INTENSITY,
   DOCK_TOP_RADIUS,
   HANDLE_GRADIENT_DEFAULT,
 } from '@/src/components/driver/driverDockTheme';
+import { formatPickupWaitLabel } from '@/src/components/driver/driverDockUtils';
+import { driverTripProgressPercent } from '@/src/utils/driverOngoingDisplay';
 import {
   fetchGoogleDrivingRoutes,
   fetchDirections,
@@ -242,18 +246,20 @@ export const NEXRYDE_MAP_STYLE: MapStyleElement[] = [
   { featureType: 'water',              elementType: 'geometry',            stylers: [{ color: '#071524' }] },
   { featureType: 'water',              elementType: 'labels.text.fill',    stylers: [{ color: '#2c5282' }] },
 
-  /* ── Roads ── */
-  { featureType: 'road',               elementType: 'geometry',            stylers: [{ color: '#192942' }] },
-  { featureType: 'road',               elementType: 'geometry.stroke',     stylers: [{ color: '#0c1a2e' }] },
-  { featureType: 'road',               elementType: 'labels.text.fill',    stylers: [{ color: '#7a9ec9' }] },
-  { featureType: 'road',               elementType: 'labels.text.stroke',  stylers: [{ color: '#0c1220' }] },
-  { featureType: 'road.highway',       elementType: 'geometry',            stylers: [{ color: '#1e3a68' }] },
-  { featureType: 'road.highway',       elementType: 'geometry.stroke',     stylers: [{ color: '#0f2045' }] },
-  { featureType: 'road.highway',       elementType: 'labels.text.fill',    stylers: [{ color: '#6b9edf' }] },
-  { featureType: 'road.arterial',      elementType: 'geometry',            stylers: [{ color: '#172b4a' }] },
-  { featureType: 'road.arterial',      elementType: 'labels.text.fill',    stylers: [{ color: '#6b8fb5' }] },
-  { featureType: 'road.local',         elementType: 'geometry',            stylers: [{ color: '#111e33' }] },
-  { featureType: 'road.local',         elementType: 'labels.text.fill',    stylers: [{ color: '#4a6580' }] },
+  /* ── Roads (thicker, higher-contrast “tick” lines for driving) ── */
+  { featureType: 'road',               elementType: 'geometry',            stylers: [{ color: '#243a5c' }] },
+  { featureType: 'road',               elementType: 'geometry.stroke',     stylers: [{ color: '#4a6a9a', weight: 1.2 }] },
+  { featureType: 'road',               elementType: 'labels.text.fill',    stylers: [{ color: '#9ec5ef' }] },
+  { featureType: 'road',               elementType: 'labels.text.stroke',  stylers: [{ color: '#0c1220', weight: 2 }] },
+  { featureType: 'road.highway',       elementType: 'geometry',            stylers: [{ color: '#2a4f82' }] },
+  { featureType: 'road.highway',       elementType: 'geometry.stroke',     stylers: [{ color: '#6b9ee8', weight: 1.8 }] },
+  { featureType: 'road.highway',       elementType: 'labels.text.fill',    stylers: [{ color: '#b8d4f5' }] },
+  { featureType: 'road.arterial',      elementType: 'geometry',            stylers: [{ color: '#1f3558' }] },
+  { featureType: 'road.arterial',      elementType: 'geometry.stroke',     stylers: [{ color: '#5a82b8', weight: 1.4 }] },
+  { featureType: 'road.arterial',      elementType: 'labels.text.fill',    stylers: [{ color: '#8eb4dc' }] },
+  { featureType: 'road.local',         elementType: 'geometry',            stylers: [{ color: '#1a2d48' }] },
+  { featureType: 'road.local',         elementType: 'geometry.stroke',     stylers: [{ color: '#3d5f88', weight: 1 }] },
+  { featureType: 'road.local',         elementType: 'labels.text.fill',    stylers: [{ color: '#6a90b8' }] },
 
   /* ── Cities & admin labels (readable while moving) ── */
   { featureType: 'administrative',                    elementType: 'geometry',            stylers: [{ color: '#1a2a42' }] },
@@ -294,6 +300,7 @@ export interface ActiveTrip {
   rider_phone?: string | null;
   pickup_code_verified?: boolean;
   security_code_verified?: boolean;
+  pickup_code_required?: boolean;
   arrived_at?: string | null;
   started_at?: string | null;
   fare?: number | null;
@@ -416,6 +423,7 @@ function CarMarker({
         </View>
       ) : null}
       <Animated.View style={[markerStyles.container, { transform: [{ translateY }, { scaleX }] }]}>
+        {blue ? <View style={markerStyles.accuracyRing} /> : null}
         <Animated.View
           style={[
             blue ? markerStyles.glowRingBlue : markerStyles.glowRing,
@@ -439,27 +447,62 @@ function CarMarker({
 function PickupMarker() {
   return (
     <View style={markerStyles.destWrap}>
-      <LinearGradient colors={['#4285F4', '#1d4ed8']} style={markerStyles.destCircle}>
+      <LinearGradient colors={['#22C55E', '#16A34A']} style={markerStyles.destCircle}>
         <Ionicons name="location" size={13} color="#FFF" />
       </LinearGradient>
-      <View style={markerStyles.stopLabel}>
+      <View style={[markerStyles.stopLabel, { backgroundColor: '#15803D' }]}>
         <Text style={markerStyles.stopLabelText}>A</Text>
       </View>
-      <View style={[markerStyles.destStem, { backgroundColor: '#4285F4' }]} />
+      <View style={[markerStyles.destStem, { backgroundColor: '#22C55E' }]} />
     </View>
   );
 }
 
-function DropoffMarker() {
+function MapStopAddressCallout({ label }: { label: string }) {
+  if (!label.trim()) return null;
+  return (
+    <View style={markerStyles.addrCallout}>
+      <Text style={markerStyles.addrCalloutTxt} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function DropoffMarker({ large = false, addressLabel }: { large?: boolean; addressLabel?: string }) {
+  const sz = large ? 36 : 28;
+  const labelSz = large ? 11 : 9;
   return (
     <View style={markerStyles.destWrap}>
-      <LinearGradient colors={['#ef4444', '#dc2626']} style={markerStyles.destCircle}>
-        <Ionicons name="flag" size={12} color="#FFF" />
+      <LinearGradient
+        colors={['#ef4444', '#dc2626']}
+        style={[markerStyles.destCircle, large && { width: sz, height: sz, borderRadius: sz / 2 }]}
+      >
+        <Ionicons name="flag" size={large ? 15 : 12} color="#FFF" />
       </LinearGradient>
-      <View style={[markerStyles.stopLabel, markerStyles.stopLabelB]}>
-        <Text style={markerStyles.stopLabelText}>B</Text>
+      <View style={[markerStyles.stopLabel, markerStyles.stopLabelB, large && markerStyles.stopLabelLg]}>
+        <Text style={[markerStyles.stopLabelText, { fontSize: labelSz }]}>B</Text>
       </View>
-      <View style={[markerStyles.destStem, { backgroundColor: '#ef4444' }]} />
+      <View style={[markerStyles.destStem, { backgroundColor: '#ef4444' }, large && { height: 8 }]} />
+      {large ? <MapStopAddressCallout label={addressLabel || ''} /> : null}
+    </View>
+  );
+}
+
+function PickupMarkerLarge({ addressLabel }: { addressLabel?: string }) {
+  return (
+    <View style={markerStyles.destWrap}>
+      <LinearGradient
+        colors={['#22C55E', '#16A34A']}
+        style={[markerStyles.destCircle, { width: 36, height: 36, borderRadius: 18 }]}
+      >
+        <Ionicons name="location" size={15} color="#FFF" />
+      </LinearGradient>
+      <View style={[markerStyles.stopLabel, { backgroundColor: '#15803D' }, markerStyles.stopLabelLg]}>
+        <Text style={[markerStyles.stopLabelText, { fontSize: 11 }]}>A</Text>
+      </View>
+      <View style={[markerStyles.destStem, { backgroundColor: '#22C55E', height: 8 }]} />
+      <MapStopAddressCallout label={addressLabel || ''} />
     </View>
   );
 }
@@ -567,6 +610,7 @@ export default function DriverLiveMapView({
   suppressTripDock = false,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { height: winHeight } = useWindowDimensions();
   const flow = useFlowLayout();
   const router = useRouter();
   const { user } = useAppStore();
@@ -590,7 +634,7 @@ export default function DriverLiveMapView({
   /** Premium pickup dock: chevron in heading bar can collapse the sheet for more map. */
   const [pickupNavDockExpanded, setPickupNavDockExpanded] = useState(true);
   /** “You’ve arrived” dock — same collapse pattern. */
-  const [arrivedDockExpanded, setArrivedDockExpanded] = useState(true);
+  const [arrivedDockExpanded, setArrivedDockExpanded] = useState(false);
   /** “Start trip” dock (code verified, rider in car). */
   const [startTripDockExpanded, setStartTripDockExpanded] = useState(true);
   /** Metered trip — drop-off leg. */
@@ -849,9 +893,54 @@ export default function DriverLiveMapView({
     }
   }, [driverCoords]);
 
+  /* ── Extract pickup/dropoff coords (early — used by recenter + map) ── */
+  const getCoord = (loc: any): { lat: number; lng: number } | null => {
+    if (!loc) return null;
+    if (typeof loc === 'object' && 'lat' in loc) return { lat: Number(loc.lat), lng: Number(loc.lng) };
+    if (typeof loc === 'object' && 'latitude' in loc)
+      return { lat: Number(loc.latitude), lng: Number(loc.longitude) };
+    return null;
+  };
+  const pickupCoord = activeTrip ? getCoord(activeTrip.pickup_location) : null;
+  const dropCoord = activeTrip ? getCoord(activeTrip.dropoff_location) : null;
+
   /* ── Re-centre on my location ── */
   const handleRecenter = useCallback(() => {
-    if (!driverCoords || !mapRef.current) return;
+    if (!mapRef.current) return;
+    const st = String(activeTrip?.status || '');
+    const atPickupWait =
+      st === 'arrived' &&
+      activeTrip?.pickup_code_required !== false &&
+      !(activeTrip?.pickup_code_verified || activeTrip?.security_code_verified);
+    const pts: { latitude: number; longitude: number }[] = [];
+    if (driverCoords && Number.isFinite(driverCoords.lat)) {
+      pts.push({ latitude: driverCoords.lat, longitude: driverCoords.lng });
+    }
+    if (pickupCoord) pts.push({ latitude: pickupCoord.lat, longitude: pickupCoord.lng });
+    if (atPickupWait && dropCoord) {
+      pts.push({ latitude: dropCoord.lat, longitude: dropCoord.lng });
+    }
+    if (pts.length >= 2) {
+      try {
+        mapRef.current.fitToCoordinates(pts, {
+          edgePadding: {
+            top: insets.top + 72,
+            right: 40,
+            bottom: atPickupWait
+              ? arrivedDockExpanded
+                ? insets.bottom + Math.round(winHeight * 0.48) + 24
+                : insets.bottom + 100
+              : insets.bottom + 120,
+            left: 40,
+          },
+          animated: true,
+        });
+      } catch {
+        /* noop */
+      }
+      return;
+    }
+    if (!driverCoords) return;
     cameraZoomRef.current = 15;
     mapRef.current.animateCamera(
       {
@@ -861,9 +950,18 @@ export default function DriverLiveMapView({
         pitch: activeTrip ? 15 : 0,
         altitude: 5000,
       },
-      { duration: 600 }
+      { duration: 600 },
     );
-  }, [driverCoords, activeTrip]);
+  }, [
+    driverCoords,
+    activeTrip,
+    pickupCoord,
+    dropCoord,
+    arrivedDockExpanded,
+    insets.top,
+    insets.bottom,
+    winHeight,
+  ]);
 
   const openMapsAtDriver = useCallback(() => {
     if (!driverCoords || !Number.isFinite(driverCoords.lat) || !Number.isFinite(driverCoords.lng)) {
@@ -888,16 +986,6 @@ export default function DriverLiveMapView({
       .filter((p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng))
       .map((p) => ({ latitude: p.lat, longitude: p.lng }));
   }, [activeTrip?.route_preview_coordinates]);
-
-  /* ── Extract pickup/dropoff coords ── */
-  const getCoord = (loc: any): { lat: number; lng: number } | null => {
-    if (!loc) return null;
-    if (typeof loc === 'object' && 'lat' in loc) return { lat: Number(loc.lat), lng: Number(loc.lng) };
-    if (typeof loc === 'object' && 'latitude' in loc) return { lat: Number(loc.latitude), lng: Number(loc.longitude) };
-    return null;
-  };
-  const pickupCoord = activeTrip ? getCoord(activeTrip.pickup_location) : null;
-  const dropCoord = activeTrip ? getCoord(activeTrip.dropoff_location) : null;
 
   const hasEmbeddedOffer = Boolean(isOnline && embeddedOfferTrip && !activeTrip);
   const offerTripKey =
@@ -960,11 +1048,10 @@ export default function DriverLiveMapView({
   }, [offerRouteLatLng]);
 
   const isFindingRide = isOnline && driverCanReceiveOffers && !activeTrip && !hasEmbeddedOffer;
-  const showOnlineIdleChrome =
-    isOnline && !activeTrip && !hasEmbeddedOffer && !destinationActive;
+  const showOnlineIdleChrome = isOnline && !activeTrip && !hasEmbeddedOffer;
   const onlineIdleMapPadBottom = useMemo(() => {
     if (!showOnlineIdleChrome) return 0;
-    return Math.round(insets.bottom + 308);
+    return Math.round(insets.bottom + 228);
   }, [showOnlineIdleChrome, insets.bottom]);
   const showLegacyTopBar = !showOnlineIdleChrome && !hasEmbeddedOffer && !activeTrip;
   const tripPhaseChromeTop = insets.top + 52;
@@ -1238,7 +1325,7 @@ export default function DriverLiveMapView({
     return m < 1 ? 1 : m > 240 ? null : m;
   }, [snapPrimaryMeta?.durationSec]);
 
-  /** Road-snapped line: hide pickup→drop while waiting for code; show driver→drop after verify. */
+  /** Road-snapped line for active navigation leg. */
   const primaryLineCoords = useMemo(() => {
     const st = String(activeTrip?.status || '');
     const pv = !!(activeTrip?.pickup_code_verified || activeTrip?.security_code_verified);
@@ -1259,12 +1346,6 @@ export default function DriverLiveMapView({
     () => snapRoutes.slice(1).filter((seg) => seg.length >= 2),
     [snapRoutes],
   );
-
-  /** While en route to pickup, show muted full trip corridor when snap + decoded preview exist */
-  const showTripContextPolyline =
-    String(activeTrip?.status) === 'accepted' &&
-    (snapRoutes[0]?.length ?? 0) >= 2 &&
-    routeCoords.length >= 3;
 
   const dashedDriverPickup = (() => {
     const st = String(activeTrip?.status || '');
@@ -1422,12 +1503,87 @@ export default function DriverLiveMapView({
   }, [activeTrip?.vehicle_color, activeTrip?.vehicle_model, activeTrip?.vehicle_plate]);
 
   const isHeadingToPickup = String(activeTrip?.status || '') === 'accepted';
-  const pickupVerifiedAtPickup = !!(
+
+  /** While en route to pickup, show full A→B corridor on the map (green route preview). */
+  const showPickupFullRoute = isHeadingToPickup && routeCoords.length >= 2;
+
+  /** Fainter context when road-snapped leg exists alongside preview */
+  const showTripContextPolyline =
+    isHeadingToPickup &&
+    (snapRoutes[0]?.length ?? 0) >= 2 &&
+    routeCoords.length >= 3 &&
+    !showPickupFullRoute;
+
+  const pickupCodeRequired = activeTrip?.pickup_code_required !== false;
+  const rawPickupVerifiedAtPickup = !!(
     activeTrip?.pickup_code_verified || activeTrip?.security_code_verified
   );
+  const pickupVerifiedAtPickup = rawPickupVerifiedAtPickup || !pickupCodeRequired;
   const isArrivedPhase = String(activeTrip?.status || '') === 'arrived';
-  const isWaitingAtPickupNoCode = isArrivedPhase && !pickupVerifiedAtPickup;
+  const isWaitingAtPickupNoCode =
+    isArrivedPhase && pickupCodeRequired && !rawPickupVerifiedAtPickup;
   const isReadyToStartTrip = isArrivedPhase && pickupVerifiedAtPickup;
+
+  /** Full A→B corridor on map while waiting at pickup (map-first pickup screen). */
+  const arrivedFullRouteCoords = useMemo(() => {
+    if (!isWaitingAtPickupNoCode) return [] as { latitude: number; longitude: number }[];
+    if (routeCoords.length >= 2) return routeCoords;
+    const snap0 = snapRoutes[0];
+    if (snap0 && snap0.length >= 2) return snap0;
+    if (pickupCoord && dropCoord) {
+      return [
+        { latitude: pickupCoord.lat, longitude: pickupCoord.lng },
+        { latitude: dropCoord.lat, longitude: dropCoord.lng },
+      ];
+    }
+    return [];
+  }, [
+    isWaitingAtPickupNoCode,
+    routeCoords,
+    snapRoutes,
+    pickupCoord?.lat,
+    pickupCoord?.lng,
+    dropCoord?.lat,
+    dropCoord?.lng,
+  ]);
+
+  useEffect(() => {
+    if (!isWaitingAtPickupNoCode || !mapReady || !mapRef.current) return;
+    const pts: { latitude: number; longitude: number }[] = [];
+    if (driverCoords) pts.push({ latitude: driverCoords.lat, longitude: driverCoords.lng });
+    if (pickupCoord) pts.push({ latitude: pickupCoord.lat, longitude: pickupCoord.lng });
+    if (dropCoord) pts.push({ latitude: dropCoord.lat, longitude: dropCoord.lng });
+    if (pts.length < 2) return;
+    const t = setTimeout(() => {
+      try {
+        mapRef.current?.fitToCoordinates(pts, {
+          edgePadding: {
+            top: insets.top + 64,
+            right: 44,
+            bottom: insets.bottom + (arrivedDockExpanded ? Math.round(winHeight * 0.52) : 96),
+            left: 44,
+          },
+          animated: true,
+        });
+      } catch {
+        /* noop */
+      }
+    }, 400);
+    return () => clearTimeout(t);
+  }, [
+    isWaitingAtPickupNoCode,
+    activeTrip?.id,
+    mapReady,
+    driverCoords?.lat,
+    driverCoords?.lng,
+    pickupCoord?.lat,
+    dropCoord?.lat,
+    arrivedDockExpanded,
+    insets.top,
+    insets.bottom,
+    winHeight,
+  ]);
+
   const isOngoingTrip = String(activeTrip?.status || '') === 'ongoing';
 
   const ongoingFareDisplayLabel = useMemo(() => {
@@ -1447,10 +1603,10 @@ export default function DriverLiveMapView({
 
   useEffect(() => {
     if (isHeadingToPickup) setPickupNavDockExpanded(true);
-  }, [activeTrip?.id, isHeadingToPickup]);
+  }, [activeTrip?.id]);
 
   useEffect(() => {
-    if (isWaitingAtPickupNoCode) setArrivedDockExpanded(true);
+    if (isWaitingAtPickupNoCode) setArrivedDockExpanded(false);
   }, [activeTrip?.id, isWaitingAtPickupNoCode]);
 
   useEffect(() => {
@@ -1506,6 +1662,23 @@ export default function DriverLiveMapView({
     return 'Follow Maps';
   }, [isOngoingTrip, displayTripEtaMin, activeTrip?.id]);
 
+  const ongoingRemainingKm = useMemo(() => {
+    if (!isOngoingTrip) return null;
+    if (metersToTarget != null && Number.isFinite(metersToTarget)) return metersToTarget / 1000;
+    const sk = snapDistKm;
+    if (sk != null && Number.isFinite(sk)) return sk;
+    const d = activeTrip?.distance_to_next_km;
+    return d != null && Number.isFinite(Number(d)) ? Number(d) : null;
+  }, [isOngoingTrip, metersToTarget, snapDistKm, activeTrip?.distance_to_next_km, activeTrip?.id]);
+
+  const ongoingTripProgressPercent = useMemo(() => {
+    const total = activeTrip?.distance_km;
+    return driverTripProgressPercent(
+      total != null ? Number(total) : null,
+      ongoingRemainingKm,
+    );
+  }, [activeTrip?.distance_km, ongoingRemainingKm, activeTrip?.id]);
+
   const fareBreakdownLineOngoing = useMemo(() => {
     if (!isOngoingTrip || !activeTrip) return null;
     const b = activeTrip.base_fare != null ? Math.round(Number(activeTrip.base_fare)) : null;
@@ -1549,13 +1722,35 @@ export default function DriverLiveMapView({
   const arrivedAtMs = useMemo(() => parseTripIsoMs(activeTrip?.arrived_at), [activeTrip?.arrived_at]);
   const startedAtMs = useMemo(() => parseTripIsoMs(activeTrip?.started_at), [activeTrip?.started_at]);
 
+  /** When server omits arrived_at, anchor wait time to first render of this arrived trip. */
+  const arrivedWaitAnchorRef = useRef<{ tripId: string; ms: number } | null>(null);
+
   const [pickupWaitSec, setPickupWaitSec] = useState(0);
   useEffect(() => {
-    if (String(activeTrip?.status) !== 'arrived' || !Number.isFinite(arrivedAtMs)) {
+    const tripId = activeTrip?.id;
+    if (String(activeTrip?.status) !== 'arrived' || !tripId) {
+      arrivedWaitAnchorRef.current = null;
       setPickupWaitSec(0);
       return;
     }
-    const tick = () => setPickupWaitSec(Math.max(0, Math.floor((Date.now() - arrivedAtMs) / 1000)));
+    let anchorMs = arrivedAtMs;
+    if (!Number.isFinite(anchorMs)) {
+      if (arrivedWaitAnchorRef.current?.tripId !== tripId) {
+        arrivedWaitAnchorRef.current = { tripId, ms: Date.now() };
+      }
+      anchorMs = arrivedWaitAnchorRef.current.ms;
+    } else {
+      arrivedWaitAnchorRef.current = { tripId, ms: anchorMs };
+    }
+    const tick = () => {
+      const now = Date.now();
+      let sec = Math.floor((now - anchorMs) / 1000);
+      const clientMs = arrivedWaitAnchorRef.current?.tripId === tripId ? arrivedWaitAnchorRef.current.ms : now;
+      if (sec > 45 * 60 || sec < 0) {
+        sec = Math.floor((now - clientMs) / 1000);
+      }
+      setPickupWaitSec(Math.max(0, Math.min(sec, 99 * 60)));
+    };
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
@@ -1597,7 +1792,7 @@ export default function DriverLiveMapView({
     }
     if (activeTripPhase === 'ongoing' && ongoingEtaToDropLabel !== '—') return ongoingEtaToDropLabel;
     if (activeTripPhase === 'arrived' && pickupWaitSec > 0) {
-      return `Waiting ${formatCountdownMmSs(pickupWaitSec)}`;
+      return `Waiting ${formatPickupWaitLabel(pickupWaitSec)}`;
     }
     return null;
   }, [activeTripPhase, displayTripEtaMin, ongoingEtaToDropLabel, pickupWaitSec]);
@@ -1633,9 +1828,13 @@ export default function DriverLiveMapView({
       top:
         insets.top +
         (activeTrip
-          ? isHeadingToPickup || isWaitingAtPickupNoCode || isReadyToStartTrip || isOngoingTrip
-            ? 172
-            : 134
+          ? isWaitingAtPickupNoCode
+            ? 56
+            : isHeadingToPickup
+              ? 72
+              : isReadyToStartTrip || isOngoingTrip
+                ? 172
+                : 134
           : showOnlineIdleChrome
             ? 108
             : 124),
@@ -1643,12 +1842,12 @@ export default function DriverLiveMapView({
       bottom: activeTrip
         ? isHeadingToPickup
           ? pickupNavDockExpanded
-            ? insets.bottom + 400
-            : insets.bottom + 96
+            ? insets.bottom + 300
+            : insets.bottom + 88
           : isWaitingAtPickupNoCode
             ? arrivedDockExpanded
-              ? insets.bottom + 400
-              : insets.bottom + 96
+              ? insets.bottom + Math.round(winHeight * 0.5) + 16
+              : insets.bottom + 88
             : isReadyToStartTrip
               ? startTripDockExpanded
                 ? insets.bottom + 400
@@ -1665,11 +1864,12 @@ export default function DriverLiveMapView({
               ? onlineIdleMapPadBottom
               : insets.bottom + 210
             : insets.bottom + 108,
-      left: 12,
+      left: showOnlineIdleChrome ? 58 : 12,
     }),
     [
       insets.top,
       insets.bottom,
+      showOnlineIdleChrome,
       !!activeTrip,
       isHeadingToPickup,
       isWaitingAtPickupNoCode,
@@ -1683,18 +1883,19 @@ export default function DriverLiveMapView({
       isOnline,
       showOnlineIdleChrome,
       onlineIdleMapPadBottom,
+      winHeight,
     ],
   );
 
   const floatControlsBottom = activeTrip
     ? isHeadingToPickup
       ? pickupNavDockExpanded
-        ? insets.bottom + 388
-        : insets.bottom + 84
+        ? insets.bottom + 292
+        : insets.bottom + 80
       : isWaitingAtPickupNoCode
         ? arrivedDockExpanded
-          ? insets.bottom + 388
-          : insets.bottom + 84
+          ? insets.bottom + Math.round(winHeight * 0.5)
+          : insets.bottom + 76
         : isReadyToStartTrip
           ? startTripDockExpanded
             ? insets.bottom + 388
@@ -1726,7 +1927,7 @@ export default function DriverLiveMapView({
     if (
       dropCoord &&
       ['accepted', 'arrived', 'ongoing', 'pending_payment'].includes(tripSt) &&
-      (tripSt !== 'arrived' || arrivedVerified)
+      (tripSt !== 'arrived' || arrivedVerified || isWaitingAtPickupNoCode)
     ) {
       pts.push({ latitude: dropCoord.lat, longitude: dropCoord.lng });
     }
@@ -1735,9 +1936,17 @@ export default function DriverLiveMapView({
       try {
         mapRef.current?.fitToCoordinates(pts, {
           edgePadding: {
-            top: activeTrip ? tripPhaseChromeTop + tripPhaseChromeHeight + 24 : 116,
+            top: activeTrip
+              ? isHeadingToPickup
+                ? insets.top + 72
+                : tripPhaseChromeTop + tripPhaseChromeHeight + 24
+              : 116,
             right: 36,
-            bottom: activeTrip ? 420 : 276,
+            bottom: activeTrip
+              ? isHeadingToPickup
+                ? insets.bottom + (pickupNavDockExpanded ? 300 : 100)
+                : 420
+              : 276,
             left: 36,
           },
           animated: true,
@@ -1757,6 +1966,10 @@ export default function DriverLiveMapView({
     driverCoords?.lng,
     pickupCoord?.lat,
     dropCoord?.lat,
+    isHeadingToPickup,
+    pickupNavDockExpanded,
+    insets.top,
+    insets.bottom,
   ]);
 
   useEffect(() => {
@@ -1911,7 +2124,7 @@ export default function DriverLiveMapView({
         customMapStyle={useDefaultMapStyle ? undefined : NEXRYDE_MAP_STYLE}
         mapType={useTileFallback ? 'none' : 'standard'}
         initialRegion={initialRegion}
-        showsUserLocation={true}
+        showsUserLocation={false}
         showsMyLocationButton={false}
         showsCompass={false}
         showsPointsOfInterest={false}
@@ -1990,6 +2203,27 @@ export default function DriverLiveMapView({
         )}
 
         {/* Full trip context (pickup → drop) while driving to A — under nav leg */}
+        {showPickupFullRoute && (
+          <>
+            <Polyline
+              coordinates={routeCoords}
+              strokeColor="rgba(34,197,94,0.16)"
+              strokeWidth={14}
+              geodesic
+              lineCap="round"
+              lineJoin="round"
+            />
+            <Polyline
+              coordinates={routeCoords}
+              strokeColor="#22C55E"
+              strokeWidth={6}
+              geodesic
+              lineCap="round"
+              lineJoin="round"
+            />
+          </>
+        )}
+
         {showTripContextPolyline && (
           <Polyline
             coordinates={routeCoords}
@@ -2012,6 +2246,42 @@ export default function DriverLiveMapView({
               lineJoin="round"
             />
           ))}
+
+        {/* At pickup: full trip corridor A→B (green) */}
+        {isWaitingAtPickupNoCode && arrivedFullRouteCoords.length >= 2 ? (
+          <>
+            <Polyline
+              coordinates={arrivedFullRouteCoords}
+              strokeColor="rgba(34,197,94,0.18)"
+              strokeWidth={14}
+              geodesic
+              lineCap="round"
+              lineJoin="round"
+            />
+            <Polyline
+              coordinates={arrivedFullRouteCoords}
+              strokeColor="#22C55E"
+              strokeWidth={6}
+              geodesic
+              lineCap="round"
+              lineJoin="round"
+            />
+          </>
+        ) : null}
+
+        {isWaitingAtPickupNoCode && driverCoords && pickupCoord ? (
+          <Polyline
+            coordinates={[
+              { latitude: driverCoords.lat, longitude: driverCoords.lng },
+              { latitude: pickupCoord.lat, longitude: pickupCoord.lng },
+            ]}
+            strokeColor="rgba(59,130,246,0.65)"
+            strokeWidth={4}
+            lineDashPattern={[10, 8]}
+            geodesic
+            lineCap="round"
+          />
+        ) : null}
 
         {/* Primary navigation leg — Google-style blue, road-snapped */}
         {!isWaitingAtPickupNoCode && primaryLineCoords.length >= 2 && (
@@ -2130,18 +2400,25 @@ export default function DriverLiveMapView({
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges={false}
           >
-            {isHeadingToPickup || isWaitingAtPickupNoCode ? <OfferRiderPin /> : <PickupMarker />}
+            {isHeadingToPickup || isWaitingAtPickupNoCode ? (
+              <PickupMarkerLarge addressLabel={isHeadingToPickup ? pickupAddrShort : undefined} />
+            ) : (
+              <PickupMarker />
+            )}
           </Marker>
         )}
 
-        {/* Dropoff marker — hidden until pickup code verified or trip ongoing */}
-        {dropCoord && !isHeadingToPickup && (!isArrivedPhase || isReadyToStartTrip) && (
+        {/* Dropoff marker — visible during pickup leg and later phases */}
+        {dropCoord && (
           <Marker
             coordinate={{ latitude: dropCoord.lat, longitude: dropCoord.lng }}
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges={false}
           >
-            <DropoffMarker />
+            <DropoffMarker
+              large={isHeadingToPickup || isWaitingAtPickupNoCode}
+              addressLabel={isHeadingToPickup ? dropAddrShort : undefined}
+            />
           </Marker>
         )}
 
@@ -2164,7 +2441,11 @@ export default function DriverLiveMapView({
                     ? 'blue'
                     : 'green'
               }
-              caption={isHeadingToPickup || isWaitingAtPickupNoCode || isReadyToStartTrip ? 'You' : undefined}
+              caption={
+                isHeadingToPickup || isWaitingAtPickupNoCode || isReadyToStartTrip || (isOnline && !activeTrip)
+                  ? 'You'
+                  : undefined
+              }
             />
           </Marker>
         )}
@@ -2173,14 +2454,29 @@ export default function DriverLiveMapView({
 
       {/* ── Top / bottom gradients — map readable under chrome + dock ── */}
       <LinearGradient
-        colors={['rgba(6,11,24,0.9)', 'transparent']}
+        colors={
+          isHeadingToPickup
+            ? ['rgba(255,255,255,0.55)', 'transparent']
+            : ['rgba(6,11,24,0.9)', 'transparent']
+        }
         style={styles.topGradient}
         pointerEvents="none"
       />
-      {activeTrip ? (
+      {activeTrip && !isHeadingToPickup ? (
         <LinearGradient
-          colors={['transparent', 'rgba(2,6,23,0.55)', 'rgba(2,6,23,0.92)']}
-          style={[styles.bottomMapFade, { height: Math.min(320, 200 + insets.bottom) }]}
+          colors={
+            isWaitingAtPickupNoCode
+              ? ['transparent', 'rgba(2,6,23,0.15)', 'rgba(2,6,23,0.45)']
+              : ['transparent', 'rgba(2,6,23,0.55)', 'rgba(2,6,23,0.92)']
+          }
+          style={[
+            styles.bottomMapFade,
+            {
+              height: isWaitingAtPickupNoCode
+                ? Math.min(140, 72 + insets.bottom)
+                : Math.min(320, 200 + insets.bottom),
+            },
+          ]}
           pointerEvents="none"
         />
       ) : null}
@@ -2188,18 +2484,104 @@ export default function DriverLiveMapView({
       <View style={styles.brandChromeWrap} pointerEvents="box-none">
         <DriverBrandHeaderRow
           topInset={insets.top}
-          variant={hasEmbeddedOffer && onFeatureHub && onInboxPress ? 'incoming' : 'default'}
-          onMenuPress={hasEmbeddedOffer && onFeatureHub ? onFeatureHub : undefined}
+          variant={
+            isHeadingToPickup
+              ? 'trip-light'
+              : hasEmbeddedOffer && onFeatureHub && onInboxPress
+                ? 'incoming'
+                : 'default'
+          }
+          onMenuPress={
+            isHeadingToPickup && onFeatureHub
+              ? onFeatureHub
+              : hasEmbeddedOffer && onFeatureHub
+                ? onFeatureHub
+                : undefined
+          }
           onInboxPress={hasEmbeddedOffer && onInboxPress ? onInboxPress : undefined}
         />
       </View>
 
-      {activeTripPhase ? (
+      {isHeadingToPickup ? (
+        <View
+          style={[styles.pickupMapChromeRow, { top: insets.top + 64, left: flow.padH }]}
+          pointerEvents="none"
+        >
+          <View style={styles.pickupMapLegend}>
+            <View style={styles.pickupMapLegendItem}>
+              <View style={[styles.pickupMapLegendDot, { backgroundColor: '#22C55E' }]} />
+              <Text style={styles.pickupMapLegendTxt}>Pickup</Text>
+            </View>
+            <View style={styles.pickupMapLegendItem}>
+              <View style={[styles.pickupMapLegendDot, { backgroundColor: '#EF4444' }]} />
+              <Text style={styles.pickupMapLegendTxt}>Drop-off</Text>
+            </View>
+          </View>
+          {displayTripEtaMin != null || distKmForPickupUi != null ? (
+            <View style={styles.pickupMapEtaChip}>
+              <Ionicons name="navigate" size={14} color="#2563EB" />
+              <Text style={styles.pickupMapEtaChipTxt}>
+                {displayTripEtaMin != null ? `${displayTripEtaMin} min` : ''}
+                {displayTripEtaMin != null && distKmForPickupUi != null ? ' · ' : ''}
+                {distKmForPickupUi != null
+                  ? distKmForPickupUi < 1
+                    ? `${Math.round(distKmForPickupUi * 1000)} m`
+                    : `${distKmForPickupUi.toFixed(1)} km`
+                  : ''}
+              </Text>
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      {isWaitingAtPickupNoCode ? (
+        <>
+          <View
+            style={[styles.arrivedMapLegend, { top: insets.top + 52, left: flow.padH }]}
+            pointerEvents="none"
+          >
+            <View style={styles.arrivedLegendItem}>
+              <View style={[styles.arrivedLegendDot, { backgroundColor: '#22C55E' }]} />
+              <Text style={styles.arrivedLegendTxt}>Pickup</Text>
+            </View>
+            <View style={styles.arrivedLegendItem}>
+              <View style={[styles.arrivedLegendDot, { backgroundColor: '#EF4444' }]} />
+              <Text style={styles.arrivedLegendTxt}>Destination</Text>
+            </View>
+          </View>
+          <View
+            style={[
+              styles.arrivedRouteMapChip,
+              { top: insets.top + 52, alignSelf: 'center' },
+            ]}
+            pointerEvents="none"
+          >
+            <LinearGradient
+              colors={['rgba(34,197,94,0.2)', 'rgba(15,23,42,0.95)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <Ionicons name="git-commit-outline" size={15} color="#4ADE80" />
+            <Text style={styles.arrivedRouteMapChipTxt}>
+              {startTripDistanceLabel}
+              <Text style={styles.arrivedRouteMapChipSep}> · </Text>
+              {startTripDurationLabel}
+            </Text>
+          </View>
+        </>
+      ) : null}
+
+      {activeTripPhase && !isWaitingAtPickupNoCode && !isHeadingToPickup ? (
         <DriverTripPhaseChrome
           phase={activeTripPhase}
           top={tripPhaseChromeTop}
           metricPrimary={tripPhaseMetricPrimary}
           metricSecondary={tripPhaseMetricSecondary}
+          hideMetrics={
+            (activeTripPhase === 'heading_pickup' && pickupNavDockExpanded) ||
+            (activeTripPhase === 'arrived' && arrivedDockExpanded)
+          }
           dockExpanded={
             activeTripPhase === 'heading_pickup'
               ? pickupNavDockExpanded
@@ -2490,13 +2872,8 @@ export default function DriverLiveMapView({
               </Text>
               <Text style={styles.statLabel}>This Week</Text>
             </View>
-            <View style={styles.statDivider} />
-            <View style={styles.statItem}>
-              <Ionicons name="car" size={18} color="#F59E0B" />
-              <Text style={styles.statValue}>{todayTrips}</Text>
-              <Text style={styles.statLabel}>Trips</Text>
-            </View>
           </View>
+          <Text style={styles.statsEarningsHint}>Trips, hours & rating are in Earnings</Text>
           {surgeActive && (
             <View style={styles.surgeChip}>
               <Ionicons name="flash" size={13} color="#F59E0B" />
@@ -2509,70 +2886,98 @@ export default function DriverLiveMapView({
         </Animated.View>
       )}
 
-      {/* ── Zoom controls ── */}
-      <View style={[styles.zoomStack, { bottom: floatControlsBottom }]}>
-        <ZoomButton icon="add" onPress={handleZoomIn} />
-        <View style={zoomStyles.divider} />
-        <ZoomButton icon="remove" onPress={handleZoomOut} />
-      </View>
-
-      {/* ── Recenter / open in Maps (reference: blue nav control when idle online) ── */}
+      {/* ── Map controls: left column when idle online; right stack otherwise ── */}
       {showOnlineIdleChrome ? (
-        <TouchableOpacity
-          style={[styles.onlineNavFab, { bottom: floatControlsBottom + 62, right: flow.padH }]}
-          onPress={openMapsAtDriver}
-          activeOpacity={0.85}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Open maps at your location"
+        <View
+          style={[styles.mapLeftControls, { bottom: floatControlsBottom, left: Math.max(12, flow.padH) }]}
+          pointerEvents="box-none"
         >
-          <LinearGradient
-            colors={['#3B82F6', '#1D4ED8']}
-            style={styles.onlineNavFabGrad}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
+          {onDestination ? (
+            <TouchableOpacity
+              style={[styles.oiDestMapFab, destinationActive && styles.oiDestMapFabOn]}
+              onPress={onDestination}
+              activeOpacity={0.88}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={
+                destinationActive ? 'Trips toward destination — tap to manage' : 'Set trips toward destination'
+              }
+            >
+              <Ionicons
+                name={destinationActive ? 'navigate-circle' : 'flag'}
+                size={22}
+                color={destinationActive ? '#34F5B8' : '#E2E8F0'}
+              />
+              {destinationActive && destinationTripsRemaining > 0 ? (
+                <View style={styles.oiMapFabBadge}>
+                  <Text style={styles.oiMapFabBadgeTxt}>{destinationTripsRemaining}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            style={styles.oiMapFab}
+            onPress={handleRecenter}
+            activeOpacity={0.88}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Recenter on your live location"
           >
-            <Ionicons name="navigate" size={22} color="#FFF" />
-          </LinearGradient>
-        </TouchableOpacity>
+            <Ionicons name="locate" size={20} color="#34F5B8" />
+          </TouchableOpacity>
+          <View style={styles.zoomStackLeft}>
+            <ZoomButton icon="add" onPress={handleZoomIn} />
+            <View style={zoomStyles.divider} />
+            <ZoomButton icon="remove" onPress={handleZoomOut} />
+          </View>
+        </View>
       ) : (
-        <TouchableOpacity
-          style={[styles.recenterBtn, { bottom: floatControlsBottom + 62 }]}
-          onPress={handleRecenter}
-          activeOpacity={0.82}
-          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          accessibilityRole="button"
-          accessibilityLabel="Recenter map on your location"
-        >
-          <Ionicons name="locate" size={19} color="#34D399" />
-        </TouchableOpacity>
+        <>
+          <View style={[styles.zoomStack, { bottom: floatControlsBottom }]}>
+            <ZoomButton icon="add" onPress={handleZoomIn} />
+            <View style={zoomStyles.divider} />
+            <ZoomButton icon="remove" onPress={handleZoomOut} />
+          </View>
+          <TouchableOpacity
+            style={[
+              styles.recenterBtn,
+              isHeadingToPickup && styles.recenterBtnLight,
+              { bottom: floatControlsBottom + 62 },
+            ]}
+            onPress={handleRecenter}
+            activeOpacity={0.82}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityRole="button"
+            accessibilityLabel="Recenter map on your location"
+          >
+            <Ionicons name="locate" size={19} color={isHeadingToPickup ? '#2563EB' : '#34D399'} />
+          </TouchableOpacity>
+          {!isReadyToStartTrip && !isOngoingTrip && onDestination ? (
+            <TouchableOpacity
+              style={[
+                styles.destinationBtn,
+                { bottom: floatControlsBottom + 124, right: flow.padH },
+                destinationActive && styles.destinationBtnActive,
+              ]}
+              onPress={onDestination}
+              activeOpacity={0.82}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={destinationActive ? 'Destination filter on' : 'Set destination filter'}
+            >
+              <Ionicons name="flag" size={19} color={destinationActive ? '#34D399' : '#94A3B8'} />
+              {destinationActive && destinationTripsRemaining > 0 ? (
+                <View style={styles.destinationBadge}>
+                  <Text style={styles.destinationBadgeText}>{destinationTripsRemaining}</Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          ) : null}
+        </>
       )}
 
-      {/* ── Destination mode button ── */}
-      {!showOnlineIdleChrome && !isReadyToStartTrip && !isOngoingTrip ? (
-      <TouchableOpacity
-        style={[
-          styles.destinationBtn,
-          { bottom: floatControlsBottom + 124, right: flow.padH },
-          destinationActive && styles.destinationBtnActive,
-        ]}
-        onPress={onDestination}
-        activeOpacity={0.82}
-        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        accessibilityRole="button"
-        accessibilityLabel={destinationActive ? 'Destination filter on' : 'Set destination filter'}
-      >
-        <Ionicons name="flag" size={19} color={destinationActive ? '#34D399' : '#94A3B8'} />
-        {destinationActive && destinationTripsRemaining > 0 && (
-          <View style={styles.destinationBadge}>
-            <Text style={styles.destinationBadgeText}>{destinationTripsRemaining}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-      ) : null}
-
-      {/* Destination strip — shown when mode is active */}
-      {destinationActive && destinationName ? (
+      {/* Destination strip — legacy bar (hidden when unified idle dock is shown) */}
+      {destinationActive && destinationName && !showOnlineIdleChrome ? (
         <TouchableOpacity
           style={[styles.destinationStrip, { bottom: activeTrip ? insets.bottom + 228 : insets.bottom + 80 }]}
           onPress={onDestination}
@@ -2610,8 +3015,16 @@ export default function DriverLiveMapView({
                 distanceKm={distKmForPickupUi}
                 etaMin={displayTripEtaMin}
                 pickupLineShort={pickupAddrShort}
+                pickupAddressLine={pickupAddrLine || ''}
+                pickupDetailLine={pickupDetailSubline}
+                dropoffAddressLine={dropAddrLine || ''}
+                dropoffDetailLine={dropDetailSubline}
+                tripDistanceLabel={startTripDistanceLabel}
+                tripDurationLabel={startTripDurationLabel}
                 arrivalEligible={arrivalEligible}
                 tripActionBusy={!!tripActionBusy}
+                expanded={pickupNavDockExpanded}
+                onToggleExpand={() => setPickupNavDockExpanded((v) => !v)}
                 riderPhone={activeTrip.rider_phone ? String(activeTrip.rider_phone) : null}
                 canMessage={!!onTripMessageRider}
                 onNavigate={() => {
@@ -2634,76 +3047,111 @@ export default function DriverLiveMapView({
                   void onTripMessageRider();
                 }}
                 onMarkArrived={handleMarkArrivedPress}
+                onCancelTrip={
+                  onTripCancel
+                    ? () => {
+                        if (Platform.OS !== 'web') {
+                          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                        }
+                        void onTripCancel();
+                      }
+                    : undefined
+                }
               />
             ) : (
               <TouchableOpacity
-                style={styles.pickupDockCollapsedBar}
+                style={[styles.pickupDockCollapsedBar, styles.pickupDockCollapsedBarLight]}
                 onPress={() => setPickupNavDockExpanded(true)}
                 activeOpacity={0.88}
                 accessibilityRole="button"
                 accessibilityLabel="Expand navigate to pickup card"
               >
-                <Ionicons name="chevron-up" size={22} color="#94A3B8" />
-                <Text style={styles.pickupDockCollapsedTxt}>Navigate to pickup</Text>
-                <Text style={styles.pickupDockCollapsedEta}>
-                  {displayTripEtaMin != null ? `~${displayTripEtaMin} min` : ' '}
+                <View style={styles.pickupCollapsedLiveDot} />
+                <View style={{ flex: 1, marginLeft: 10, minWidth: 0 }}>
+                  <Text style={styles.pickupDockCollapsedTxtLight}>En route to pickup</Text>
+                  <Text style={styles.pickupDockCollapsedSubLight} numberOfLines={1}>
+                    {pickupAddrShort || 'Pickup'}
+                    {dropAddrShort ? ` → ${dropAddrShort}` : ''}
+                  </Text>
+                </View>
+                <Text style={styles.pickupDockCollapsedEtaLight}>
+                  {displayTripEtaMin != null ? `${displayTripEtaMin} min` : 'Open'}
                 </Text>
-                <Ionicons name="navigate" size={20} color="#34F5B8" />
+                <Ionicons name="chevron-up" size={20} color="#2563EB" />
               </TouchableOpacity>
             )
           ) : String(activeTrip.status) === 'arrived' && !pickupVerifiedAtPickup && onTripStart ? (
-            arrivedDockExpanded ? (
-              <DriverArrivedPickupDock
-                riderName={activeTrip.rider_name || 'Rider'}
-                riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
-                ratingAvg={activeTrip.rider_reputation_avg ?? null}
-                ratingTrips={activeTrip.rider_trip_count ?? null}
-                isNewRider={!!activeTrip.rider_new_account}
-                waitingSec={pickupWaitSec}
-                pickupShort={pickupAddrShort}
-                pickupDetailLine={pickupDetailSubline}
-                tripActionBusy={!!tripActionBusy}
-                riderPhone={activeTrip.rider_phone ? String(activeTrip.rider_phone) : null}
-                canMessage={!!onTripMessageRider}
-                onImHere={() => {
-                  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  void onTripStart();
-                }}
-                onCall={() => {
-                  if (!onTripCallRider) return;
-                  if (!activeTrip.rider_phone) {
-                    Alert.alert('Call unavailable', 'Rider phone is not available for this trip.');
-                    return;
-                  }
-                  void onTripCallRider();
-                }}
-                onMessage={() => {
-                  if (!onTripMessageRider) {
-                    Alert.alert('Chat unavailable', 'Messaging is unavailable from this screen.');
-                    return;
-                  }
-                  void onTripMessageRider();
-                }}
-                onSafetyPress={() => {
-                  if (onShieldPress) void onShieldPress();
-                }}
-              />
-            ) : (
-              <TouchableOpacity
-                style={styles.pickupDockCollapsedBar}
-                onPress={() => setArrivedDockExpanded(true)}
-                activeOpacity={0.88}
-                accessibilityRole="button"
-                accessibilityLabel="Expand waiting at pickup card"
-              >
-                <Ionicons name="chevron-up" size={22} color="#94A3B8" />
-                <Text style={styles.pickupDockCollapsedTxt}>Waiting at pickup</Text>
-                <Text style={styles.pickupDockCollapsedEta}>
-                  {pickupWaitSec > 0 ? formatCountdownMmSs(pickupWaitSec) : ' '}
-                </Text>
-                <Ionicons name="time-outline" size={20} color="#34F5B8" />
-              </TouchableOpacity>
-            )
+            <DriverArrivedPickupDock
+              expanded={arrivedDockExpanded}
+              onToggleExpand={() => setArrivedDockExpanded((v) => !v)}
+              onStartTrip={
+                !pickupCodeRequired && onTripConfirmStart
+                  ? () => {
+                      if (Platform.OS !== 'web') {
+                        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                      }
+                      void onTripConfirmStart();
+                    }
+                  : undefined
+              }
+              riderName={activeTrip.rider_name || 'Rider'}
+              riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+              ratingAvg={activeTrip.rider_reputation_avg ?? null}
+              ratingTrips={activeTrip.rider_trip_count ?? null}
+              isNewRider={!!activeTrip.rider_new_account}
+              waitingSec={pickupWaitSec}
+              pickupAddressLine={pickupAddrLine || pickupAddrShort || ''}
+              pickupDetailLine={pickupDetailSubline}
+              destinationAddressLine={dropAddrLine || dropAddrShort || ''}
+              destinationDetailLine={dropDetailSubline}
+              routeDistanceLabel={startTripDistanceLabel}
+              routeDurationLabel={startTripDurationLabel}
+              pickupCodeRequired={pickupCodeRequired}
+              tripActionBusy={!!tripActionBusy}
+              riderPhone={activeTrip.rider_phone ? String(activeTrip.rider_phone) : null}
+              canMessage={!!onTripMessageRider}
+              onVerifyPickupCode={() => {
+                if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                void onTripStart();
+              }}
+              onNavigateToPickup={
+                onTripOpenNavigation
+                  ? () => {
+                      if (Platform.OS !== 'web') void Haptics.selectionAsync();
+                      onTripOpenNavigation();
+                    }
+                  : undefined
+              }
+              onNavigateToDestination={onTripOpenNavigation}
+              onCall={() => {
+                if (!onTripCallRider) return;
+                if (!activeTrip.rider_phone) {
+                  Alert.alert('Call unavailable', 'Rider phone is not available for this trip.');
+                  return;
+                }
+                void onTripCallRider();
+              }}
+              onMessage={() => {
+                if (!onTripMessageRider) {
+                  Alert.alert('Chat unavailable', 'Messaging is unavailable from this screen.');
+                  return;
+                }
+                void onTripMessageRider();
+              }}
+              onSafetyPress={() => {
+                if (onShieldPress) void onShieldPress();
+              }}
+              onCancelTrip={
+                onTripCancel
+                  ? () => {
+                      if (Platform.OS !== 'web') {
+                        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+                      }
+                      void onTripCancel();
+                    }
+                  : undefined
+              }
+            />
           ) : String(activeTrip.status) === 'arrived' && pickupVerifiedAtPickup && onTripConfirmStart ? (
             startTripDockExpanded ? (
               <DriverStartTripDock
@@ -2774,17 +3222,34 @@ export default function DriverLiveMapView({
                 elapsedSec={tripLegSec}
                 distanceToDropLabel={ongoingDistanceLabel}
                 etaToDropLabel={ongoingEtaToDropLabel}
+                routeSummaryLabel={(() => {
+                  const km = activeTrip?.distance_km;
+                  const dist =
+                    km != null && Number.isFinite(Number(km))
+                      ? `${Number(km).toFixed(1)} km`
+                      : ongoingDistanceLabel !== '—'
+                        ? ongoingDistanceLabel
+                        : null;
+                  const eta = ongoingEtaToDropLabel !== '—' ? ongoingEtaToDropLabel : null;
+                  if (dist && eta) return `${dist} / ${eta}`;
+                  return dist || eta || undefined;
+                })()}
                 fareLabel={ongoingFareDisplayLabel}
+                distanceFareLabel={
+                  activeTrip?.distance_fee != null && Number.isFinite(Number(activeTrip.distance_fee))
+                    ? `₦${Math.round(Number(activeTrip.distance_fee)).toLocaleString()}`
+                    : undefined
+                }
                 fareBreakdownLine={fareBreakdownLineOngoing}
                 fareDeltaLabel={ongoingFareDeltaLabel}
+                tripProgressPercent={ongoingTripProgressPercent}
                 isCompleting={tripActionBusy === 'complete'}
                 tripActionBusy={!!tripActionBusy}
+                bottomInset={insets.bottom}
+                onCollapse={() => setOngoingDockExpanded(false)}
                 riderPhone={activeTrip.rider_phone ? String(activeTrip.rider_phone) : null}
                 canMessage={!!onTripMessageRider}
-                onCompleteTrip={() => {
-                  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  void onTripComplete();
-                }}
+                onCompleteTrip={() => void onTripComplete()}
                 onNavigate={() => {
                   if (Platform.OS !== 'web') void Haptics.selectionAsync();
                   if (!onTripOpenNavigation) return;
@@ -2815,20 +3280,54 @@ export default function DriverLiveMapView({
                 onPauseTrip={onTripPause}
               />
             ) : (
-              <TouchableOpacity
-                style={styles.pickupDockCollapsedBar}
-                onPress={() => setOngoingDockExpanded(true)}
-                activeOpacity={0.88}
-                accessibilityRole="button"
-                accessibilityLabel="Expand trip in progress card"
-              >
-                <Ionicons name="chevron-up" size={22} color="#94A3B8" />
-                <Text style={styles.pickupDockCollapsedTxt}>Trip in progress</Text>
-                <Text style={styles.pickupDockCollapsedEta}>
-                  {tripLegSec > 0 ? formatCountdownMmSs(tripLegSec) : ' '}
-                </Text>
-                <Ionicons name="speedometer-outline" size={20} color="#60A5FA" />
-              </TouchableOpacity>
+              <View style={[styles.ongoingCollapsedWrap, { paddingBottom: Math.max(4, insets.bottom) }]}>
+                <TouchableOpacity
+                  style={styles.pickupDockCollapsedBar}
+                  onPress={() => setOngoingDockExpanded(true)}
+                  activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel="Expand trip in progress card"
+                >
+                  <Ionicons name="chevron-up" size={22} color="#94A3B8" />
+                  <View style={styles.ongoingCollapsedMid}>
+                    <Text style={styles.ongoingCollapsedTitle}>Trip in progress</Text>
+                    <Text style={styles.ongoingCollapsedSub} numberOfLines={1}>
+                      {ongoingFareDisplayLabel}
+                      {ongoingTripProgressPercent > 0
+                        ? ` · ${Math.round(ongoingTripProgressPercent)}% done`
+                        : ''}
+                      {ongoingEtaToDropLabel !== '—' ? ` · ${ongoingEtaToDropLabel}` : ''}
+                    </Text>
+                  </View>
+                  <Text style={styles.pickupDockCollapsedEta}>
+                    {tripLegSec > 0 ? formatCountdownMmSs(tripLegSec) : ' '}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.ongoingCollapsedComplete,
+                    !!tripActionBusy && styles.ongoingCollapsedCompleteBusy,
+                  ]}
+                  onPress={() => {
+                    if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                    void onTripComplete?.();
+                  }}
+                  disabled={!!tripActionBusy}
+                  activeOpacity={0.9}
+                  accessibilityRole="button"
+                  accessibilityLabel="Complete trip"
+                  accessibilityHint="Opens confirmation to end the trip"
+                >
+                  {tripActionBusy === 'complete' ? (
+                    <ActivityIndicator color="#022C22" size="small" />
+                  ) : (
+                    <>
+                      <Ionicons name="checkmark-done" size={20} color="#022C22" />
+                      <Text style={styles.ongoingCollapsedCompleteTxt}>COMPLETE TRIP</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
             )
           ) : (
           <View style={styles.tripDockCard}>
@@ -2851,16 +3350,14 @@ export default function DriverLiveMapView({
               paymentStatus={activeTrip.payment_status}
             />
             <View style={styles.tripDockTopRow}>
-              {activeTrip.rider_profile_image ? (
-                <Image
-                  source={{ uri: String(activeTrip.rider_profile_image) }}
-                  style={styles.tripDockAvatarImg}
-                />
-              ) : (
-                <View style={styles.tripDockAvatarPh}>
-                  <Ionicons name="person" size={28} color="#94A3B8" />
-                </View>
-              )}
+              <TripProfileAvatar
+                size={48}
+                uri={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
+                person={activeTrip as Record<string, unknown>}
+                role="rider"
+                borderColor="rgba(96,165,250,0.45)"
+                accessibilityLabel={`Photo of ${activeTrip.rider_name || 'rider'}`}
+              />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.tripDockRiderEyebrow}>Your rider</Text>
                 <Text style={styles.tripDockRiderName} numberOfLines={1}>
@@ -2969,7 +3466,7 @@ export default function DriverLiveMapView({
                 ) : null}
                 {String(activeTrip.status) === 'arrived' && pickupWaitSec > 0 ? (
                   <Text style={styles.tripDockWaitBadge} numberOfLines={1}>
-                    {' · '}Waiting {formatCountdownMmSs(pickupWaitSec)}
+                    {' · '}Waiting {formatPickupWaitLabel(pickupWaitSec)}
                   </Text>
                 ) : null}
               </View>
@@ -3256,29 +3753,23 @@ export default function DriverLiveMapView({
                 </View>
               </View>
 
-              <View style={styles.oiMetricsStrip}>
-                <View style={styles.oiMetric}>
-                  <Ionicons name="briefcase-outline" size={15} color="#7DD3FC" />
-                  <Text style={styles.oiMetricVal}>{todayTrips}</Text>
-                  <Text style={styles.oiMetricLbl}>Trips</Text>
-                </View>
-                <View style={styles.oiMetricDivider} />
-                <View style={styles.oiMetric}>
-                  <Ionicons name="time-outline" size={15} color="#7DD3FC" />
-                  <Text style={styles.oiMetricVal}>
-                    {todayTripHours > 0 ? todayTripHours.toFixed(1) : '0'}
-                  </Text>
-                  <Text style={styles.oiMetricLbl}>Hours</Text>
-                </View>
-                <View style={styles.oiMetricDivider} />
-                <View style={styles.oiMetric}>
-                  <Ionicons name="star" size={15} color="#FBBF24" />
-                  <Text style={styles.oiMetricVal}>
-                    {driverRating != null && driverRating > 0 ? driverRating.toFixed(1) : '—'}
-                  </Text>
-                  <Text style={styles.oiMetricLbl}>Rating</Text>
-                </View>
-              </View>
+              {destinationActive && destinationName ? (
+                <TouchableOpacity style={styles.oiDestBanner} onPress={onDestination} activeOpacity={0.9}>
+                  <View style={styles.oiDestBannerIcon}>
+                    <Ionicons name="navigate-circle" size={20} color="#34F5B8" />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.oiDestBannerEyebrow}>TRIPS TOWARDS</Text>
+                    <Text style={styles.oiDestBannerTxt} numberOfLines={2}>
+                      {destinationName}
+                    </Text>
+                    {destinationTripsRemaining > 0 ? (
+                      <Text style={styles.oiDestBannerMeta}>{destinationTripsRemaining} matched trips left today</Text>
+                    ) : null}
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.oiListenCard}>
                 <View style={styles.oiListenRow}>
@@ -3315,7 +3806,7 @@ export default function DriverLiveMapView({
                     </Text>
                     <Text style={styles.oiWaitSub}>
                       {isFindingRide
-                        ? 'Stay in a busy area for faster matches.'
+                        ? 'Map shows your live position. Use Heatmap in the menu for busy zones.'
                         : 'Complete account steps to receive offers.'}
                     </Text>
                   </View>
@@ -3571,22 +4062,15 @@ export default function DriverLiveMapView({
         </>
       )}
 
-      {!showOnlineIdleChrome ? (
+      {!showOnlineIdleChrome && !activeTrip ? (
       <DriverMapInboxBar
-        anchor={activeTrip ? 'mapCorner' : 'dock'}
+        anchor="dock"
         bottom={
           insets.bottom +
-          (activeTrip ? 320 : hasEmbeddedOffer ? 340 : isFindingRide && !destinationActive ? 220 : 78)
-        }
-        cornerTop={
-          activeTrip
-            ? tripPhaseChromeTop + tripPhaseChromeHeight + 12 + (routeChangeBanner ? 46 : 0)
-            : insets.top + 118 + (routeChangeBanner ? 46 : 0)
+          (hasEmbeddedOffer ? 340 : isFindingRide && !destinationActive ? 220 : 78)
         }
         compact={Boolean(
-          (isFindingRide && !destinationActive && !activeTrip) ||
-            (hasEmbeddedOffer && !activeTrip) ||
-            activeTrip,
+          (isFindingRide && !destinationActive) || hasEmbeddedOffer,
         )}
         unread={mapInboxUnread}
         onPress={handleMapInboxPress}
@@ -3841,6 +4325,15 @@ const markerStyles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: 'rgba(34,229,160,0.5)',
   },
+  accuracyRing: {
+    position: 'absolute',
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    borderWidth: 2,
+    borderColor: 'rgba(52,245,184,0.35)',
+    backgroundColor: 'rgba(59,130,246,0.08)',
+  },
   glowRingBlue: {
     position: 'absolute',
     width: 52,
@@ -3898,11 +4391,37 @@ const markerStyles = StyleSheet.create({
   stopLabelB: {
     backgroundColor: '#ef4444',
   },
+  stopLabelLg: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
   stopLabelText: { fontSize: 9, fontWeight: '900', color: '#FFF' },
-  youPill: {
-    marginBottom: 4,
-    paddingHorizontal: 10,
+  addrCallout: {
+    marginTop: 4,
+    maxWidth: 140,
+    paddingHorizontal: 8,
     paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.12)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.12,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  addrCalloutTxt: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#0F172A',
+    textAlign: 'center',
+  },
+  youPill: {
+    marginBottom: 6,
+    paddingHorizontal: 11,
+    paddingVertical: 5,
     borderRadius: 999,
     backgroundColor: 'rgba(30,64,175,0.95)',
     borderWidth: 1,
@@ -4017,11 +4536,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     borderWidth: 1,
     borderBottomWidth: 0,
-    borderColor: 'rgba(52,245,184,0.14)',
-    paddingTop: 6,
-    paddingHorizontal: 14,
-    paddingBottom: 12,
-    gap: 10,
+    borderColor: 'rgba(52,245,184,0.18)',
+    paddingTop: 8,
+    paddingHorizontal: 16,
+    paddingBottom: 14,
+    gap: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -8 },
     shadowOpacity: 0.4,
@@ -4142,11 +4661,122 @@ const styles = StyleSheet.create({
     letterSpacing: 1.2,
   },
   oiTodayAmount: {
-    fontSize: 21,
+    fontSize: 26,
     fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: -0.6,
+    letterSpacing: -0.8,
     fontVariant: ['tabular-nums'],
+  },
+  oiDestBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(6,78,59,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,245,184,0.38)',
+    minHeight: 72,
+  },
+  oiDestBannerIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(52,245,184,0.14)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  oiDestBannerEyebrow: {
+    fontSize: 10,
+    fontWeight: '900',
+    color: '#34F5B8',
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  oiDestBannerTxt: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: '#ECFDF5',
+    lineHeight: 20,
+  },
+  oiDestBannerMeta: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#6EE7B7',
+  },
+  oiDestMapFab: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: 'rgba(8,13,24,0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.28)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  oiDestMapFabOn: {
+    borderColor: 'rgba(52,245,184,0.55)',
+    backgroundColor: 'rgba(6,78,59,0.45)',
+  },
+  mapLeftControls: {
+    position: 'absolute',
+    zIndex: 12,
+    alignItems: 'center',
+    gap: 10,
+  },
+  zoomStackLeft: {
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.22)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    elevation: 10,
+  },
+  oiMapFab: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(8,13,24,0.94)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(148,163,184,0.28)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  oiMapFabDestOn: {
+    borderColor: 'rgba(52,245,184,0.55)',
+    backgroundColor: 'rgba(6,78,59,0.45)',
+  },
+  oiMapFabBadge: {
+    position: 'absolute',
+    top: -3,
+    right: -3,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: '#34F5B8',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  oiMapFabBadgeTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#042F1A',
   },
   oiLiveDot: {
     width: 7,
@@ -4200,12 +4830,12 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   oiListenCard: {
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(30,58,138,0.22)',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(30,58,138,0.28)',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.22)',
+    borderColor: 'rgba(96,165,250,0.28)',
   },
   oiListenRow: {
     flexDirection: 'row',
@@ -4336,6 +4966,64 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     color: '#E2E8F0',
     letterSpacing: 0.2,
+  },
+  arrivedMapLegend: {
+    position: 'absolute',
+    zIndex: 14,
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(15,23,42,0.82)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  arrivedLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  arrivedLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  arrivedLegendTxt: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#E2E8F0',
+  },
+  arrivedRouteMapChip: {
+    position: 'absolute',
+    left: '12%',
+    right: '12%',
+    zIndex: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 999,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(34,197,94,0.45)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  arrivedRouteMapChipTxt: {
+    fontSize: 14,
+    fontWeight: '900',
+    color: '#DCFCE7',
+    letterSpacing: 0.1,
+  },
+  arrivedRouteMapChipSep: {
+    fontWeight: '600',
+    color: 'rgba(187,247,208,0.65)',
   },
 
   embeddedOfferWrap: {
@@ -4560,19 +5248,183 @@ const styles = StyleSheet.create({
     color: 'rgba(148,163,184,0.95)',
   },
   pickupDockCollapsedBar: {
-    borderRadius: 22,
+    borderRadius: 16,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.28)',
-    backgroundColor: 'rgba(15,23,42,0.94)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(10,10,12,0.96)',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.35,
+    shadowRadius: 12,
+    elevation: 16,
   },
-  pickupDockCollapsedTxt: { fontSize: 14, fontWeight: '800', color: '#E2E8F0', flex: 1, marginLeft: 10 },
-  pickupDockCollapsedEta: { fontSize: 13, fontWeight: '800', color: '#86EFAC', marginRight: 8 },
+  pickupDockCollapsedTxt: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    flex: 1,
+    marginLeft: 10,
+    letterSpacing: -0.2,
+  },
+  pickupDockCollapsedEta: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#CBD5E1',
+    marginRight: 8,
+  },
+  ongoingCollapsedWrap: {
+    gap: 8,
+  },
+  ongoingCollapsedMid: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: 10,
+    marginRight: 8,
+  },
+  ongoingCollapsedTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    letterSpacing: -0.2,
+  },
+  ongoingCollapsedSub: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginTop: 2,
+  },
+  ongoingCollapsedComplete: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    borderRadius: 14,
+    backgroundColor: '#22C55E',
+    borderWidth: 1,
+    borderColor: 'rgba(74,222,128,0.6)',
+    shadowColor: '#22C55E',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
+    minHeight: 56,
+  },
+  ongoingCollapsedCompleteBusy: {
+    opacity: 0.75,
+  },
+  ongoingCollapsedCompleteTxt: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#022C22',
+    letterSpacing: 0.5,
+  },
+  pickupDockCollapsedBarLight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    shadowOpacity: 0.1,
+    shadowRadius: 16,
+    marginHorizontal: 4,
+  },
+  pickupCollapsedLiveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#22C55E',
+  },
+  pickupDockCollapsedTxtLight: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: '#0F172A',
+    letterSpacing: -0.2,
+  },
+  pickupDockCollapsedSubLight: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  pickupDockCollapsedEtaLight: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: '#16A34A',
+    marginRight: 8,
+    fontVariant: ['tabular-nums'],
+  },
+  pickupMapChromeRow: {
+    position: 'absolute',
+    right: 14,
+    zIndex: 26,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    alignItems: 'flex-start',
+    maxWidth: '92%',
+  },
+  pickupMapLegend: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  pickupMapLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  pickupMapLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  pickupMapLegendTxt: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#475569',
+  },
+  pickupMapEtaChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.94)',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    shadowColor: '#2563EB',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  pickupMapEtaChipTxt: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#1E40AF',
+    fontVariant: ['tabular-nums'],
+  },
+  recenterBtnLight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E2E8F0',
+    shadowOpacity: 0.12,
+  },
 
   idleOnlineWrap: {
     position: 'absolute',
@@ -5170,10 +6022,10 @@ const styles = StyleSheet.create({
 
   tripDockWrap: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
     zIndex: 11,
-    maxHeight: 620,
+    maxHeight: '88%',
   },
   tripDockCard: {
     backgroundColor: 'rgba(6,10,20,0.98)',
@@ -6140,6 +6992,14 @@ const styles = StyleSheet.create({
     color: '#F59E0B',
     fontSize: 12,
     fontWeight: '700',
+  },
+  statsEarningsHint: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 4,
   },
   statsCloseBtn: {
     alignSelf: 'center',

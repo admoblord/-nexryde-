@@ -32,6 +32,7 @@ import { useAppStore, type Trip, type DriverProfile } from '@/src/store/appStore
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import { SupportedLanguage } from '@/src/i18n/translations';
 import { driverOffersFallbackPollIntervalMs } from '@/src/constants/tripRealtimeRhythm';
+import { flushTripLocationQueue } from '@/src/utils/tripLocationQueue';
 import {
   BACKEND_URL,
   getAuthHeaders,
@@ -154,6 +155,7 @@ function tripToActiveTrip(trip: Trip | null, driverProfile: DriverProfile | null
     rider_phone: (raw.rider_phone as string) || null,
     pickup_code_verified: trip.pickup_code_verified,
     security_code_verified: trip.security_code_verified,
+    pickup_code_required: trip.pickup_code_required !== false,
     arrived_at: trip.arrived_at ?? null,
     started_at: trip.started_at ?? null,
     fare: Number.isFinite(trip.fare) ? trip.fare : null,
@@ -441,7 +443,12 @@ export default function ModernDriverHome() {
   const [showLangPicker, setShowLangPicker] = useState(false);
   const [featureHubOpen, setFeatureHubOpen] = useState(false);
   const [offlineQueueCount, setOfflineQueueCount] = useState(0);
-  const [driverCoords, setDriverCoords] = useState<{ lat: number; lng: number; heading?: number } | null>(null);
+  const [driverCoords, setDriverCoords] = useState<{
+    lat: number;
+    lng: number;
+    heading?: number;
+    speedKmh?: number;
+  } | null>(null);
   const lastLocationPushAtRef = useRef<number>(0);
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
   const [simSignalSent, setSimSignalSent] = useState(false);
@@ -807,14 +814,24 @@ export default function ModernDriverHome() {
 
         const lastKnown = await Location.getLastKnownPositionAsync();
         if (mounted && lastKnown) {
-          const c = { lat: lastKnown.coords.latitude, lng: lastKnown.coords.longitude, heading: lastKnown.coords.heading ?? 0 };
+          const c = {
+            lat: lastKnown.coords.latitude,
+            lng: lastKnown.coords.longitude,
+            heading: lastKnown.coords.heading ?? 0,
+            speedKmh: lastKnown.coords.speed != null ? (lastKnown.coords.speed * 3.6) : undefined,
+          };
           setDriverCoords(c);
           setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
 
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         if (mounted) {
-          const c = { lat: loc.coords.latitude, lng: loc.coords.longitude, heading: loc.coords.heading ?? 0 };
+          const c = {
+            lat: loc.coords.latitude,
+            lng: loc.coords.longitude,
+            heading: loc.coords.heading ?? 0,
+            speedKmh: loc.coords.speed != null ? (loc.coords.speed * 3.6) : undefined,
+          };
           setDriverCoords(c);
           setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
         }
@@ -833,6 +850,7 @@ export default function ModernDriverHome() {
                 lat: update.coords.latitude,
                 lng: update.coords.longitude,
                 heading: update.coords.heading ?? 0,
+                speedKmh: update.coords.speed != null ? (update.coords.speed * 3.6) : undefined,
               };
               setDriverCoords(c);
               setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
@@ -881,6 +899,10 @@ export default function ModernDriverHome() {
     };
     pushLocation();
   }, [isOnline, driverId, driverCoords?.lat, driverCoords?.lng]);
+
+  useEffect(() => {
+    if (AppState.currentState === 'active') void flushTripLocationQueue();
+  }, [currentTrip?.id]);
 
   // SIM Swap Protection — runs at most once per 24h per device, never blocks UI
   const [simSwapAlert, setSimSwapAlert] = useState(false);
@@ -1662,6 +1684,7 @@ export default function ModernDriverHome() {
     profileImageUri={user?.profile_image ?? null}
     driverRating={typeof user?.rating === 'number' && Number.isFinite(user.rating) ? user.rating : 0}
     surgeActive={!!(surgePricing?.is_surge)}
+    surgePricing={surgePricing}
     driverApproved={driverApproved}
     trialReady={trialReady}
     subscriptionStatus={subscriptionStatus}
@@ -1713,6 +1736,7 @@ function DriverOfflineHome({
   profileImageUri,
   driverRating,
   surgeActive,
+  surgePricing,
   driverApproved,
   trialReady,
   subscriptionStatus,
@@ -1741,6 +1765,7 @@ function DriverOfflineHome({
   profileImageUri: string | null;
   driverRating: number;
   surgeActive: boolean;
+  surgePricing: { driver_message?: string; is_peak_window?: boolean; heatmap?: { top_zone?: string } } | null;
   driverApproved: boolean;
   trialReady: boolean;
   subscriptionStatus: string | null;
@@ -2017,11 +2042,24 @@ function DriverOfflineHome({
           </TouchableOpacity>
         </View>
 
-        {surgeActive ? (
-          <View style={ohStyles.surgeStrip}>
-            <Ionicons name="flash" size={15} color="#FBBF24" />
-            <Text style={ohStyles.surgeStripText}>Surge is on — fares are elevated nearby</Text>
-          </View>
+        {surgeActive || surgePricing?.is_peak_window ? (
+          <TouchableOpacity
+            style={ohStyles.surgeStrip}
+            onPress={onHeatmap}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Open demand heatmap"
+          >
+            <Ionicons name={surgeActive ? 'flash' : 'time'} size={15} color="#FBBF24" />
+            <Text style={ohStyles.surgeStripText} numberOfLines={2}>
+              {typeof surgePricing?.driver_message === 'string' && surgePricing.driver_message.trim().length > 0
+                ? surgePricing.driver_message
+                : surgeActive
+                  ? 'Surge is on — open Heatmap for the best zones'
+                  : 'Peak hour — open Heatmap to position for more trips'}
+            </Text>
+            <Ionicons name="chevron-forward" size={14} color="#FCD34D" />
+          </TouchableOpacity>
         ) : null}
 
         <View style={ohStyles.prayerSlot}>

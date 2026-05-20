@@ -92,6 +92,7 @@ class UserPreferencesUpdate(BaseModel):
     notification_channels: Optional[dict] = None
     notification_types: Optional[dict] = None
     ride_mood: Optional[RideMoodPreferences] = None
+    pickup_code_enabled: Optional[bool] = None
 
 
 class RiderVerificationUpdate(BaseModel):
@@ -755,6 +756,7 @@ async def get_preferences(user_id: str, request: Request):
         "notification_channels": user.get("notification_channels", {}),
         "notification_types": user.get("notification_types", {}),
         "ride_mood": user.get("ride_mood_preferences", default_mood),
+        "pickup_code_enabled": bool(user.get("pickup_code_enabled", True)),
     }
 
 
@@ -794,6 +796,8 @@ async def update_preferences(user_id: str, request: Request, body: UserPreferenc
             "temperature": body.ride_mood.temperature,
             "driving_style": body.ride_mood.driving_style,
         }
+    if body.pickup_code_enabled is not None:
+        update_data["pickup_code_enabled"] = bool(body.pickup_code_enabled)
 
     if not update_data:
         return {"success": True, "message": "No changes provided"}

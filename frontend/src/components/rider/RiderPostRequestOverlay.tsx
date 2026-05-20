@@ -7,6 +7,7 @@ import {
   useWindowDimensions,
   Image,
   Platform,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
@@ -19,7 +20,8 @@ import {
   RiderFindingStatusRow,
 } from '@/src/components/rider/RiderFindingDriverChrome';
 import { RIDER_FINDING_SHEET_BORDER } from '@/src/constants/riderRideChrome';
-import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
+import { RIDER_DRIVER_FOUND_HANDOFF_MS, riderHandoffProgress } from '@/src/constants/riderTripHandoff';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 export type RiderPostRequestPhase = 'searching' | 'matched';
 
@@ -49,6 +51,8 @@ export type RiderPostRequestOverlayProps = {
   routeMinLabel: string | null;
   searchCountdown: number;
   driverMatched: RiderMatchedDriver | null;
+  /** Seconds until auto-open live map (from book handoff). */
+  handoffCountdownSec?: number | null;
   onCancelSearch: () => void;
   onTrackDriver: () => void;
   /** Top-left menu (reference: hamburger). Omit to hide. */
@@ -104,11 +108,6 @@ function stripTripEtaLabel(s: string | null | undefined): string | null {
 }
 
 function MatchedDriverHero({ driver }: { driver: RiderMatchedDriver }) {
-  const resolvedFace = useMemo(() => resolvePublicMediaUri(driver.face_image ?? null), [driver.face_image]);
-  const resolvedProfile = useMemo(() => resolvePublicMediaUri(driver.profile_image ?? null), [driver.profile_image]);
-  const uri = resolvedFace || resolvedProfile;
-  const [imgFail, setImgFail] = useState(false);
-  useEffect(() => setImgFail(false), [uri]);
   const vehicleLine = [driver.color, driver.vehicle].filter(Boolean).join(' ');
   const platePart = driver.plate ? ` · ${driver.plate}` : '';
   return (
@@ -120,20 +119,15 @@ function MatchedDriverHero({ driver }: { driver: RiderMatchedDriver }) {
         style={StyleSheet.absoluteFillObject}
       />
       <View style={styles.heroPhotoRing}>
-        {uri && !imgFail ? (
-          <Image
-            source={{ uri }}
-            style={styles.heroPhoto}
-            resizeMode="cover"
-            accessibilityLabel={`Photo of ${driver.name}`}
-            onError={() => setImgFail(true)}
-            {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
-          />
-        ) : (
-          <View style={styles.heroPhotoPh}>
-            <Ionicons name="person" size={40} color="#86EFAC" />
-          </View>
-        )}
+        <TripProfileAvatar
+          size={72}
+          faceUri={driver.face_image}
+          profileUri={driver.profile_image}
+          borderColor="#22C55E"
+          borderWidth={3}
+          accessibilityLabel={`Photo of ${driver.name}`}
+          showOnlineDot
+        />
       </View>
       <View style={styles.heroTextCol}>
         <Text style={styles.heroName} numberOfLines={2}>
@@ -224,6 +218,7 @@ export function RiderPostRequestOverlay({
   routeMinLabel,
   searchCountdown,
   driverMatched,
+  handoffCountdownSec = null,
   onCancelSearch,
   onTrackDriver,
   onMenuPress,
@@ -232,19 +227,35 @@ export function RiderPostRequestOverlay({
 }: RiderPostRequestOverlayProps) {
   const { width: winW } = useWindowDimensions();
   const prevPhaseRef = useRef<RiderPostRequestPhase>(phase);
+  const matchedEnter = useRef(new Animated.Value(0)).current;
+  const handoffProgress = riderHandoffProgress(handoffCountdownSec, RIDER_DRIVER_FOUND_HANDOFF_MS);
 
   useEffect(() => {
     if (!visible) {
       prevPhaseRef.current = phase;
+      matchedEnter.setValue(0);
       return;
     }
     if (phase === 'matched' && prevPhaseRef.current !== 'matched') {
+      matchedEnter.setValue(0);
+      Animated.spring(matchedEnter, {
+        toValue: 1,
+        friction: 8,
+        tension: 72,
+        useNativeDriver: true,
+      }).start();
       if (Platform.OS !== 'web') {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     }
     prevPhaseRef.current = phase;
-  }, [visible, phase]);
+  }, [visible, phase, matchedEnter]);
+
+  const matchedSlide = matchedEnter.interpolate({
+    inputRange: [0, 1],
+    outputRange: [28, 0],
+  });
+  const matchedOpacity = matchedEnter;
 
   const headline = useMemo(() => {
     if (phase === 'matched') return 'Your driver is on the way!';
@@ -325,10 +336,15 @@ export function RiderPostRequestOverlay({
               )}
             </>
           ) : (
-            <>
+            <Animated.View
+              style={{
+                opacity: matchedOpacity,
+                transform: [{ translateY: matchedSlide }],
+              }}
+            >
               <Text style={styles.headlineMatched}>{headline}</Text>
               <Text style={styles.subMatched}>{sub}</Text>
-            </>
+            </Animated.View>
           )}
 
           {phase === 'searching' ? (
@@ -340,10 +356,16 @@ export function RiderPostRequestOverlay({
           ) : null}
 
           {phase === 'matched' && driverMatched ? (
-            <>
+            <Animated.View
+              style={{
+                gap: 14,
+                opacity: matchedOpacity,
+                transform: [{ translateY: matchedSlide }],
+              }}
+            >
               <MatchedDriverHero driver={driverMatched} />
               <MatchedTripStats bidNgn={bidNgn} routeKmLabel={routeKmLabel} routeMinLabel={routeMinLabel} />
-            </>
+            </Animated.View>
           ) : null}
 
           {phase === 'matched' && (onCallDriver || onChatDriver) ? (
@@ -419,6 +441,23 @@ export function RiderPostRequestOverlay({
                   <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.4)" />
                 </LinearGradient>
               </TouchableOpacity>
+              <View style={styles.handoffBlock}>
+                <View style={styles.handoffTrack}>
+                  <Animated.View
+                    style={[
+                      styles.handoffFill,
+                      {
+                        width: `${Math.round(handoffProgress * 100)}%`,
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={styles.handoffHint}>
+                  {handoffCountdownSec != null && handoffCountdownSec > 0
+                    ? `Opening live map in ${handoffCountdownSec}s — or tap Track driver now`
+                    : 'Opening live map… — tap Track driver anytime'}
+                </Text>
+              </View>
               <TouchableOpacity
                 style={styles.cancelOutline}
                 onPress={onCancelSearch}
@@ -840,6 +879,36 @@ const styles = StyleSheet.create({
     color: '#022C22',
     letterSpacing: 0.12,
     textAlign: 'center',
+  },
+  handoffBlock: {
+    marginTop: 2,
+    marginBottom: 2,
+    gap: 8,
+  },
+  handoffTrack: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(148,163,184,0.2)',
+    overflow: 'hidden',
+    marginHorizontal: 4,
+  },
+  handoffFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: '#34F5B8',
+    shadowColor: '#22E5A0',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  handoffHint: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 17,
+    paddingHorizontal: 6,
   },
   cancelOutline: {
     alignItems: 'center',

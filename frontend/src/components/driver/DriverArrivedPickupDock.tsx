@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -7,266 +7,475 @@ import {
   Image,
   ActivityIndicator,
   Platform,
+  Alert,
+  ScrollView,
+  useWindowDimensions,
+  Animated,
+  Easing,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
-import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS, HANDLE_GRADIENT_DEFAULT } from '@/src/components/driver/driverDockTheme';
-import { COLORS as THEME_COLORS } from '@/src/constants/theme';
+import * as Haptics from 'expo-haptics';
+import {
+  DOCK_BLUR_INTENSITY,
+  DOCK_TOP_RADIUS,
+  DOCK_METRIC_CHIP,
+  HANDLE_GRADIENT_DEFAULT,
+} from '@/src/components/driver/driverDockTheme';
+import {
+  driverFirstName,
+  DRIVER_CANCEL_TRIP_ALERT,
+  formatPickupWaitPeek,
+} from '@/src/components/driver/driverDockUtils';
+import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
+
+const GREEN = '#22C55E';
+const RED = '#EF4444';
+const MUTED = '#9CA3AF';
+const INK = '#022C22';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 export type DriverArrivedPickupDockProps = {
+  expanded: boolean;
+  onToggleExpand: () => void;
   riderName: string;
   riderPhoto: string | null;
   ratingAvg: number | null;
   ratingTrips: number | null;
   isNewRider: boolean;
-  /** Seconds since driver marked arrived */
   waitingSec: number;
-  pickupShort: string;
-  /** Secondary line, e.g. "Near …" */
+  pickupAddressLine: string;
   pickupDetailLine: string;
+  destinationAddressLine: string;
+  destinationDetailLine: string;
+  routeDistanceLabel: string;
+  routeDurationLabel: string;
   tripActionBusy: boolean;
+  pickupCodeRequired?: boolean;
   riderPhone: string | null;
   canMessage: boolean;
-  /** Opens verify / start flow (same as previous “Enter pick-up code” / Start trip). */
-  onImHere: () => void;
+  onVerifyPickupCode: () => void;
+  onStartTrip?: () => void;
+  onNavigateToPickup?: () => void;
+  onNavigateToDestination?: () => void;
   onCall: () => void;
   onMessage: () => void;
   onSafetyPress: () => void;
+  onCancelTrip?: () => void;
 };
 
-function firstName(full: string): string {
-  const t = full.trim();
-  if (!t) return 'Rider';
-  return t.split(/\s+/)[0] || t;
+function PulsingDot() {
+  const pulse = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, {
+          toValue: 1.35,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulse, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <View style={s.dotWrap}>
+      <Animated.View style={[s.dotPulse, { transform: [{ scale: pulse }] }]} />
+      <View style={s.statusDot} />
+    </View>
+  );
 }
 
-function formatWaitingParts(totalSec: number): { min: number; sec: string } {
-  const s = Math.max(0, Math.floor(totalSec));
-  return { min: Math.floor(s / 60), sec: String(s % 60).padStart(2, '0') };
+function TripRouteTimeline({
+  pickupAddress,
+  pickupDetail,
+  destinationAddress,
+  destinationDetail,
+  onNavPickup,
+  onNavDest,
+  disabled,
+}: {
+  pickupAddress: string;
+  pickupDetail: string;
+  destinationAddress: string;
+  destinationDetail: string;
+  onNavPickup?: () => void;
+  onNavDest?: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <View style={s.timelineCard}>
+      <LinearGradient
+        colors={['rgba(34,197,94,0.08)', 'transparent']}
+        style={s.timelineSheen}
+        pointerEvents="none"
+      />
+      <View style={s.timelineRow}>
+        <View style={s.timelineRail}>
+          <View style={[s.timelineDot, { backgroundColor: GREEN }]} />
+          <View style={s.timelineLine} />
+          <View style={[s.timelineDot, { backgroundColor: RED }]} />
+        </View>
+        <View style={s.timelineBody}>
+          <View style={s.timelineStop}>
+            <View style={s.timelineStopHead}>
+              <Text style={s.addrLabel}>PICKUP</Text>
+              {onNavPickup ? (
+                <TouchableOpacity
+                  style={[s.navMini, disabled && s.navMiniOff]}
+                  onPress={onNavPickup}
+                  disabled={disabled}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="navigate" size={16} color={disabled ? '#64748B' : '#60A5FA'} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <Text style={s.addrMain} numberOfLines={3}>
+              {pickupAddress || '—'}
+            </Text>
+            {pickupDetail ? (
+              <Text style={s.addrSub} numberOfLines={2}>
+                {pickupDetail}
+              </Text>
+            ) : null}
+          </View>
+          <View style={[s.timelineStop, { marginTop: 16 }]}>
+            <View style={s.timelineStopHead}>
+              <Text style={s.addrLabel}>DESTINATION</Text>
+              {onNavDest ? (
+                <TouchableOpacity
+                  style={[s.navMini, disabled && s.navMiniOff]}
+                  onPress={onNavDest}
+                  disabled={disabled}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Ionicons name="navigate" size={16} color={disabled ? '#64748B' : '#60A5FA'} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <Text style={s.addrMain} numberOfLines={3}>
+              {destinationAddress || '—'}
+            </Text>
+            {destinationDetail ? (
+              <Text style={s.addrSub} numberOfLines={2}>
+                {destinationDetail}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function RouteMetrics({ distance, duration }: { distance: string; duration: string }) {
+  return (
+    <View style={s.metricsRow}>
+      <View style={s.metricChip}>
+        <Ionicons name="resize-outline" size={14} color={GREEN} />
+        <Text style={s.metricVal}>{distance}</Text>
+        <Text style={s.metricLbl}>Distance</Text>
+      </View>
+      <View style={s.metricChip}>
+        <Ionicons name="time-outline" size={14} color="#60A5FA" />
+        <Text style={s.metricVal}>{duration}</Text>
+        <Text style={s.metricLbl}>Est. time</Text>
+      </View>
+    </View>
+  );
 }
 
 export default function DriverArrivedPickupDock({
+  expanded,
+  onToggleExpand,
   riderName,
   riderPhoto,
   ratingAvg,
   ratingTrips,
   isNewRider,
   waitingSec,
-  pickupShort,
+  pickupAddressLine,
   pickupDetailLine,
+  destinationAddressLine,
+  destinationDetailLine,
+  routeDistanceLabel,
+  routeDurationLabel,
   tripActionBusy,
+  pickupCodeRequired = true,
   riderPhone,
   canMessage,
-  onImHere,
+  onVerifyPickupCode,
+  onStartTrip,
+  onNavigateToPickup,
+  onNavigateToDestination,
   onCall,
   onMessage,
   onSafetyPress,
+  onCancelTrip,
 }: DriverArrivedPickupDockProps) {
-  const initial = firstName(riderName).charAt(0).toUpperCase() || 'R';
-  const { min: waitMin, sec: waitSec } = formatWaitingParts(waitingSec);
+  const { height: winH } = useWindowDimensions();
+  const initial = driverFirstName(riderName).charAt(0).toUpperCase() || 'R';
+  const waitLabel = formatPickupWaitPeek(waitingSec);
+  const expandedMaxH = Math.round(winH * 0.52);
+  const resolvedPhoto = resolvePublicMediaUri(riderPhoto);
+  const expandAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
 
-  const ringProgress = useMemo(() => {
-    const cap = 600;
-    return Math.min(1, waitingSec / cap);
-  }, [waitingSec]);
+  useEffect(() => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    Animated.timing(expandAnim, {
+      toValue: expanded ? 1 : 0,
+      duration: 280,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: false,
+    }).start();
+  }, [expanded, expandAnim]);
 
-  const imHereSub = "Verify pickup code with your rider, then start when they're in.";
+  const toggleExpand = () => {
+    if (Platform.OS !== 'web') void Haptics.selectionAsync();
+    onToggleExpand();
+  };
+
+  const confirmCancel = () => {
+    if (!onCancelTrip) return;
+    Alert.alert(DRIVER_CANCEL_TRIP_ALERT.title, DRIVER_CANCEL_TRIP_ALERT.message, [
+      { text: DRIVER_CANCEL_TRIP_ALERT.keep, style: 'cancel' },
+      { text: DRIVER_CANCEL_TRIP_ALERT.confirm, style: 'destructive', onPress: onCancelTrip },
+    ]);
+  };
+
+  const primaryAction = pickupCodeRequired ? onVerifyPickupCode : onStartTrip ?? onVerifyPickupCode;
 
   return (
     <View style={s.shell}>
       {Platform.OS === 'ios' || Platform.OS === 'android' ? (
         <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
-      ) : (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(2,6,18,0.97)' }]} />
-      )}
+      ) : null}
       <LinearGradient
-        colors={['rgba(15,23,42,0.22)', 'rgba(2,6,23,0.94)', '#020617']}
+        colors={['rgba(26,26,26,0.98)', '#141414', '#0a0a0a']}
         style={StyleSheet.absoluteFillObject}
       />
-      <LinearGradient
-        colors={['rgba(52,245,184,0.11)', 'transparent']}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.42 }}
-        style={s.sheenTop}
-        pointerEvents="none"
-      />
 
-      <View style={s.handleRail}>
+      <TouchableOpacity
+        style={s.handleHit}
+        onPress={toggleExpand}
+        activeOpacity={0.92}
+        accessibilityRole="button"
+        accessibilityLabel={expanded ? 'Collapse trip details' : 'Expand trip details'}
+        accessibilityState={{ expanded }}
+      >
         <LinearGradient
           colors={[...HANDLE_GRADIENT_DEFAULT]}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
-          style={s.handle}
+          style={s.handleGrad}
         />
-      </View>
-
-      <View style={s.titleRow}>
-        <Text style={s.titleMain} numberOfLines={1}>
-          Waiting for {firstName(riderName)}
-        </Text>
-        <View style={s.waitBadge}>
-          <Ionicons name="time-outline" size={13} color="#86EFAC" />
-          <Text style={s.waitBadgeTxt}>Please wait</Text>
-        </View>
-      </View>
-
-      <View style={s.profileBlock}>
-        {riderPhoto ? (
-          <Image source={{ uri: riderPhoto }} style={s.avatar} />
-        ) : (
-          <View style={s.avatarPh}>
-            <Text style={s.avatarPhTxt}>{initial}</Text>
-          </View>
-        )}
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.riderName} numberOfLines={1}>
-            {firstName(riderName)}
-          </Text>
-          {typeof ratingAvg === 'number' && ratingAvg > 0 ? (
-            <View style={s.ratingRow}>
-              <Ionicons name="star" size={15} color="#FBBF24" />
-              <Text style={s.ratingTxt}>
-                {ratingAvg.toFixed(1)}
-                {typeof ratingTrips === 'number' && ratingTrips > 0
-                  ? ` (${ratingTrips.toLocaleString()} ${ratingTrips === 1 ? 'trip' : 'trips'})`
-                  : ''}
-              </Text>
-            </View>
-          ) : isNewRider ? (
-            <View style={s.ratingRow}>
-              <Ionicons name="sparkles" size={14} color="#94A3B8" />
-              <Text style={s.ratingNew}>New rider</Text>
-            </View>
-          ) : null}
-        </View>
-
-        <View style={s.timerCol}>
-          <Text style={s.timerLabel}>Waiting time</Text>
-          <View style={s.timerRingOuter}>
-            <View
-              style={[
-                s.timerRingTrack,
-                {
-                  borderColor: `rgba(52,245,184,${0.22 + ringProgress * 0.55})`,
-                },
-              ]}
-            />
-            <View style={s.timerRingInner}>
-              <Text style={s.timerBig}>
-                <Text style={s.timerBigEm}>{waitMin}</Text>
-                <Text style={s.timerUnit}> min </Text>
-                <Text style={s.timerBigEm}>{waitSec}</Text>
-                <Text style={s.timerUnit}> sec</Text>
-              </Text>
+        <View style={s.peekRow}>
+          <View style={s.peekLeft}>
+            <PulsingDot />
+            <View>
+              <Text style={s.peekStatus}>AT PICKUP</Text>
+              {!expanded ? (
+                <Text style={s.peekHint}>Trip details · swipe up</Text>
+              ) : null}
             </View>
           </View>
+          <View style={s.peekTimeCol}>
+            <Ionicons name="time-outline" size={13} color={MUTED} />
+            <Text style={s.peekTime}>{waitLabel}</Text>
+          </View>
+          <Ionicons
+            name={expanded ? 'chevron-down' : 'chevron-up'}
+            size={22}
+            color="#E2E8F0"
+          />
         </View>
-      </View>
+      </TouchableOpacity>
 
-      <View style={s.pickupCard}>
-        <View style={s.pickupRow}>
-          <Ionicons name="location" size={18} color="#4ADE80" />
-          <Text style={s.pickupStrong} numberOfLines={1}>
-            Pickup:{' '}
-            <Text style={s.pickupWhite}>{pickupShort || 'Pickup location'}</Text>
-          </Text>
-        </View>
-        {pickupDetailLine ? (
-          <Text style={s.pickupSub} numberOfLines={2}>
-            {pickupDetailLine}
-          </Text>
-        ) : null}
-      </View>
-
-      <TouchableOpacity
-        style={[s.imHereOuter, tripActionBusy && { opacity: 0.65 }]}
-        onPress={onImHere}
-        disabled={!!tripActionBusy}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Continue to verify rider or start trip"
-      >
-        <LinearGradient
-          colors={['#5DFFC7', '#34F5B8', '#0D9F6E']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={s.imHereGrad}
+      {expanded ? (
+        <ScrollView
+          style={{ maxHeight: expandedMaxH }}
+          contentContainerStyle={s.scrollInner}
+          showsVerticalScrollIndicator={false}
+          bounces
         >
-          {tripActionBusy ? (
-            <ActivityIndicator color="#022C22" />
-          ) : (
-            <>
-              <Ionicons name="checkmark-circle" size={24} color="#022C22" />
-              <View style={{ flex: 1, minWidth: 0, alignItems: 'center' }}>
-                <Text style={s.imHereTitle}>{"I'M HERE"}</Text>
-                <Text style={s.imHereSub} numberOfLines={1}>
-                  {imHereSub}
+          <RouteMetrics distance={routeDistanceLabel} duration={routeDurationLabel} />
+
+          <TripRouteTimeline
+            pickupAddress={pickupAddressLine}
+            pickupDetail={pickupDetailLine}
+            destinationAddress={destinationAddressLine}
+            destinationDetail={destinationDetailLine}
+            onNavPickup={onNavigateToPickup}
+            onNavDest={onNavigateToDestination ?? onNavigateToPickup}
+            disabled={!!tripActionBusy}
+          />
+
+          <View style={s.riderCard}>
+            {resolvedPhoto ? (
+              <Image source={{ uri: resolvedPhoto }} style={s.avatar} />
+            ) : (
+              <LinearGradient colors={['#3B82F6', '#1D4ED8']} style={s.avatarPh}>
+                <Text style={s.avatarPhTxt}>{initial}</Text>
+              </LinearGradient>
+            )}
+            <View style={s.riderMeta}>
+              <Text style={s.riderName} numberOfLines={1}>
+                {driverFirstName(riderName)}
+              </Text>
+              {typeof ratingAvg === 'number' && ratingAvg > 0 ? (
+                <View style={s.ratingRow}>
+                  <Ionicons name="star" size={12} color="#FBBF24" />
+                  <Text style={s.ratingTxt}>
+                    {ratingAvg.toFixed(1)}
+                    {typeof ratingTrips === 'number' && ratingTrips > 0
+                      ? ` · ${ratingTrips.toLocaleString()} rides`
+                      : ''}
+                  </Text>
+                </View>
+              ) : isNewRider ? (
+                <Text style={s.riderHint}>New to NEXRYDE</Text>
+              ) : (
+                <Text style={s.riderHint}>
+                  {pickupCodeRequired ? 'Ask for their 4-digit code' : 'Confirm rider identity'}
                 </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.45)" />
-              <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.25)" style={{ marginLeft: -14 }} />
-            </>
+              )}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[s.verifyBtnOuter, tripActionBusy && s.btnDisabled]}
+            onPress={primaryAction}
+            disabled={!!tripActionBusy}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel={pickupCodeRequired ? 'Verify pickup code' : 'Start trip'}
+          >
+            <LinearGradient
+              colors={pickupCodeRequired ? ['#4ADE80', '#22C55E', '#16A34A'] : ['#60A5FA', '#3B82F6', '#2563EB']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={s.verifyBtn}
+            >
+              {tripActionBusy ? (
+                <ActivityIndicator color={INK} />
+              ) : (
+                <>
+                  <View style={s.verifyIconWrap}>
+                    <Ionicons
+                      name={pickupCodeRequired ? 'keypad' : 'play'}
+                      size={22}
+                      color={INK}
+                    />
+                  </View>
+                  <View style={s.verifyTextCol}>
+                    <Text style={s.verifyTitle}>
+                      {pickupCodeRequired ? 'Verify pickup code' : 'Start trip'}
+                    </Text>
+                    <Text style={s.verifySub}>
+                      {pickupCodeRequired
+                        ? 'Enter the code from the rider\'s app'
+                        : 'Rider is ready — begin the metered ride'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.45)" />
+                </>
+              )}
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <View style={s.actionRow}>
+            <TouchableOpacity
+              style={[s.actionBtn, s.actionCall, !riderPhone && s.actionOff]}
+              onPress={onCall}
+              disabled={!riderPhone || !!tripActionBusy}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel="Call rider"
+            >
+              <Ionicons name="call" size={20} color="#F8FAFC" />
+              <Text style={s.actionLbl}>Call</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.actionBtn, s.actionMsg, !canMessage && s.actionOff]}
+              onPress={onMessage}
+              disabled={!canMessage || !!tripActionBusy}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel="Message rider"
+            >
+              <Ionicons name="chatbubble" size={19} color="#F8FAFC" />
+              <Text style={s.actionLbl}>Message</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.actionBtn, s.actionDir, !onNavigateToPickup && s.actionOff]}
+              onPress={onNavigateToPickup}
+              disabled={!onNavigateToPickup || !!tripActionBusy}
+              activeOpacity={0.88}
+              accessibilityRole="button"
+              accessibilityLabel="Open directions"
+            >
+              <Ionicons name="navigate" size={20} color="#F8FAFC" />
+              <Text style={s.actionLbl}>Directions</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={s.safetyRow} onPress={onSafetyPress} activeOpacity={0.88}>
+            <Ionicons name="shield-checkmark" size={18} color={GREEN} />
+            <Text style={s.safetyTxt}>
+              <Text style={s.safetyStrong}>Safety: </Text>
+              Match name and photo before starting the trip
+            </Text>
+            <Ionicons name="chevron-forward" size={16} color={MUTED} />
+          </TouchableOpacity>
+
+          {onCancelTrip ? (
+            <TouchableOpacity
+              style={s.cancelBtn}
+              onPress={confirmCancel}
+              disabled={!!tripActionBusy}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel trip"
+            >
+              <Ionicons name="warning" size={18} color={RED} />
+              <Text style={s.cancelTxt}>Cancel trip</Text>
+            </TouchableOpacity>
+          ) : null}
+        </ScrollView>
+      ) : (
+        <View style={s.collapsedQuick}>
+          {!pickupCodeRequired && onStartTrip ? (
+            <TouchableOpacity
+              style={s.collapsedCta}
+              onPress={onStartTrip}
+              disabled={!!tripActionBusy}
+              activeOpacity={0.9}
+            >
+              <Text style={s.collapsedCtaTxt}>Start trip</Text>
+              <Ionicons name="arrow-forward" size={16} color={INK} />
+            </TouchableOpacity>
+          ) : (
+            <Text style={s.collapsedRoutePreview} numberOfLines={1}>
+              {routeDistanceLabel} to destination · {routeDurationLabel}
+            </Text>
           )}
-        </LinearGradient>
-      </TouchableOpacity>
-
-      <View style={s.commsRow}>
-        <TouchableOpacity
-          style={[s.commBtn, !riderPhone && s.commBtnMuted]}
-          onPress={onCall}
-          disabled={!riderPhone || !!tripActionBusy}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Call rider"
-        >
-          <LinearGradient
-            colors={riderPhone ? ['#3B82F6', '#1D4ED8'] : ['rgba(51,65,85,0.6)', 'rgba(30,41,59,0.9)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={s.commInner}
-          >
-            <Ionicons name="call" size={20} color={riderPhone ? '#F8FAFC' : '#64748B'} />
-            <Text style={[s.commTxt, !riderPhone && s.commTxtMuted]} numberOfLines={1}>
-              CALL RIDER
-            </Text>
-          </LinearGradient>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.commBtn, !canMessage && s.commBtnMuted]}
-          onPress={onMessage}
-          disabled={!canMessage || !!tripActionBusy}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Message rider"
-        >
-          <LinearGradient
-            colors={canMessage ? ['#2563EB', '#1E40AF'] : ['rgba(51,65,85,0.6)', 'rgba(30,41,59,0.9)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={s.commInner}
-          >
-            <Ionicons name="chatbubble-ellipses" size={19} color={canMessage ? THEME_COLORS.accentMuted : '#64748B'} />
-            <Text style={[s.commTxt, !canMessage && s.commTxtMuted]} numberOfLines={2}>
-              MESSAGE RIDER
-            </Text>
-          </LinearGradient>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={s.safetyFoot}
-        onPress={onSafetyPress}
-        activeOpacity={0.85}
-        accessibilityRole="button"
-        accessibilityLabel="Open safety"
-      >
-        <Ionicons name="shield-checkmark" size={16} color="#4ADE80" style={{ marginRight: 8 }} />
-        <Text style={s.safetyFootTxt}>
-          <Text style={s.safetyFootStrong}>Safety tip: </Text>
-          Verify the rider before starting trip
-        </Text>
-      </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
@@ -275,154 +484,398 @@ const s = StyleSheet.create({
   shell: {
     borderTopLeftRadius: DOCK_TOP_RADIUS,
     borderTopRightRadius: DOCK_TOP_RADIUS,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 18,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.12)',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.12)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -18 },
-    shadowOpacity: 0.58,
-    shadowRadius: 32,
-    elevation: 36,
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    elevation: 28,
   },
-  sheenTop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 120,
+  handleHit: {
+    paddingTop: 10,
+    paddingBottom: 10,
+    paddingHorizontal: 18,
   },
-  handleRail: { alignItems: 'center', marginBottom: 14 },
-  handle: { width: 48, height: 4, borderRadius: 100 },
-  titleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+  handleGrad: {
+    alignSelf: 'center',
+    width: 48,
+    height: 5,
+    borderRadius: 100,
     marginBottom: 14,
   },
-  titleMain: { flex: 1, fontSize: 19, fontWeight: '900', color: '#F8FAFC', letterSpacing: -0.35 },
-  waitBadge: {
+  peekRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.32)',
-    backgroundColor: 'rgba(52,245,184,0.1)',
+    gap: 12,
   },
-  waitBadgeTxt: { fontSize: 11, fontWeight: '900', color: '#BBF7D0', letterSpacing: 0.2 },
-  profileBlock: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-  avatar: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 2,
-    borderColor: 'rgba(52,245,184,0.42)',
-    backgroundColor: '#1E293B',
-  },
-  avatarPh: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(96,165,250,0.38)',
-    backgroundColor: '#1E3A5F',
-  },
-  avatarPhTxt: { fontSize: 22, fontWeight: '900', color: '#BFDBFE' },
-  riderName: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', letterSpacing: -0.3 },
-  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
-  ratingTxt: { fontSize: 14, fontWeight: '700', color: '#E2E8F0' },
-  ratingNew: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
-  timerCol: { alignItems: 'flex-end' },
-  timerLabel: { fontSize: 10, fontWeight: '800', color: '#64748B', marginBottom: 4, letterSpacing: 0.4 },
-  timerRingOuter: {
-    width: 100,
-    height: 100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  timerRingTrack: {
-    ...StyleSheet.absoluteFillObject,
-    borderRadius: 50,
-    borderWidth: 3,
-  },
-  timerRingInner: {
-    width: 86,
-    height: 86,
-    borderRadius: 43,
-    backgroundColor: 'rgba(15,23,42,0.92)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(51,65,85,0.5)',
-  },
-  timerBig: { textAlign: 'center' },
-  timerBigEm: { fontSize: 20, fontWeight: '900', color: '#F8FAFC', fontVariant: ['tabular-nums'] },
-  timerUnit: { fontSize: 11, fontWeight: '800', color: '#94A3B8' },
-  pickupCard: {
-    borderRadius: 18,
-    paddingVertical: 14,
-    paddingHorizontal: 15,
-    marginBottom: 16,
-    backgroundColor: 'rgba(15,23,42,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.18)',
-  },
-  pickupRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pickupStrong: { flex: 1, fontSize: 14, fontWeight: '800', color: '#4ADE80' },
-  pickupWhite: { color: '#F8FAFC', fontWeight: '900' },
-  pickupSub: { marginTop: 6, fontSize: 12, fontWeight: '600', color: '#94A3B8', lineHeight: 17, paddingLeft: 26 },
-  imHereOuter: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.45)',
-    shadowColor: '#34F5B8',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.35,
-    shadowRadius: 16,
-    elevation: 12,
-  },
-  imHereGrad: {
+  peekLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 14,
     gap: 10,
+    flex: 1,
+    minWidth: 0,
   },
-  imHereTitle: { fontSize: 16, fontWeight: '900', color: '#022C22', letterSpacing: 1 },
-  imHereSub: { marginTop: 2, fontSize: 11, fontWeight: '700', color: 'rgba(2,44,34,0.72)' },
-  commsRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  commBtn: { flex: 1, borderRadius: 14, overflow: 'hidden' },
-  commBtnMuted: { opacity: 0.55 },
-  commInner: {
+  dotWrap: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dotPulse: {
+    position: 'absolute',
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: 'rgba(34,197,94,0.35)',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: GREEN,
+  },
+  peekStatus: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: GREEN,
+    letterSpacing: 1.3,
+  },
+  peekHint: {
+    marginTop: 2,
+    fontSize: 11,
+    fontWeight: '600',
+    color: MUTED,
+  },
+  peekTimeCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  peekTime: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#F8FAFC',
+    fontVariant: ['tabular-nums'],
+  },
+  collapsedQuick: {
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  collapsedRoutePreview: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED,
+    textAlign: 'center',
+  },
+  collapsedCta: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 13,
-    paddingHorizontal: 6,
+    backgroundColor: GREEN,
+    borderRadius: 12,
+    paddingVertical: 12,
   },
-  commTxt: { fontSize: 10, fontWeight: '900', color: '#F8FAFC', letterSpacing: 0.25, textAlign: 'center' },
-  commTxtMuted: { color: '#94A3B8' },
-  safetyFoot: {
+  collapsedCtaTxt: {
+    fontSize: 15,
+    fontWeight: '900',
+    color: INK,
+  },
+  scrollInner: {
+    paddingHorizontal: 18,
+    paddingBottom: 16,
+    gap: 14,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  metricChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 14,
+    backgroundColor: DOCK_METRIC_CHIP.bg,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: DOCK_METRIC_CHIP.border,
+    gap: 4,
+  },
+  metricVal: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: DOCK_METRIC_CHIP.value,
+    letterSpacing: -0.3,
+  },
+  metricLbl: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: DOCK_METRIC_CHIP.label,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+  },
+  timelineCard: {
+    borderRadius: 16,
+    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
+  },
+  timelineSheen: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 48,
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  timelineRail: {
+    width: 14,
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  timelineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#FFF',
+  },
+  timelineLine: {
+    flex: 1,
+    width: 2,
+    minHeight: 36,
+    marginVertical: 4,
+    backgroundColor: 'rgba(148,163,184,0.35)',
+    borderRadius: 1,
+  },
+  timelineBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  timelineStop: {},
+  timelineStopHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    backgroundColor: 'rgba(15,23,42,0.75)',
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.22)',
+    justifyContent: 'space-between',
+    marginBottom: 4,
   },
-  safetyFootTxt: { flex: 1, fontSize: 12, fontWeight: '600', color: '#CBD5E1', lineHeight: 17 },
-  safetyFootStrong: { fontWeight: '900', color: '#86EFAC' },
+  navMini: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: 'rgba(59,130,246,0.15)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(96,165,250,0.35)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  navMiniOff: {
+    opacity: 0.4,
+  },
+  addrLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: MUTED,
+    letterSpacing: 1,
+  },
+  addrMain: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 21,
+  },
+  addrSub: {
+    marginTop: 3,
+    fontSize: 12,
+    fontWeight: '600',
+    color: MUTED,
+    lineHeight: 17,
+  },
+  riderCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  avatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: '#1E293B',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  avatarPh: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.15)',
+  },
+  avatarPhTxt: {
+    fontSize: 20,
+    fontWeight: '900',
+    color: '#FFF',
+  },
+  riderMeta: {
+    flex: 1,
+    minWidth: 0,
+  },
+  riderName: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: -0.3,
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  ratingTxt: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: MUTED,
+  },
+  riderHint: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: MUTED,
+    marginTop: 4,
+  },
+  verifyBtnOuter: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: GREEN,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.25,
+    shadowRadius: 12,
+    elevation: 8,
+  },
+  verifyBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 15,
+    paddingHorizontal: 14,
+  },
+  verifyIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifyTextCol: {
+    flex: 1,
+    minWidth: 0,
+  },
+  verifyTitle: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: INK,
+    letterSpacing: -0.2,
+  },
+  verifySub: {
+    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    color: 'rgba(2,44,34,0.72)',
+    lineHeight: 16,
+  },
+  btnDisabled: {
+    opacity: 0.55,
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  actionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    borderRadius: 14,
+    minHeight: 66,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  actionCall: {
+    backgroundColor: 'rgba(34,197,94,0.16)',
+    borderColor: 'rgba(34,197,94,0.38)',
+  },
+  actionMsg: {
+    backgroundColor: 'rgba(59,130,246,0.16)',
+    borderColor: 'rgba(59,130,246,0.38)',
+  },
+  actionDir: {
+    backgroundColor: 'rgba(59,130,246,0.1)',
+    borderColor: 'rgba(59,130,246,0.28)',
+  },
+  actionOff: {
+    opacity: 0.4,
+  },
+  actionLbl: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#E2E8F0',
+  },
+  safetyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: 'rgba(34,197,94,0.08)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(34,197,94,0.24)',
+  },
+  safetyTxt: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#CBD5E1',
+    lineHeight: 17,
+  },
+  safetyStrong: {
+    fontWeight: '800',
+    color: '#86EFAC',
+  },
+  cancelBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    borderRadius: 14,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(239,68,68,0.32)',
+  },
+  cancelTxt: {
+    fontSize: 15,
+    fontWeight: '800',
+    color: RED,
+  },
 });

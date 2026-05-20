@@ -31,11 +31,21 @@ def is_wallet_payment_method(payment_method: Optional[str]) -> bool:
     }
 
 
-def rider_must_confirm_payment(payment_method: Optional[str]) -> bool:
-    """Cash, transfer, or wallet: rider confirms after trip complete."""
+def is_cash_payment_method(payment_method: Optional[str]) -> bool:
+    """Default booking method is cash — treat empty/unknown as cash."""
     if not payment_method:
         return True
     pm = str(payment_method).strip().lower()
+    return pm in {"cash", "cash_payment"} or pm.startswith("cash")
+
+
+def rider_must_confirm_payment(payment_method: Optional[str]) -> bool:
+    """Wallet/transfer need rider confirm after trip; cash is settled in person at drop-off."""
+    if is_cash_payment_method(payment_method):
+        return False
+    if not payment_method:
+        return False
+    pm = str(payment_method).strip().lower()
     if is_wallet_payment_method(pm):
         return True
-    return pm in {"cash", "transfer", "bank_transfer"}
+    return pm in {"transfer", "bank_transfer"}

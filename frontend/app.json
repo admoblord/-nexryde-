@@ -2,7 +2,7 @@
   "expo": {
     "name": "Nexryde",
     "slug": "nexryde",
-    "version": "1.3.21",
+    "version": "1.3.23",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
@@ -21,7 +21,7 @@
       "config": {
         "googleMapsApiKey": "AIzaSyCg8_VB5ikbOzQHTJ1wVg1zGMdjTwCBSYs"
       },
-      "buildNumber": "42",
+      "buildNumber": "44",
       "associatedDomains": [
         "applinks:nexryde.app",
         "webcredentials:nexryde.app"
@@ -31,8 +31,8 @@
       "infoPlist": {
         "CFBundleDisplayName": "Nexryde",
         "CFBundleName": "Nexryde",
-        "CFBundleShortVersionString": "1.3.21",
-        "CFBundleVersion": "42",
+        "CFBundleShortVersionString": "1.3.23",
+        "CFBundleVersion": "44",
         "NSLocationWhenInUseUsageDescription": "NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
         "NSLocationAlwaysUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
@@ -64,7 +64,7 @@
       }
     },
     "android": {
-      "versionCode": 75,
+      "versionCode": 85,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"

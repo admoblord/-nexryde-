@@ -32,6 +32,7 @@ import Constants from 'expo-constants';
 import { fetchGoogleDrivingRoutes, DIRECTIONS_ROUTE_MIN_POINTS } from '@/src/navigation/navUtils';
 import { isShortTripFare } from '@/src/utils/farePresentation';
 import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 const C = DS_COLOR;
 
@@ -136,7 +137,6 @@ export default function DriverRideRequestModal({
 }: Props) {
   const insets = useSafeAreaInsets();
   const fareInputRef = useRef<TextInput>(null);
-  const [imgError, setImgError]   = useState(false);
   const [counterMode, setCounterMode] = useState(false);
   const [expanded, setExpanded]   = useState(false);
   const [googleTripRoutes, setGoogleTripRoutes] = useState<
@@ -163,7 +163,6 @@ export default function DriverRideRequestModal({
   useEffect(() => {
     if (!visible) {
       setCounterMode(false);
-      setImgError(false);
       setExpanded(false);
     }
   }, [visible, trip?.id]);
@@ -204,12 +203,6 @@ export default function DriverRideRequestModal({
     return null;
   }, [trip]);
 
-  const riderPhoto = useMemo(() => resolvePublicMediaUri(riderPhotoRaw), [riderPhotoRaw]);
-
-  useEffect(() => {
-    setImgError(false);
-  }, [riderPhoto]);
-  const initial    = riderName.charAt(0).toUpperCase() || 'R';
   const rating     = trip?.shield?.rider_reputation_avg != null ? Number(trip.shield.rider_reputation_avg).toFixed(1) : null;
   const ratingCount = trip?.shield?.rider_reputation_trip_count ?? null;
   const riderRiskBand = String(trip?.shield?.rider_risk_band || '').toLowerCase();
@@ -451,8 +444,8 @@ export default function DriverRideRequestModal({
             pickupLat={pLat}    pickupLng={pLng}
             dropLat={dLat}      dropLng={dLng}
             routeCoords={rideRequestRouteCoords ?? trip?.route_preview_coordinates}
-            riderPhoto={riderPhoto}
-            riderInitial={initial}
+            riderPhoto={resolvePublicMediaUri(riderPhotoRaw)}
+            riderInitial={riderName.charAt(0).toUpperCase() || 'R'}
             riderRiskColor={riskColor}
             driverLat={driverLat}
             driverLng={driverLng}
@@ -586,19 +579,14 @@ export default function DriverRideRequestModal({
                 {/* Rider avatar block */}
                 <View style={s.heroRider}>
                   <View style={[s.heroAvatarWrap, { borderColor: riskColor }]}>
-                    {riderPhoto && !imgError ? (
-                      <Image
-                        source={{ uri: riderPhoto }}
-                        style={s.heroAvatar}
-                        resizeMode="cover"
-                        onError={() => setImgError(true)}
-                      />
-                    ) : (
-                      <LinearGradient colors={['#1e40af', '#1d4ed8']} style={s.heroAvatar}>
-                        <Text style={s.heroAvatarInitial}>{initial}</Text>
-                      </LinearGradient>
-                    )}
-                    <View style={s.onlineDot} />
+                    <TripProfileAvatar
+                      size={56}
+                      uri={riderPhotoRaw}
+                      borderColor={riskColor}
+                      borderWidth={3}
+                      accessibilityLabel={`Photo of ${riderName}`}
+                      showOnlineDot
+                    />
                   </View>
                   <Text style={s.heroRiderName} numberOfLines={1}>{riderName}</Text>
                   {rating != null && (

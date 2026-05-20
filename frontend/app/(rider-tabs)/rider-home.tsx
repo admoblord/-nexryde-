@@ -43,6 +43,11 @@ import {
 } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RiderFavoritesHomeStrip } from '@/src/components/rider/RiderFavoritesHomeStrip';
+import { RiderActiveTripHomePanel } from '@/src/components/rider/RiderActiveTripHomePanel';
+import { pullAndApplyActiveTrip } from '@/src/services/activeTripSync';
+import { useRiderHasActiveTrip, useRiderActiveTripPhase } from '@/src/hooks/useRiderHasActiveTrip';
+import { riderTripStatusHeadline } from '@/src/constants/riderActiveTripDisplay';
+import type { RiderTripDisplayOpts } from '@/src/utils/tripPaymentMethod';
 
 const ICON_EMERGENCY = '#EF4444';
 const ICON_SUPPORT = '#F97316';
@@ -74,6 +79,17 @@ export default function ModernRiderHome() {
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
   const [completedTripCount, setCompletedTripCount] = useState<number>(-1);
   const [savedPlaces, setSavedPlaces] = useState<RiderSavedPlace[]>([]);
+  const hasActiveTrip = useRiderHasActiveTrip();
+  const activeTripPhase = useRiderActiveTripPhase();
+  const activeTripFade = useRef(new Animated.Value(hasActiveTrip ? 1 : 0)).current;
+
+  useEffect(() => {
+    Animated.timing(activeTripFade, {
+      toValue: hasActiveTrip ? 1 : 0,
+      duration: 320,
+      useNativeDriver: true,
+    }).start();
+  }, [hasActiveTrip, activeTripFade]);
 
   const QUICK_FEATURES = [
     {
@@ -167,11 +183,19 @@ export default function ModernRiderHome() {
         return;
       }
       void loadRiderSavedPlaces(riderId).then(setSavedPlaces).catch(() => setSavedPlaces([]));
+      void pullAndApplyActiveTrip(riderId);
     }, [riderId, canCallAuthedApi]),
   );
 
   const openBookToSaved = useCallback(
     (place: RiderSavedPlace) => {
+      if (hasActiveTrip) {
+        Alert.alert(
+          'Ride in progress',
+          'Finish or cancel your current trip before booking another ride.',
+        );
+        return;
+      }
       void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       router.push({
         pathname: '/rider/book',
@@ -182,8 +206,19 @@ export default function ModernRiderHome() {
         },
       } as any);
     },
-    [router],
+    [router, hasActiveTrip],
   );
+
+  const openBook = useCallback(() => {
+    if (hasActiveTrip) {
+      Alert.alert(
+        'Ride in progress',
+        'Finish or cancel your current trip before booking another ride.',
+      );
+      return;
+    }
+    router.push('/rider/book' as any);
+  }, [router, hasActiveTrip]);
 
   useEffect(() => {
     if (!canCallAuthedApi || !riderId) return;
@@ -302,16 +337,32 @@ export default function ModernRiderHome() {
   );
 
   return (
-    <SafeAreaView style={styles.container} edges={['top']}>
-      <StatusBar barStyle="dark-content" backgroundColor={COLORS.gray50} />
+    <SafeAreaView style={[styles.container, hasActiveTrip && styles.containerActiveTrip]} edges={['top']}>
+      <StatusBar barStyle="dark-content" backgroundColor={hasActiveTrip ? '#F0FDF4' : COLORS.gray50} />
       
       {/* HEADER */}
       <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
         <View style={{ flex: 1, marginRight: 8 }}>
-          <Text style={styles.greeting}>
-            {t.common.hello}, {firstName}!
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Text style={styles.greeting}>
+              {t.common.hello}, {firstName}!
+            </Text>
+            {hasActiveTrip && activeTripPhase ? (
+              <View style={styles.liveHeaderBadge}>
+                <View style={styles.liveHeaderDot} />
+                <Text style={styles.liveHeaderTxt}>LIVE</Text>
+              </View>
+            ) : null}
+          </View>
+          <Text style={styles.subtitle}>
+            {hasActiveTrip && activeTripPhase && currentTrip
+              ? riderTripStatusHeadline(activeTripPhase, {
+                  paymentMethod: currentTrip.payment_method,
+                  paymentStatus: currentTrip.payment_status,
+                  tripStatus: currentTrip.status,
+                } satisfies RiderTripDisplayOpts)
+              : 'Where would you like to go?'}
           </Text>
-          <Text style={styles.subtitle}>Where would you like to go?</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
           <TouchableOpacity
@@ -341,26 +392,27 @@ export default function ModernRiderHome() {
         </View>
       </View>
 
-      {/* ── Destination bar (“Where to?”) ── */}
-      <TouchableOpacity
-        style={[styles.whereToBar, { marginHorizontal: flow.padH }]}
-        onPress={() => router.push('/rider/book' as any)}
-        activeOpacity={0.86}
-        accessibilityLabel="Book a ride — Where to?"
-        accessibilityRole="button"
-      >
-        <View style={styles.whereToBarDot} />
-        <Text style={styles.whereToBarText}>Where to?</Text>
-        <LinearGradient
-          colors={[...RIDER_PRIMARY_CTA_GRADIENT]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.whereToBarCta}
+      {!hasActiveTrip ? (
+        <TouchableOpacity
+          style={[styles.whereToBar, { marginHorizontal: flow.padH }]}
+          onPress={openBook}
+          activeOpacity={0.86}
+          accessibilityLabel="Book a ride — Where to?"
+          accessibilityRole="button"
         >
-          <Text style={styles.whereToBarCtaText}>Book</Text>
-          <Ionicons name="arrow-forward" size={13} color="#FFF" />
-        </LinearGradient>
-      </TouchableOpacity>
+          <View style={styles.whereToBarDot} />
+          <Text style={styles.whereToBarText}>Where to?</Text>
+          <LinearGradient
+            colors={[...RIDER_PRIMARY_CTA_GRADIENT]}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.whereToBarCta}
+          >
+            <Text style={styles.whereToBarCtaText}>Book</Text>
+            <Ionicons name="arrow-forward" size={13} color="#FFF" />
+          </LinearGradient>
+        </TouchableOpacity>
+      ) : null}
 
       {/* Language Picker Modal */}
       <Modal visible={showLangPicker} transparent animationType="fade">
@@ -385,8 +437,7 @@ export default function ModernRiderHome() {
         </TouchableOpacity>
       </Modal>
 
-      {/* ── Wallet balance strip ─────────────────────────────────── */}
-      {walletBalance !== null && (
+      {!hasActiveTrip && walletBalance !== null ? (
         <TouchableOpacity
           style={[styles.walletStrip, { marginHorizontal: flow.padH }]}
           onPress={() => router.push('/(rider-tabs)/rider-wallet' as any)}
@@ -399,13 +450,12 @@ export default function ModernRiderHome() {
           <Text style={styles.walletStripBalance}>₦{walletBalance.toLocaleString()}</Text>
           <Ionicons name="chevron-forward" size={15} color={COLORS.gray400} />
         </TouchableOpacity>
-      )}
+      ) : null}
 
-      {/* ── First-ride discount nudge (only before first completed trip) ── */}
-      {completedTripCount === 0 && (
+      {!hasActiveTrip && completedTripCount === 0 ? (
         <TouchableOpacity
           style={[styles.firstRideBanner, { marginHorizontal: flow.padH }]}
-          onPress={() => router.push('/rider/book' as any)}
+          onPress={openBook}
           activeOpacity={0.88}
         >
           <LinearGradient
@@ -425,13 +475,19 @@ export default function ModernRiderHome() {
             <Ionicons name="arrow-forward-circle" size={26} color="rgba(255,255,255,0.9)" />
           </LinearGradient>
         </TouchableOpacity>
-      )}
+      ) : null}
 
       <ScrollView
         style={[styles.content, { paddingHorizontal: flow.padH }]}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={{ paddingBottom: tabPad, gap: Math.round(flow.sectionGap * 0.35) }}
       >
+        {hasActiveTrip ? (
+          <Animated.View style={{ marginTop: 4, opacity: activeTripFade, transform: [{ translateY: activeTripFade.interpolate({ inputRange: [0, 1], outputRange: [12, 0] }) }] }}>
+            <RiderActiveTripHomePanel />
+          </Animated.View>
+        ) : (
+        <>
         {/* PRIORITY ACTIONS — full-bleed green hero, then two equal cards */}
         <Animated.View
           style={[
@@ -442,7 +498,7 @@ export default function ModernRiderHome() {
         >
           <TouchableOpacity
             style={styles.heroCard}
-            onPress={() => router.push('/rider/book' as any)}
+            onPress={openBook}
             activeOpacity={0.9}
             accessibilityLabel="Book a ride"
             accessibilityRole="button"
@@ -737,6 +793,8 @@ export default function ModernRiderHome() {
             ))}
           </View>
         </Animated.View>
+        </>
+        )}
       </ScrollView>
 
       <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="rider" />
@@ -748,6 +806,32 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.gray50,
+  },
+  containerActiveTrip: {
+    backgroundColor: '#F0FDF4',
+  },
+  liveHeaderBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: '#DCFCE7',
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+  },
+  liveHeaderDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#16A34A',
+  },
+  liveHeaderTxt: {
+    fontSize: 9,
+    fontWeight: '900',
+    color: '#15803D',
+    letterSpacing: 0.8,
   },
   header: {
     flexDirection: 'row',

@@ -31,6 +31,10 @@ import { ConfirmationModal, EmergencyButton } from '@/src/components/tier1';
 import policeContacts from '@/src/data/policeContacts';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
+import { RiderSafetyActiveTripCard } from '@/src/components/rider/RiderSafetyActiveTripCard';
+import { pullAndApplyActiveTrip } from '@/src/services/activeTripSync';
+import { openShareTrip } from '@/src/utils/openShareTrip';
+import { isActiveTripStatus } from '@/src/utils/tripStatus';
 
 type PoliceContact = { state: string; aliases: string[]; phone: string };
 const POLICE: PoliceContact[] = policeContacts as PoliceContact[];
@@ -259,15 +263,20 @@ export default function RiderSafetyScreen() {
     const fetchActiveTrip = async () => {
       setLoadingTrip(true);
       try {
-        const res = await fetch(`${BACKEND_URL}/api/trips/active/${riderId}`, { headers: getAuthHeaders() });
-        const data = await res.json();
-        if (data?.active && data?.trip?.id) {
-          setActiveTripId(String(data.trip.id));
+        const result = await pullAndApplyActiveTrip(riderId);
+        if (result.found && result.trip?.id) {
+          setActiveTripId(String(result.trip.id));
         } else {
-          setActiveTripId(null);
+          const stored = useAppStore.getState().currentTrip;
+          if (!stored?.id || !isActiveTripStatus(stored.status, stored.payment_status)) {
+            setActiveTripId(null);
+          }
         }
       } catch {
-        // Keep existing trip state.
+        const stored = useAppStore.getState().currentTrip;
+        if (stored?.id) {
+          setActiveTripId(String(stored.id));
+        }
       } finally {
         setLoadingTrip(false);
       }
@@ -276,7 +285,7 @@ export default function RiderSafetyScreen() {
     void fetchActiveTrip();
     const interval = setInterval(fetchActiveTrip, 20000);
     return () => clearInterval(interval);
-  }, [canCallAuthedApi, riderId, BACKEND_URL]);
+  }, [canCallAuthedApi, riderId]);
 
   const handleConfirmSOS = async () => {
     if (!effectiveTripId) {
@@ -341,6 +350,14 @@ export default function RiderSafetyScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {effectiveTripId ? (
+          <RiderSafetyActiveTripCard
+            tripId={effectiveTripId}
+            status={currentTrip?.status || undefined}
+            paymentStatus={currentTrip?.payment_status}
+          />
+        ) : null}
+
         <Text style={styles.quickLabel}>Quick access</Text>
         <View style={styles.quickRow}>
           {QUICK.map(q => (
@@ -350,6 +367,10 @@ export default function RiderSafetyScreen() {
               onPress={() => {
                 if (q.route === '/(rider-tabs)/rider-safety') {
                   setSosModalVisible(true);
+                  return;
+                }
+                if (q.route === '/rider/share-trip') {
+                  openShareTrip(router, effectiveTripId);
                   return;
                 }
                 router.push(q.route as any);
@@ -432,7 +453,13 @@ export default function RiderSafetyScreen() {
               <TouchableOpacity
                 key={row.route + row.label}
                 style={styles.row}
-                onPress={() => router.push(row.route as any)}
+                onPress={() => {
+                  if (row.route === '/rider/share-trip') {
+                    openShareTrip(router, effectiveTripId);
+                    return;
+                  }
+                  router.push(row.route as any);
+                }}
                 activeOpacity={0.9}
                 accessibilityRole="button"
                 accessibilityLabel={row.label}

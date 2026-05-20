@@ -32,8 +32,14 @@ export function isRiderMapFirstTripStatus(tripStatus: string): boolean {
 
 /** Rider `/trips/:id/status` poll: slower while WS is healthy; faster when live + no WS. */
 export function riderTripStatusPollIntervalMs(wsConnected: boolean, tripStatus: string): number {
-  if (wsConnected) return 18000;
-  return isRiderMapLiveTripStatus(tripStatus) ? 2500 : 5000;
+  if (isRiderMapLiveTripStatus(tripStatus)) return wsConnected ? 12000 : 4000;
+  if (wsConnected) return 20000;
+  return 5000;
+}
+
+/** Backup ETA REST poll — primary path is WebSocket `eta_seconds`. */
+export function riderTripEtaFallbackPollMs(wsConnected: boolean): number {
+  return wsConnected ? 18000 : 5000;
 }
 
 /** Driver home: fetch incoming offers when no modal; slower while offer WS is connected. */

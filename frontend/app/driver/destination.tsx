@@ -1,11 +1,9 @@
 /**
  * Trips Towards Destination — Nexryde
- *
  * Drivers set a destination and only receive rides going their way.
- * Max 3 trips / day (configurable). Home & Favourite are saveable.
  */
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -22,6 +20,7 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -30,10 +29,16 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { useFlowLayout, FLOW_MAX_CONTENT_WIDTH } from '@/src/constants/flowLayout';
+import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
+import { BORDER_RADIUS } from '@/src/constants/theme';
 
 const DAILY_LIMIT = 3;
+const ACCENT = '#34F5B8';
+const ACCENT_DIM = 'rgba(52,245,184,0.14)';
+const SURFACE = 'rgba(15,23,42,0.72)';
+const BORDER = 'rgba(148,163,184,0.18)';
 
-/* ─────────────── types ─────────────── */
 interface DestinationState {
   active: boolean;
   limit_reached: boolean;
@@ -47,7 +52,12 @@ interface DestinationState {
   destination_duration_mins?: number;
   destination_saved_label?: string;
 }
-interface SavedLocation { label: string; name: string; lat: number; lng: number; }
+interface SavedLocation {
+  label: string;
+  name: string;
+  lat: number;
+  lng: number;
+}
 interface SearchResult {
   place_id: string;
   description: string;
@@ -65,81 +75,88 @@ const LOCAL_DESTINATION_FALLBACKS: Array<{ name: string; lat: number; lng: numbe
   { name: 'Yaba', lat: 6.5155, lng: 3.3702, secondary: 'Lagos, Nigeria' },
   { name: 'Surulere', lat: 6.5058, lng: 3.3581, secondary: 'Lagos, Nigeria' },
   { name: 'Ajah', lat: 6.4654, lng: 3.5448, secondary: 'Lagos, Nigeria' },
-  { name: 'Maryland', lat: 6.5720, lng: 3.3637, secondary: 'Lagos, Nigeria' },
+  { name: 'Maryland', lat: 6.572, lng: 3.3637, secondary: 'Lagos, Nigeria' },
   { name: 'Abuja', lat: 9.0579, lng: 7.4951, secondary: 'FCT, Nigeria' },
   { name: 'Port Harcourt', lat: 4.8156, lng: 7.0498, secondary: 'Rivers, Nigeria' },
 ];
 
-/* ─────────────── trip-dots indicator ─────────────── */
-function TripDots({ total, used }: { total: number; used: number }) {
+function TripProgressBar({ total, used }: { total: number; used: number }) {
   return (
-    <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+    <View style={progressStyles.track} accessibilityLabel={`${used} of ${total} trips used today`}>
       {Array.from({ length: total }).map((_, i) => (
-        <View
-          key={i}
-          style={[
-            dot.base,
-            i < used ? dot.used : dot.avail,
-          ]}
-        />
+        <View key={i} style={[progressStyles.segment, i < used ? progressStyles.segmentUsed : progressStyles.segmentFree]} />
       ))}
     </View>
   );
 }
-const dot = StyleSheet.create({
-  base:  { width: 11, height: 11, borderRadius: 5.5 },
-  used:  { backgroundColor: '#22E5A0' },
-  avail: { backgroundColor: 'rgba(34,229,160,0.22)', borderWidth: 1.5, borderColor: 'rgba(34,229,160,0.5)' },
+
+const progressStyles = StyleSheet.create({
+  track: { flexDirection: 'row', gap: 8, width: '100%' },
+  segment: { flex: 1, height: 10, borderRadius: 5 },
+  segmentUsed: { backgroundColor: ACCENT },
+  segmentFree: {
+    backgroundColor: 'rgba(52,245,184,0.12)',
+    borderWidth: 1.5,
+    borderColor: 'rgba(52,245,184,0.35)',
+  },
 });
 
-/* ─────────────── main screen ─────────────── */
 export default function DestinationScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const flow = useFlowLayout();
+  const { width: screenW, height: screenH } = useWindowDimensions();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
-  const [state, setState]                   = useState<DestinationState | null>(null);
-  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [activating, setActivating]         = useState(false);
-  const [cancelling, setCancelling]         = useState(false);
+  const isNarrow = screenW < 360;
+  const contentMaxW = Math.min(screenW, FLOW_MAX_CONTENT_WIDTH);
+  const tileMinW = screenW >= 400 ? '47%' : '100%';
 
-  // search state
-  const [searchQuery, setSearchQuery]     = useState('');
-  const [searchResults, setResults]       = useState<SearchResult[]>([]);
-  const [searching, setSearching]         = useState(false);
-  const [showSearch, setShowSearch]       = useState(false);
+  const [state, setState] = useState<DestinationState | null>(null);
+  const [savedLocations, setSavedLocations] = useState<SavedLocation[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activating, setActivating] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [showSearch, setShowSearch] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [searchErrorHint, setSearchErrorHint] = useState<string | null>(null);
-  // when set, search auto-saves result as this label (home / favourite)
-  const [saveAsLabel, setSaveAsLabel]     = useState<string | null>(null);
-  const searchRef   = useRef<TextInput>(null);
+  const [saveAsLabel, setSaveAsLabel] = useState<string | null>(null);
+  const searchRef = useRef<TextInput>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const latestSearchRef = useRef('');
 
-  // animations
   const slideAnim = useRef(new Animated.Value(0)).current;
   const pulseAnim = useRef(new Animated.Value(1)).current;
+  const heroFade = useRef(new Animated.Value(0)).current;
 
-  /* ── Load ── */
   const load = useCallback(async () => {
     if (!driverId) return;
     try {
       const [sr, lr] = await Promise.all([
-        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`,        { headers: getAuthHeaders() }),
-        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved`,  { headers: getAuthHeaders() }),
+        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, { headers: getAuthHeaders() }),
+        fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved`, { headers: getAuthHeaders() }),
       ]);
       if (sr.ok) {
         setState(await sr.json());
-        Animated.spring(slideAnim, { toValue: 1, tension: 50, friction: 9, useNativeDriver: true }).start();
+        Animated.parallel([
+          Animated.spring(slideAnim, { toValue: 1, tension: 48, friction: 9, useNativeDriver: true }),
+          Animated.timing(heroFade, { toValue: 1, duration: 420, useNativeDriver: true }),
+        ]).start();
       }
       if (lr.ok) {
         const d = await lr.json();
         setSavedLocations(Array.isArray(d.saved) ? d.saved : []);
       }
-    } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, [driverId]); // eslint-disable-line react-hooks/exhaustive-deps
+    } catch {
+      /* silent */
+    } finally {
+      setLoading(false);
+    }
+  }, [driverId, slideAnim, heroFade]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
@@ -157,35 +174,48 @@ export default function DestinationScreen() {
     };
   }, []);
 
-  /* ── Pulse when active ── */
   useEffect(() => {
     if (!state?.active) return;
-    const loop = Animated.loop(Animated.sequence([
-      Animated.timing(pulseAnim, { toValue: 1.06, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-      Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }),
-    ]));
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.04,
+          duration: 1100,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1100,
+          useNativeDriver: true,
+          easing: Easing.inOut(Easing.ease),
+        }),
+      ])
+    );
     loop.start();
     return () => loop.stop();
-  }, [state?.active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [state?.active, pulseAnim]);
 
-  /* ── Search ── */
   const doSearch = useCallback(async (q: string) => {
     const trimmed = q.trim();
-    if (!trimmed || trimmed.length < 2) { setResults([]); setSearchErrorHint(null); return; }
+    if (!trimmed || trimmed.length < 2) {
+      setResults([]);
+      setSearchErrorHint(null);
+      return;
+    }
     latestSearchRef.current = trimmed;
     setSearching(true);
     setSearchErrorHint(null);
     try {
-      const r = await fetch(
-        `${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(trimmed)}`,
-        { headers: getAuthHeaders() }
-      );
+      const r = await fetch(`${BACKEND_URL}/api/places/autocomplete?input=${encodeURIComponent(trimmed)}`, {
+        headers: getAuthHeaders(),
+      });
       if (r.ok) {
         const d = await r.json();
         if (latestSearchRef.current !== trimmed) return;
         const preds = Array.isArray(d.predictions) ? d.predictions : [];
         const normalized = preds
-          .map((p: any) => ({
+          .map((p: Record<string, unknown>) => ({
             place_id: String(p.place_id ?? p.id ?? ''),
             description: String(p.description ?? p.main_text ?? ''),
             main_text: String(p.main_text ?? p.description ?? ''),
@@ -197,13 +227,11 @@ export default function DestinationScreen() {
           setResults(normalized);
           return;
         }
-
-        // Fallback: if autocomplete is denied/empty, try direct geocode by typed text.
         if (typeof d.status === 'string' && d.status !== 'OK') {
           setSearchErrorHint(
             d.status === 'REQUEST_DENIED'
-              ? 'Places API denied this request. Check backend Google Maps key restrictions.'
-              : `Places returned ${d.status}. Trying direct address lookup...`
+              ? 'Places API denied. Check Google Maps key on the server.'
+              : `Places returned ${d.status}. Trying address lookup…`
           );
         }
         const geo = await fetch(
@@ -216,19 +244,22 @@ export default function DestinationScreen() {
           const lat = Number(gd.latitude);
           const lng = Number(gd.longitude);
           if (Number.isFinite(lat) && Number.isFinite(lng)) {
-            setResults([{
-              place_id: `geocode:${encodeURIComponent(trimmed)}`,
-              description: String(gd.address || trimmed),
-              main_text: String((gd.address || trimmed).split(',')[0] || trimmed),
-              secondary_text: String(gd.address || ''),
-              lat,
-              lng,
-            }]);
+            setResults([
+              {
+                place_id: `geocode:${encodeURIComponent(trimmed)}`,
+                description: String(gd.address || trimmed),
+                main_text: String((gd.address || trimmed).split(',')[0] || trimmed),
+                secondary_text: String(gd.address || ''),
+                lat,
+                lng,
+              },
+            ]);
             return;
           }
         }
-        const localMatches = LOCAL_DESTINATION_FALLBACKS
-          .filter((c) => c.name.toLowerCase().includes(trimmed.toLowerCase()))
+        const localMatches = LOCAL_DESTINATION_FALLBACKS.filter((c) =>
+          c.name.toLowerCase().includes(trimmed.toLowerCase())
+        )
           .slice(0, 6)
           .map((c) => ({
             place_id: `local:${encodeURIComponent(c.name)}`,
@@ -239,7 +270,7 @@ export default function DestinationScreen() {
             lng: c.lng,
           }));
         if (localMatches.length > 0) {
-          setSearchErrorHint('Google Places unavailable right now — showing local fallback results.');
+          setSearchErrorHint('Showing local area matches.');
           setResults(localMatches);
           return;
         }
@@ -247,9 +278,12 @@ export default function DestinationScreen() {
       } else {
         setResults([]);
       }
-    } catch { /* silent */ }
-    finally { setSearching(false); }
-  }, [setSearchErrorHint]);
+    } catch {
+      /* silent */
+    } finally {
+      setSearching(false);
+    }
+  }, []);
 
   const onSearchChange = (text: string) => {
     setSearchQuery(text);
@@ -257,7 +291,6 @@ export default function DestinationScreen() {
     searchTimer.current = setTimeout(() => doSearch(text), 380);
   };
 
-  /* ── Resolve place_id → lat/lng ── */
   const resolvePlaceId = async (result: SearchResult): Promise<{ lat: number; lng: number; address: string }> => {
     if (Number.isFinite(result.lat) && Number.isFinite(result.lng)) {
       return {
@@ -285,24 +318,20 @@ export default function DestinationScreen() {
       }
       return { lat, lng, address: gd.address || raw };
     }
-    // ✅ FIX: path param, not query param
-    const r = await fetch(
-      `${BACKEND_URL}/api/places/details/${encodeURIComponent(place_id)}`,
-      { headers: getAuthHeaders() }
-    );
+    const r = await fetch(`${BACKEND_URL}/api/places/details/${encodeURIComponent(place_id)}`, {
+      headers: getAuthHeaders(),
+    });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       throw new Error(err.detail || 'Could not resolve location');
     }
     const d = await r.json();
-    // ✅ FIX: backend returns { latitude, longitude, address }
     const lat = d.latitude ?? d.lat ?? d?.result?.geometry?.location?.lat;
     const lng = d.longitude ?? d.lng ?? d?.result?.geometry?.location?.lng;
     if (!lat || !lng) throw new Error('No coordinates returned for this location');
     return { lat, lng, address: d.address || '' };
   };
 
-  /* ── Activate destination ── */
   const activateDestination = async (name: string, lat: number, lng: number, label?: string) => {
     if (!driverId) return;
     const r = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, {
@@ -318,9 +347,9 @@ export default function DestinationScreen() {
     const d = await r.json();
     if (d.blocked) {
       Alert.alert(
-        'Daily Limit Reached',
+        'Daily limit reached',
         d.message || `You've used all ${DAILY_LIMIT} trips today. Resets at midnight.`,
-        [{ text: 'Got it' }]
+        [{ text: 'OK' }]
       );
       return;
     }
@@ -328,7 +357,6 @@ export default function DestinationScreen() {
     await load();
   };
 
-  /* ── Save a location as Home / Favourite ── */
   const saveLocation = async (label: string, name: string, lat: number, lng: number) => {
     if (!driverId) return;
     await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved`, {
@@ -339,472 +367,524 @@ export default function DestinationScreen() {
     await load();
   };
 
-  /* ── Handle search result tap ── */
-  const handleSearchResult = useCallback(async (result: SearchResult) => {
-    setShowSearch(false);
-    setResults([]);
-    setSearchQuery('');
-    setActivating(true);
-    const savedLabel = saveAsLabel;
-    setSaveAsLabel(null);
-    try {
-      const { lat, lng } = await resolvePlaceId(result);
-      const name = result.main_text || result.description;
-
-      // If user tapped "Home +" or "Favourite +" → save first, then activate
-      if (savedLabel) {
-        await saveLocation(savedLabel, name, lat, lng);
-        await activateDestination(name, lat, lng, savedLabel);
-      } else {
-        await activateDestination(name, lat, lng);
+  const handleSearchResult = useCallback(
+    async (result: SearchResult) => {
+      setShowSearch(false);
+      setResults([]);
+      setSearchQuery('');
+      setActivating(true);
+      const savedLabel = saveAsLabel;
+      setSaveAsLabel(null);
+      try {
+        const { lat, lng } = await resolvePlaceId(result);
+        const name = result.main_text || result.description;
+        if (savedLabel) {
+          await saveLocation(savedLabel, name, lat, lng);
+          await activateDestination(name, lat, lng, savedLabel);
+        } else {
+          await activateDestination(name, lat, lng);
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : 'Could not set destination. Try again.';
+        Alert.alert('Error', msg);
+      } finally {
+        setActivating(false);
       }
-    } catch (e: any) {
-      Alert.alert('Error', e.message || 'Could not set destination. Try again.');
-    } finally {
-      setActivating(false);
-    }
-  }, [saveAsLabel, driverId]); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+    [saveAsLabel, driverId]
+  );
 
-  /* ── Handle saved location tap (activate directly) ── */
   const handleSavedTap = useCallback(async (saved: SavedLocation) => {
     setActivating(true);
     try {
       await activateDestination(saved.name, saved.lat, saved.lng, saved.label);
-    } catch (e: any) {
-      Alert.alert('Error', e.message || 'Could not activate. Try again.');
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not activate. Try again.';
+      Alert.alert('Error', msg);
     } finally {
       setActivating(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
-  /* ── Delete saved location ── */
   const handleDeleteSaved = (label: string) => {
-    Alert.alert(
-      `Remove ${label.charAt(0).toUpperCase() + label.slice(1)}`,
-      'Remove this saved location?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            if (!driverId) return;
-            await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved/${label}`, {
-              method: 'DELETE',
-              headers: getAuthHeaders(),
-            });
-            await load();
-          },
+    Alert.alert(`Remove ${label}`, 'Remove this saved location?', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          if (!driverId) return;
+          await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination/saved/${label}`, {
+            method: 'DELETE',
+            headers: getAuthHeaders(),
+          });
+          await load();
         },
-      ]
-    );
+      },
+    ]);
   };
 
-  /* ── Cancel destination ── */
   const handleCancel = () => {
-    Alert.alert('Turn Off Destination Mode', 'Stop receiving trips towards your destination?', [
-      { text: 'Keep Active', style: 'cancel' },
+    Alert.alert('Turn off destination mode', 'Stop receiving trips towards your destination?', [
+      { text: 'Keep active', style: 'cancel' },
       {
-        text: 'Turn Off',
+        text: 'Turn off',
         style: 'destructive',
         onPress: async () => {
           if (!driverId) return;
           setCancelling(true);
           try {
             await fetch(`${BACKEND_URL}/api/drivers/${driverId}/destination`, {
-              method: 'DELETE', headers: getAuthHeaders(),
+              method: 'DELETE',
+              headers: getAuthHeaders(),
             });
             await load();
-          } finally { setCancelling(false); }
+          } finally {
+            setCancelling(false);
+          }
         },
       },
     ]);
   };
 
-  /* ── Open search ── */
   const openSearch = (asLabel?: string) => {
     setSaveAsLabel(asLabel || null);
     setShowSearch(true);
-    setTimeout(() => searchRef.current?.focus(), 100);
+    setTimeout(() => searchRef.current?.focus(), 120);
   };
 
-  /* ── Helpers ── */
   const getSavedIcon = (label: string): React.ComponentProps<typeof Ionicons>['name'] => {
-    if (label === 'home')                           return 'home';
+    if (label === 'home') return 'home';
     if (label === 'favourite' || label === 'favorite') return 'star';
     return 'location';
   };
   const getSavedColor = (label: string) => {
-    if (label === 'home')                           return '#3B82F6';
-    if (label === 'favourite' || label === 'favorite') return '#F59E0B';
-    return '#22E5A0';
+    if (label === 'home') return '#60A5FA';
+    if (label === 'favourite' || label === 'favorite') return '#FBBF24';
+    return ACCENT;
   };
+
   const fmtDist = (km?: number, mins?: number) => {
     if (km == null) return '';
     const d = km < 1 ? `${Math.round(km * 1000)} m` : `${km.toFixed(1)} km`;
     return mins != null ? `${d} · ~${Math.round(mins)} min` : d;
   };
 
-  /* ── Preset presets for unsaved slots ── */
   const PRESETS: Array<{ label: string; icon: React.ComponentProps<typeof Ionicons>['name']; color: string }> = [
-    { label: 'home',      icon: 'home',  color: '#3B82F6' },
-    { label: 'favourite', icon: 'star',  color: '#F59E0B' },
+    { label: 'home', icon: 'home', color: '#60A5FA' },
+    { label: 'favourite', icon: 'star', color: '#FBBF24' },
   ];
-  const unsavedPresets = PRESETS.filter(p => !savedLocations.some(s => s.label === p.label));
+  const unsavedPresets = PRESETS.filter((p) => !savedLocations.some((s) => s.label === p.label));
 
-  /* ── Status ── */
-  const statusColor = state?.limit_reached ? '#EF4444' : state?.active ? '#22E5A0' : '#64748B';
-  const statusLabel = state?.limit_reached ? 'Limit reached' : state?.active ? 'Active' : 'Inactive';
+  const statusColor = state?.limit_reached ? '#F87171' : state?.active ? ACCENT : '#94A3B8';
+  const statusLabel = state?.limit_reached ? 'Limit reached' : state?.active ? 'Active' : 'Ready to set';
 
-  /* ══════════════════════════════ LOADING ══════════════════════════════ */
+  const slideY = slideAnim.interpolate({ inputRange: [0, 1], outputRange: [32, 0] });
+
+  const searchPanelMaxH = useMemo(() => Math.min(screenH * 0.88, screenH - insets.top - 24), [screenH, insets.top]);
+
   if (loading) {
     return (
-      <SafeAreaView style={s.root} edges={['top']}>
+      <SafeAreaView style={styles.root} edges={['top']}>
         <StatusBar barStyle="light-content" />
-        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-          <ActivityIndicator size="large" color="#22E5A0" />
+        <TabBrandStrip role="driver" />
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={ACCENT} />
+          <Text style={styles.loadingTxt}>Loading destination mode…</Text>
         </View>
       </SafeAreaView>
     );
   }
 
-  /* ══════════════════════════════ RENDER ══════════════════════════════ */
   return (
-    <SafeAreaView style={s.root} edges={['top']}>
+    <SafeAreaView style={styles.root} edges={['top']}>
       <StatusBar barStyle="light-content" />
+      <TabBrandStrip role="driver" />
 
-      {/* Header */}
-      <View style={s.header}>
-        <TouchableOpacity style={s.backBtn} onPress={() => router.back()} activeOpacity={0.8}>
-          <Ionicons name="arrow-back" size={20} color="#E2E8F0" />
+      {/* Top bar */}
+      <View style={[styles.topBar, { paddingHorizontal: flow.padH }]}>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => router.back()}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
+          <Ionicons name="arrow-back" size={22} color="#F1F5F9" />
         </TouchableOpacity>
-        <View style={{ flex: 1 }}>
-          <Text style={s.headerTitle}>Trips towards destination</Text>
-          <Text style={s.headerSub}>Receive only rides going your way · Max {DAILY_LIMIT}/day</Text>
-        </View>
-        {state?.active && (
-          <View style={[s.liveDot, { backgroundColor: '#22E5A020', borderColor: '#22E5A050' }]}>
-            <View style={[s.liveDotInner, { backgroundColor: '#22E5A0' }]} />
+        <View style={{ flex: 1, minWidth: 0 }} />
+        {state?.active ? (
+          <View style={styles.livePill}>
+            <View style={styles.liveDot} />
+            <Text style={styles.livePillTxt}>LIVE</Text>
           </View>
-        )}
+        ) : null}
       </View>
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={[s.body, { paddingBottom: insets.bottom + 28 }]}
+        contentContainerStyle={[
+          styles.scrollBody,
+          {
+            paddingHorizontal: flow.padH,
+            paddingBottom: insets.bottom + flow.sectionGap,
+            maxWidth: contentMaxW,
+            alignSelf: 'center',
+            width: '100%',
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* ── Status card ── */}
+        {/* Hero */}
+        <Animated.View style={{ opacity: heroFade }}>
+          <LinearGradient colors={['rgba(37,99,235,0.35)', 'rgba(8,12,24,0)']} style={styles.heroGrad}>
+            <View style={styles.heroIconRing}>
+              <LinearGradient colors={['#3B82F6', '#1D4ED8']} style={styles.heroIconGrad}>
+                <Ionicons name="navigate-circle" size={isNarrow ? 36 : 42} color="#FFF" />
+              </LinearGradient>
+            </View>
+            <Text style={[styles.heroTitle, isNarrow && { fontSize: 24 }]}>Trips towards destination</Text>
+            <Text style={styles.heroSub}>
+              Only get offers going your way · up to {DAILY_LIMIT} matched trips per day
+            </Text>
+          </LinearGradient>
+        </Animated.View>
+
+        {/* Status card */}
         <Animated.View
           style={[
-            s.statusCard,
-            state?.active       && s.cardActive,
-            state?.limit_reached && s.cardLimit,
-            { opacity: slideAnim, transform: [{ translateY: slideAnim.interpolate({ inputRange: [0,1], outputRange: [24,0] }) }] },
+            styles.statusCard,
+            state?.active && styles.statusCardActive,
+            state?.limit_reached && styles.statusCardLimit,
+            { opacity: slideAnim, transform: [{ translateY: slideY }] },
           ]}
         >
-          {/* Row: badge + dots */}
-          <View style={s.statusRow}>
-            <View style={[s.badge, { backgroundColor: `${statusColor}18`, borderColor: `${statusColor}38` }]}>
-              <View style={[s.badgeDot, { backgroundColor: statusColor }]} />
-              <Text style={[s.badgeText, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
+          <View style={styles.statusTopRow}>
+            <View style={[styles.statusBadge, { borderColor: `${statusColor}55`, backgroundColor: `${statusColor}18` }]}>
+              <View style={[styles.statusBadgeDot, { backgroundColor: statusColor }]} />
+              <Text style={[styles.statusBadgeTxt, { color: statusColor }]}>{statusLabel.toUpperCase()}</Text>
             </View>
-            {state && (
-              <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                <TripDots total={state.daily_limit} used={state.daily_trips} />
-                <Text style={s.tripsLeft}>
-                  {state.limit_reached
-                    ? 'Resets at midnight'
-                    : `${state.trips_remaining} trip${state.trips_remaining !== 1 ? 's' : ''} left today`}
-                </Text>
-              </View>
-            )}
+            {state ? (
+              <Text style={styles.statusTripsHint}>
+                {state.limit_reached
+                  ? 'Resets at midnight'
+                  : `${state.trips_remaining} left today`}
+              </Text>
+            ) : null}
           </View>
 
-          {state && (
-            <View style={s.summaryRow}>
-              <View style={s.summaryChip}>
-                <Text style={s.summaryValue}>{state.daily_trips}</Text>
-                <Text style={s.summaryLabel}>Used today</Text>
+          {state ? (
+            <>
+              <TripProgressBar total={state.daily_limit} used={state.daily_trips} />
+              <View style={styles.statGrid}>
+                <View style={styles.statCell}>
+                  <Text style={styles.statValue}>{state.daily_trips}</Text>
+                  <Text style={styles.statLabel}>Used</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statCell}>
+                  <Text style={[styles.statValue, { color: state.limit_reached ? '#F87171' : ACCENT }]}>
+                    {state.trips_remaining}
+                  </Text>
+                  <Text style={styles.statLabel}>Left</Text>
+                </View>
+                <View style={styles.statDivider} />
+                <View style={styles.statCell}>
+                  <Text style={styles.statValue}>{state.daily_limit}</Text>
+                  <Text style={styles.statLabel}>Daily max</Text>
+                </View>
               </View>
-              <View style={s.summaryChip}>
-                <Text style={[s.summaryValue, { color: state.limit_reached ? '#F87171' : '#22E5A0' }]}>
-                  {state.trips_remaining}
-                </Text>
-                <Text style={s.summaryLabel}>Remaining</Text>
-              </View>
-              <View style={s.summaryChip}>
-                <Text style={s.summaryValue}>{state.daily_limit}</Text>
-                <Text style={s.summaryLabel}>Daily limit</Text>
-              </View>
-            </View>
-          )}
+            </>
+          ) : null}
 
-          {/* Active destination banner */}
           {state?.active && state.destination_name ? (
-            <Animated.View style={[s.activeDest, { transform: [{ scale: pulseAnim }] }]}>
-              <LinearGradient colors={['rgba(34,229,160,0.12)', 'rgba(34,229,160,0.05)']} style={s.activeDestGrad}>
-                <View style={s.activeDestIcon}>
-                  <Ionicons name="flag" size={18} color="#22E5A0" />
+            <Animated.View style={[styles.activeCard, { transform: [{ scale: pulseAnim }] }]}>
+              <LinearGradient
+                colors={['rgba(52,245,184,0.16)', 'rgba(6,78,59,0.35)']}
+                style={styles.activeCardGrad}
+              >
+                <View style={styles.activeIconWrap}>
+                  <Ionicons name="flag" size={28} color={ACCENT} />
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.activeDestLabel}>GOING TOWARDS</Text>
-                  <Text style={s.activeDestName} numberOfLines={2}>{state.destination_name}</Text>
-                  {fmtDist(state.destination_distance_km, state.destination_duration_mins) !== '' && (
-                    <Text style={s.activeDestMeta}>
-                      <Ionicons name="navigate-outline" size={11} color="#22E5A0" /> {fmtDist(state.destination_distance_km, state.destination_duration_mins)}
-                    </Text>
+                <View style={styles.activeTextCol}>
+                  <Text style={styles.activeEyebrow}>HEADING TO</Text>
+                  <Text style={styles.activeName} numberOfLines={3}>
+                    {state.destination_name}
+                  </Text>
+                  {fmtDist(state.destination_distance_km, state.destination_duration_mins) ? (
+                    <View style={styles.activeMetaRow}>
+                      <Ionicons name="map-outline" size={14} color={ACCENT} />
+                      <Text style={styles.activeMeta}>
+                        {fmtDist(state.destination_distance_km, state.destination_duration_mins)}
+                      </Text>
+                    </View>
+                  ) : null}
+                </View>
+                <TouchableOpacity
+                  onPress={handleCancel}
+                  style={styles.activeOffBtn}
+                  disabled={cancelling}
+                  accessibilityLabel="Turn off destination mode"
+                >
+                  {cancelling ? (
+                    <ActivityIndicator size="small" color="#FCA5A5" />
+                  ) : (
+                    <>
+                      <Ionicons name="power" size={18} color="#FCA5A5" />
+                      <Text style={styles.activeOffTxt}>Off</Text>
+                    </>
                   )}
-                </View>
-                {/* Cancel X */}
-                <TouchableOpacity onPress={handleCancel} style={s.activeDestCancel} disabled={cancelling}>
-                  {cancelling
-                    ? <ActivityIndicator size="small" color="#EF4444" />
-                    : <Ionicons name="close-circle" size={22} color="#EF4444" />
-                  }
                 </TouchableOpacity>
               </LinearGradient>
             </Animated.View>
           ) : state?.limit_reached ? (
-            <View style={s.limitBanner}>
-              <Ionicons name="time-outline" size={16} color="#EF4444" />
-              <Text style={s.limitText}>
-                All {DAILY_LIMIT} destination trips used today. Resets at midnight.
+            <View style={styles.limitBox}>
+              <Ionicons name="moon-outline" size={22} color="#F87171" />
+              <Text style={styles.limitBoxTxt}>
+                All {DAILY_LIMIT} destination trips used today. Come back after midnight.
               </Text>
             </View>
           ) : (
-            <Text style={s.inactiveHint}>
-              Set a destination below to start receiving matched trips.
-            </Text>
+            <Text style={styles.inactiveHint}>Pick a destination below to start matching rides on your route.</Text>
           )}
         </Animated.View>
 
-        {/* ── How it works (collapsed when active) ── */}
-        {!state?.active && !state?.limit_reached && (
-          <View style={s.howCard}>
-            <Text style={s.sectionLabel}>HOW IT WORKS</Text>
-            {[
-              { icon: 'navigate'         as const, color: '#22E5A0', title: 'Set your destination',  desc: 'Pick where you\'re heading — home, favourite, or any location.' },
-              { icon: 'car-sport'        as const, color: '#3B82F6', title: 'Get matched trips',      desc: 'Only receive rides going your direction (within 2.5 km of your route).' },
-              { icon: 'checkmark-circle' as const, color: '#F59E0B', title: 'Up to 3 trips/day',      desc: 'Complete up to 3 trips towards your destination. Resets daily at midnight.' },
-            ].map((step, i) => (
-              <View key={i} style={s.stepRow}>
-                <View style={[s.stepIcon, { backgroundColor: `${step.color}18` }]}>
-                  <Ionicons name={step.icon} size={18} color={step.color} />
+        {!state?.active && !state?.limit_reached ? (
+          <View style={styles.howSection}>
+            <Text style={styles.sectionEyebrow}>How it works</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.howScroll}>
+              {[
+                { icon: 'navigate' as const, color: ACCENT, title: 'Set direction', desc: 'Home, favourite, or search any area.' },
+                { icon: 'git-merge' as const, color: '#60A5FA', title: 'Matched only', desc: 'Offers within ~2.5 km of your route.' },
+                { icon: 'calendar' as const, color: '#FBBF24', title: `${DAILY_LIMIT} per day`, desc: 'Resets every night at midnight.' },
+              ].map((step) => (
+                <View key={step.title} style={[styles.howCard, { width: Math.min(260, screenW * 0.72) }]}>
+                  <View style={[styles.howIcon, { backgroundColor: `${step.color}22` }]}>
+                    <Ionicons name={step.icon} size={22} color={step.color} />
+                  </View>
+                  <Text style={styles.howTitle}>{step.title}</Text>
+                  <Text style={styles.howDesc}>{step.desc}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.stepTitle}>{step.title}</Text>
-                  <Text style={s.stepDesc}>{step.desc}</Text>
-                </View>
-              </View>
-            ))}
+              ))}
+            </ScrollView>
           </View>
-        )}
+        ) : null}
 
-        {/* ── Choose / Change destination ── */}
-        {!state?.limit_reached && (
+        {!state?.limit_reached ? (
           <>
-            <Text style={s.sectionLabel}>
-              {state?.active ? 'CHANGE DESTINATION' : 'CHOOSE DESTINATION'}
-            </Text>
+            <Text style={styles.sectionEyebrow}>{state?.active ? 'Change destination' : 'Choose destination'}</Text>
 
-            {/* Saved locations */}
-            {savedLocations.map((loc) => (
-              <TouchableOpacity
-                key={loc.label}
-                style={[s.locRow, state?.active && state?.destination_saved_label === loc.label && s.locRowActive]}
-                onPress={() => handleSavedTap(loc)}
-                activeOpacity={0.8}
-                disabled={activating}
-              >
-                <View style={[s.locIcon, { backgroundColor: `${getSavedColor(loc.label)}18` }]}>
-                  <Ionicons name={getSavedIcon(loc.label)} size={20} color={getSavedColor(loc.label)} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.locLabel}>{loc.label.charAt(0).toUpperCase() + loc.label.slice(1)}</Text>
-                  <Text style={s.locName} numberOfLines={1}>{loc.name}</Text>
-                </View>
-                <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                  <TouchableOpacity
-                    style={s.locEditBtn}
-                    onPress={() => openSearch(loc.label)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name="pencil-outline" size={14} color="#64748B" />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.locEditBtn}
-                    onPress={() => handleDeleteSaved(loc.label)}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Ionicons name="trash-outline" size={14} color="#EF4444" />
-                  </TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={16} color="#334155" />
-                </View>
-              </TouchableOpacity>
-            ))}
+            <View style={[styles.quickGrid, { gap: flow.cardPad }]}>
+              {savedLocations.map((loc) => (
+                <TouchableOpacity
+                  key={loc.label}
+                  style={[
+                    styles.quickTile,
+                    { minWidth: tileMinW, flexGrow: 1, flexBasis: tileMinW },
+                    state?.active && state?.destination_saved_label === loc.label && styles.quickTileOn,
+                  ]}
+                  onPress={() => handleSavedTap(loc)}
+                  activeOpacity={0.88}
+                  disabled={activating}
+                >
+                  <View style={[styles.quickTileIcon, { backgroundColor: `${getSavedColor(loc.label)}22` }]}>
+                    <Ionicons name={getSavedIcon(loc.label)} size={26} color={getSavedColor(loc.label)} />
+                  </View>
+                  <Text style={styles.quickTileLabel}>
+                    {loc.label.charAt(0).toUpperCase() + loc.label.slice(1)}
+                  </Text>
+                  <Text style={styles.quickTileName} numberOfLines={2}>
+                    {loc.name}
+                  </Text>
+                  <View style={styles.quickTileActions}>
+                    <TouchableOpacity
+                      onPress={() => openSearch(loc.label)}
+                      hitSlop={8}
+                      style={styles.quickTileActionBtn}
+                    >
+                      <Ionicons name="pencil" size={16} color="#94A3B8" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => handleDeleteSaved(loc.label)}
+                      hitSlop={8}
+                      style={styles.quickTileActionBtn}
+                    >
+                      <Ionicons name="trash-outline" size={16} color="#F87171" />
+                    </TouchableOpacity>
+                  </View>
+                </TouchableOpacity>
+              ))}
 
-            {/* Unsaved preset slots (Home, Favourite if not set) */}
-            {unsavedPresets.map((p) => (
-              <TouchableOpacity
-                key={p.label}
-                style={s.locRowUnset}
-                onPress={() => openSearch(p.label)}
-                activeOpacity={0.8}
-              >
-                <View style={[s.locIcon, { backgroundColor: `${p.color}12` }]}>
-                  <Ionicons name={p.icon} size={20} color={p.color} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.locLabel}>{p.label.charAt(0).toUpperCase() + p.label.slice(1)}</Text>
-                  <Text style={s.locNameMuted}>Not set — tap to add</Text>
-                </View>
-                <View style={[s.addChip, { borderColor: `${p.color}50` }]}>
-                  <Ionicons name="add" size={16} color={p.color} />
-                  <Text style={[s.addChipText, { color: p.color }]}>Add</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
+              {unsavedPresets.map((p) => (
+                <TouchableOpacity
+                  key={p.label}
+                  style={[styles.quickTile, styles.quickTileEmpty, { minWidth: tileMinW, flexGrow: 1, flexBasis: tileMinW }]}
+                  onPress={() => openSearch(p.label)}
+                  activeOpacity={0.88}
+                >
+                  <View style={[styles.quickTileIcon, { backgroundColor: `${p.color}14`, borderStyle: 'dashed', borderWidth: 1, borderColor: `${p.color}44` }]}>
+                    <Ionicons name={p.icon} size={26} color={p.color} />
+                  </View>
+                  <Text style={styles.quickTileLabel}>{p.label.charAt(0).toUpperCase() + p.label.slice(1)}</Text>
+                  <Text style={styles.quickTileNameMuted}>Tap to add</Text>
+                  <View style={[styles.addPill, { borderColor: `${p.color}66` }]}>
+                    <Ionicons name="add" size={18} color={p.color} />
+                    <Text style={[styles.addPillTxt, { color: p.color }]}>Add</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
 
-            {/* Search any location */}
-            <TouchableOpacity style={s.searchTrigger} onPress={() => openSearch()} activeOpacity={0.8}>
-              <View style={[s.locIcon, { backgroundColor: 'rgba(148,163,184,0.1)' }]}>
-                <Ionicons name="search" size={18} color="#94A3B8" />
-              </View>
-              <Text style={s.locLabel}>Set destination</Text>
-              <Ionicons name="chevron-forward" size={16} color="#334155" />
+            <TouchableOpacity style={styles.searchHeroBtn} onPress={() => openSearch()} activeOpacity={0.9}>
+              <LinearGradient colors={['#2563EB', '#1D4ED8']} style={styles.searchHeroGrad}>
+                <Ionicons name="search" size={24} color="#FFF" />
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={styles.searchHeroTitle}>Search any destination</Text>
+                  <Text style={styles.searchHeroSub}>Street, area, landmark, or city</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={22} color="rgba(255,255,255,0.85)" />
+              </LinearGradient>
             </TouchableOpacity>
           </>
-        )}
+        ) : null}
 
-        {/* ── Activating spinner ── */}
-        {activating && (
-          <View style={s.activatingRow}>
-            <ActivityIndicator size="small" color="#22E5A0" />
-            <Text style={s.activatingText}>Setting destination...</Text>
+        {activating ? (
+          <View style={styles.activatingRow}>
+            <ActivityIndicator color={ACCENT} />
+            <Text style={styles.activatingTxt}>Updating destination…</Text>
           </View>
-        )}
+        ) : null}
 
-        {/* ── Tip when active ── */}
-        {state?.active && (
-          <View style={s.tipRow}>
-            <Ionicons name="information-circle-outline" size={15} color="#3B82F6" />
-            <Text style={s.tipText}>
-              You'll only receive ride requests within 2.5 km of your route. Non-matching trips are automatically skipped.
+        {state?.active ? (
+          <View style={styles.tipCard}>
+            <Ionicons name="information-circle" size={20} color="#60A5FA" />
+            <Text style={styles.tipTxt}>
+              You'll only see requests near your route. Other offers are skipped automatically.
             </Text>
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
-      <Modal visible={showSearch} transparent animationType="fade" onRequestClose={() => setShowSearch(false)}>
+      {/* Search sheet */}
+      <Modal visible={showSearch} transparent animationType="slide" onRequestClose={() => setShowSearch(false)}>
         <KeyboardAvoidingView
-          style={s.searchModalOverlay}
+          style={styles.modalRoot}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 6 : 0}
         >
           <TouchableOpacity
-            style={s.searchBackdrop}
+            style={styles.modalBackdrop}
             activeOpacity={1}
-            onPress={() => { setShowSearch(false); setResults([]); setSearchQuery(''); setSaveAsLabel(null); }}
+            onPress={() => {
+              setShowSearch(false);
+              setResults([]);
+              setSearchQuery('');
+              setSaveAsLabel(null);
+            }}
           />
           <View
             style={[
-              s.searchPanel,
+              styles.searchSheet,
               {
-                marginBottom:
-                  Platform.OS === 'android'
-                    ? Math.max(insets.bottom + 8, keyboardHeight + 8)
-                    : insets.bottom + 10,
+                marginHorizontal: Math.max(8, flow.padH - 4),
+                marginBottom: Platform.OS === 'android' ? Math.max(insets.bottom + 8, keyboardHeight + 8) : insets.bottom + 8,
+                maxHeight: searchPanelMaxH,
               },
             ]}
           >
-            {/* Search label */}
-            {saveAsLabel && (
-              <View style={s.searchLabelRow}>
+            <View style={styles.sheetHandle} />
+            {saveAsLabel ? (
+              <View style={styles.sheetLabelRow}>
                 <Ionicons
                   name={saveAsLabel === 'home' ? 'home' : 'star'}
-                  size={14}
-                  color={saveAsLabel === 'home' ? '#3B82F6' : '#F59E0B'}
+                  size={18}
+                  color={saveAsLabel === 'home' ? '#60A5FA' : '#FBBF24'}
                 />
-                <Text style={s.searchLabelText}>
-                  Setting{' '}
-                  <Text style={{ color: saveAsLabel === 'home' ? '#3B82F6' : '#F59E0B', fontWeight: '800' }}>
+                <Text style={styles.sheetLabelTxt}>
+                  Saving as{' '}
+                  <Text style={{ fontWeight: '900', color: saveAsLabel === 'home' ? '#60A5FA' : '#FBBF24' }}>
                     {saveAsLabel.charAt(0).toUpperCase() + saveAsLabel.slice(1)}
                   </Text>
                 </Text>
               </View>
-            )}
+            ) : null}
 
-            {/* Input row */}
-            <View style={s.searchInputRow}>
-              <Ionicons name="search" size={18} color="#64748B" />
+            <View style={styles.searchInputWrap}>
+              <Ionicons name="search" size={22} color="#64748B" />
               <TextInput
                 ref={searchRef}
-                style={s.searchInput}
-                placeholder={`Search${saveAsLabel ? ` for your ${saveAsLabel}...` : ' for a destination...'}`}
-                placeholderTextColor="#475569"
+                style={styles.searchInput}
+                placeholder={saveAsLabel ? `Search ${saveAsLabel} address…` : 'Where are you heading?'}
+                placeholderTextColor="#64748B"
                 value={searchQuery}
                 onChangeText={onSearchChange}
                 autoFocus
                 returnKeyType="search"
               />
-              {searchQuery.length > 0 && (
+              {searchQuery.length > 0 ? (
                 <TouchableOpacity onPress={() => { setSearchQuery(''); setResults([]); }}>
-                  <Ionicons name="close-circle" size={18} color="#475569" />
+                  <Ionicons name="close-circle" size={22} color="#64748B" />
                 </TouchableOpacity>
-              )}
+              ) : null}
             </View>
 
             <ScrollView
-              style={s.searchResultsWrap}
+              style={{ maxHeight: searchPanelMaxH * 0.55 }}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ paddingBottom: 8 }}
             >
-              {searching && (
-                <View style={{ padding: 16, alignItems: 'center' }}>
-                  <ActivityIndicator size="small" color="#22E5A0" />
+              {searching ? (
+                <View style={styles.searchLoading}>
+                  <ActivityIndicator color={ACCENT} />
+                  <Text style={styles.searchLoadingTxt}>Searching…</Text>
                 </View>
-              )}
-
-              {!searching && searchResults.map((r) => (
-                <TouchableOpacity
-                  key={r.place_id}
-                  style={s.searchResult}
-                  onPress={() => handleSearchResult(r)}
-                  activeOpacity={0.8}
-                  disabled={activating}
-                >
-                  <View style={s.searchResultIcon}>
-                    <Ionicons name="location-outline" size={16} color="#64748B" />
-                  </View>
-                  <View style={s.searchResultTextWrap}>
-                    <Text style={s.searchResultMain} numberOfLines={1}>
-                      {r.main_text || r.description}
-                    </Text>
-                    {!!r.secondary_text && (
-                      <Text style={s.searchResultSub} numberOfLines={1}>{r.secondary_text}</Text>
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-
-              {!searching && searchQuery.trim().length >= 2 && searchResults.length === 0 && (
-                <View style={s.searchEmptyWrap}>
-                  <Ionicons name="search-outline" size={15} color="#64748B" />
-                  <Text style={s.searchEmptyText}>
-                    {searchErrorHint || 'No locations found. Try a street, area, or landmark.'}
+              ) : null}
+              {!searching &&
+                searchResults.map((r) => (
+                  <TouchableOpacity
+                    key={r.place_id}
+                    style={styles.resultRow}
+                    onPress={() => handleSearchResult(r)}
+                    activeOpacity={0.85}
+                    disabled={activating}
+                  >
+                    <View style={styles.resultIcon}>
+                      <Ionicons name="location" size={20} color={ACCENT} />
+                    </View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.resultMain} numberOfLines={2}>
+                        {r.main_text || r.description}
+                      </Text>
+                      {r.secondary_text ? (
+                        <Text style={styles.resultSub} numberOfLines={1}>
+                          {r.secondary_text}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#475569" />
+                  </TouchableOpacity>
+                ))}
+              {!searching && searchQuery.trim().length >= 2 && searchResults.length === 0 ? (
+                <View style={styles.searchEmpty}>
+                  <Ionicons name="search-outline" size={28} color="#475569" />
+                  <Text style={styles.searchEmptyTxt}>
+                    {searchErrorHint || 'No places found. Try a neighbourhood or landmark.'}
                   </Text>
                 </View>
-              )}
+              ) : null}
             </ScrollView>
 
             <TouchableOpacity
-              style={s.searchCancel}
-              onPress={() => { setShowSearch(false); setResults([]); setSearchQuery(''); setSaveAsLabel(null); }}
+              style={styles.sheetCancelBtn}
+              onPress={() => {
+                setShowSearch(false);
+                setResults([]);
+                setSearchQuery('');
+                setSaveAsLabel(null);
+              }}
             >
-              <Text style={s.searchCancelText}>Cancel</Text>
+              <Text style={styles.sheetCancelTxt}>Cancel</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -813,233 +893,348 @@ export default function DestinationScreen() {
   );
 }
 
-/* ─────────────────── styles ─────────────────── */
-const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#080c18' },
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#060B18' },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 14 },
+  loadingTxt: { fontSize: 15, fontWeight: '600', color: '#94A3B8' },
 
-  /* Header */
-  header: {
+  topBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 8,
     gap: 12,
-    paddingHorizontal: 20,
-    paddingTop: 10,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.06)',
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.07)',
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitle: { fontSize: 17, fontWeight: '800', color: '#E2E8F0', letterSpacing: 0.2 },
-  headerSub:   { fontSize: 12, fontWeight: '500', color: '#64748B', marginTop: 3, lineHeight: 17 },
-  liveDot: {
-    width: 32, height: 32, borderRadius: 16,
-    alignItems: 'center', justifyContent: 'center',
+  livePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: 'rgba(6,78,59,0.45)',
     borderWidth: 1,
+    borderColor: 'rgba(52,245,184,0.35)',
   },
-  liveDotInner: { width: 8, height: 8, borderRadius: 4 },
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: ACCENT },
+  livePillTxt: { fontSize: 11, fontWeight: '900', color: ACCENT, letterSpacing: 1 },
 
-  /* Body */
-  body: { paddingHorizontal: 20, paddingTop: 20, gap: 16 },
+  scrollBody: { gap: 20, paddingTop: 4 },
 
-  /* Status card */
+  heroGrad: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 8,
+    borderRadius: BORDER_RADIUS.xl,
+    marginBottom: 4,
+  },
+  heroIconRing: {
+    marginBottom: 14,
+    shadowColor: '#3B82F6',
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 8,
+  },
+  heroIconGrad: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(191,219,254,0.35)',
+  },
+  heroTitle: {
+    fontSize: 26,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    textAlign: 'center',
+    letterSpacing: -0.5,
+    lineHeight: 32,
+  },
+  heroSub: {
+    marginTop: 8,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 22,
+    maxWidth: 340,
+  },
+
   statusCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    backgroundColor: SURFACE,
     borderRadius: 22,
     padding: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    gap: 14,
+    borderColor: BORDER,
+    gap: 16,
   },
-  cardActive: { borderColor: 'rgba(34,229,160,0.3)',  backgroundColor: 'rgba(34,229,160,0.04)' },
-  cardLimit:  { borderColor: 'rgba(239,68,68,0.3)',   backgroundColor: 'rgba(239,68,68,0.04)' },
-  statusRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  badge: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    borderRadius: 20, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1,
+  statusCardActive: {
+    borderColor: 'rgba(52,245,184,0.35)',
+    backgroundColor: 'rgba(6,78,59,0.12)',
   },
-  badgeDot:  { width: 7, height: 7, borderRadius: 3.5 },
-  badgeText: { fontSize: 11, fontWeight: '800', letterSpacing: 0.8 },
-  tripsLeft: { fontSize: 11, fontWeight: '600', color: '#64748B' },
-  summaryRow: { flexDirection: 'row', gap: 9 },
-  summaryChip: {
-    flex: 1,
-    borderRadius: 12,
-    paddingVertical: 10,
-    alignItems: 'center',
-    backgroundColor: 'rgba(15,23,42,0.46)',
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.16)',
+  statusCardLimit: {
+    borderColor: 'rgba(248,113,113,0.35)',
+    backgroundColor: 'rgba(127,29,29,0.12)',
   },
-  summaryValue: { fontSize: 16, fontWeight: '900', color: '#E2E8F0' },
-  summaryLabel: { fontSize: 10, fontWeight: '700', color: '#64748B', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.4 },
-
-  /* Active destination */
-  activeDest:     { borderRadius: 18, overflow: 'hidden' },
-  activeDestGrad: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16 },
-  activeDestIcon: {
-    width: 42, height: 42, borderRadius: 21,
-    backgroundColor: 'rgba(34,229,160,0.12)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  activeDestLabel: { fontSize: 10, fontWeight: '800', color: '#22E5A0', letterSpacing: 1, marginBottom: 2 },
-  activeDestName:  { fontSize: 15, fontWeight: '800', color: '#F1F5F9', lineHeight: 20 },
-  activeDestMeta:  { fontSize: 12, fontWeight: '600', color: '#22E5A0', marginTop: 3 },
-  activeDestCancel:{ padding: 4 },
-
-  /* Limit / inactive */
-  limitBanner: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: 'rgba(239,68,68,0.08)',
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(239,68,68,0.2)',
-  },
-  limitText:    { flex: 1, fontSize: 13, fontWeight: '600', color: '#FCA5A5', lineHeight: 18 },
-  inactiveHint: { fontSize: 13, color: '#475569', lineHeight: 18 },
-
-  /* How it works */
-  howCard: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 20, padding: 18, borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)', gap: 16,
-  },
-  stepRow:   { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  stepIcon:  { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
-  stepTitle: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', marginBottom: 2 },
-  stepDesc:  { fontSize: 12, color: '#64748B', lineHeight: 17 },
-
-  /* Section label */
-  sectionLabel: {
-    fontSize: 11, fontWeight: '800', color: '#475569',
-    letterSpacing: 1.2, marginTop: 4, marginBottom: 8,
-  },
-
-  /* Location rows */
-  locRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16, padding: 16,
-    minHeight: 72,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.07)',
-  },
-  locRowActive: { borderColor: 'rgba(34,229,160,0.35)', backgroundColor: 'rgba(34,229,160,0.05)' },
-  locRowUnset: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.03)',
-    borderRadius: 16, padding: 16,
-    minHeight: 72,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.05)',
-    borderStyle: 'dashed',
-  },
-  locIcon:      { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  locLabel:     { fontSize: 14, fontWeight: '700', color: '#CBD5E1', marginBottom: 2 },
-  locName:      { fontSize: 12, color: '#64748B', lineHeight: 17 },
-  locNameMuted: { fontSize: 12, color: '#475569', fontStyle: 'italic' },
-  locEditBtn:   { padding: 10, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 10 },
-
-  addChip: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5,
-    borderWidth: 1.5,
-  },
-  addChipText: { fontSize: 12, fontWeight: '700' },
-
-  /* Search trigger */
-  searchTrigger: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 16, padding: 16, minHeight: 72,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-  },
-
-  /* Search panel */
-  searchModalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  searchBackdrop: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(2,6,15,0.64)',
-  },
-  searchPanel: {
-    backgroundColor: 'rgba(8,13,27,0.99)',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    borderBottomLeftRadius: 20,
-    borderBottomRightRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.24)',
-    overflow: 'hidden',
-    marginHorizontal: 12,
-    maxHeight: '78%',
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: -3 },
-    elevation: 16,
-  },
-  searchLabelRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4,
-  },
-  searchLabelText: { fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  searchInputRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    paddingHorizontal: 18, paddingVertical: 13,
-    minHeight: 56,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.08)',
-  },
-  searchResultsWrap: {
-    maxHeight: 330,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#E2E8F0',
-    padding: 0,
-    paddingVertical: 4,
-    textAlignVertical: 'center',
-  },
-  searchResult: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingHorizontal: 18, paddingVertical: 15,
-    minHeight: 68,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)',
-  },
-  searchResultIcon: {
-    width: 32, height: 32, borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  searchResultTextWrap: { flex: 1, paddingRight: 4 },
-  searchResultMain: { fontSize: 14, fontWeight: '700', color: '#CBD5E1', lineHeight: 19 },
-  searchResultSub:  { fontSize: 12, color: '#64748B', marginTop: 2, lineHeight: 16 },
-  searchEmptyWrap: {
+  statusTopRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  statusBadgeDot: { width: 8, height: 8, borderRadius: 4 },
+  statusBadgeTxt: { fontSize: 12, fontWeight: '900', letterSpacing: 0.8 },
+  statusTripsHint: { fontSize: 13, fontWeight: '700', color: '#94A3B8' },
+
+  statGrid: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(2,6,23,0.5)',
+    borderRadius: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: BORDER,
+  },
+  statCell: { flex: 1, alignItems: 'center', gap: 4 },
+  statDivider: { width: 1, height: 36, backgroundColor: BORDER },
+  statValue: { fontSize: 22, fontWeight: '900', color: '#F8FAFC', fontVariant: ['tabular-nums'] },
+  statLabel: { fontSize: 11, fontWeight: '800', color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 },
+
+  activeCard: { borderRadius: 20, overflow: 'hidden' },
+  activeCardGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    padding: 18,
+    minHeight: 100,
+  },
+  activeIconWrap: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: ACCENT_DIM,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  activeTextCol: { flex: 1, minWidth: 0, gap: 4 },
+  activeEyebrow: { fontSize: 11, fontWeight: '900', color: ACCENT, letterSpacing: 1.2 },
+  activeName: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', lineHeight: 24 },
+  activeMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  activeMeta: { fontSize: 14, fontWeight: '700', color: ACCENT },
+  activeOffBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 14,
+    backgroundColor: 'rgba(127,29,29,0.35)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.35)',
+    minWidth: 52,
+  },
+  activeOffTxt: { fontSize: 11, fontWeight: '800', color: '#FCA5A5' },
+
+  limitBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(127,29,29,0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.3)',
+  },
+  limitBoxTxt: { flex: 1, fontSize: 15, fontWeight: '600', color: '#FECACA', lineHeight: 22 },
+  inactiveHint: { fontSize: 15, fontWeight: '600', color: '#64748B', lineHeight: 22 },
+
+  howSection: { gap: 12 },
+  howScroll: { gap: 12, paddingRight: 8 },
+  howCard: {
+    backgroundColor: SURFACE,
+    borderRadius: 18,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 10,
+    minHeight: 130,
+  },
+  howIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  howTitle: { fontSize: 16, fontWeight: '900', color: '#E2E8F0' },
+  howDesc: { fontSize: 14, fontWeight: '600', color: '#94A3B8', lineHeight: 20 },
+
+  sectionEyebrow: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: '#64748B',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop: 4,
+  },
+
+  quickGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  quickTile: {
+    backgroundColor: SURFACE,
+    borderRadius: 20,
+    padding: 18,
+    minHeight: 148,
+    borderWidth: 1,
+    borderColor: BORDER,
+    gap: 8,
+  },
+  quickTileOn: {
+    borderColor: 'rgba(52,245,184,0.45)',
+    backgroundColor: 'rgba(6,78,59,0.15)',
+  },
+  quickTileEmpty: { borderStyle: 'dashed', borderColor: 'rgba(148,163,184,0.22)' },
+  quickTileIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  quickTileLabel: { fontSize: 16, fontWeight: '900', color: '#F1F5F9' },
+  quickTileName: { fontSize: 14, fontWeight: '600', color: '#94A3B8', lineHeight: 20, flex: 1 },
+  quickTileNameMuted: { fontSize: 14, fontWeight: '600', color: '#64748B', fontStyle: 'italic' },
+  quickTileActions: { flexDirection: 'row', gap: 8, marginTop: 4 },
+  quickTileActionBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    marginTop: 4,
+  },
+  addPillTxt: { fontSize: 13, fontWeight: '800' },
+
+  searchHeroBtn: { borderRadius: 20, overflow: 'hidden', marginTop: 4 },
+  searchHeroGrad: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    minHeight: 72,
+  },
+  searchHeroTitle: { fontSize: 17, fontWeight: '900', color: '#FFF' },
+  searchHeroSub: { fontSize: 13, fontWeight: '600', color: 'rgba(255,255,255,0.75)', marginTop: 2 },
+
+  activatingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, paddingVertical: 8 },
+  activatingTxt: { fontSize: 15, fontWeight: '700', color: '#94A3B8' },
+
+  tipCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: 'rgba(37,99,235,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(96,165,250,0.28)',
+  },
+  tipTxt: { flex: 1, fontSize: 14, fontWeight: '600', color: '#BFDBFE', lineHeight: 21 },
+
+  modalRoot: { flex: 1, justifyContent: 'flex-end' },
+  modalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(2,6,15,0.72)' },
+  searchSheet: {
+    backgroundColor: '#0B1224',
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    borderWidth: 1,
+    borderColor: BORDER,
+    paddingBottom: 12,
+    overflow: 'hidden',
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: 'rgba(148,163,184,0.35)',
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  sheetLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 20, paddingBottom: 8 },
+  sheetLabelTxt: { fontSize: 14, fontWeight: '600', color: '#94A3B8' },
+  searchInputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginHorizontal: 16,
+    marginBottom: 8,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    minHeight: 58,
+    borderRadius: 16,
+    backgroundColor: SURFACE,
+    borderWidth: 1,
+    borderColor: BORDER,
   },
-  searchEmptyText: { fontSize: 12, fontWeight: '600', color: '#64748B' },
-  searchCancel:     { paddingVertical: 14, alignItems: 'center' },
-  searchCancelText: { fontSize: 14, fontWeight: '700', color: '#64748B' },
-
-  /* Misc */
-  activatingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, justifyContent: 'center', paddingVertical: 16 },
-  activatingText:{ fontSize: 14, fontWeight: '600', color: '#94A3B8' },
-  tipRow: {
-    flexDirection: 'row', alignItems: 'flex-start', gap: 8,
-    backgroundColor: 'rgba(59,130,246,0.08)',
-    borderRadius: 12, padding: 12,
-    borderWidth: 1, borderColor: 'rgba(59,130,246,0.2)',
+  searchInput: {
+    flex: 1,
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#F1F5F9',
+    padding: 0,
   },
-  tipText: { flex: 1, fontSize: 12, color: '#93C5FD', lineHeight: 17 },
+  searchLoading: { alignItems: 'center', paddingVertical: 28, gap: 10 },
+  searchLoadingTxt: { fontSize: 14, fontWeight: '600', color: '#64748B' },
+  resultRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    minHeight: 76,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: BORDER,
+  },
+  resultIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: ACCENT_DIM,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  resultMain: { fontSize: 16, fontWeight: '800', color: '#E2E8F0', lineHeight: 22 },
+  resultSub: { fontSize: 13, fontWeight: '600', color: '#64748B', marginTop: 2 },
+  searchEmpty: { alignItems: 'center', padding: 32, gap: 12 },
+  searchEmptyTxt: { fontSize: 14, fontWeight: '600', color: '#64748B', textAlign: 'center', lineHeight: 20 },
+  sheetCancelBtn: { alignItems: 'center', paddingVertical: 16 },
+  sheetCancelTxt: { fontSize: 16, fontWeight: '800', color: '#64748B' },
 });

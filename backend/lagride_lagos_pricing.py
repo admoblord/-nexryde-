@@ -76,7 +76,7 @@ SURGE MULTIPLIERS (Lagos Lagride — **max** of applicable factors, then tier ca
 
 • Rain: 1.4×
 
-• Peak hours: 1.5×  *(WAT 07:00–09:00, 17:00–20:00)*
+• Peak hours: 1.0×  *(WAT 07:00–09:00, 17:00–20:00 — no peak surcharge)*
 
 Result is clamped to the ride tier ``max_multiplier`` from ``FARE_CONFIG``.
 
@@ -161,7 +161,7 @@ LAGRIDE_SERVICE_OMNI = 0.35
 NORMAL_SURGE_LAGride = 1.0
 HIGH_DEMAND_SURGE = 1.3
 RAIN_SURGE_LAGride = 1.4
-PEAK_SURGE_LAGride = 1.5
+PEAK_SURGE_LAGride = 1.0
 
 # City-wide fare factor (all zones, all service tiers) — applied after distance×area×service, before surge.
 LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.02
@@ -523,7 +523,7 @@ def _lagride_lagos_surge_payload(
     service_max_multiplier: float,
 ) -> dict[str, Any]:
     """
-    Surge = max(Normal 1.0, High demand 1.3, Rain 1.4, Peak 1.5) among active flags;
+    Surge = max(Normal 1.0, High demand 1.3, Rain 1.4, Peak 1.0) among active flags;
     then min(..., service_max_multiplier).
     """
     dr = max(0.0, min(1.0, float(demand_ratio)))

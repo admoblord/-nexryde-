@@ -5,7 +5,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { HEADER_BLUR_DEFAULT, HEADER_BLUR_INCOMING } from '@/src/components/driver/driverDockTheme';
 
-export type DriverBrandHeaderVariant = 'default' | 'incoming';
+export type DriverBrandHeaderVariant = 'default' | 'incoming' | 'trip-light';
 
 /** Matches rider booking chrome — NX badge, NEXRYDE wordmark, DRIVER pill (blue driver accent). */
 export function DriverBrandHeaderRow({
@@ -78,6 +78,43 @@ export function DriverBrandHeaderRow({
           </TouchableOpacity>
         </View>
         <View style={incomingStyles.hairline} pointerEvents="none" />
+      </View>
+    );
+  }
+
+  if (variant === 'trip-light') {
+    return (
+      <View style={lightStyles.outer}>
+        <View style={[lightStyles.wrap, { paddingTop: topInset + 8 }]}>
+          {onMenuPress ? (
+            <TouchableOpacity
+              style={lightStyles.menuBtn}
+              onPress={onMenuPress}
+              activeOpacity={0.82}
+              hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Menu"
+            >
+              <Ionicons name="menu" size={22} color="#334155" />
+            </TouchableOpacity>
+          ) : null}
+          <View style={[lightStyles.left, onMenuPress && { marginLeft: 4 }]}>
+            <LinearGradient
+              colors={['#2563EB', '#1E40AF']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={lightStyles.logo}
+            >
+              <Text style={lightStyles.logoTxt}>NX</Text>
+            </LinearGradient>
+            <Text style={lightStyles.brand}>NEXRYDE</Text>
+          </View>
+          <View style={lightStyles.pill}>
+            <Ionicons name="car-sport" size={14} color="#2563EB" style={{ marginRight: 5 }} />
+            <Text style={lightStyles.pillTxt}>DRIVER</Text>
+          </View>
+        </View>
+        <View style={lightStyles.hairline} pointerEvents="none" />
       </View>
     );
   }
@@ -196,6 +233,68 @@ const incomingStyles = StyleSheet.create({
     marginHorizontal: 16,
     backgroundColor: 'rgba(52,245,184,0.2)',
   },
+});
+
+const lightStyles = StyleSheet.create({
+  outer: {
+    backgroundColor: '#FFFFFF',
+    overflow: 'hidden',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E2E8F0',
+    shadowColor: '#0F172A',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  wrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 18,
+    paddingBottom: 12,
+  },
+  hairline: {
+    height: StyleSheet.hairlineWidth,
+    marginHorizontal: 18,
+    backgroundColor: '#E2E8F0',
+  },
+  menuBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  left: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
+  logo: {
+    width: 40,
+    height: 40,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoTxt: { fontSize: 14, fontWeight: '900', color: '#FFF', letterSpacing: -0.3 },
+  brand: {
+    fontSize: 17,
+    fontWeight: '900',
+    color: '#0F172A',
+    letterSpacing: 0.8,
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  pillTxt: { fontSize: 11, fontWeight: '900', color: '#2563EB', letterSpacing: 0.8 },
 });
 
 const styles = StyleSheet.create({

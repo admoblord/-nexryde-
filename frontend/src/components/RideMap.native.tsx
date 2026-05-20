@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -26,6 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '@/src/constants/theme';
 import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 /* ─── Map Styles ──────────────────────────────────────────────── */
 const DARK_MAP_STYLE = [
@@ -102,6 +103,33 @@ function calcBearing(lat1: number, lng1: number, lat2: number, lng2: number): nu
 }
 
 /** Haversine distance in km */
+/** Split route into driven (green), active leg (amber), remainder (gray) by closest point to driver. */
+function splitRouteByDriver(
+  coords: LatLng[],
+  driver: { lat: number; lng: number } | null,
+): { completed: LatLng[]; active: LatLng[]; remaining: LatLng[] } {
+  if (!coords.length) return { completed: [], active: [], remaining: [] };
+  if (!driver || coords.length < 2) {
+    return { completed: [], active: coords, remaining: [] };
+  }
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < coords.length; i++) {
+    const d = haversineKm(driver.lat, driver.lng, coords[i].latitude, coords[i].longitude);
+    if (d < bestDist) {
+      bestDist = d;
+      bestIdx = i;
+    }
+  }
+  const completed = coords.slice(0, bestIdx + 1);
+  const remaining = coords.slice(bestIdx);
+  const active =
+    remaining.length >= 2
+      ? remaining.slice(0, Math.min(3, remaining.length))
+      : remaining;
+  return { completed, active, remaining };
+}
+
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -114,34 +142,29 @@ function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): nu
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/** Rider/driver portrait with absolute URL resolution + graceful decode failures. */
-function ResolvedProfilePhoto({
-  uri,
-  imageStyle,
-  fallback,
-  accessibilityLabel,
-}: {
-  uri?: string | null;
-  imageStyle: ImageStyle | ImageStyle[];
-  fallback: React.ReactNode;
-  accessibilityLabel?: string;
-}) {
-  const resolved = useMemo(() => resolvePublicMediaUri(uri ?? null), [uri]);
-  const [failed, setFailed] = useState(false);
-  useEffect(() => setFailed(false), [resolved]);
-  if (resolved && !failed) {
-    return (
-      <Image
-        source={{ uri: resolved }}
-        style={imageStyle}
-        resizeMode="cover"
-        accessibilityLabel={accessibilityLabel}
-        onError={() => setFailed(true)}
-        {...(Platform.OS === 'android' ? { fadeDuration: 0 } : {})}
-      />
-    );
-  }
-  return <>{fallback}</>;
+/** Pickup (A) / destination (B) markers for map-first rider tracking. */
+function TripEndpointMarker({ label, color }: { label: 'A' | 'B'; color: string }) {
+  return (
+    <View
+      style={{
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        backgroundColor: color,
+        borderWidth: 2.5,
+        borderColor: '#FFFFFF',
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOpacity: 0.35,
+        shadowRadius: 6,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 8,
+      }}
+    >
+      <Text style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '800' }}>{label}</Text>
+    </View>
+  );
 }
 
 /* ─── Pulsing location dot ────────────────────────────────────── */
@@ -188,15 +211,53 @@ function PulseDot({ color }: { color: string }) {
 }
 
 /* ─── Custom driver marker view ───────────────────────────────── */
+/** Top-down car pin for premium rider tracking map. */
+function DriverCarPin({ moving }: { moving: boolean }) {
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'center', width: 48, height: 48 }}>
+      <View
+        style={{
+          position: 'absolute',
+          width: 44,
+          height: 44,
+          borderRadius: 22,
+          backgroundColor: 'rgba(59,130,246,0.35)',
+          ...(moving ? { transform: [{ scale: 1.08 }] } : {}),
+        }}
+      />
+      <View
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 20,
+          backgroundColor: '#3B82F6',
+          borderWidth: 2.5,
+          borderColor: '#FFFFFF',
+          alignItems: 'center',
+          justifyContent: 'center',
+          elevation: 10,
+        }}
+      >
+        <Ionicons name="car" size={22} color="#FFFFFF" />
+      </View>
+    </View>
+  );
+}
+
 function DriverMarkerView({
   initial,
   moving,
   profileImage,
+  carPin,
 }: {
   initial: string;
   moving: boolean;
   profileImage?: string | null;
+  carPin?: boolean;
 }) {
+  if (carPin) {
+    return <DriverCarPin moving={moving} />;
+  }
   const glowOpacity = useRef(new Animated.Value(0.5)).current;
   const glowScale = useRef(new Animated.Value(1)).current;
 
@@ -273,14 +334,12 @@ function DriverMarkerView({
           elevation: 12,
         }}
       >
-        <ResolvedProfilePhoto
+        <TripProfileAvatar
+          size={36}
           uri={profileImage}
-          imageStyle={{ width: 40, height: 40, borderRadius: 20 }}
-          fallback={
-            <Text style={{ fontSize: 14, fontWeight: '900', color: '#FFF' }}>
-              {initial.toUpperCase()}
-            </Text>
-          }
+          borderWidth={0}
+          borderColor="transparent"
+          accessibilityLabel={`Photo of driver`}
         />
       </LinearGradient>
       {/* Car badge */}
@@ -309,38 +368,69 @@ function AnimatedDriverMarker({
   moving,
   initial,
   profileImage,
+  heading,
+  carPin,
 }: {
   lat: number;
   lng: number;
   moving: boolean;
   initial: string;
   profileImage?: string | null;
+  heading?: number | null;
+  carPin?: boolean;
 }) {
   const markerRef = useRef<any>(null);
   const animCoord = useRef(
     new AnimatedRegion({ latitude: lat, longitude: lng, latitudeDelta: 0, longitudeDelta: 0 }),
   ).current;
-
   useEffect(() => {
+    const duration = 1100;
     if (Platform.OS === 'android') {
-      markerRef.current?.animateMarkerToCoordinate({ latitude: lat, longitude: lng }, 700);
+      markerRef.current?.animateMarkerToCoordinate({ latitude: lat, longitude: lng }, duration);
     } else {
-      // AnimatedRegion.timing sets per-axis toValue from latitude/longitude keys (see react-native-maps).
       animCoord
         .timing({
           latitude: lat,
           longitude: lng,
           latitudeDelta: 0,
           longitudeDelta: 0,
-          duration: 700,
+          duration,
           useNativeDriver: false,
         } as Parameters<AnimatedRegion['timing']>[0])
         .start();
     }
   }, [lat, lng, animCoord]);
 
-  // @ts-ignore — Marker.Animated exists in react-native-maps
-  const MarkerAnimated = Marker.Animated as React.ComponentType<any>;
+  const rotateDeg =
+    heading != null && Number.isFinite(Number(heading)) ? `${Number(heading)}deg` : '0deg';
+
+  const coordinate = { latitude: lat, longitude: lng };
+  const child = (
+    <View style={{ transform: [{ rotate: rotateDeg }] }}>
+      <DriverMarkerView
+        initial={initial}
+        moving={moving}
+        profileImage={profileImage}
+        carPin={carPin}
+      />
+    </View>
+  );
+
+  // @ts-ignore — Marker.Animated exists in react-native-maps when linked
+  const MarkerAnimated = Marker.Animated as React.ComponentType<any> | undefined;
+  if (!MarkerAnimated) {
+    return (
+      <Marker
+        ref={markerRef}
+        coordinate={coordinate}
+        anchor={{ x: 0.5, y: 0.65 }}
+        tracksViewChanges={moving}
+        zIndex={10}
+      >
+        {child}
+      </Marker>
+    );
+  }
 
   return (
     <MarkerAnimated
@@ -350,7 +440,7 @@ function AnimatedDriverMarker({
       tracksViewChanges={moving}
       zIndex={10}
     >
-      <DriverMarkerView initial={initial} moving={moving} profileImage={profileImage} />
+      {child}
     </MarkerAnimated>
   );
 }
@@ -552,15 +642,11 @@ function DriverAssignmentSheet({
 
             <View style={assignStyles.topRow}>
               <View style={assignStyles.avatarRing}>
-                <ResolvedProfilePhoto
+                <TripProfileAvatar
+                  size={52}
                   uri={profileImage}
-                  imageStyle={assignStyles.avatarImg}
+                  borderColor={NR_GREEN}
                   accessibilityLabel={`Photo of ${name}`}
-                  fallback={
-                    <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPh}>
-                      <Text style={assignStyles.avatarInitial}>{initial}</Text>
-                    </LinearGradient>
-                  }
                 />
                 <View
                   style={[
@@ -736,15 +822,11 @@ function DriverAssignmentSheet({
 
             <View style={assignStyles.acceptedDriverCard}>
               <View style={assignStyles.avatarRingLg}>
-                <ResolvedProfilePhoto
+                <TripProfileAvatar
+                  size={64}
                   uri={profileImage}
-                  imageStyle={assignStyles.avatarImgLg}
+                  borderColor={NR_GREEN}
                   accessibilityLabel={`Photo of ${name}`}
-                  fallback={
-                    <LinearGradient colors={['#0f172a', '#0EA5E9']} style={assignStyles.avatarPhLg}>
-                      <Text style={assignStyles.avatarInitialLg}>{initial}</Text>
-                    </LinearGradient>
-                  }
                 />
                 <View
                   style={[
@@ -1754,15 +1836,11 @@ function OngoingRidePanel({
 
           <View style={styles.ongoingDriverRow}>
             <View style={styles.ongoingAvatarWrap}>
-              <ResolvedProfilePhoto
+              <TripProfileAvatar
+                size={48}
                 uri={profileImage}
-                imageStyle={styles.ongoingAvatarImg}
+                borderColor="rgba(96,165,250,0.5)"
                 accessibilityLabel={`Photo of ${name}`}
-                fallback={
-                  <LinearGradient colors={['#1E3A5F', '#2563EB']} style={styles.ongoingAvatarPh}>
-                    <Text style={styles.ongoingAvatarInitial}>{initial}</Text>
-                  </LinearGradient>
-                }
               />
               <View
                 style={[
@@ -2030,15 +2108,11 @@ function DriverPreviewCard({
         <View style={{ flexDirection: 'row', gap: 12 }}>
           {/* Avatar */}
           <View style={styles.driverAvatarWrap}>
-            <ResolvedProfilePhoto
+            <TripProfileAvatar
+              size={52}
               uri={profileImage}
-              imageStyle={styles.driverAvatarImg}
+              borderColor={NR_GREEN}
               accessibilityLabel={`Photo of ${name}`}
-              fallback={
-                <LinearGradient colors={['#1E3A5F', '#0EA5E9']} style={styles.driverAvatarGrad}>
-                  <Text style={styles.driverAvatarInitial}>{initial}</Text>
-                </LinearGradient>
-              }
             />
             <View
               style={[
@@ -2739,8 +2813,10 @@ export interface RideMapProps {
     status?: string;
     vehicle?: string;
   }>;
-  activeDriverLocation?: { lat: number; lng: number } | null;
+  activeDriverLocation?: { lat: number; lng: number; heading?: number } | null;
   activeDriverMoving?: boolean;
+  /** Server-synced ETA seconds for countdown pill (optional). */
+  serverEtaSeconds?: number | null;
   activeDriverMeta?: {
     name?: string;
     vehicle?: string;
@@ -2778,7 +2854,7 @@ export interface RideMapProps {
 }
 
 /* ─── Main component ──────────────────────────────────────────── */
-export default function RideMap({
+function RideMap({
   mapRef,
   pickupCoords,
   destinationCoords,
@@ -2789,6 +2865,7 @@ export default function RideMap({
   nearbyDrivers = [],
   activeDriverLocation = null,
   activeDriverMoving = false,
+  serverEtaSeconds = null,
   activeDriverMeta = null,
   tripStatus,
   embedded = false,
@@ -2817,17 +2894,34 @@ export default function RideMap({
 
   const prevDriverRef = useRef<{ lat: number; lng: number } | null>(null);
   const bearingRef = useRef<number>(0);
+  const lastCameraAtRef = useRef(0);
   const [userPanned, setUserPanned] = useState(false);
+  const [driverMarkerTracks, setDriverMarkerTracks] = useState(true);
 
   const pickupLL = parseCoordPair(pickupCoords);
   const destLL = parseCoordPair(destinationCoords ?? undefined);
   const lineCoords = useMemo(() => sanitizePolyline(routePolyline), [routePolyline]);
   const activeLL = parseCoordPair(activeDriverLocation ?? undefined);
+  const routeSegments = useMemo(
+    () => splitRouteByDriver(lineCoords, activeLL),
+    [lineCoords, activeLL?.lat, activeLL?.lng],
+  );
 
   const pickupLabel = String(pickup ?? '');
   const destLabel = String(destination ?? '');
+
+  useEffect(() => {
+    if (!activeLL) return;
+    setDriverMarkerTracks(true);
+    const t = setTimeout(() => setDriverMarkerTracks(false), 2500);
+    return () => clearTimeout(t);
+  }, [activeLL?.lat, activeLL?.lng]);
   const assignmentSheet =
-    Boolean(embedded && (tripStatus === 'accepted' || tripStatus === 'arrived'));
+    Boolean(
+      embedded &&
+        !suppressDriverOverlay &&
+        (tripStatus === 'accepted' || tripStatus === 'arrived'),
+    );
   const riderSheetBottom = Math.max(
     14,
     insets.bottom +
@@ -2862,12 +2956,16 @@ export default function RideMap({
       setRiderApproachSec(null);
       return;
     }
+    if (serverEtaSeconds != null && serverEtaSeconds >= 0) {
+      setRiderApproachSec(Math.min(serverEtaSeconds, 7200));
+      return;
+    }
     if (displayEtaMin == null || displayEtaMin < 1) {
       setRiderApproachSec(null);
       return;
     }
     setRiderApproachSec(Math.min(displayEtaMin * 60, 7200));
-  }, [tripStatus, displayEtaMin]);
+  }, [tripStatus, displayEtaMin, serverEtaSeconds]);
 
   useEffect(() => {
     if (tripStatus !== 'accepted' || riderApproachSec == null) return;
@@ -2968,17 +3066,14 @@ export default function RideMap({
     embedded,
     fitEdgeBottom,
     tripStatus,
-    activeLL?.lat,
-    activeLL?.lng,
   ]);
 
-  /* ── Bearing-aware camera follow ── */
+  /* ── Bearing-aware camera follow (throttled — avoids map jank) ── */
   useEffect(() => {
     if (!activeLL) return;
     const m = mapViewRef.current;
     const prev = prevDriverRef.current;
 
-    // Calculate bearing from previous position
     if (prev && (prev.lat !== activeLL.lat || prev.lng !== activeLL.lng)) {
       bearingRef.current = calcBearing(prev.lat, prev.lng, activeLL.lat, activeLL.lng);
     }
@@ -2988,16 +3083,17 @@ export default function RideMap({
       const distMoved = prev
         ? haversineKm(prev.lat, prev.lng, activeLL.lat, activeLL.lng) * 1000
         : 999;
-      // Only re-center camera when driver has actually moved (>5m)
-      if (distMoved > 5 || !prev) {
+      const now = Date.now();
+      if ((distMoved > 18 || !prev) && now - lastCameraAtRef.current > 3500) {
+        lastCameraAtRef.current = now;
         m.animateCamera(
           {
             center: { latitude: activeLL.lat, longitude: activeLL.lng },
             zoom: 16,
             heading: bearingRef.current,
-            pitch: 20,
+            pitch: 18,
           },
-          { duration: 800 },
+          { duration: 650 },
         );
       }
     }
@@ -3059,7 +3155,7 @@ export default function RideMap({
                 bottom: assignmentSheet
                   ? Math.max(300, insets.bottom + 275)
                   : tripStatus === 'ongoing'
-                    ? Math.max(285, insets.bottom + 260)
+                    ? Math.max(320, insets.bottom + 300)
                     : Math.max(168, insets.bottom + 150),
                 left: 10,
               }
@@ -3069,22 +3165,66 @@ export default function RideMap({
         {/* ── Route: glow + main stroke (Directions polyline only — no straight connector overlays) ── */}
         {destLL && lineCoords.length >= 2 ? (
           <>
-            <Polyline
-              coordinates={lineCoords}
-              strokeColor={routeStrokeGlow}
-              strokeWidth={14}
-              lineCap="round"
-              lineJoin="round"
-              geodesic
-            />
-            <Polyline
-              coordinates={lineCoords}
-              strokeColor={routeStrokeMain}
-              strokeWidth={routeBlueMode ? 5 : 4}
-              lineCap="round"
-              lineJoin="round"
-              geodesic
-            />
+            {routeSegments.completed.length >= 2 ? (
+              <Polyline
+                coordinates={routeSegments.completed}
+                strokeColor="rgba(34,197,94,0.85)"
+                strokeWidth={5}
+                lineCap="round"
+                lineJoin="round"
+                geodesic
+              />
+            ) : null}
+            {routeSegments.active.length >= 2 ? (
+              <Polyline
+                coordinates={routeSegments.active}
+                strokeColor="#FBBF24"
+                strokeWidth={6}
+                lineCap="round"
+                lineJoin="round"
+                geodesic
+                zIndex={6}
+              />
+            ) : null}
+            {routeSegments.remaining.length >= 2 ? (
+              <>
+                <Polyline
+                  coordinates={routeSegments.remaining}
+                  strokeColor={routeStrokeGlow}
+                  strokeWidth={14}
+                  lineCap="round"
+                  lineJoin="round"
+                  geodesic
+                />
+                <Polyline
+                  coordinates={routeSegments.remaining}
+                  strokeColor="rgba(148,163,184,0.55)"
+                  strokeWidth={routeBlueMode ? 5 : 4}
+                  lineCap="round"
+                  lineJoin="round"
+                  geodesic
+                />
+              </>
+            ) : (
+              <>
+                <Polyline
+                  coordinates={lineCoords}
+                  strokeColor={routeStrokeGlow}
+                  strokeWidth={14}
+                  lineCap="round"
+                  lineJoin="round"
+                  geodesic
+                />
+                <Polyline
+                  coordinates={lineCoords}
+                  strokeColor={routeStrokeMain}
+                  strokeWidth={routeBlueMode ? 5 : 4}
+                  lineCap="round"
+                  lineJoin="round"
+                  geodesic
+                />
+              </>
+            )}
           </>
         ) : null}
 
@@ -3116,7 +3256,7 @@ export default function RideMap({
           />
         ) : null}
 
-        {/* ── Pickup marker ── */}
+        {/* ── Pickup marker (A) ── */}
         <Marker
           coordinate={{ latitude: pickupLL.lat, longitude: pickupLL.lng }}
           title="Pickup"
@@ -3125,10 +3265,14 @@ export default function RideMap({
           tracksViewChanges={false}
           zIndex={5}
         >
-          <PulseDot color={pickupPulseColor} />
+          {embedded ? (
+            <TripEndpointMarker label="A" color={pickupPulseColor} />
+          ) : (
+            <PulseDot color={pickupPulseColor} />
+          )}
         </Marker>
 
-        {/* ── Destination marker ── */}
+        {/* ── Destination marker (B) ── */}
         {destLL ? (
           <Marker
             coordinate={{ latitude: destLL.lat, longitude: destLL.lng }}
@@ -3138,7 +3282,11 @@ export default function RideMap({
             tracksViewChanges={false}
             zIndex={5}
           >
-            <PulseDot color="#EF4444" />
+            {embedded ? (
+              <TripEndpointMarker label="B" color="#EF4444" />
+            ) : (
+              <PulseDot color="#EF4444" />
+            )}
           </Marker>
         ) : null}
 
@@ -3167,9 +3315,11 @@ export default function RideMap({
           <AnimatedDriverMarker
             lat={activeLL.lat}
             lng={activeLL.lng}
-            moving={activeDriverMoving}
+            moving={activeDriverMoving || driverMarkerTracks}
             initial={driverInitial}
             profileImage={activeDriverMeta?.profileImage}
+            heading={activeDriverLocation?.heading ?? bearingRef.current}
+            carPin={embedded}
           />
         ) : null}
       </MapView>
@@ -3265,6 +3415,8 @@ export default function RideMap({
     </View>
   );
 }
+
+export default memo(RideMap);
 
 /* ─── Danger circles (unchanged) ─────────────────────────────── */
 export function RideMapDangerCircles({

@@ -848,6 +848,18 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
             raise HTTPException(status_code=403, detail=status.get("message", "Cannot go online right now"))
 
     await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
+
+    if is_online:
+        try:
+            from services.driver_surge_notifications import sync_driver_surge_alerts
+
+            profile_live = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0}) or {}
+            user_live = await db.users.find_one({"id": user_id}, {"_id": 0, "city": 1}) or {}
+            profile_live["is_online"] = True
+            await sync_driver_surge_alerts(db, user_id, profile_live, user_live, notify=True)
+        except Exception as surge_exc:
+            logger.warning("Surge alert on go-online skipped for %s: %s", user_id, surge_exc)
+
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
 @drivers_router.post("/drivers/{user_id}/verify-face-at-start")
@@ -2274,54 +2286,17 @@ async def admin_get_verification_audit_log(verification_id: str, request: Reques
 
 # ==================== DRIVER HEATMAP ====================
 
-def _heatmap_zone_jitter(seed_bytes: bytes, idx: int, slot: str) -> float:
-    """Stable pseudo-random float in [-0.05, 0.05] derived from seed (no `random` nondeterminism across workers)."""
-    h = hashlib.sha256(seed_bytes + str(idx).encode() + slot.encode()).digest()
-    u = int.from_bytes(h[:4], "big") / 0xFFFFFFFF
-    return round((u * 0.10) - 0.05, 6)
-
-
 @drivers_router.get("/driver/heatmap")
 async def get_heatmap(lat: float = None, lng: float = None, city: str = None):
-    from routers.ai_features import detect_city
+    from driver_heatmap_snapshot import build_driver_heatmap_snapshot
 
-    loc = detect_city(lat, lng, city)
-    city_name = loc["city"]
-    base_lat, base_lng = float(loc["lat"]), float(loc["lng"])
-    zones_data = list(loc.get("zones") or [])
-    if not zones_data:
-        zones_data = detect_city(None, None, "lagos").get("zones") or ["Central"]
-
-    hour = int(datetime.utcnow().hour)
-    seed_bytes = f"{hour}-{city_name}".encode()
-    zones = []
-    for i, zone_name in enumerate(zones_data):
-        offset_lat = _heatmap_zone_jitter(seed_bytes, i, "lat")
-        offset_lng = _heatmap_zone_jitter(seed_bytes, i, "lng")
-        ih = _heatmap_zone_jitter(seed_bytes, i, "int")
-        intensity = round(0.50 + (ih + 0.05) / 0.10 * 0.45, 2)
-        intensity = max(0.50, min(0.95, intensity))
-        sh = abs(_heatmap_zone_jitter(seed_bytes, i, "srg"))
-        surge = round(1.0 + min(0.50, (sh + 0.05) / 0.10 * 0.50), 1)
-        zones.append(
-            {
-                "lat": round(base_lat + offset_lat, 4),
-                "lng": round(base_lng + offset_lng, 4),
-                "intensity": intensity,
-                "zone_name": zone_name,
-                "surge_multiplier": surge,
-                "demand_level": "very_high"
-                if intensity > 0.8
-                else "high"
-                if intensity > 0.6
-                else "medium",
-            }
-        )
+    snap = build_driver_heatmap_snapshot(lat, lng, city)
     return {
-        "city": city_name,
-        "zones": zones,
-        "updated_at": datetime.utcnow().isoformat(),
-        "recommendation": f"Head to {zones[0]['zone_name']} for stronger demand this hour" if zones else "No data available",
+        "city": snap["city"],
+        "zones": snap["zones"],
+        "updated_at": snap["updated_at"],
+        "recommendation": snap["recommendation"],
+        "top_zone": snap.get("top_zone"),
     }
 
 
@@ -2474,7 +2449,14 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
     user_doc = await db.users.find_one({"id": driver_id}, {"_id": 0, "city": 1}) or {}
     profile = await db.driver_profiles.find_one(
         {"user_id": driver_id},
-        {"_id": 0, "salary_mode": 1, "current_location": 1, "active_categories": 1, "vehicle_type": 1},
+        {
+            "_id": 0,
+            "salary_mode": 1,
+            "current_location": 1,
+            "active_categories": 1,
+            "vehicle_type": 1,
+            "is_online": 1,
+        },
     ) or {}
 
     # ── Live surge (hybrid): GPS bubble demand + profile city/service tier ──
@@ -2529,6 +2511,33 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
         "gps_based_demand": bool(has_coords),
         "tier_surge_cap": surge_status.get("service_cap"),
     }
+
+    if period == "today":
+        try:
+            from driver_heatmap_snapshot import build_driver_heatmap_snapshot
+            from services.driver_surge_notifications import (
+                enrich_driver_surge_status,
+                maybe_notify_driver_surge,
+            )
+
+            heatmap_snap = build_driver_heatmap_snapshot(
+                lat_f if has_coords else None,
+                lng_f if has_coords else None,
+                city_for_surge,
+            )
+            surge_status = enrich_driver_surge_status(surge_status, heatmap_snap)
+            if profile.get("is_online"):
+                await maybe_notify_driver_surge(
+                    db,
+                    driver_id,
+                    surge_status,
+                    lat=lat_f if has_coords else None,
+                    lng=lng_f if has_coords else None,
+                    city=city_for_surge,
+                    is_online=True,
+                )
+        except Exception as surge_exc:
+            logger.warning("Surge inbox alert skipped for %s: %s", driver_id, surge_exc)
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     month_trips = await db.trips.find(

@@ -7,6 +7,7 @@ import { FONT_SIZE, SHADOWS, tabIconActivePillBg, useThemeColors } from '@/src/c
 import { BRAND } from '@/src/constants/designSystem';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
+import ActiveTripBar from '@/src/components/ActiveTripBar';
 import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
@@ -97,6 +98,7 @@ export default function RiderTabLayout() {
   }
 
   return (
+    <>
     <Tabs
       screenOptions={tabScreenOptions}
     >
@@ -165,6 +167,8 @@ export default function RiderTabLayout() {
         }}
       />
     </Tabs>
+    <ActiveTripBar />
+    </>
   );
 }
 

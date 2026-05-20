@@ -54,6 +54,8 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [womenOnly, setWomenOnly] = useState(false);
   const [womenOnlyLoading, setWomenOnlyLoading] = useState(false);
+  const [pickupCodeEnabled, setPickupCodeEnabled] = useState(true);
+  const [pickupCodeSaving, setPickupCodeSaving] = useState(false);
 
   const showFemaleDriverRow =
     variant === 'rider' && (user?.gender || '').toLowerCase() === 'female';
@@ -236,6 +238,9 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
         if (userRes?.data && typeof userRes.data.women_only_mode === 'boolean') {
           setWomenOnly(userRes.data.women_only_mode);
         }
+        if (typeof pref.pickup_code_enabled === 'boolean') {
+          setPickupCodeEnabled(pref.pickup_code_enabled);
+        }
       } catch {
         // keep defaults
       } finally {
@@ -325,6 +330,42 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
       </View>
 
       {variant === 'driver' && <DriverOfferSoundPreferences />}
+
+      {variant === 'rider' && (
+        <View style={[styles.menuItem, { borderBottomColor: COLORS.gray100 }]}>
+          <View style={[styles.menuIcon, { backgroundColor: COLORS.accentGreenSoft }]}>
+            <Ionicons name="keypad-outline" size={20} color={COLORS.accentGreen} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.menuText, { color: colors.text }]}>Pickup code</Text>
+            <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>
+              {pickupCodeEnabled
+                ? 'Show a 4-digit code at pickup for your driver'
+                : 'Off — driver can start without a code'}
+            </Text>
+          </View>
+          <Switch
+            value={pickupCodeEnabled}
+            disabled={pickupCodeSaving}
+            onValueChange={async (v) => {
+              if (!userId || !canCallAuthedApi) return;
+              setPickupCodeSaving(true);
+              const prev = pickupCodeEnabled;
+              setPickupCodeEnabled(v);
+              try {
+                await updateUserPreferences(userId, { pickup_code_enabled: v });
+              } catch {
+                setPickupCodeEnabled(prev);
+                Alert.alert('Error', 'Could not save pickup code preference.');
+              } finally {
+                setPickupCodeSaving(false);
+              }
+            }}
+            trackColor={{ false: COLORS.gray200, true: COLORS.accentGreen + '50' }}
+            thumbColor={pickupCodeEnabled ? COLORS.accentGreen : COLORS.gray100}
+          />
+        </View>
+      )}
 
       <View style={[styles.block, { borderBottomColor: COLORS.gray100 }]}>
         <TouchableOpacity

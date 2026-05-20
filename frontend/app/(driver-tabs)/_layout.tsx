@@ -8,6 +8,7 @@ import { BRAND } from '@/src/constants/designSystem';
 import { useLanguage } from '@/src/i18n/LanguageContext';
 import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import ActiveTripBar from '@/src/components/ActiveTripBar';
+import { DriverTripLocationBridge } from '@/src/components/driver/DriverTripLocationBridge';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
@@ -168,6 +169,7 @@ export default function DriverTabLayout() {
           }}
         />
       </Tabs>
+      <DriverTripLocationBridge />
       <ActiveTripBar />
     </>
   );

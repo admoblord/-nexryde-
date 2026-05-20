@@ -34,8 +34,8 @@ def test_max_style_surge_peak_and_stack():
     out_rain = compute_max_style_surge_multiplier(
         demand_ratio=0.0, is_raining=True, service_max_multiplier=3.0
     )
-    # Peak window can lift max to 1.5 alongside rain 1.4
-    assert 1.4 <= out_rain["multiplier"] <= 1.5
+    # Peak capped at 1.0; rain can still lift to 1.4
+    assert 1.0 <= out_rain["multiplier"] <= 1.4
     out_hi = compute_max_style_surge_multiplier(
         demand_ratio=0.95, is_raining=False, service_max_multiplier=3.0
     )

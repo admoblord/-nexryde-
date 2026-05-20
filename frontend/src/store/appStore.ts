@@ -97,6 +97,8 @@ export interface Trip {
   pickup_code?: string;
   pickup_code_verified?: boolean;
   security_code_verified?: boolean;
+  /** When false, driver can start without entering a code (rider preference at booking). */
+  pickup_code_required?: boolean;
 }
 
 export interface Location {
@@ -187,6 +189,12 @@ export const useAppStore = create<AppState>()(
       },
       
       logout: async () => {
+        try {
+          const { clearTripDriverCache } = await import('@/src/utils/tripDriverCache');
+          clearTripDriverCache();
+        } catch {
+          /* non-fatal */
+        }
         // Clear SecureStore session
         try {
           const { clearUserSession } = await import('@/utils/authStorage');

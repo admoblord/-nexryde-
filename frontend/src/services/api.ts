@@ -251,6 +251,7 @@ export const updateUserPreferences = (
     notifications_enabled?: boolean;
     notification_channels?: Record<string, boolean>;
     notification_types?: Record<string, boolean>;
+    pickup_code_enabled?: boolean;
   }
 ) => api.put(`/users/${userId}/preferences`, data);
 
@@ -1226,6 +1227,40 @@ export const shareTrip = (tripId: string, recipientPhone: string, recipientName?
 
 export const trackSharedTrip = (shareToken: string) =>
   api.get(`/trips/track/${shareToken}`);
+
+export type TripShareData = {
+  success?: boolean;
+  trip_id: string;
+  status: string;
+  share_link: string;
+  last_updated: string;
+  driver: {
+    name: string;
+    image_url?: string | null;
+    face_image?: string | null;
+    profile_image?: string | null;
+    rating?: number | null;
+  };
+  vehicle: {
+    make: string;
+    color: string;
+    license_plate: string;
+  };
+  pickup_address: string;
+  destination_address: string;
+  distance_km?: number | null;
+  eta_seconds?: number | null;
+  started_at?: string | null;
+  driver_location?: { lat: number; lng: number } | null;
+};
+
+export const fetchTripShareData = (tripId: string) =>
+  api.get<TripShareData>(`/trips/${tripId}/share-data`);
+
+export const generateTripShareLink = (tripId: string) =>
+  api.post<{ success: boolean; share_link: string; trip_id: string; status: string }>(
+    `/trips/${tripId}/generate-share-link`,
+  );
 
 // Trip Recording
 export const startRecording = (tripId: string) =>

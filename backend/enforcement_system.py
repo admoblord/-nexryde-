@@ -2,12 +2,16 @@
 NEXRYDE Enforcement & Penalty System
 Based on Bolt/Uber industry standards, adapted for Nigerian market.
 
-Strike system:
-  - Violations accumulate strikes
-  - 3 strikes = 24hr suspension
-  - 5 strikes = 7-day suspension
-  - 7 strikes = permanent deactivation
-  - Strikes reset after 30 days of clean behavior
+Cancellation policy (24-hour rolling window):
+  - Warnings only until the 7th cancellation in 24 hours
+  - Penalty applies exactly on the 7th cancellation (not again at 8, 9, … in the same window)
+  - Repeat episodes escalate: 1h → 24h → 7 days (riders and drivers)
+
+Strike system (30-day rolling window, non-cancellation violations):
+  - Each violation adds strikes per VIOLATION_CONFIG (cancellations add 0 strikes)
+  - 5 active strikes = mandatory 24h account pause
+  - 7 active strikes = permanent deactivation
+  - Strikes age out after 30 days of clean behavior
 """
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -15,6 +19,7 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 import logging
 import asyncio
+import uuid
 
 from database import db
 
@@ -43,12 +48,24 @@ VIOLATION_CONFIG = {
         "threshold": 7,
         "window_hours": 24,
         "penalty": "warning",
-        "strikes": 1,
+        "strikes": 0,
         "escalation": {
-            1: {"action": "warning", "message": "⚠️ Cancelling after you accept leaves riders stranded. Only accept trips you can complete."},
-            4: {"action": "warning", "message": "⚠️ You've cancelled 4 trips after accepting in the last 24 hours. At 7, you cannot go online for 1 hour."},
-            6: {"action": "warning", "message": "⚠️ You've cancelled 6 trips after accepting in the last 24 hours. One more cancellation will block going online for 1 hour."},
-            7: {"action": "timeout_1h", "message": "🚫 Going online is paused for 1 hour. You've reached 7 post-accept cancellations in the last 24 hours. Please only accept trips you can complete."},
+            1: {
+                "action": "warning",
+                "message": "You cancelled after accepting. Riders are already on their way — only accept trips you can complete.",
+            },
+            4: {
+                "action": "warning",
+                "message": "4 post-accept cancellations in 24 hours. At 7, going online pauses (1 hour first time, longer if it happens again).",
+            },
+            6: {
+                "action": "warning",
+                "message": "6 post-accept cancellations in 24 hours. One more in this window triggers an automatic pause.",
+            },
+            7: {
+                "action": "cancellation_progressive",
+                "message": "You've reached 7 post-accept cancellations in 24 hours.",
+            },
         },
         "role": "driver",
     },
@@ -57,12 +74,24 @@ VIOLATION_CONFIG = {
         "threshold": 7,
         "window_hours": 24,
         "penalty": "warning",
-        "strikes": 1,
+        "strikes": 0,
         "escalation": {
-            1: {"action": "warning", "message": "⚠️ Cancelling trips wastes drivers' time and fuel. Book when you're ready."},
-            4: {"action": "warning", "message": "⚠️ You've cancelled 4 rides in the last 24 hours. At 7 cancellations, booking pauses for 1 hour."},
-            6: {"action": "warning", "message": "⚠️ You've cancelled 6 rides in the last 24 hours. One more cancellation will pause booking for 1 hour."},
-            7: {"action": "booking_block_1h", "message": "🚫 Booking paused for 1 hour. You've reached 7 ride cancellations in the last 24 hours. Please book only when you're ready to travel."},
+            1: {
+                "action": "warning",
+                "message": "Trip cancelled. Drivers lose time and fuel when bookings are called off — book only when you're ready to travel.",
+            },
+            4: {
+                "action": "warning",
+                "message": "4 cancellations in 24 hours. At 7, booking pauses (1 hour the first time, 24 hours the second, longer after that).",
+            },
+            6: {
+                "action": "warning",
+                "message": "6 cancellations in 24 hours. One more in this window triggers an automatic booking pause.",
+            },
+            7: {
+                "action": "cancellation_progressive",
+                "message": "You've reached 7 ride cancellations in 24 hours.",
+            },
         },
         "role": "rider",
     },
@@ -187,6 +216,315 @@ VIOLATION_CONFIG = {
     },
 }
 
+STRIKE_WINDOW_DAYS = 30
+STRIKE_SUSPEND_AT = 5
+STRIKE_DEACTIVATE_AT = 7
+
+CANCELLATION_PENALTY_THRESHOLD = 7
+CANCELLATION_PROGRESSIVE_TYPES = frozenset({"rider_cancellation", "driver_cancellation"})
+CANCELLATION_TIER_FIELD = {
+    "rider_cancellation": "rider_cancellation_penalty_tier",
+    "driver_cancellation": "driver_cancellation_penalty_tier",
+}
+
+# Rotating copy so repeat warnings are not identical in the inbox.
+VIOLATION_COPY_VARIANTS: dict[str, dict[str, list[str]]] = {
+    "driver_cancellation": {
+        "warning": [
+            "You cancelled after accepting — riders may already be waiting. Only accept trips you can finish.",
+            "Post-accept cancellation logged. Once you tap Accept, the rider is counting on you to show up.",
+            "Cancellation after accept hurts reliability. Check traffic and pickup time before you accept.",
+        ],
+        "timeout": [
+            "Going online is paused for 1 hour — 7 post-accept cancellations in the last 24 hours.",
+            "You're offline for 1 hour. This is your first cancellation pause; repeat episodes last longer.",
+        ],
+        "suspended": [
+            "Your driver account is paused for 24 hours after another 7-cancellation episode.",
+            "Second cancellation pause: 24 hours offline. Accept only when you can complete the trip.",
+        ],
+        "suspended_long": [
+            "Your driver account is paused for 7 days after repeated cancellation episodes.",
+            "Extended pause applied — too many 7-cancellation windows. Contact support if this seems wrong.",
+        ],
+    },
+    "ride_rejection": {
+        "warning": [
+            "Several ride offers were declined in a short window. Steady acceptance keeps you visible to riders.",
+            "High decline rate detected. Ignoring too many nearby requests may limit future offers.",
+        ],
+    },
+    "rider_cancellation": {
+        "warning": [
+            "Trip cancelled — drivers lose time and fuel when bookings are called off late.",
+            "Another cancellation recorded. Book when you're ready to travel to avoid booking limits.",
+        ],
+        "booking_blocked": [
+            "Booking is paused for 1 hour — 7 cancellations in the last 24 hours.",
+            "First cancellation pause: 1 hour. Book only when you're ready to travel.",
+        ],
+        "suspended": [
+            "Booking and account access are paused for 24 hours after another 7-cancellation episode.",
+            "Second cancellation pause: 24 hours. Please book only when you're sure you'll ride.",
+        ],
+        "suspended_long": [
+            "Your account is paused for 7 days after repeated cancellation episodes.",
+            "Extended pause — too many 7-cancellation windows in a short period. Email support@nexryde.com to appeal.",
+        ],
+    },
+    "rude_behavior": {
+        "warning": [
+            "A conduct concern was logged on your account. Professional, respectful trips keep everyone safe.",
+            "We've received another behaviour report. Please keep conversations courteous on every trip.",
+        ],
+    },
+    "speed_spike": {
+        "warning": [
+            "Overspeed detected during an active trip. Slow down — this is on your safety record.",
+            "Speed limit exceeded on trip. Repeated spikes trigger an automatic pause.",
+        ],
+    },
+    "accumulated_strikes": {
+        "suspended": [
+            "Your strike balance triggered a mandatory pause. See the deadline below before going online again.",
+            "Too many active strikes in 30 days — account paused until the time shown below.",
+        ],
+        "deactivated": [
+            "Your account was deactivated after repeated strikes. Contact support if you believe this is an error.",
+        ],
+    },
+}
+
+
+def _parse_iso_dt(raw: str) -> datetime | None:
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_until_label(iso: str) -> str:
+    """Human-readable lift time from an ISO deadline."""
+    until = _parse_iso_dt(iso)
+    if not until:
+        return "the listed time"
+    now = datetime.now(timezone.utc)
+    remaining = until - now
+    secs = int(remaining.total_seconds())
+    if secs <= 0:
+        return "now"
+    if secs < 3600:
+        mins = max(1, secs // 60)
+        return f"{mins} minute{'s' if mins != 1 else ''}"
+    if secs < 48 * 3600:
+        hours = max(1, secs // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''}"
+    days = round(secs / 86400, 1)
+    if days == int(days):
+        return f"{int(days)} day{'s' if int(days) != 1 else ''}"
+    return f"{days} days"
+
+
+def _format_until_clock(iso: str) -> str:
+    until = _parse_iso_dt(iso)
+    if not until:
+        return ""
+    return until.astimezone(timezone.utc).strftime("%d %b, %H:%M UTC")
+
+
+def _deadline_lines(action_result: dict) -> list[str]:
+    lines: list[str] = []
+    mapping = (
+        ("suspended_until", "Account unfreezes"),
+        ("offline_until", "You can go online again"),
+        ("blocked_until", "Booking reopens"),
+    )
+    for key, prefix in mapping:
+        iso = action_result.get(key)
+        if not iso:
+            continue
+        rel = _format_until_label(iso)
+        clock = _format_until_clock(iso)
+        if clock:
+            lines.append(f"{prefix} in {rel} ({clock}).")
+        else:
+            lines.append(f"{prefix} in {rel}.")
+    return lines
+
+
+def _strike_status_line(total_strikes: int) -> str:
+    if total_strikes >= STRIKE_DEACTIVATE_AT:
+        return (
+            f"Strike tally: {total_strikes} active in the last {STRIKE_WINDOW_DAYS} days "
+            f"(policy maximum)."
+        )
+    if total_strikes >= STRIKE_SUSPEND_AT:
+        next_label = STRIKE_DEACTIVATE_AT - total_strikes
+        return (
+            f"Strike tally: {total_strikes} of {STRIKE_DEACTIVATE_AT} in {STRIKE_WINDOW_DAYS} days. "
+            f"{next_label} more may lead to permanent deactivation."
+        )
+    until_suspend = STRIKE_SUSPEND_AT - total_strikes
+    return (
+        f"Strike tally: {total_strikes} of {STRIKE_DEACTIVATE_AT} in {STRIKE_WINDOW_DAYS} days "
+        f"({until_suspend} more before a mandatory 24-hour pause)."
+    )
+
+
+def _window_count_line(violation_type: str, count: int, window_hours: int) -> str:
+    if window_hours <= 0 or count <= 0:
+        return ""
+    desc = VIOLATION_CONFIG.get(violation_type, {}).get("description", violation_type.replace("_", " "))
+    if window_hours < 48:
+        window_label = f"{window_hours} hours"
+    else:
+        window_label = f"{max(1, window_hours // 24)} days"
+    return f"Incident count: {count}× {desc.lower()} in the last {window_label}."
+
+
+def _pick_variant_copy(violation_type: str, action_bucket: str, count: int) -> str | None:
+    pool = VIOLATION_COPY_VARIANTS.get(violation_type, {}).get(action_bucket, [])
+    if not pool:
+        return None
+    return pool[(max(1, count) - 1) % len(pool)]
+
+
+def _action_bucket(action_result: dict) -> str:
+    action = action_result.get("action") or "warning"
+    if action_result.get("cancellation_penalty_tier", 0) >= 3 and action == "suspended":
+        return "suspended_long"
+    if action in ("timeout", "cooldown"):
+        return "timeout"
+    if action == "booking_blocked":
+        return "booking_blocked"
+    if action == "suspended":
+        return "suspended"
+    if action == "deactivated":
+        return "deactivated"
+    return "warning"
+
+
+def _cancellation_penalty_summary(violation_type: str, tier: int, hours: int) -> str:
+    role = "booking" if violation_type == "rider_cancellation" else "going online"
+    if tier == 1:
+        return (
+            f"Pause #{tier}: {role} is limited for 1 hour after 7 cancellations in 24 hours. "
+            f"A second episode within 30 days becomes a 24-hour pause."
+        )
+    if tier == 2:
+        return (
+            f"Pause #{tier}: {role} is suspended for 24 hours after another 7-cancellation window. "
+            f"A third episode triggers a 7-day pause."
+        )
+    return (
+        f"Pause #{tier}: extended {hours // 24}-day suspension after repeated 7-cancellation episodes. "
+        f"Contact support@nexryde.com if you need to appeal."
+    )
+
+
+def _accumulated_strike_message(total_strikes: int, action_result: dict) -> str:
+    bucket = _action_bucket(action_result)
+    variant = _pick_variant_copy("accumulated_strikes", bucket, total_strikes)
+    if action_result.get("action") == "deactivated":
+        base = variant or (
+            f"Your account was deactivated after {total_strikes} active strikes "
+            f"in {STRIKE_WINDOW_DAYS} days. Email support@nexryde.com to appeal."
+        )
+    else:
+        until_iso = action_result.get("suspended_until")
+        rel = _format_until_label(until_iso) if until_iso else "24 hours"
+        clock = _format_until_clock(until_iso)
+        clock_bit = f" ({clock})" if clock else ""
+        base = variant or (
+            f"Your account is paused for {rel}{clock_bit} after {total_strikes} active strikes "
+            f"in {STRIKE_WINDOW_DAYS} days."
+        )
+    parts = [base, _strike_status_line(total_strikes)]
+    parts.extend(_deadline_lines(action_result))
+    return "\n\n".join(p for p in parts if p)
+
+
+def _enforcement_notification_title(
+    violation_type: str,
+    action_result: dict,
+    total_strikes: int,
+    count: int,
+) -> str:
+    action = action_result.get("action") or "warning"
+    if action == "deactivated":
+        return "Account deactivated"
+    if action == "suspended":
+        if violation_type == "accumulated_strikes":
+            return f"Strike pause · {total_strikes}/{STRIKE_DEACTIVATE_AT}"
+        return "Account paused"
+    if action in ("timeout", "cooldown"):
+        tier = action_result.get("cancellation_penalty_tier")
+        if tier == 1:
+            return "1-hour online pause"
+        return "Going offline temporarily"
+    if action == "booking_blocked":
+        tier = action_result.get("cancellation_penalty_tier")
+        if tier == 1:
+            return "Booking paused · 1 hour"
+        return "Booking paused"
+    if action == "suspended" and action_result.get("cancellation_penalty_tier"):
+        tier = action_result["cancellation_penalty_tier"]
+        if tier >= 3:
+            return "Extended cancellation pause"
+        if tier == 2:
+            return "24-hour cancellation pause"
+    title_pools = {
+        "driver_cancellation": [
+            "Trip commitment reminder",
+            "Cancellation notice",
+            "Reliability alert",
+        ],
+        "ride_rejection": ["Offer decline notice", "Acceptance reminder"],
+        "rider_cancellation": ["Booking cancellation", "Trip cancelled"],
+        "speed_spike": ["Safety speed alert", "Speed limit notice"],
+        "rude_behavior": ["Conduct reminder", "Professional standards"],
+        "accumulated_strikes": [
+            f"Strike warning · {total_strikes}/{STRIKE_DEACTIVATE_AT}",
+            f"Account standing · {total_strikes} strikes",
+        ],
+    }
+    pool = title_pools.get(violation_type, ["Policy update", "Account notice", "Trip policy"])
+    return pool[(max(1, count) - 1) % len(pool)]
+
+
+def compose_enforcement_notification(
+    violation_type: str,
+    count: int,
+    total_strikes: int,
+    action_result: dict,
+    config: dict,
+) -> tuple[str, str, str]:
+    """Return (title, message, notification_type) for inbox + email."""
+    bucket = _action_bucket(action_result)
+    variant = _pick_variant_copy(violation_type, bucket, count)
+    if action_result.get("cancellation_penalty_tier"):
+        body = action_result.get("message") or "Cancellation limit reached."
+    else:
+        body = variant or (action_result.get("message") or "A policy event was recorded on your account.")
+
+    if violation_type == "accumulated_strikes":
+        body = _accumulated_strike_message(total_strikes, action_result)
+    else:
+        parts = [body.strip()]
+        window_line = _window_count_line(violation_type, count, config.get("window_hours", 0))
+        if window_line:
+            parts.append(window_line)
+        if total_strikes > 0:
+            parts.append(_strike_status_line(total_strikes))
+        parts.extend(_deadline_lines(action_result))
+        body = "\n\n".join(p for p in parts if p)
+
+    title = _enforcement_notification_title(violation_type, action_result, total_strikes, count)
+    notif_type = f"enforcement_{bucket}"
+    return title, body, notif_type
+
 
 # ==================== MODELS ====================
 
@@ -236,32 +574,84 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
 
     action_result = {"action": "recorded", "message": "Violation recorded.", "count": count}
 
-    for threshold in sorted(config["escalation"].keys(), reverse=True):
-        if count >= threshold:
-            escalation = config["escalation"][threshold]
-            action_result = await apply_penalty(user_id, escalation["action"], escalation["message"], violation_type)
-            break
+    if (
+        violation_type in CANCELLATION_PROGRESSIVE_TYPES
+        and count == CANCELLATION_PENALTY_THRESHOLD
+    ):
+        escalation = config["escalation"][CANCELLATION_PENALTY_THRESHOLD]
+        action_result = await apply_cancellation_progressive_penalty(
+            user_id, violation_type, escalation.get("message", ""), count
+        )
+    elif violation_type in CANCELLATION_PROGRESSIVE_TYPES:
+        escalation = config["escalation"].get(count)
+        if escalation and escalation["action"] == "warning":
+            action_result = await apply_penalty(
+                user_id, escalation["action"], escalation["message"], violation_type
+            )
+    else:
+        for threshold in sorted(config["escalation"].keys(), reverse=True):
+            if count >= threshold:
+                escalation = config["escalation"][threshold]
+                action_result = await apply_penalty(
+                    user_id, escalation["action"], escalation["message"], violation_type
+                )
+                break
 
-    total_strikes = await db.violations.count_documents({
-        "user_id": user_id,
-        "status": "active",
-        "created_at": {"$gte": (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()},
-    })
+    strike_window_start = (datetime.now(timezone.utc) - timedelta(days=STRIKE_WINDOW_DAYS)).isoformat()
+    strike_rows = await db.violations.find(
+        {
+            "user_id": user_id,
+            "status": "active",
+            "created_at": {"$gte": strike_window_start},
+            "violation_type": {"$nin": list(CANCELLATION_PROGRESSIVE_TYPES)},
+        },
+        {"strikes": 1},
+    ).to_list(500)
+    total_strikes = sum(int(v.get("strikes") or 1) for v in strike_rows)
 
-    if total_strikes >= 7:
-        action_result = await apply_penalty(user_id, "deactivate",
-                                            "Your account has been deactivated due to repeated violations. Contact support to appeal.",
-                                            "accumulated_strikes")
-    elif total_strikes >= 5:
-        action_result = await apply_penalty(user_id, "suspend_7d",
-                                            "Multiple violations recorded. Account suspended for 7 days.",
-                                            "accumulated_strikes")
+    notify_violation_type = violation_type
+    if total_strikes >= STRIKE_DEACTIVATE_AT:
+        action_result = await apply_penalty(
+            user_id, "deactivate", "", "accumulated_strikes"
+        )
+        action_result["message"] = _accumulated_strike_message(total_strikes, action_result)
+        notify_violation_type = "accumulated_strikes"
+    elif total_strikes >= STRIKE_SUSPEND_AT:
+        action_result = await apply_penalty(
+            user_id, "suspend_7d", "", "accumulated_strikes"
+        )
+        action_result["message"] = _accumulated_strike_message(total_strikes, action_result)
+        notify_violation_type = "accumulated_strikes"
+
+    notify_config = (
+        config
+        if notify_violation_type != "accumulated_strikes"
+        else {
+            "description": "Accumulated policy strikes",
+            "window_hours": STRIKE_WINDOW_DAYS * 24,
+        }
+    )
+    title, inbox_message, notif_type = compose_enforcement_notification(
+        notify_violation_type, count, total_strikes, action_result, notify_config
+    )
 
     await db.notifications.insert_one({
+        "id": str(uuid.uuid4()),
         "user_id": user_id,
-        "type": "enforcement",
-        "title": "Policy Notice",
-        "message": action_result["message"],
+        "type": notif_type,
+        "title": title,
+        "message": inbox_message,
+        "data": {
+            "violation_type": violation_type,
+            "incident_count": count,
+            "total_strikes": total_strikes,
+            "action": action_result.get("action"),
+            "cancellation_penalty_tier": action_result.get("cancellation_penalty_tier"),
+            "suspended_until": action_result.get("suspended_until"),
+            "offline_until": action_result.get("offline_until"),
+            "blocked_until": action_result.get("blocked_until"),
+            "trip_id": trip_id,
+        },
         "created_at": datetime.now(timezone.utc).isoformat(),
         "read": False,
     })
@@ -270,21 +660,120 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
 
     vdesc = (config.get("description") or violation_type).strip()
     body = (
-        f"A policy-related event was recorded on your account.\n\n"
-        f"Type: {vdesc}\n"
-        + (f"Trip: {trip_id}\n\n" if trip_id else "\n")
-        + f"What you need to know:\n{action_result.get('message', '')}\n\n"
-        f"If this looks wrong, reach out via in-app support."
+        f"{title}\n\n"
+        f"{inbox_message}\n\n"
+        f"Event: {vdesc}\n"
+        + (f"Trip: {trip_id}\n" if trip_id else "")
+        + f"\nIf this looks wrong, reach out via in-app support."
     ).strip()
     schedule_notify_user_brevo_email(
         user_id,
-        subject="Important: NEXRYDE policy notice",
+        subject=f"NEXRYDE — {title}",
         body_plain=body,
         tags=["nexryde-violation", violation_type[:32]],
         respect_notification_channels=False,
     )
 
     return action_result
+
+
+async def apply_cancellation_progressive_penalty(
+    user_id: str,
+    violation_type: str,
+    base_message: str,
+    count_in_window: int,
+) -> dict:
+    """Apply 1h → 24h → 7d pause when a user hits exactly 7 cancellations in 24 hours."""
+    user = await db.users.find_one({"id": user_id}) or {}
+    tier_field = CANCELLATION_TIER_FIELD[violation_type]
+    tier = int(user.get(tier_field) or 0) + 1
+    now = datetime.now(timezone.utc)
+
+    if tier == 1:
+        until = now + timedelta(hours=1)
+        if violation_type == "rider_cancellation":
+            await db.users.update_one(
+                {"id": user_id},
+                {
+                    "$set": {
+                        tier_field: tier,
+                        "booking_blocked_until": until.isoformat(),
+                        "block_reason": violation_type,
+                    }
+                },
+            )
+            action = "booking_blocked"
+            deadline_key = "blocked_until"
+        else:
+            await db.users.update_one(
+                {"id": user_id},
+                {
+                    "$set": {
+                        tier_field: tier,
+                        "forced_offline_until": until.isoformat(),
+                        "block_reason": violation_type,
+                    }
+                },
+            )
+            await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+            action = "timeout"
+            deadline_key = "offline_until"
+        hours = 1
+    elif tier == 2:
+        until = now + timedelta(hours=24)
+        await db.users.update_one(
+            {"id": user_id},
+            {
+                "$set": {
+                    tier_field: tier,
+                    "suspended_until": until.isoformat(),
+                    "suspension_reason": violation_type,
+                    "booking_blocked_until": until.isoformat(),
+                    "block_reason": violation_type,
+                    "forced_offline_until": until.isoformat(),
+                }
+            },
+        )
+        await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        action = "suspended"
+        deadline_key = "suspended_until"
+        hours = 24
+    else:
+        until = now + timedelta(days=7)
+        await db.users.update_one(
+            {"id": user_id},
+            {
+                "$set": {
+                    tier_field: tier,
+                    "suspended_until": until.isoformat(),
+                    "suspension_reason": violation_type,
+                    "booking_blocked_until": until.isoformat(),
+                    "block_reason": violation_type,
+                    "forced_offline_until": until.isoformat(),
+                }
+            },
+        )
+        await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        action = "suspended"
+        deadline_key = "suspended_until"
+        hours = 24 * 7
+
+    summary = _cancellation_penalty_summary(violation_type, tier, hours)
+    message = f"{base_message.strip()}\n\n{summary}".strip()
+    result = {
+        "action": action,
+        "message": message,
+        "count": count_in_window,
+        "cancellation_penalty_tier": tier,
+        deadline_key: until.isoformat(),
+    }
+    if tier == 1 and violation_type == "driver_cancellation":
+        result["offline_until"] = until.isoformat()
+    if tier >= 2:
+        result["blocked_until"] = until.isoformat()
+        if violation_type == "driver_cancellation":
+            result["offline_until"] = until.isoformat()
+    return result
 
 
 async def apply_penalty(user_id: str, action: str, message: str, violation_type: str):
@@ -323,9 +812,14 @@ async def apply_penalty(user_id: str, action: str, message: str, violation_type:
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
 
-    elif action in ("suspend_3d", "suspend_7d"):
-        # Driver suspensions are capped at 24 hours — longer bans require admin review
-        until = now + timedelta(hours=24)
+    elif action == "suspend_3d":
+        until = now + timedelta(days=3)
+        await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
+        await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
+        return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
+
+    elif action == "suspend_7d":
+        until = now + timedelta(days=7)
         await db.users.update_one({"id": user_id}, {"$set": {"suspended_until": until.isoformat(), "suspension_reason": violation_type}})
         await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": False}})
         return {"action": "suspended", "message": message, "suspended_until": until.isoformat()}
@@ -394,7 +888,13 @@ async def check_user_status(user_id: str):
                     time_str = f"{days} days" if days != int(days) else f"{int(days)} days"
                 else:
                     time_str = f"{total_hours} hours"
-                return {"allowed": False, "reason": "Account suspended", "message": f"Your account is suspended. {time_str} remaining.", "suspended_until": suspended_until}
+                reason = (user.get("suspension_reason") or "policy").replace("_", " ")
+                return {
+                    "allowed": False,
+                    "reason": "Account suspended",
+                    "message": f"Account paused ({reason}). {time_str} remaining.",
+                    "suspended_until": suspended_until,
+                }
             else:
                 await db.users.update_one({"id": user_id}, {"$unset": {"suspended_until": "", "suspension_reason": ""}})
         except (ValueError, TypeError):
@@ -486,7 +986,19 @@ async def get_book_status(user_id: str):
             now_utc = datetime.now(timezone.utc)
             if now_utc < until_dt:
                 secs = int((until_dt - now_utc).total_seconds())
-                return {"can_book": False, "reason": "booking_blocked", "message": "Too many cancellations today. Booking is temporarily suspended.", "seconds_remaining": secs, "blocked_until": until_dt.isoformat()}
+                mins = secs // 60
+                block_reason = (user.get("block_reason") or "cancellations").replace("_", " ")
+                if mins >= 60:
+                    time_msg = f"{mins // 60}h {mins % 60}m"
+                else:
+                    time_msg = f"{mins}m {secs % 60:02d}s"
+                return {
+                    "can_book": False,
+                    "reason": "booking_blocked",
+                    "message": f"Booking paused ({block_reason}). {time_msg} remaining.",
+                    "seconds_remaining": secs,
+                    "blocked_until": until_dt.isoformat(),
+                }
         except (ValueError, TypeError):
             pass
     return {"can_book": True}
@@ -527,13 +1039,22 @@ async def get_policies():
                 for t, e in sorted(config["escalation"].items())
             ],
         })
-    return {"policies": policies, "strike_system": {
-        "warning": "3 strikes in 30 days",
-        "suspension_24h": "5 strikes in 30 days",
-        "suspension_7d": "7 strikes in 30 days",
-        "deactivation": "7+ strikes or severe violations",
-        "reset": "Strikes reset after 30 days of clean behavior",
-    }}
+    return {
+        "policies": policies,
+        "strike_system": {
+            "warning": f"Strikes accumulate over {STRIKE_WINDOW_DAYS} days (cancellations do not add strikes)",
+            "suspension_24h": f"{STRIKE_SUSPEND_AT} active strikes = mandatory 24-hour pause",
+            "deactivation": f"{STRIKE_DEACTIVATE_AT} active strikes = permanent deactivation",
+            "reset": f"Strikes age out after {STRIKE_WINDOW_DAYS} days without new violations",
+        },
+        "cancellation_policy": {
+            "threshold_per_24h": CANCELLATION_PENALTY_THRESHOLD,
+            "first_episode": "1 hour booking / online pause",
+            "second_episode": "24 hour account pause",
+            "third_plus_episode": "7 day account pause",
+            "note": "Penalty applies on the 7th cancellation in a 24-hour window, not on every cancellation after that.",
+        },
+    }
 
 
 @enforcement_router.post("/enforcement/appeal")

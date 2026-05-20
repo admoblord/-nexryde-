@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
-import { getActiveTrip } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { isActiveTripStatus, normalizeTripStatus } from '@/src/utils/tripStatus';
+import { isActiveTripStatus } from '@/src/utils/tripStatus';
+import { pullAndApplyActiveTrip, shouldClearTripAfterInactiveApi } from '@/src/services/activeTripSync';
 
 const POLL_MS = 22000;
 
@@ -15,42 +15,35 @@ export default function useActiveTripCoordinator() {
 
   useEffect(() => {
     if (!storeReady) return;
+
     if (!canCallAuthedApi || !userId) {
-      setCurrentTrip(null);
+      // Keep a valid persisted active trip during brief auth hydration gaps.
+      if (shouldClearTripAfterInactiveApi()) {
+        setCurrentTrip(null);
+      }
       return;
     }
 
     let mounted = true;
 
     const pullActiveTrip = async () => {
-      try {
-        const res = await getActiveTrip(userId);
-        const payload = res?.data;
-        if (!mounted) return;
+      const result = await pullAndApplyActiveTrip(userId);
+      if (!mounted) return;
 
-        if (payload?.active && payload?.trip) {
-          const normalizedStatus = normalizeTripStatus(payload.trip.status, payload.trip.payment_status);
-          const normalizedTrip = { ...payload.trip, status: normalizedStatus };
-          if (isActiveTripStatus(normalizedStatus, payload.trip.payment_status)) {
-            setCurrentTrip(normalizedTrip);
-          } else {
-            setCurrentTrip(null);
-          }
-          return;
-        }
+      if (result.found) return;
 
+      // API says no active trip — only clear when local state is not a live trip.
+      if (shouldClearTripAfterInactiveApi()) {
         setCurrentTrip(null);
-      } catch {
-        // Keep prior state when network is unstable.
       }
     };
 
-    pullActiveTrip();
-    const interval = setInterval(pullActiveTrip, POLL_MS);
+    void pullActiveTrip();
+    const interval = setInterval(() => void pullActiveTrip(), POLL_MS);
 
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
-        pullActiveTrip();
+        void pullActiveTrip();
       }
     });
 
@@ -61,4 +54,3 @@ export default function useActiveTripCoordinator() {
     };
   }, [canCallAuthedApi, storeReady, userId, setCurrentTrip]);
 }
-

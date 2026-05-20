@@ -139,7 +139,21 @@ export default function ActiveTripBar() {
     ['accepted', 'arrived', 'ongoing'].includes(effectiveStatus) &&
     segments.some((s) => s === 'driver-home');
 
-  if (hideDuplicateDriverStrip) return null;
+  /** Rider tracking/book screens already show full trip chrome. */
+  const hideDuplicateRiderStrip =
+    user?.role === 'rider' &&
+    segments.some((s) => s === 'tracking' || s === 'book') &&
+    ['accepted', 'arrived', 'ongoing', 'pending', 'pending_driver_offers', 'pending_payment'].includes(
+      effectiveStatus,
+    );
+
+  /** Rider home shows dedicated active-trip panel — avoid duplicate bottom strip. */
+  const hideOnRiderHome =
+    user?.role === 'rider' &&
+    segments.some((s) => s === 'rider-home') &&
+    isActiveTripStatus(activeTrip.status, activeTrip.payment_status);
+
+  if (hideDuplicateDriverStrip || hideDuplicateRiderStrip || hideOnRiderHome) return null;
 
   const statusLabel =
     effectiveStatus === 'pending' || effectiveStatus === 'pending_driver_offers'

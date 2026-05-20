@@ -1,24 +1,35 @@
-import React, { useEffect, useRef } from 'react';
+/**
+ * Trip in progress — scrollable glass sheet with fixed Complete Trip CTA (always tappable).
+ */
+import React, { useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Image,
   ActivityIndicator,
   Platform,
   Animated,
   Easing,
   Alert,
+  ScrollView,
+  useWindowDimensions,
+  Pressable,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
+import * as Haptics from 'expo-haptics';
 import {
   DOCK_BLUR_INTENSITY,
   DOCK_TOP_RADIUS,
   HANDLE_GRADIENT_ONGOING,
 } from '@/src/components/driver/driverDockTheme';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import {
+  formatDriverRouteSummary,
+  formatDriverTripElapsed,
+} from '@/src/utils/driverOngoingDisplay';
 
 export type DriverOngoingTripDockProps = {
   tripShortId: string;
@@ -33,15 +44,19 @@ export type DriverOngoingTripDockProps = {
   elapsedSec: number;
   distanceToDropLabel: string;
   etaToDropLabel: string;
+  routeSummaryLabel?: string;
+  /** 0–100 journey progress for route card bar */
+  tripProgressPercent?: number;
   fareLabel: string;
-  /** e.g. "Base ₦500 + Distance ₦1,200 + Time ₦150" when API sends components */
+  distanceFareLabel?: string;
   fareBreakdownLine: string | null;
-  /** e.g. "↗ ₦50 just now" when fare ticks up */
   fareDeltaLabel: string | null;
   isCompleting: boolean;
   tripActionBusy: boolean;
   riderPhone: string | null;
   canMessage: boolean;
+  bottomInset?: number;
+  onCollapse?: () => void;
   onCompleteTrip: () => void;
   onNavigate: () => void;
   onCall: () => void;
@@ -51,7 +66,11 @@ export type DriverOngoingTripDockProps = {
   onPauseTrip?: () => void | Promise<void>;
 };
 
-const NEON = '#39FF14';
+const NEON = '#22C55E';
+const CYAN = '#06B6D4';
+const BLUE = '#3B82F6';
+const BG = '#0F172A';
+const MIN_TOUCH = 48;
 
 function firstName(full: string): string {
   const t = full.trim();
@@ -59,14 +78,19 @@ function firstName(full: string): string {
   return t.split(/\s+/)[0] || t;
 }
 
-function formatElapsedVerbose(totalSec: number): string {
-  const s = Math.max(0, Math.floor(totalSec));
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m} min ${String(sec).padStart(2, '0')} sec`;
+function hapticLight() {
+  if (Platform.OS !== 'web') void Haptics.selectionAsync();
 }
 
-function UpdatingDot() {
+function hapticMedium() {
+  if (Platform.OS !== 'web') void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+}
+
+function hapticWarning() {
+  if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+}
+
+function LivePulseDot({ color = NEON }: { color?: string }) {
   const op = useRef(new Animated.Value(0.35)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -76,11 +100,18 @@ function UpdatingDot() {
       ]),
     );
     loop.start();
-    return () => {
-      loop.stop();
-    };
+    return () => loop.stop();
   }, [op]);
-  return <Animated.View style={[s.pulseDot, { opacity: op }]} />;
+  return <Animated.View style={[st.liveDot, { opacity: op, backgroundColor: color }]} />;
+}
+
+function StatHint({ label, live }: { label: string; live?: boolean }) {
+  return (
+    <View style={st.statHintRow}>
+      {live ? <LivePulseDot color={NEON} /> : null}
+      <Text style={st.statHint}>{label}</Text>
+    </View>
+  );
 }
 
 export default function DriverOngoingTripDock({
@@ -96,13 +127,18 @@ export default function DriverOngoingTripDock({
   elapsedSec,
   distanceToDropLabel,
   etaToDropLabel,
+  routeSummaryLabel,
+  tripProgressPercent = 0,
   fareLabel,
+  distanceFareLabel,
   fareBreakdownLine,
   fareDeltaLabel,
   isCompleting,
   tripActionBusy,
   riderPhone,
   canMessage,
+  bottomInset = 0,
+  onCollapse,
   onCompleteTrip,
   onNavigate,
   onCall,
@@ -111,479 +147,560 @@ export default function DriverOngoingTripDock({
   onEmergencyPress,
   onPauseTrip,
 }: DriverOngoingTripDockProps) {
-  const initial = firstName(riderName).charAt(0).toUpperCase() || 'R';
   const busy = !!tripActionBusy;
+  const { height: winH } = useWindowDimensions();
+  const scrollMaxH = Math.min(460, Math.round(winH * 0.48));
+  const routeLine =
+    routeSummaryLabel?.trim() ||
+    formatDriverRouteSummary(null, distanceToDropLabel, etaToDropLabel);
+  const distFare = distanceFareLabel?.trim() || '—';
+  const progressPct = Math.min(100, Math.max(0, tripProgressPercent));
+
+  const handleComplete = useCallback(() => {
+    if (busy) return;
+    hapticMedium();
+    onCompleteTrip();
+  }, [busy, onCompleteTrip]);
 
   return (
-    <View style={s.shell}>
+    <View style={st.shell} accessibilityViewIsModal>
       {Platform.OS === 'ios' || Platform.OS === 'android' ? (
         <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
       ) : (
-        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(0,0,0,0.96)' }]} />
+        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15,23,42,0.98)' }]} />
       )}
       <LinearGradient
-        colors={['rgba(18,18,18,0.4)', 'rgba(2,6,23,0.97)', '#000000']}
+        colors={['rgba(15,23,42,0.55)', 'rgba(15,23,42,0.97)', BG]}
         style={StyleSheet.absoluteFillObject}
       />
-      <LinearGradient
-        colors={['rgba(57,255,20,0.12)', 'rgba(57,255,20,0.02)', 'transparent']}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 0.55 }}
-        style={s.fareMeterGlow}
-        pointerEvents="none"
-      />
 
-      <View style={s.handleRail}>
+      <Pressable
+        onPress={() => {
+          hapticLight();
+          onCollapse?.();
+        }}
+        style={st.handleRail}
+        accessibilityRole="button"
+        accessibilityLabel="Collapse trip sheet"
+        disabled={!onCollapse}
+      >
         <LinearGradient
           colors={[...HANDLE_GRADIENT_ONGOING]}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
-          style={s.handle}
+          style={st.handle}
         />
+      </Pressable>
+
+      <View style={st.brandRow}>
+        <View style={st.logoMark}>
+          <LinearGradient colors={[CYAN, NEON]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={st.logoGrad}>
+            <Text style={st.logoLetter}>N</Text>
+          </LinearGradient>
+          <Text style={st.brandTxt}>NEXRYDE</Text>
+        </View>
+        <View style={st.onDriverPill}>
+          <LivePulseDot />
+          <Text style={st.onDriverTxt}>ON DRIVER</Text>
+        </View>
       </View>
 
-      {/* Live fare meter — matches reference layout */}
-      <View style={s.fareMeterCard}>
-        <LinearGradient
-          colors={['rgba(57,255,20,0.08)', 'rgba(2,6,23,0.5)', 'rgba(15,23,42,0.85)']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
-        />
-        <View style={s.fareMeterHeader}>
-          <View style={s.fareMeterTitleRow}>
-            <View style={s.fareGraphIcon}>
-              <Ionicons name="stats-chart" size={18} color="#022C22" />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.fareMeterKicker}>LIVE FARE METER</Text>
-              <View style={s.updatingRow}>
-                <UpdatingDot />
-                <Text style={s.updatingTxt}>Updating…</Text>
+      <View style={st.scrollWrap}>
+        <ScrollView
+          style={{ maxHeight: scrollMaxH }}
+          contentContainerStyle={st.scrollInner}
+          showsVerticalScrollIndicator={false}
+          bounces
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={st.routeCard}>
+            <LinearGradient
+              colors={['rgba(59,130,246,0.22)', 'rgba(15,23,42,0.55)', 'rgba(15,23,42,0.92)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
+            <View style={st.routeTop}>
+              <View style={st.onRoutePill}>
+                <Ionicons name="navigate" size={12} color={BLUE} />
+                <Text style={st.onRouteTxt}>ON ROUTE</Text>
+              </View>
+              <View style={st.routeMapIcon}>
+                <Ionicons name="map" size={20} color={CYAN} />
               </View>
             </View>
-            <View style={s.fareUpdatingPill}>
-              <Text style={s.fareUpdatingPillTxt}>FARE UPDATING</Text>
+            <Text style={st.routeTitle}>Trip in progress</Text>
+            <Text style={st.routeSub} numberOfLines={2}>
+              {routeLine}
+            </Text>
+            {progressPct > 0 ? (
+              <View style={st.progressTrack} accessibilityLabel={`Trip progress ${Math.round(progressPct)} percent`}>
+                <LinearGradient
+                  colors={[BLUE, CYAN, NEON]}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 0 }}
+                  style={[st.progressFill, { width: `${progressPct}%` }]}
+                />
+              </View>
+            ) : null}
+            <View style={st.liveBadge}>
+              <LivePulseDot />
+              <Text style={st.liveBadgeTxt}>LIVE UPDATING</Text>
+            </View>
+            <Text style={st.tripMeta} numberOfLines={1}>
+              {tripShortId} · {paymentMethodLabel}
+            </Text>
+          </View>
+
+          <View style={st.fareCard}>
+            <View style={st.fareCol}>
+              <Text style={st.fareLbl}>CURRENT FARE</Text>
+              <Text
+                style={st.fareMain}
+                numberOfLines={1}
+                accessibilityLabel={`Current fare ${fareLabel}`}
+                accessibilityLiveRegion="polite"
+              >
+                {fareLabel}
+              </Text>
+              {fareDeltaLabel ? (
+                <Text style={st.fareDelta} accessibilityLiveRegion="polite">
+                  {fareDeltaLabel}
+                </Text>
+              ) : null}
+            </View>
+            <View style={st.fareDivider} />
+            <View style={st.fareCol}>
+              <Text style={st.fareLbl}>DISTANCE FARE</Text>
+              <Text style={st.fareSecondary} numberOfLines={1}>
+                {distFare}
+              </Text>
             </View>
           </View>
-          <Text style={s.currentFareLbl}>CURRENT FARE</Text>
-          <Text style={s.currentFareVal} numberOfLines={1}>
-            {fareLabel}
-          </Text>
-          {fareDeltaLabel ? <Text style={s.fareDelta}>{fareDeltaLabel}</Text> : <View style={{ height: 18 }} />}
           {fareBreakdownLine ? (
-            <Text style={s.fareBreakdown} numberOfLines={2}>
+            <Text style={st.fareBreakdown} numberOfLines={2}>
               {fareBreakdownLine}
             </Text>
-          ) : (
-            <Text style={s.fareBreakdownMuted} numberOfLines={1}>
-              Breakdown appears as the meter accrues distance & time.
-            </Text>
-          )}
-        </View>
-      </View>
+          ) : null}
 
-      <View style={s.metaCompact}>
-        <Text style={s.metaTripId} numberOfLines={1}>
-          {tripShortId}
-        </Text>
-        <View style={s.metaPay}>
-          <Text style={s.metaPayTxt}>{paymentMethodLabel}</Text>
-        </View>
-      </View>
-
-      {/* Trip stats — Distance · Time · ETA */}
-      <View style={s.statsRow}>
-        <View style={s.statCard}>
-          <View style={[s.statIconWrap, s.statIconBlue]}>
-            <Ionicons name="git-network-outline" size={18} color="#60A5FA" />
-          </View>
-          <Text style={s.statLbl}>DISTANCE</Text>
-          <Text style={s.statVal} numberOfLines={1}>
-            {distanceToDropLabel}
-          </Text>
-        </View>
-        <View style={s.statCard}>
-          <View style={[s.statIconWrap, s.statIconBlue]}>
-            <Ionicons name="time-outline" size={18} color="#60A5FA" />
-          </View>
-          <Text style={s.statLbl}>TIME</Text>
-          <Text style={s.statVal} numberOfLines={1}>
-            {formatElapsedVerbose(elapsedSec)}
-          </Text>
-          <View style={s.countingRow}>
-            <View style={s.countingDot} />
-            <Text style={s.countingTxt}>Counting up…</Text>
-          </View>
-        </View>
-        <View style={s.statCard}>
-          <View style={[s.statIconWrap, s.statIconBlue]}>
-            <Ionicons name="location-outline" size={18} color="#60A5FA" />
-          </View>
-          <Text style={s.statLbl}>ETA</Text>
-          <Text style={s.statVal} numberOfLines={1}>
-            {etaToDropLabel}
-          </Text>
-        </View>
-      </View>
-
-      {/* Rider + destination */}
-      <View style={s.riderDestBlock}>
-        <View style={s.riderRow}>
-          {riderPhoto ? (
-            <Image source={{ uri: riderPhoto }} style={s.avatarSm} />
-          ) : (
-            <View style={s.avatarSmPh}>
-              <Text style={s.avatarSmPhTxt}>{initial}</Text>
-            </View>
-          )}
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.withRiderLbl}>With {firstName(riderName)}</Text>
-            {typeof ratingAvg === 'number' && ratingAvg > 0 ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
-                <Ionicons name="star" size={13} color="#FBBF24" />
-                <Text style={s.riderMeta} numberOfLines={1}>
-                  {ratingAvg.toFixed(1)}
-                  {typeof ratingTrips === 'number' && ratingTrips > 0
-                    ? ` · ${ratingTrips.toLocaleString()} trips`
-                    : ''}
-                </Text>
+          <View style={st.statsRow}>
+            <View style={st.statBox} accessibilityLabel={`Distance to drop-off ${distanceToDropLabel}`}>
+              <View style={[st.statIcon, st.statIconBlue]}>
+                <Ionicons name="location" size={18} color={BLUE} />
               </View>
-            ) : isNewRider ? (
-              <Text style={s.riderMeta}>New rider</Text>
-            ) : null}
-          </View>
-          <TouchableOpacity
-            style={[s.iconBtn, !canMessage && s.iconBtnOff]}
-            onPress={onMessage}
-            disabled={!canMessage || busy}
-            accessibilityRole="button"
-            accessibilityLabel="Message rider"
-          >
-            <Ionicons name="chatbubble-ellipses" size={20} color={canMessage ? '#93C5FD' : '#475569'} />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.iconBtn, !riderPhone && s.iconBtnOff]}
-            onPress={onCall}
-            disabled={!riderPhone || busy}
-            accessibilityRole="button"
-            accessibilityLabel="Call rider"
-          >
-            <Ionicons name="call" size={20} color={riderPhone ? '#86EFAC' : '#475569'} />
-          </TouchableOpacity>
-        </View>
-        <View style={s.destRow}>
-          <Ionicons name="flag" size={15} color="#F87171" style={{ marginRight: 8 }} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.destKicker}>DROP-OFF</Text>
-            <Text style={s.destMain} numberOfLines={1}>
-              {dropLineShort || 'Destination'}
-            </Text>
-            {dropDetailLine ? (
-              <Text style={s.destSub} numberOfLines={2}>
-                {dropDetailLine}
+              <Text style={st.statLbl}>DISTANCE</Text>
+              <Text style={st.statVal} numberOfLines={1}>
+                {distanceToDropLabel}
               </Text>
-            ) : null}
+              <StatHint label="To drop-off" />
+            </View>
+            <View style={st.statBox} accessibilityLabel={`Trip time ${formatDriverTripElapsed(elapsedSec)}`}>
+              <View style={[st.statIcon, st.statIconGreen]}>
+                <Ionicons name="time-outline" size={18} color={NEON} />
+              </View>
+              <Text style={st.statLbl}>TIME</Text>
+              <Text style={st.statVal} numberOfLines={2}>
+                {formatDriverTripElapsed(elapsedSec)}
+              </Text>
+              <StatHint label="Counting up" live />
+            </View>
+            <View style={st.statBox} accessibilityLabel={`ETA ${etaToDropLabel}`}>
+              <View style={[st.statIcon, st.statIconGreen]}>
+                <Ionicons name="timer-outline" size={18} color={NEON} />
+              </View>
+              <Text style={st.statLbl}>ETA</Text>
+              <Text style={st.statVal} numberOfLines={1}>
+                {etaToDropLabel}
+              </Text>
+              <StatHint label="Live ETA" live />
+            </View>
           </View>
+
+          <Text style={st.sectionKicker}>WITH RIDER</Text>
+          <View style={st.riderCard}>
+            <TripProfileAvatar
+              size={52}
+              uri={riderPhoto}
+              borderColor={NEON}
+              accessibilityLabel={`Photo of ${firstName(riderName)}`}
+            />
+            <View style={st.riderMid}>
+              <Text style={st.riderName} numberOfLines={1}>
+                {riderName.trim() || 'Rider'}
+              </Text>
+              <Text style={st.dropKicker}>DROP-OFF</Text>
+              <Text style={st.dropMain} numberOfLines={1}>
+                {dropLineShort || 'Destination'}
+              </Text>
+              {dropDetailLine ? (
+                <Text style={st.riderLoc} numberOfLines={2}>
+                  {dropDetailLine}
+                </Text>
+              ) : null}
+              {typeof ratingAvg === 'number' && ratingAvg > 0 ? (
+                <View style={st.ratingRow}>
+                  <Ionicons name="star" size={12} color="#FBBF24" />
+                  <Text style={st.riderRating} numberOfLines={1}>
+                    {ratingAvg.toFixed(1)}
+                    {typeof ratingTrips === 'number' && ratingTrips > 0
+                      ? ` · ${ratingTrips.toLocaleString()} trips`
+                      : ''}
+                  </Text>
+                </View>
+              ) : isNewRider ? (
+                <Text style={st.riderRating}>New to NEXRYDE</Text>
+              ) : null}
+            </View>
+            <View style={st.riderActions}>
+              <TouchableOpacity
+                style={[st.circleBtn, st.msgBtn, !canMessage && st.circleBtnOff]}
+                onPress={() => {
+                  hapticLight();
+                  onMessage();
+                }}
+                disabled={!canMessage || busy}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Message rider"
+              >
+                <Ionicons name="chatbubble" size={20} color={canMessage ? BLUE : '#64748B'} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[st.circleBtn, st.callBtn, !riderPhone && st.circleBtnOff]}
+                onPress={() => {
+                  hapticLight();
+                  onCall();
+                }}
+                disabled={!riderPhone || busy}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityRole="button"
+                accessibilityLabel="Call rider"
+              >
+                <Ionicons name="call" size={20} color={riderPhone ? NEON : '#64748B'} />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={st.actionRow}>
+            <TouchableOpacity
+              style={[st.pauseBtn, busy && st.disabled]}
+              onPress={() => {
+                if (busy) return;
+                hapticLight();
+                if (onPauseTrip) void onPauseTrip();
+                else
+                  Alert.alert(
+                    'Pause trip',
+                    'Pull over safely and use Chat or Call if you need a moment.',
+                  );
+              }}
+              disabled={busy}
+              activeOpacity={0.88}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Pause trip"
+            >
+              <Ionicons name="pause" size={20} color="#FFF" />
+              <Text style={st.pauseTxt}>PAUSE TRIP</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[st.emergencyBtn, busy && st.disabled]}
+              onPress={() => {
+                hapticWarning();
+                onEmergencyPress();
+              }}
+              disabled={busy}
+              activeOpacity={0.88}
+              hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
+              accessibilityRole="button"
+              accessibilityLabel="Emergency"
+            >
+              <Ionicons name="warning" size={20} color="#FFF" />
+              <Text style={st.emergencyTxt}>EMERGENCY</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity
+            style={[st.navBtn, busy && st.disabled]}
+            onPress={() => {
+              hapticLight();
+              onNavigate();
+            }}
+            disabled={busy}
+            activeOpacity={0.88}
+            accessibilityRole="button"
+            accessibilityLabel="Open navigation to drop-off"
+          >
+            <Ionicons name="navigate" size={20} color={NEON} />
+            <Text style={st.navTxt}>OPEN NAVIGATION</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={st.safetyLink}
+            onPress={() => {
+              hapticLight();
+              onSafetyPress();
+            }}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Safety tools and trip help"
+          >
+            <Ionicons name="shield-checkmark" size={14} color="#94A3B8" />
+            <Text style={st.safetyLinkTxt}>Safety tools & trip help</Text>
+            <Ionicons name="chevron-forward" size={14} color="#64748B" />
+          </TouchableOpacity>
+        </ScrollView>
+        <LinearGradient
+          colors={['transparent', 'rgba(15,23,42,0.85)']}
+          style={st.scrollFade}
+          pointerEvents="none"
+        />
+      </View>
+
+      <View style={[st.fixedFooter, { paddingBottom: Math.max(14, bottomInset) }]}>
+        <LinearGradient
+          colors={['rgba(34,197,94,0.35)', 'transparent']}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={st.footerGlow}
+          pointerEvents="none"
+        />
+        <TouchableOpacity
+          style={[st.completeBtn, (busy || isCompleting) && st.completeBtnBusy]}
+          onPress={handleComplete}
+          disabled={busy}
+          activeOpacity={0.9}
+          hitSlop={{ top: 4, bottom: 4, left: 0, right: 0 }}
+          accessibilityRole="button"
+          accessibilityLabel="Complete trip at destination"
+          accessibilityHint="Opens confirmation. End trip after rider exits."
+          accessibilityState={{ disabled: busy, busy: isCompleting }}
+        >
+          <LinearGradient
+            colors={['#86EFAC', '#4ADE80', NEON, '#16A34A']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 0 }}
+            style={st.completeGrad}
+          >
+            {isCompleting ? (
+              <ActivityIndicator color="#022C22" size="small" />
+            ) : (
+              <>
+                <View style={st.completeIconWrap}>
+                  <Ionicons name="checkmark-done" size={24} color="#022C22" />
+                </View>
+                <Text style={st.completeTxt}>COMPLETE TRIP</Text>
+              </>
+            )}
+          </LinearGradient>
+        </TouchableOpacity>
+        <Text style={st.completeHint}>Tap when rider has exited and belongings are secure</Text>
+        <View style={st.safetyFoot}>
+          <Ionicons name="shield-outline" size={14} color="#94A3B8" />
+          <Text style={st.safetyFootTxt}>Drive safely and follow all traffic rules.</Text>
         </View>
       </View>
-
-      {/* Pause + Emergency */}
-      <View style={s.dangerRow}>
-        <TouchableOpacity
-          style={[s.pauseBtn, busy && s.rowDisabled]}
-          onPress={() => {
-            if (busy) return;
-            if (onPauseTrip) void onPauseTrip();
-            else
-              Alert.alert(
-                'Pause trip',
-                'This action is not available from here yet. Pull over safely and use Chat or Call if you need a moment.',
-              );
-          }}
-          disabled={busy}
-          activeOpacity={0.88}
-          accessibilityRole="button"
-          accessibilityLabel="Pause trip"
-        >
-          <Ionicons name="pause" size={22} color="#FFF" />
-          <Text style={s.pauseBtnTxt}>PAUSE TRIP</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[s.emergencyBtn, busy && s.rowDisabled]}
-          onPress={onEmergencyPress}
-          disabled={busy}
-          activeOpacity={0.88}
-          accessibilityRole="button"
-          accessibilityLabel="Emergency"
-        >
-          <Ionicons name="warning" size={22} color="#FFF" />
-          <Text style={s.emergencyBtnTxt}>EMERGENCY</Text>
-        </TouchableOpacity>
-      </View>
-
-      <TouchableOpacity
-        style={[s.navOutline, busy && s.rowDisabled]}
-        onPress={onNavigate}
-        disabled={busy}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Open navigation to drop-off"
-      >
-        <Ionicons name="navigate" size={20} color="#34F5B8" />
-        <Text style={s.navOutlineTxt}>OPEN NAVIGATION</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={[s.completeOuter, (busy || isCompleting) && { opacity: 0.65 }]}
-        onPress={onCompleteTrip}
-        disabled={busy}
-        activeOpacity={0.88}
-        accessibilityRole="button"
-        accessibilityLabel="Complete trip at destination"
-      >
-        <LinearGradient
-          colors={['#5DFFC7', '#34F5B8', '#0D9F6E']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={s.completeGrad}
-        >
-          {isCompleting ? (
-            <ActivityIndicator color="#022C22" />
-          ) : (
-            <>
-              <View style={s.completeIconCircle}>
-                <Ionicons name="checkmark-done" size={24} color="#022C22" />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.completeTitle}>COMPLETE TRIP</Text>
-                <Text style={s.completeSub} numberOfLines={2}>
-                  After the rider exits — belongings secure, then complete.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.4)" />
-            </>
-          )}
-        </LinearGradient>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={s.safetyFoot} onPress={onSafetyPress} activeOpacity={0.85} accessibilityRole="button">
-        <Ionicons name="shield-checkmark" size={16} color="#60A5FA" style={{ marginRight: 8 }} />
-        <Text style={s.safetyFootTxt}>
-          <Text style={s.safetyFootStrong}>Safety: </Text>
-          Meter runs until you complete. Pull over before using the phone.
-        </Text>
-      </TouchableOpacity>
     </View>
   );
 }
 
-const s = StyleSheet.create({
+const st = StyleSheet.create({
   shell: {
     borderTopLeftRadius: DOCK_TOP_RADIUS,
     borderTopRightRadius: DOCK_TOP_RADIUS,
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 18,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(57,255,20,0.22)',
-    shadowColor: NEON,
-    shadowOffset: { width: 0, height: -12 },
-    shadowOpacity: 0.22,
-    shadowRadius: 24,
-    elevation: 32,
+    borderColor: 'rgba(34,197,94,0.22)',
+    borderBottomWidth: 0,
   },
-  fareMeterGlow: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 200,
-  },
-  handleRail: { alignItems: 'center', marginBottom: 10 },
-  handle: { width: 48, height: 4, borderRadius: 100 },
-  fareMeterCard: {
-    borderRadius: 20,
-    overflow: 'hidden',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(57,255,20,0.28)',
-  },
-  fareMeterHeader: {
-    paddingHorizontal: 16,
-    paddingTop: 14,
-    paddingBottom: 14,
-  },
-  fareMeterTitleRow: {
+  handleRail: { alignItems: 'center', paddingTop: 10, paddingBottom: 8, minHeight: 28 },
+  handle: { width: 48, height: 5, borderRadius: 100 },
+  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    marginBottom: 8,
   },
-  fareGraphIcon: {
+  logoMark: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  logoGrad: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoLetter: { fontSize: 18, fontWeight: '900', color: '#FFF' },
+  brandTxt: { fontSize: 16, fontWeight: '800', color: '#F8FAFC', letterSpacing: 0.6 },
+  onDriverPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: NEON,
+    backgroundColor: 'rgba(34,197,94,0.1)',
+  },
+  onDriverDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: NEON },
+  onDriverTxt: { fontSize: 11, fontWeight: '700', color: NEON },
+  scrollWrap: { position: 'relative' },
+  scrollFade: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 28,
+  },
+  scrollInner: { paddingHorizontal: 16, paddingBottom: 12 },
+  routeCard: {
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.2)',
+    overflow: 'hidden',
+  },
+  routeTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  onRoutePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor: 'rgba(59,130,246,0.2)',
+  },
+  onRouteTxt: { fontSize: 11, fontWeight: '700', color: BLUE },
+  routeMapIcon: {
     width: 40,
     height: 40,
-    borderRadius: 14,
-    backgroundColor: NEON,
+    borderRadius: 12,
+    backgroundColor: 'rgba(6,182,212,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
-    shadowColor: NEON,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.55,
-    shadowRadius: 10,
-    elevation: 8,
+    borderColor: 'rgba(6,182,212,0.25)',
   },
-  fareMeterKicker: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: NEON,
-    letterSpacing: 1.1,
-  },
-  updatingRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  pulseDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    backgroundColor: NEON,
-  },
-  updatingTxt: { fontSize: 12, fontWeight: '700', color: 'rgba(226,232,240,0.9)' },
-  fareUpdatingPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: 'rgba(57,255,20,0.65)',
-    backgroundColor: 'rgba(57,255,20,0.08)',
-  },
-  fareUpdatingPillTxt: {
-    fontSize: 9,
-    fontWeight: '900',
-    color: NEON,
-    letterSpacing: 0.6,
-  },
-  currentFareLbl: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: 'rgba(248,250,252,0.72)',
-    letterSpacing: 1.2,
-    marginBottom: 4,
-  },
-  currentFareVal: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: -1,
-  },
-  fareDelta: {
-    marginTop: 4,
-    fontSize: 13,
-    fontWeight: '800',
-    color: NEON,
-  },
-  fareBreakdown: {
-    marginTop: 10,
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(203,213,225,0.92)',
-    lineHeight: 16,
-  },
-  fareBreakdownMuted: {
-    marginTop: 10,
-    fontSize: 11,
-    fontWeight: '600',
-    color: 'rgba(148,163,184,0.85)',
-    lineHeight: 16,
-  },
-  metaCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  routeTitle: { fontSize: 22, fontWeight: '800', color: '#FFF', marginBottom: 4 },
+  routeSub: { fontSize: 14, color: '#94A3B8', marginBottom: 10, lineHeight: 20 },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    overflow: 'hidden',
     marginBottom: 10,
   },
-  metaTripId: { flex: 1, fontSize: 11, fontWeight: '800', color: '#64748B' },
-  metaPay: {
+  progressFill: { height: '100%', borderRadius: 3 },
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
     paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.9)',
-    borderWidth: 1,
-    borderColor: 'rgba(148,163,184,0.25)',
+    paddingVertical: 5,
+    borderRadius: 12,
+    backgroundColor: 'rgba(34,197,94,0.12)',
+    marginBottom: 8,
   },
-  metaPayTxt: { fontSize: 10, fontWeight: '800', color: '#E2E8F0' },
-  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
-  statCard: {
+  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: NEON },
+  liveBadgeTxt: { fontSize: 10, fontWeight: '700', color: NEON },
+  tripMeta: { fontSize: 10, fontWeight: '600', color: '#64748B' },
+  fareCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 8,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.2)',
+  },
+  fareCol: { flex: 1, minWidth: 0 },
+  fareLbl: { fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4, letterSpacing: 0.5 },
+  fareMain: { fontSize: 28, fontWeight: '800', color: NEON, fontVariant: ['tabular-nums'] },
+  fareSecondary: { fontSize: 20, fontWeight: '800', color: '#F8FAFC', fontVariant: ['tabular-nums'] },
+  fareDelta: { marginTop: 4, fontSize: 12, fontWeight: '700', color: NEON },
+  fareDivider: { width: 1, height: 48, backgroundColor: 'rgba(255,255,255,0.12)', marginHorizontal: 12 },
+  fareBreakdown: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#94A3B8',
+    marginBottom: 12,
+    lineHeight: 16,
+  },
+  statsRow: { flexDirection: 'row', gap: 8, marginBottom: 14 },
+  statBox: {
     flex: 1,
-    borderRadius: 14,
+    alignItems: 'center',
     paddingVertical: 10,
     paddingHorizontal: 4,
-    backgroundColor: 'rgba(15,23,42,0.92)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.2)',
-    alignItems: 'center',
+    borderColor: 'rgba(34,197,94,0.15)',
+    minHeight: 108,
   },
-  statIconWrap: {
+  statIcon: {
     width: 36,
     height: 36,
-    borderRadius: 12,
+    borderRadius: 18,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 6,
   },
-  statIconBlue: { backgroundColor: 'rgba(59,130,246,0.18)' },
-  statLbl: {
-    fontSize: 8,
-    fontWeight: '900',
-    color: '#64748B',
-    letterSpacing: 0.7,
-    marginBottom: 3,
+  statIconBlue: { backgroundColor: 'rgba(59,130,246,0.2)' },
+  statIconGreen: { backgroundColor: 'rgba(34,197,94,0.18)' },
+  statLbl: { fontSize: 9, fontWeight: '700', color: '#94A3B8', marginBottom: 2 },
+  statVal: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: '#FFF',
+    fontVariant: ['tabular-nums'],
+    textAlign: 'center',
   },
-  statVal: { fontSize: 12, fontWeight: '900', color: '#F1F5F9', fontVariant: ['tabular-nums'] },
-  countingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
-  countingDot: { width: 5, height: 5, borderRadius: 3, backgroundColor: NEON },
-  countingTxt: { fontSize: 9, fontWeight: '700', color: 'rgba(57,255,20,0.95)' },
-  riderDestBlock: {
-    borderRadius: 16,
+  statHintRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
+  statHint: { fontSize: 9, fontWeight: '600', color: NEON },
+  sectionKicker: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: BLUE,
+    letterSpacing: 0.8,
+    marginBottom: 8,
+  },
+  riderCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
     padding: 12,
-    marginBottom: 12,
-    backgroundColor: 'rgba(15,23,42,0.75)',
-    borderWidth: 1,
-    borderColor: 'rgba(51,65,85,0.45)',
-  },
-  riderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  avatarSm: { width: 40, height: 40, borderRadius: 20, borderWidth: 2, borderColor: 'rgba(96,165,250,0.45)' },
-  avatarSmPh: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(30,41,59,0.95)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(51,65,85,0.55)',
-  },
-  avatarSmPhTxt: { fontSize: 16, fontWeight: '900', color: '#94A3B8' },
-  withRiderLbl: { fontSize: 14, fontWeight: '900', color: '#F8FAFC' },
-  riderMeta: { marginTop: 2, fontSize: 12, fontWeight: '600', color: '#94A3B8' },
-  iconBtn: {
-    width: 42,
-    height: 42,
     borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.15)',
+    marginBottom: 12,
+  },
+  riderMid: { flex: 1, minWidth: 0, paddingTop: 2 },
+  riderName: { fontSize: 15, fontWeight: '800', color: '#FFF', marginBottom: 6 },
+  dropKicker: { fontSize: 9, fontWeight: '800', color: '#FCA5A5', letterSpacing: 0.6, marginBottom: 2 },
+  dropMain: { fontSize: 13, fontWeight: '700', color: '#E2E8F0', marginBottom: 2 },
+  riderLoc: { fontSize: 12, color: '#94A3B8', lineHeight: 16, marginBottom: 4 },
+  ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  riderRating: { fontSize: 11, fontWeight: '600', color: '#CBD5E1' },
+  riderActions: { flexDirection: 'row', gap: 8, paddingTop: 4 },
+  circleBtn: {
+    width: MIN_TOUCH,
+    height: MIN_TOUCH,
+    borderRadius: MIN_TOUCH / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(2,6,23,0.65)',
     borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.35)',
   },
-  iconBtnOff: { opacity: 0.45 },
-  destRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  destKicker: { fontSize: 9, fontWeight: '900', color: '#FCA5A5', letterSpacing: 0.7 },
-  destMain: { fontSize: 14, fontWeight: '900', color: '#F8FAFC', marginTop: 2 },
-  destSub: { marginTop: 4, fontSize: 12, fontWeight: '600', color: '#94A3B8', lineHeight: 16 },
-  dangerRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-  rowDisabled: { opacity: 0.55 },
+  msgBtn: { backgroundColor: 'rgba(59,130,246,0.2)', borderColor: 'rgba(59,130,246,0.45)' },
+  callBtn: { backgroundColor: 'rgba(34,197,94,0.15)', borderColor: 'rgba(34,197,94,0.45)' },
+  circleBtnOff: { opacity: 0.45 },
+  actionRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
+  disabled: { opacity: 0.55 },
   pauseBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -591,12 +708,13 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#007BFF',
+    minHeight: MIN_TOUCH,
+    borderRadius: 12,
+    backgroundColor: 'rgba(59,130,246,0.25)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    borderColor: 'rgba(59,130,246,0.5)',
   },
-  pauseBtnTxt: { fontSize: 12, fontWeight: '900', color: '#FFF', letterSpacing: 0.6 },
+  pauseTxt: { fontSize: 12, fontWeight: '800', color: '#FFF' },
   emergencyBtn: {
     flex: 1,
     flexDirection: 'row',
@@ -604,64 +722,91 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     paddingVertical: 14,
-    borderRadius: 14,
-    backgroundColor: '#FF3B30',
+    minHeight: MIN_TOUCH,
+    borderRadius: 12,
+    backgroundColor: 'rgba(239,68,68,0.25)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(239,68,68,0.5)',
   },
-  emergencyBtnTxt: { fontSize: 12, fontWeight: '900', color: '#FFF', letterSpacing: 0.6 },
-  navOutline: {
+  emergencyTxt: { fontSize: 12, fontWeight: '800', color: '#FFF' },
+  navBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 12,
+    paddingVertical: 14,
+    minHeight: MIN_TOUCH,
+    borderRadius: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: NEON,
+    backgroundColor: 'rgba(34,197,94,0.08)',
+  },
+  navTxt: { fontSize: 13, fontWeight: '800', color: NEON },
+  safetyLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    marginBottom: 4,
+  },
+  safetyLinkTxt: { flex: 1, fontSize: 12, fontWeight: '600', color: '#64748B' },
+  fixedFooter: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(34,197,94,0.25)',
+    backgroundColor: 'rgba(15,23,42,0.99)',
+  },
+  footerGlow: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+  },
+  completeBtn: {
     borderRadius: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.45)',
-    backgroundColor: 'rgba(6,78,59,0.2)',
-  },
-  navOutlineTxt: { fontSize: 12, fontWeight: '900', color: '#34F5B8', letterSpacing: 0.7 },
-  completeOuter: {
-    borderRadius: 16,
     overflow: 'hidden',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(52,245,184,0.45)',
-    shadowColor: '#34F5B8',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowColor: NEON,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 14,
+    elevation: 14,
+    minHeight: 58,
   },
+  completeBtnBusy: { opacity: 0.72 },
   completeGrad: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    gap: 12,
+    justifyContent: 'center',
+    gap: 10,
+    paddingVertical: 17,
+    paddingHorizontal: 20,
   },
-  completeIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(2,44,34,0.18)',
+  completeIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,255,255,0.4)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  completeTitle: { fontSize: 15, fontWeight: '900', color: '#022C22', letterSpacing: 0.8 },
-  completeSub: { marginTop: 3, fontSize: 11, fontWeight: '700', color: 'rgba(2,44,34,0.72)', lineHeight: 15 },
+  completeTxt: { fontSize: 17, fontWeight: '900', color: '#022C22', letterSpacing: 0.6 },
+  completeHint: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 15,
+  },
   safetyFoot: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    backgroundColor: 'rgba(15,23,42,0.65)',
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.18)',
+    gap: 8,
+    marginTop: 10,
+    paddingBottom: 2,
   },
-  safetyFootTxt: { flex: 1, fontSize: 11, fontWeight: '600', color: '#CBD5E1', lineHeight: 16 },
-  safetyFootStrong: { fontWeight: '900', color: '#93C5FD' },
+  safetyFootTxt: { flex: 1, fontSize: 11, color: '#94A3B8', lineHeight: 15 },
 });

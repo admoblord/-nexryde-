@@ -133,7 +133,7 @@ def test_surge_constants_lagride_spec():
     assert NORMAL_SURGE_LAGride == 1.0
     assert HIGH_DEMAND_SURGE == 1.3
     assert RAIN_SURGE_LAGride == 1.4
-    assert PEAK_SURGE_LAGride == 1.5
+    assert PEAK_SURGE_LAGride == 1.0
 
 
 def test_verification_totals_lekki_ikoyi_yaba_festac():

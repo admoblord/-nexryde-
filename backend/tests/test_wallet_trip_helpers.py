@@ -2,7 +2,12 @@
 
 import pytest
 
-from wallet_trip_helpers import is_wallet_payment_method, rider_must_confirm_payment, trip_fare_amount
+from wallet_trip_helpers import (
+    is_cash_payment_method,
+    is_wallet_payment_method,
+    rider_must_confirm_payment,
+    trip_fare_amount,
+)
 
 
 def test_trip_fare_amount_priority():
@@ -20,8 +25,16 @@ def test_is_wallet_payment_method():
     assert is_wallet_payment_method(None) is False
 
 
+def test_is_cash_payment_method():
+    assert is_cash_payment_method(None) is True
+    assert is_cash_payment_method("cash") is True
+    assert is_cash_payment_method("CASH") is True
+    assert is_cash_payment_method("wallet") is False
+
+
 def test_rider_must_confirm_payment():
-    assert rider_must_confirm_payment(None) is True
+    assert rider_must_confirm_payment(None) is False
+    assert rider_must_confirm_payment("cash") is False
     assert rider_must_confirm_payment("wallet") is True
-    assert rider_must_confirm_payment("cash") is True
+    assert rider_must_confirm_payment("transfer") is True
     assert rider_must_confirm_payment("card") is False

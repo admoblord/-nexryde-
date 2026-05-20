@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS, HANDLE_GRADIENT_DEFAULT } from '@/src/components/driver/driverDockTheme';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 
 export type DriverStartTripDockProps = {
   riderName: string;
@@ -62,8 +63,6 @@ export default function DriverStartTripDock({
   onMessage,
   onCancelTrip,
 }: DriverStartTripDockProps) {
-  const initial = firstName(riderName).charAt(0).toUpperCase() || 'R';
-
   const confirmCancel = () => {
     Alert.alert(
       'Cancel this trip?',
@@ -104,13 +103,12 @@ export default function DriverStartTripDock({
       </View>
 
       <View style={s.profileRow}>
-        {riderPhoto ? (
-          <Image source={{ uri: riderPhoto }} style={s.avatar} />
-        ) : (
-          <View style={s.avatarPh}>
-            <Text style={s.avatarPhTxt}>{initial}</Text>
-          </View>
-        )}
+        <TripProfileAvatar
+          size={56}
+          uri={riderPhoto}
+          borderColor="rgba(52,245,184,0.45)"
+          accessibilityLabel={`Photo of ${firstName(riderName)}`}
+        />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.riderName} numberOfLines={1}>
             {firstName(riderName)}

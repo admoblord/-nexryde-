@@ -1370,7 +1370,10 @@ async def get_active_trip(user_id: str, request: Request):
                 "$and": [
                     {"$or": [{"rider_id": user_id}, {"driver_id": user_id}]},
                     {"$or": [
-                        {"status": {"$in": ["accepted", "arrived", "pickup", "ongoing", "pending", "pending_driver_offers"]}},
+                        {"status": {"$in": [
+                            "accepted", "arrived", "pickup", "ongoing", "pending", "pending_driver_offers",
+                            "in_progress", "started", "picked_up", "driver_arriving",
+                        ]}},
                         {"status": "completed", "payment_status": "pending"},
                     ]},
                 ],
@@ -1380,6 +1383,29 @@ async def get_active_trip(user_id: str, request: Request):
         )
         if not trip:
             return {"active": False}
+
+        # Heal legacy cash trips stuck on payment pending (cash is collected at drop-off).
+        try:
+            from wallet_trip_helpers import is_cash_payment_method
+
+            if (
+                trip.get("status") == "completed"
+                and str(trip.get("payment_status") or "").lower() == "pending"
+                and is_cash_payment_method(trip.get("payment_method"))
+            ):
+                paid_at = datetime.now(timezone.utc)
+                await db.trips.update_one(
+                    {"id": trip["id"]},
+                    {"$set": {"payment_status": "completed", "paid_at": paid_at}},
+                )
+                trip["payment_status"] = "completed"
+                trip["paid_at"] = paid_at.isoformat()
+        except Exception:
+            pass
+
+        if trip.get("status") == "completed" and str(trip.get("payment_status") or "").lower() == "completed":
+            return {"active": False}
+
         # Attach estate_gate_access so driver trips screen sees the gate countdown
         try:
             from routers.trips import _build_estate_gate_access

@@ -25,6 +25,8 @@ export type DriverTripPhaseChromeProps = {
   metricPrimary?: string | null;
   metricSecondary?: string | null;
   dockExpanded: boolean;
+  /** Hide duplicate ETA/distance when bottom sheet shows full trip context */
+  hideMetrics?: boolean;
   onToggleDock: () => void;
   onMenuPress?: () => void;
 };
@@ -34,21 +36,21 @@ const PHASE_COPY: Record<
   { kicker: string; title: string; icon: keyof typeof Ionicons.glyphMap; iconBg: string }
 > = {
   heading_pickup: {
-    kicker: 'Live trip',
-    title: 'Heading to pickup',
+    kicker: 'Active trip',
+    title: 'En route to pickup',
     icon: 'navigate',
-    iconBg: '#34F5B8',
+    iconBg: '#FFFFFF',
   },
   arrived: {
     kicker: 'At pickup',
-    title: "You've arrived",
-    icon: 'checkmark',
+    title: 'Verify rider code',
+    icon: 'keypad',
     iconBg: '#34F5B8',
   },
   rider_in_car: {
-    kicker: 'Pickup done',
-    title: 'Rider in car',
-    icon: 'car-sport',
+    kicker: 'At pickup',
+    title: 'Ready to start',
+    icon: 'play',
     iconBg: '#34F5B8',
   },
   ongoing: {
@@ -65,15 +67,18 @@ export function DriverTripPhaseChrome({
   metricPrimary,
   metricSecondary,
   dockExpanded,
+  hideMetrics,
   onToggleDock,
   onMenuPress,
 }: DriverTripPhaseChromeProps) {
   const copy = PHASE_COPY[phase];
   const accent = DOCK_PHASE_COLORS[phase];
+  const showMetrics =
+    !hideMetrics && (metricPrimary || metricSecondary) && !(dockExpanded && phase === 'heading_pickup');
 
   return (
     <View style={[s.wrap, { top }]} pointerEvents="box-none">
-      <View style={[s.card, { borderColor: accent.border }]}>
+      <View style={[s.card, s.cardMinimal, { borderColor: accent.border }]}>
         {Platform.OS === 'ios' || Platform.OS === 'android' ? (
           <BlurView intensity={PHASE_CHROME_BLUR} tint="dark" style={StyleSheet.absoluteFillObject} />
         ) : (
@@ -101,7 +106,11 @@ export function DriverTripPhaseChrome({
             </TouchableOpacity>
           ) : (
             <View style={[s.leadIcon, { backgroundColor: copy.iconBg }]}>
-              <Ionicons name={copy.icon} size={18} color="#022C22" />
+              <Ionicons
+                name={copy.icon}
+                size={18}
+                color={phase === 'heading_pickup' ? '#000000' : '#022C22'}
+              />
             </View>
           )}
 
@@ -113,7 +122,7 @@ export function DriverTripPhaseChrome({
             <Text style={s.title} numberOfLines={1}>
               {copy.title}
             </Text>
-            {(metricPrimary || metricSecondary) ? (
+            {showMetrics ? (
               <Text style={s.metrics} numberOfLines={1}>
                 {[metricPrimary, metricSecondary].filter(Boolean).join(' · ')}
               </Text>
@@ -156,6 +165,10 @@ const s = StyleSheet.create({
     shadowOpacity: 0.35,
     shadowRadius: 14,
     elevation: 14,
+  },
+  cardMinimal: {
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(8,8,10,0.88)',
   },
   sheen: {
     position: 'absolute',

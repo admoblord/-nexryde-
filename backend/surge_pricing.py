@@ -14,10 +14,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta, date
 from typing import Any
 
-# Max-of card (nationwide non-Lagos + parity with Lagos Lagride narrative): Normal 1.0, High 1.3, Rain 1.4, Peak 1.5
+# Max-of card (nationwide non-Lagos + parity with Lagos Lagride narrative): Normal 1.0, High 1.3, Rain 1.4, Peak 1.0
 NATIONWIDE_MAX_SURGE_HIGH_DEMAND = 1.3
 NATIONWIDE_MAX_SURGE_RAIN = 1.4
-NATIONWIDE_MAX_SURGE_PEAK = 1.5
+NATIONWIDE_MAX_SURGE_PEAK = 1.0
 
 SURGE_CONFIG: dict[str, Any] = {
     "enabled": True,
@@ -30,7 +30,7 @@ SURGE_CONFIG: dict[str, Any] = {
     },
     "weekend_multiplier": 1.1,
     "rain_multiplier": 1.4,
-    "holiday_multiplier": 1.5,
+    "holiday_multiplier": 1.0,
     "high_demand_threshold": 0.70,
     "very_high_demand_threshold": 0.85,
     "critical_demand_threshold": 0.95,
@@ -170,7 +170,7 @@ def compute_max_style_surge_multiplier(
     service_max_multiplier: float = 2.5,
 ) -> dict[str, Any]:
     """
-    ``max(Normal 1.0, High demand 1.3, Rain 1.4, Peak 1.5)`` among active conditions (WAT),
+    ``max(Normal 1.0, High demand 1.3, Rain 1.4, Peak 1.0)`` among active conditions (WAT),
     then ``min(..., service_max_multiplier)``. Used for nationwide premium table pricing (non-Lagos).
     """
     _ = lat, lng
@@ -278,9 +278,10 @@ def _finalize_surge_result(
         "active_window": active_window,
         "window_ends_label": window_ends_label,
         "driver_message": (
-            f"+{pct_extra}% on fares now — {', '.join(reasons[:2])}."
+            f"+{pct_extra}% on fares now ({final_multiplier:.1f}×) — {', '.join(reasons[:2])}. "
+            "Open Demand Heatmap to see the best zones."
             if is_surge
-            else "Normal fares. Stay online — surge can activate anytime."
+            else "Normal fares. Stay online — open Demand Heatmap to scout busy areas."
         ),
         "rider_message": (
             f"About {pct_extra}% higher now ({reasons[0]})." if is_surge else "Standard fare — no surge multiplier."

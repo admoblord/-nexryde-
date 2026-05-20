@@ -24,7 +24,7 @@ export const REFERRAL_CODE_STORAGE_KEY = '@nexryde_pending_referral';
 // ── Action deep-link routes ───────────────────────────────────────────────────
 const ACTION_ROUTES: Record<string, string> = {
   go_online: '/(driver-tabs)/driver-home?action=go_online',
-  resume:    '/(driver-tabs)/driver-home?action=resume',
+  open_app:  '/(driver-tabs)/driver-home',
   my_trips:  '/(driver-tabs)/driver-trips',
   wallet:    '/(driver-tabs)/driver-earnings',
 };

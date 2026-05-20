@@ -13,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS, HANDLE_GRADIENT_DEFAULT } from '@/src/components/driver/driverDockTheme';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
 import { COLORS as THEME_COLORS } from '@/src/constants/theme';
 
 type TripOffer = Record<string, any>;
@@ -70,7 +71,6 @@ export default function DriverMapOfferDock({
     (trip?.shield?.rider_display_name as string)?.trim() ||
     'Rider';
   const riderPhoto = trip?.rider_photo || trip?.rider?.profile_image || null;
-  const initial = riderName.charAt(0).toUpperCase() || 'R';
   const rating =
     trip?.shield?.rider_reputation_avg != null
       ? Number(trip.shield.rider_reputation_avg).toFixed(1)
@@ -170,13 +170,14 @@ export default function DriverMapOfferDock({
       </View>
 
       <View style={s.riderBlock}>
-        {riderPhoto ? (
-          <Image source={{ uri: String(riderPhoto) }} style={s.avatar} />
-        ) : (
-          <View style={s.avatarPh}>
-            <Text style={s.avatarPhTxt}>{initial}</Text>
-          </View>
-        )}
+        <TripProfileAvatar
+          size={52}
+          uri={riderPhoto ? String(riderPhoto) : null}
+          person={trip as Record<string, unknown>}
+          role="rider"
+          borderColor="rgba(52,245,184,0.5)"
+          accessibilityLabel={`Photo of ${riderName}`}
+        />
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.riderName} numberOfLines={1}>
             {riderName}

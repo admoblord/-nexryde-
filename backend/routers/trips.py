@@ -38,7 +38,12 @@ from trip_ws_payload import rider_trip_payload_from_doc
 from enforcement_system import record_violation, check_user_status
 from driver_compliance import check_driver_document_expiry, check_monthly_uploads
 from auth_guard import require_authenticated, verify_trip_participant, verify_owner_strict
-from wallet_trip_helpers import is_wallet_payment_method, rider_must_confirm_payment, trip_fare_amount
+from wallet_trip_helpers import (
+    is_cash_payment_method,
+    is_wallet_payment_method,
+    rider_must_confirm_payment,
+    trip_fare_amount,
+)
 from wallet_ops import (
     assert_rider_wallet_covers_fare,
     apply_driver_wallet_ride_credit,
@@ -258,8 +263,52 @@ def _driver_location_snapshot_for_trip(
     return _from_profile()
 
 
-async def _emit_rider_trip_realtime(trip_id: str) -> None:
+def _rider_pickup_code_enabled(rider: Optional[dict]) -> bool:
+    """Rider preference — default on for existing accounts."""
+    if not rider:
+        return True
+    return bool(rider.get("pickup_code_enabled", True))
+
+
+def _trip_pickup_code_required(trip: dict) -> bool:
+    """Per-trip flag set at booking from rider preference."""
+    return bool(trip.get("pickup_code_required", True))
+
+
+def _pickup_security_fields_for_trip(*, pickup_code_required: bool) -> dict:
+    """Trip document fields for optional pickup-code verification."""
+    if pickup_code_required:
+        code = str(random.randint(1000, 9999))
+        return {
+            "pickup_code_required": True,
+            "pickup_code": code,
+            "security_code": code,
+            "pickup_code_verified": False,
+            "pickup_code_attempts": 0,
+            "security_code_verified": False,
+            "security_code_attempts": 0,
+        }
+    return {
+        "pickup_code_required": False,
+        "pickup_code": None,
+        "security_code": None,
+        "pickup_code_verified": True,
+        "pickup_code_attempts": 0,
+        "security_code_verified": True,
+        "security_code_attempts": 0,
+    }
+
+
+async def _emit_rider_trip_realtime(trip_id: str, *, throttle_location: bool = False) -> None:
     """Push current trip document to rider WebSocket subscribers."""
+    from services.trip_tracking_service import (
+        enrich_driver_location_payload,
+        mark_realtime_emitted,
+        should_emit_realtime,
+    )
+
+    if throttle_location and not should_emit_realtime(trip_id, force=False):
+        return
     trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     if not trip or not trip.get("rider_id"):
         return
@@ -270,6 +319,12 @@ async def _emit_rider_trip_realtime(trip_id: str) -> None:
         raw = prof.get("current_location")
         profile_loc = raw if isinstance(raw, dict) else None
     driver_location = _driver_location_snapshot_for_trip(trip, profile_loc)
+    if driver_location:
+        driver_location = enrich_driver_location_payload(
+            trip,
+            driver_location,
+            speed_kmh=trip.get("current_speed_kmh"),
+        )
     payload = {
         "trip_id": trip_id,
         "status": trip.get("status"),
@@ -277,7 +332,44 @@ async def _emit_rider_trip_realtime(trip_id: str) -> None:
     }
     if driver_location:
         payload["driver_location"] = driver_location
+        if driver_location.get("eta_seconds") is not None:
+            payload["eta_seconds"] = driver_location.get("eta_seconds")
+        if driver_location.get("distance_km") is not None:
+            payload["distance_remaining_km"] = driver_location.get("distance_km")
+    mark_realtime_emitted(trip_id)
     await push_rider_trip_update(trip["rider_id"], payload)
+
+
+async def _emit_rider_trip_location_ping(
+    trip_id: str,
+    trip: dict,
+    driver_location: dict,
+    *,
+    eta_seconds: Optional[int] = None,
+    distance_km: Optional[float] = None,
+) -> None:
+    """Lightweight WS push for GPS pings — avoids reloading full trip + profile each tick."""
+    from services.trip_tracking_service import mark_realtime_emitted
+
+    rider_id = trip.get("rider_id")
+    if not rider_id:
+        return
+    payload = {
+        "trip_id": trip_id,
+        "status": trip.get("status"),
+        "driver_location": driver_location,
+    }
+    if eta_seconds is not None:
+        payload["eta_seconds"] = eta_seconds
+    if distance_km is not None:
+        payload["distance_remaining_km"] = distance_km
+        payload["distance_remaining"] = distance_km
+    speed = driver_location.get("speed_kmh")
+    if speed is not None:
+        payload["speed_kmh"] = speed
+    payload["timestamp"] = driver_location.get("updated_at") or datetime.now(timezone.utc).isoformat()
+    mark_realtime_emitted(trip_id)
+    await push_rider_trip_update(rider_id, {"type": "trip_update", **payload})
 
 
 def _stable_json(value) -> str:
@@ -1408,12 +1500,9 @@ async def create_trip_with_custom_price(request: CustomPriceRequest, http_reques
             "map_preview_region": map_region,
             "smart_match_priority": smart_priority,
             "payment_method": request.payment_method,
-            "pickup_code": str(random.randint(1000, 9999)),
-            "pickup_code_verified": False,
-            "pickup_code_attempts": 0,
-            "security_code": str(random.randint(1000, 9999)),
-            "security_code_verified": False,
-            "security_code_attempts": 0,
+            **_pickup_security_fields_for_trip(
+                pickup_code_required=_rider_pickup_code_enabled(rider),
+            ),
             "rider_face_verified_at_pickup": False,
             "rider_face_match_confidence": 0.0,
             "rider_face_verified_at": None,
@@ -1540,6 +1629,9 @@ class BlackShieldCourtOrderAccessRequest(BaseModel):
 class LocationUpdate(BaseModel):
     latitude: float
     longitude: float
+    heading: Optional[float] = None
+    speed: Optional[float] = None
+    timestamp: Optional[str] = None
 
 
 # ==================== TRIP ENDPOINTS ====================
@@ -1759,12 +1851,9 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         "recording_enabled": request.enable_recording,
         "fare_locked_until": (datetime.now(timezone.utc) + timedelta(minutes=FARE_LOCK_MINUTES)).isoformat(),
         "insurance_id": f"INS_{uuid4().hex[:8].upper()}",
-        "pickup_code": str(random.randint(1000, 9999)),
-        "pickup_code_verified": False,
-        "pickup_code_attempts": 0,
-        "security_code": str(random.randint(1000, 9999)),
-        "security_code_verified": False,
-        "security_code_attempts": 0,
+        **_pickup_security_fields_for_trip(
+            pickup_code_required=_rider_pickup_code_enabled(rider),
+        ),
         "rider_face_verified_at_pickup": False,
         "rider_face_match_confidence": 0.0,
         "rider_face_verified_at": None,
@@ -1887,20 +1976,19 @@ async def book_for_other(booker_id: str, request: BookForOtherRequest, http_requ
         "shield_recording_driver_opt_in": False,
         "shield_recording_active": False,
         "shield_recording_updated_at": None,
-        "pickup_code": str(random.randint(1000, 9999)),
-        "pickup_code_verified": False,
-        "pickup_code_attempts": 0,
-        "security_code": str(random.randint(1000, 9999)),
-        "security_code_verified": False,
-        "security_code_attempts": 0,
-        "rider_face_verified_at_pickup": False,
-        "rider_face_match_confidence": 0.0,
-        "rider_face_verified_at": None,
     }
+    booker = await db.users.find_one({"id": booker_id}, {"_id": 0, "blocked_drivers": 1, "pickup_code_enabled": 1}) or {}
+    trip_dict.update(
+        _pickup_security_fields_for_trip(
+            pickup_code_required=_rider_pickup_code_enabled(booker),
+        )
+    )
+    trip_dict["rider_face_verified_at_pickup"] = False
+    trip_dict["rider_face_match_confidence"] = 0.0
+    trip_dict["rider_face_verified_at"] = None
     
     await db.trips.insert_one(trip_dict)
     trip_dict.pop("_id", None)
-    booker = await db.users.find_one({"id": booker_id}, {"_id": 0, "blocked_drivers": 1}) or {}
     offers = await _create_trip_offers(trip_dict, booker.get("blocked_drivers", []))
     await _log_trip_event(
         trip_dict["id"],
@@ -2359,6 +2447,9 @@ async def verify_pickup_code(trip_id: str, request: dict, http_request: Request)
     if trip["status"] not in ["accepted", "arrived"]:
         raise HTTPException(status_code=400, detail="Trip must be in accepted or arrived state.")
 
+    if not _trip_pickup_code_required(trip):
+        raise HTTPException(status_code=400, detail="Pickup code is not required for this trip.")
+
     # Already verified
     if trip.get("pickup_code_verified") or trip.get("security_code_verified"):
         return {"verified": True, "message": "Pick-up code already confirmed.", "trip_id": trip_id}
@@ -2710,10 +2801,10 @@ async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequ
     if trip["status"] not in ["accepted", "arrived"]:
         raise HTTPException(status_code=400, detail="Trip must be accepted or driver must be at pickup first")
 
-    # Require pickup code verification (new system) or legacy security_code_verified
-    pickup_verified = trip.get("pickup_code_verified") or trip.get("security_code_verified")
-    if not pickup_verified:
-        raise HTTPException(status_code=403, detail="Verify the rider's pick-up code before starting the trip.")
+    if _trip_pickup_code_required(trip):
+        pickup_verified = trip.get("pickup_code_verified") or trip.get("security_code_verified")
+        if not pickup_verified:
+            raise HTTPException(status_code=403, detail="Verify the rider's pick-up code before starting the trip.")
     
     if not request.face_image or len(request.face_image) < 100:
         raise HTTPException(status_code=400, detail="Live face photo is required before starting any ride")
@@ -2765,14 +2856,13 @@ async def start_trip(trip_id: str, request: Request):
     if trip.get("driver_id") != driver_id:
         raise HTTPException(status_code=403, detail="Only the assigned driver can start this trip")
 
-    # Pick-up code is the mandatory verification gate.
-    # Face verification (verify-face-and-start) is an optional enhancement — not enforced here.
-    pickup_ok = trip.get("pickup_code_verified") or trip.get("security_code_verified")
-    if not pickup_ok:
-        raise HTTPException(
-            status_code=403,
-            detail="Pickup code must be verified before starting the trip.",
-        )
+    if _trip_pickup_code_required(trip):
+        pickup_ok = trip.get("pickup_code_verified") or trip.get("security_code_verified")
+        if not pickup_ok:
+            raise HTTPException(
+                status_code=403,
+                detail="Pickup code must be verified before starting the trip.",
+            )
 
     shield_mode = dict(trip.get("invisible_shield_mode") or {})
     shield_updates = {}
@@ -2951,10 +3041,15 @@ async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
         "estate_gate_code_expires_at": (gate_access or {}).get("expires_at"),
     })
     if updated and updated.get("rider_id"):
+        arrive_msg = (
+            "Your driver has arrived. Show your pickup code before starting the ride."
+            if _trip_pickup_code_required(updated)
+            else "Your driver has arrived at the pickup point."
+        )
         await send_push_notification(
             updated["rider_id"],
             "Driver Arrived",
-            "Your driver has arrived at the pickup point. Show your security code before starting the ride.",
+            arrive_msg,
             {"type": "driver_arrived", "trip_id": trip_id},
         )
         await _emit_rider_trip_realtime(trip_id)
@@ -2965,11 +3060,35 @@ async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
 @trips_router.put("/trips/{trip_id}/update-location")
 async def update_trip_location(trip_id: str, request: LocationUpdate, http_request: Request):
     """Update trip route and run Trip Guardian safety monitoring."""
-    location_point = {
+    return await _update_trip_location_impl(trip_id, request, http_request)
+
+
+@trips_router.post("/trips/{trip_id}/location")
+async def post_trip_location(trip_id: str, request: LocationUpdate, http_request: Request):
+    """Driver live GPS ping (2s cadence) — same as update-location with tracking payload."""
+    return await _update_trip_location_impl(trip_id, request, http_request)
+
+
+async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http_request: Request):
+    """Update trip route and run Trip Guardian safety monitoring."""
+    from services.trip_tracking_service import compute_live_tracking, trip_tracking_target
+
+    ts = request.timestamp or datetime.utcnow().isoformat()
+    location_point: dict = {
         "lat": request.latitude,
         "lng": request.longitude,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": ts,
     }
+    if request.heading is not None:
+        try:
+            location_point["heading"] = float(request.heading) % 360.0
+        except (TypeError, ValueError):
+            pass
+    if request.speed is not None:
+        try:
+            location_point["speed_kmh"] = max(0.0, float(request.speed))
+        except (TypeError, ValueError):
+            pass
     
     trip = await db.trips.find_one({"id": trip_id})
     if not trip:
@@ -3292,10 +3411,28 @@ async def update_trip_location(trip_id: str, request: LocationUpdate, http_reque
         else:
             geo_fence_lock["driver_explanation_required"] = False
 
+    live_tracking_set: dict = {}
+    target = trip_tracking_target(trip)
+    if target:
+        live_preview = compute_live_tracking(
+            driver_lat=float(request.latitude),
+            driver_lng=float(request.longitude),
+            target_lat=target[0],
+            target_lng=target[1],
+            speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
+            trip_status=str(trip.get("status") or ""),
+        )
+        live_tracking_set = {
+            "live_eta_seconds": live_preview.get("eta_seconds"),
+            "live_distance_km": live_preview.get("distance_km"),
+            "live_tracking_status": live_preview.get("status"),
+            "live_tracking_updated_at": live_preview.get("updated_at"),
+        }
+
     await db.trips.update_one(
         {"id": trip_id},
         {
-            "$push": {"actual_route": location_point},
+            "$push": {"actual_route": {"$each": [location_point], "$slice": -240}},
             "$set": {
                 "route_deviation_detected": route_deviation,
                 "abnormal_stop_detected": abnormal_stop,
@@ -3311,6 +3448,7 @@ async def update_trip_location(trip_id: str, request: LocationUpdate, http_reque
                     "last_moved_km": round(moved_km, 4),
                     "updated_at": now.isoformat(),
                 },
+                **live_tracking_set,
             },
         },
     )
@@ -3345,19 +3483,290 @@ async def update_trip_location(trip_id: str, request: LocationUpdate, http_reque
         },
     )
 
+    updated_trip = {**trip, **live_tracking_set, "current_speed_kmh": round(current_speed_kmh, 1)}
     try:
-        await _emit_rider_trip_realtime(trip_id)
+        await _emit_rider_trip_location_ping(
+            trip_id,
+            updated_trip,
+            {
+                "lat": float(request.latitude),
+                "lng": float(request.longitude),
+                "heading": location_point.get("heading"),
+                "speed_kmh": location_point.get("speed_kmh") or round(current_speed_kmh, 1),
+                "updated_at": location_point["timestamp"],
+                "eta_seconds": live_tracking_set.get("live_eta_seconds"),
+                "distance_km": live_tracking_set.get("live_distance_km"),
+                "status": live_tracking_set.get("live_tracking_status"),
+            },
+            eta_seconds=live_tracking_set.get("live_eta_seconds"),
+            distance_km=live_tracking_set.get("live_distance_km"),
+        )
     except Exception:
-        logger.debug("emit rider trip realtime failed", exc_info=True)
+        logger.debug("emit rider location ping failed", exc_info=True)
+
+    updated_trip = await db.trips.find_one({"id": trip_id}, {"_id": 0}) or updated_trip
+    driver_location = {
+        "lat": float(request.latitude),
+        "lng": float(request.longitude),
+        "heading": location_point.get("heading"),
+        "speed_kmh": location_point.get("speed_kmh") or round(current_speed_kmh, 1),
+        "updated_at": location_point["timestamp"],
+    }
+    tracking_status = str(updated_trip.get("live_tracking_status") or "en_route")
+    distance_remaining = updated_trip.get("live_distance_km")
+    eta_seconds = updated_trip.get("live_eta_seconds")
+    if eta_seconds is None:
+        target = trip_tracking_target(updated_trip)
+        if target:
+            live = compute_live_tracking(
+                driver_lat=float(request.latitude),
+                driver_lng=float(request.longitude),
+                target_lat=target[0],
+                target_lng=target[1],
+                speed_kmh=location_point.get("speed_kmh") or current_speed_kmh,
+                trip_status=str(updated_trip.get("status") or ""),
+            )
+            eta_seconds = live.get("eta_seconds")
+            distance_remaining = live.get("distance_km")
+            tracking_status = live.get("status", "en_route")
+            driver_location.update(
+                {
+                    "eta_seconds": eta_seconds,
+                    "distance_km": distance_remaining,
+                    "status": tracking_status,
+                }
+            )
+    else:
+        driver_location.update(
+            {
+                "eta_seconds": eta_seconds,
+                "distance_km": distance_remaining,
+                "status": tracking_status,
+            }
+        )
 
     return {
+        "success": True,
         "location_updated": True,
+        "driver_location": {
+            "latitude": driver_location["lat"],
+            "longitude": driver_location["lng"],
+            "heading": driver_location.get("heading"),
+            "speed": driver_location.get("speed_kmh"),
+            "eta_seconds": eta_seconds,
+            "distance_km": distance_remaining,
+            "status": tracking_status,
+        },
+        "distance_remaining": distance_remaining,
+        "distance_remaining_km": distance_remaining,
+        "eta_seconds": eta_seconds,
+        "status": tracking_status,
         "speed_kmh": round(current_speed_kmh, 1),
         "route_deviation": route_deviation,
         "geo_fence_deviation_meters": deviation_distance_meters,
         "abnormal_stop": abnormal_stop,
         "guardian_alert_active": bool(guardian_alert),
         "gps_spoofing_active": bool(gps_spoofing_alert and gps_spoofing_alert.get("active")),
+    }
+
+
+@trips_router.get("/trips/{trip_id}/eta")
+async def get_trip_eta(trip_id: str, http_request: Request):
+    """Live ETA from driver position to pickup (or dropoff while ongoing)."""
+    from services.trip_tracking_service import compute_live_tracking, trip_tracking_target
+
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(http_request, trip)
+    profile_loc: Optional[dict] = None
+    driver_id = trip.get("driver_id")
+    if driver_id:
+        prof = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "current_location": 1}) or {}
+        raw = prof.get("current_location")
+        profile_loc = raw if isinstance(raw, dict) else None
+    snap = _driver_location_snapshot_for_trip(trip, profile_loc)
+    if not snap:
+        raise HTTPException(status_code=404, detail="Driver location not available")
+    target = trip_tracking_target(trip)
+    if not target:
+        raise HTTPException(status_code=400, detail="ETA not available for this trip phase")
+    live = compute_live_tracking(
+        driver_lat=float(snap["lat"]),
+        driver_lng=float(snap["lng"]),
+        target_lat=target[0],
+        target_lng=target[1],
+        speed_kmh=trip.get("current_speed_kmh"),
+        trip_status=str(trip.get("status") or ""),
+    )
+    return {
+        "success": True,
+        "trip_id": trip_id,
+        "eta_seconds": live["eta_seconds"],
+        "distance_km": live["distance_km"],
+        "average_speed": live["average_speed_kmh"],
+        "status": live["status"],
+        "updated_at": live["updated_at"],
+    }
+
+
+@trips_router.get("/trips/{trip_id}/route")
+async def get_trip_route(trip_id: str, http_request: Request):
+    """Trip route polyline and waypoints for rider map."""
+    from services.trip_tracking_service import build_trip_route_response
+
+    trip = await db.trips.find_one({"id": trip_id}, {"_id": 0})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(http_request, trip)
+    profile_loc: Optional[dict] = None
+    driver_id = trip.get("driver_id")
+    if driver_id:
+        prof = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "current_location": 1}) or {}
+        raw = prof.get("current_location")
+        profile_loc = raw if isinstance(raw, dict) else None
+    snap = _driver_location_snapshot_for_trip(trip, profile_loc)
+    route = build_trip_route_response(trip, snap)
+    return {"success": True, "trip_id": trip_id, **route}
+
+
+SHARE_TRACK_BASE = os.environ.get("NEXRYDE_SHARE_TRACK_BASE", "https://nexrydeapp.com/track").rstrip("/")
+
+
+def _trip_location_address(loc) -> str:
+    if not isinstance(loc, dict):
+        return ""
+    addr = loc.get("address")
+    if isinstance(addr, str) and addr.strip():
+        return addr.strip()
+    lat, lng = loc.get("lat"), loc.get("lng")
+    if lat is not None and lng is not None:
+        try:
+            return f"{float(lat):.4f}, {float(lng):.4f}"
+        except (TypeError, ValueError):
+            pass
+    return ""
+
+
+async def _ensure_trip_share_token(trip_id: str, trip: dict) -> str:
+    existing = trip.get("share_token")
+    if isinstance(existing, str) and existing.strip():
+        return existing.strip()
+    token = str(uuid.uuid4())[:12]
+    now = datetime.now(timezone.utc)
+    await db.trips.update_one(
+        {"id": trip_id},
+        {
+            "$set": {
+                "share_token": token,
+                "share_token_created_at": now.isoformat(),
+            }
+        },
+    )
+    await db.trip_shares.update_one(
+        {"trip_id": trip_id},
+        {
+            "$set": {
+                "trip_id": trip_id,
+                "token": token,
+                "shared_at": now,
+                "expires_at": now + timedelta(hours=24),
+            }
+        },
+        upsert=True,
+    )
+    return token
+
+
+async def _build_trip_share_data(trip: dict, share_token: str) -> dict:
+    driver_id = trip.get("driver_id")
+    driver = {"name": "Driver", "image_url": None, "rating": None}
+    vehicle = {"make": "Vehicle", "color": "", "license_plate": ""}
+    driver_location = None
+    eta_seconds = trip.get("live_eta_seconds")
+    distance_km = trip.get("live_distance_km") or trip.get("distance_km")
+
+    if driver_id:
+        user = await db.users.find_one({"id": driver_id}) or {}
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+        locked_v = trip.get("locked_vehicle") or {}
+        face_img = profile.get("face_image") or user.get("face_image")
+        profile_img = user.get("profile_image")
+        driver = {
+            "name": str(user.get("name") or "Driver"),
+            "image_url": profile_img or face_img,
+            "face_image": face_img,
+            "profile_image": profile_img,
+            "rating": float(user.get("rating") or profile.get("avg_rating") or 0) or None,
+        }
+        vehicle = {
+            "make": str(locked_v.get("model") or profile.get("vehicle_model") or "Vehicle"),
+            "color": str(locked_v.get("color") or profile.get("vehicle_color") or ""),
+            "license_plate": str(locked_v.get("plate") or profile.get("vehicle_plate") or ""),
+        }
+        prof_loc = profile.get("current_location")
+        loc = prof_loc if isinstance(prof_loc, dict) else {}
+        driver_location = _driver_location_snapshot_for_trip(trip, loc)
+        if driver_location:
+            try:
+                from services.trip_tracking_service import enrich_driver_location_payload
+
+                driver_location = enrich_driver_location_payload(
+                    trip,
+                    driver_location,
+                    speed_kmh=trip.get("current_speed_kmh"),
+                )
+                if driver_location.get("eta_seconds") is not None:
+                    eta_seconds = driver_location.get("eta_seconds")
+                if driver_location.get("distance_km") is not None:
+                    distance_km = driver_location.get("distance_km")
+            except Exception:
+                logger.debug("share-data live enrichment skipped", exc_info=True)
+
+    started_at = trip.get("started_at") or trip.get("accepted_at") or trip.get("created_at")
+    return {
+        "trip_id": trip.get("id"),
+        "status": trip.get("status"),
+        "share_link": f"{SHARE_TRACK_BASE}/{share_token}",
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+        "driver": driver,
+        "vehicle": vehicle,
+        "pickup_address": _trip_location_address(trip.get("pickup_location")),
+        "destination_address": _trip_location_address(trip.get("dropoff_location")),
+        "distance_km": distance_km,
+        "eta_seconds": eta_seconds,
+        "started_at": started_at,
+        "driver_location": driver_location,
+    }
+
+
+@trips_router.get("/trips/{trip_id}/share-data")
+async def get_trip_share_data(trip_id: str, request: Request):
+    """Rider/driver share screen — live trip snapshot + tracking link."""
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    token = trip.get("share_token")
+    if not isinstance(token, str) or not token.strip():
+        token = await _ensure_trip_share_token(trip_id, trip)
+        trip = await db.trips.find_one({"id": trip_id}) or trip
+    payload = await _build_trip_share_data(trip, str(token))
+    return {"success": True, **payload}
+
+
+@trips_router.post("/trips/{trip_id}/generate-share-link")
+async def generate_trip_share_link(trip_id: str, request: Request):
+    trip = await db.trips.find_one({"id": trip_id})
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    token = await _ensure_trip_share_token(trip_id, trip)
+    return {
+        "success": True,
+        "share_link": f"{SHARE_TRACK_BASE}/{token}",
+        "trip_id": trip_id,
+        "status": trip.get("status"),
     }
 
 
@@ -3376,6 +3785,7 @@ async def get_trip_status(trip_id: str, request: Request):
     driver_info = None
     driver_location = None
     driver_moving = False
+    live_eta = None
 
     driver_id = trip.get("driver_id")
     if driver_id:
@@ -3396,6 +3806,28 @@ async def get_trip_status(trip_id: str, request: Request):
                 driver_moving = moved_km >= 0.03  # ~30 meters+
 
         driver_location = _driver_location_snapshot_for_trip(trip, loc if isinstance(loc, dict) else None)
+        if driver_location:
+            try:
+                from services.trip_tracking_service import enrich_driver_location_payload
+
+                driver_location = enrich_driver_location_payload(
+                    trip,
+                    driver_location,
+                    speed_kmh=trip.get("current_speed_kmh"),
+                )
+                live_eta = {
+                    "eta_seconds": driver_location.get("eta_seconds"),
+                    "distance_km": driver_location.get("distance_km"),
+                    "tracking_status": driver_location.get("status"),
+                }
+            except Exception:
+                logger.debug("live eta enrichment skipped", exc_info=True)
+        if not live_eta and trip.get("live_eta_seconds") is not None:
+            live_eta = {
+                "eta_seconds": trip.get("live_eta_seconds"),
+                "distance_km": trip.get("live_distance_km"),
+                "tracking_status": trip.get("live_tracking_status") or "en_route",
+            }
 
         # Phone visibility gate: only expose during active ride OR if rider has favorited this driver
         ACTIVE_CALL_STATUSES = {"accepted", "arrived", "ongoing", "pending_payment"}
@@ -3469,6 +3901,7 @@ async def get_trip_status(trip_id: str, request: Request):
         "biometric_handshake_ready": _trip_biometric_ready(trip),
         "driver_info": driver_info,
         "driver_location": driver_location,
+        "live_eta": live_eta,
         "current_speed_kmh": trip.get("current_speed_kmh"),
         "guardian_alert": trip.get("guardian_alert"),
         "geo_fence_trip_lock": trip.get("geo_fence_trip_lock"),
@@ -3494,6 +3927,7 @@ async def complete_trip(trip_id: str, request: Request):
         raise HTTPException(status_code=403, detail="Only the assigned driver can complete this trip")
     pm = trip_before.get("payment_method")
     needs_confirm = rider_must_confirm_payment(str(pm) if pm is not None else None)
+    payment_status_after = "pending" if needs_confirm else "completed"
     completed_at = datetime.now(timezone.utc)
     shield_mode = dict(trip_before.get("invisible_shield_mode") or {})
     shield_updates = {}
@@ -3515,15 +3949,18 @@ async def complete_trip(trip_id: str, request: Request):
         "emergency_contacts_notified": 0,
         "check_in_status": "awaiting_confirmation",
     }
+    complete_set: dict = {
+        "status": "completed",
+        "completed_at": completed_at,
+        "payment_status": payment_status_after,
+        "safe_arrival_check": safe_arrival_check,
+        **shield_updates,
+    }
+    if payment_status_after == "completed":
+        complete_set["paid_at"] = completed_at
     result = await db.trips.update_one(
         {"id": trip_id, "status": "ongoing"},
-        {"$set": {
-            "status": "completed",
-            "completed_at": completed_at,
-            "payment_status": "pending" if needs_confirm else "completed",
-            "safe_arrival_check": safe_arrival_check,
-            **shield_updates,
-        }}
+        {"$set": complete_set},
     )
     
     if result.modified_count == 0:

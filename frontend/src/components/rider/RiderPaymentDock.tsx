@@ -1,7 +1,7 @@
 /**
  * Map-first pending_payment dock — pay CTA + safety checklist (blur shell).
  */
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,11 @@ import {
 } from '@/src/constants/riderRideChrome';
 import { DOCK_BLUR_INTENSITY, DOCK_TOP_RADIUS } from '@/src/components/driver/driverDockTheme';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import {
+  formatPaymentMetaDisplay,
+  isCashPaymentMethod,
+  paymentDockPayButtonLabel,
+} from '@/src/utils/tripPaymentMethod';
 
 export type SafetyChecklistItem = {
   id: string;
@@ -30,7 +35,8 @@ export type SafetyChecklistItem = {
 export type RiderPaymentDockProps = {
   fareDisplay: string | null;
   financialPaymentPending: boolean;
-  paymentStatus?: string;
+  paymentMethod?: string | null;
+  paymentStatus?: string | null;
   checklist: SafetyChecklistItem[];
   loading?: boolean;
   onPay: () => void;
@@ -43,6 +49,7 @@ export type RiderPaymentDockProps = {
 export function RiderPaymentDock({
   fareDisplay,
   financialPaymentPending,
+  paymentMethod,
   paymentStatus,
   checklist,
   loading,
@@ -53,6 +60,16 @@ export function RiderPaymentDock({
   bottomInset,
 }: RiderPaymentDockProps) {
   const pendingItems = checklist.filter((c) => !c.completed);
+  const payMeta = useMemo(
+    () => formatPaymentMetaDisplay(paymentMethod, paymentStatus),
+    [paymentMethod, paymentStatus],
+  );
+  const payBtnLabel = paymentDockPayButtonLabel(paymentMethod);
+  const payIcon = isCashPaymentMethod(paymentMethod)
+    ? 'cash'
+    : payMeta.methodLabel === 'wallet'
+      ? 'wallet'
+      : 'card';
 
   return (
     <View style={[styles.root, { paddingBottom: Math.max(bottomInset, 10) }]} pointerEvents="box-none">
@@ -85,16 +102,39 @@ export function RiderPaymentDock({
               </View>
               <Text style={styles.heroSub}>
                 {financialPaymentPending
-                  ? 'Settle your fare and finish the quick safety steps below.'
+                  ? isCashPaymentMethod(paymentMethod)
+                    ? 'Pay your driver in cash, then confirm below.'
+                    : 'Settle your fare and finish the quick safety steps below.'
                   : 'Confirm the safety prompts below to close your trip.'}
               </Text>
 
               <View style={styles.fareCard}>
                 <Text style={styles.fareLabel}>Total fare</Text>
                 <Text style={styles.fareValue}>{fareDisplay ?? '—'}</Text>
-                {paymentStatus ? (
-                  <Text style={styles.fareMeta}>Payment · {paymentStatus}</Text>
-                ) : null}
+                <Text style={[styles.fareMeta, { color: payMeta.color }]} accessibilityLabel={payMeta.line}>
+                  {payMeta.line}
+                </Text>
+              </View>
+
+              <View style={styles.methodChip}>
+                <Ionicons
+                  name={
+                    payMeta.methodLabel === 'cash'
+                      ? 'cash'
+                      : payMeta.methodLabel === 'wallet'
+                        ? 'wallet'
+                        : 'card'
+                  }
+                  size={18}
+                  color={payMeta.color}
+                />
+                <Text style={styles.methodChipTxt}>
+                  {payMeta.methodLabel === 'cash'
+                    ? 'Cash — pay driver directly'
+                    : payMeta.methodLabel === 'wallet'
+                      ? 'NEXRYDE wallet'
+                      : 'Card payment'}
+                </Text>
               </View>
 
               {checklist.length > 0 ? (
@@ -137,8 +177,8 @@ export function RiderPaymentDock({
                     end={{ x: 1, y: 1 }}
                     style={styles.payBtn}
                   >
-                    <Ionicons name="wallet" size={20} color="#022C22" />
-                    <Text style={styles.payTxt}>Pay & view receipt</Text>
+                    <Ionicons name={payIcon} size={20} color="#022C22" />
+                    <Text style={styles.payTxt}>{payBtnLabel}</Text>
                   </LinearGradient>
                 </TouchableOpacity>
               ) : (
@@ -213,7 +253,20 @@ const styles = StyleSheet.create({
     color: '#F8FAFC',
     marginTop: 4,
   },
-  fareMeta: { fontSize: FONT_SIZE.xs, fontWeight: '600', color: '#94A3B8', marginTop: 4 },
+  fareMeta: { fontSize: FONT_SIZE.sm, fontWeight: '700', marginTop: 6 },
+  methodChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'stretch',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  methodChipTxt: { flex: 1, fontSize: FONT_SIZE.sm, fontWeight: '700', color: '#E2E8F0' },
   checklist: {
     gap: 8,
     backgroundColor: 'rgba(255,255,255,0.03)',

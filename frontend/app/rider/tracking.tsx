@@ -14,7 +14,7 @@ import {
   ScrollView,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
@@ -24,11 +24,22 @@ import * as FileSystem from 'expo-file-system';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RIDER_MAP_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
+import { RIDER_DRIVER_FOUND_HANDOFF_MS } from '@/src/constants/riderTripHandoff';
+import { useETACountdown } from '@/src/hooks/useETACountdown';
+import { fetchTripEta, fetchTripRoute } from '@/src/services/tripTrackingApi';
 import {
   RiderFindingStatusHero,
   RiderFindingStrip,
 } from '@/src/components/rider/RiderFindingDriverChrome';
 import { RiderLiveTripDock, RiderLiveTripDockFade } from '@/src/components/rider/RiderLiveTripDock';
+import {
+  RiderOnTripRadiantDock,
+  RiderOnTripRadiantDockFade,
+} from '@/src/components/rider/RiderOnTripRadiantDock';
+import {
+  RiderTrackingMapChrome,
+  RiderTrackingRecenterButton,
+} from '@/src/components/rider/RiderTrackingMapChrome';
 import { RiderFindingTripDock } from '@/src/components/rider/RiderFindingTripDock';
 import { RiderPaymentDock } from '@/src/components/rider/RiderPaymentDock';
 import { AddFavoriteDriverModal } from '@/src/components/rider/AddFavoriteDriverModal';
@@ -46,16 +57,38 @@ import {
   triggerSOS,
   uploadInvisibleShieldAudio,
   verifyRiderFaceAtPickup,
+  confirmTripPayment,
 } from '@/src/services/api';
+import {
+  formatPaymentMetaDisplay,
+  isCashPaymentMethod,
+  paymentChecklistPayLabel,
+  paymentDockPayButtonLabel,
+  riderFinancialPaymentPending,
+} from '@/src/utils/tripPaymentMethod';
 import { normalizeTripStatus } from '@/src/utils/tripStatus';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import {
   riderTripStatusPollIntervalMs,
   isRiderMapLiveTripStatus,
   isRiderMapFirstTripStatus,
+  riderTripEtaFallbackPollMs,
 } from '@/src/constants/tripRealtimeRhythm';
 import { useTripSafetyRecording } from '@/src/hooks/useTripSafetyRecording';
 import MapComponent from '@/src/components/MapComponent';
+import RideMap from '@/src/components/RideMap';
+import {
+  parseTripCoords,
+  normalizeDriverInfo,
+  formatDriverDisplayField,
+  mergeTripFromStatusPayload,
+} from '@/src/utils/tripCoords';
+import { TripProfileAvatar } from '@/src/components/TripProfileAvatar';
+import { driverPingMovedEnough, parseTrackingPing } from '@/src/utils/riderTripLiveSync';
+import { driverAvatarSources } from '@/src/utils/tripProfilePhotos';
+import { openShareTrip } from '@/src/utils/openShareTrip';
+import { setTripDriverCache, clearTripDriverCache } from '@/src/utils/tripDriverCache';
+import { getActiveTrip } from '@/src/services/api';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import { fetchDirections } from '@/src/navigation/navUtils';
 import notificationService from '@/src/services/notifications';
@@ -94,10 +127,29 @@ export default function TrackingScreen() {
   const { user, userId: riderId, token } = useAuthedUserId();
   const [loading, setLoading] = useState(true);
   const [driverInfo, setDriverInfo] = useState<any>(null);
-  const [tripStatus, setTripStatus] = useState<string>('pending');
+  const [tripStatus, setTripStatus] = useState<string>(() => {
+    const tripIdParam = typeof params.tripId === 'string' ? params.tripId : '';
+    const fromBook =
+      params.fromBook === 'true' || params.fromBook === '1';
+    if (tripIdParam && currentTrip?.id === tripIdParam) {
+      return normalizeTripStatus(currentTrip.status, currentTrip.payment_status);
+    }
+    if (fromBook && tripIdParam) {
+      return 'accepted';
+    }
+    if (!currentTrip?.id) return 'pending';
+    if (tripIdParam && currentTrip.id !== tripIdParam) return 'pending';
+    return normalizeTripStatus(currentTrip.status, currentTrip.payment_status);
+  });
   const [paymentStatus, setPaymentStatus] = useState<string>('pending');
   const [securityPromptShown, setSecurityPromptShown] = useState(false);
   const [driverLocation, setDriverLocation] = useState<any>(null);
+  const [serverEtaSeconds, setServerEtaSeconds] = useState<number | null>(null);
+  const [distanceRemainingKm, setDistanceRemainingKm] = useState<number | null>(null);
+  const [speedKmh, setSpeedKmh] = useState<number | null>(null);
+  const [trackingStatus, setTrackingStatus] = useState<string | null>(null);
+  const [locationStale, setLocationStale] = useState(false);
+  const lastLocationAtRef = useRef<number>(Date.now());
   const [guardianAlert, setGuardianAlert] = useState<any>(null);
   const [optimizedRoute, setOptimizedRoute] = useState<TrafficRoute | null>(null);
   // Road-snapped polyline from Google Directions (fetched once per trip segment)
@@ -141,6 +193,25 @@ export default function TrackingScreen() {
   /** Prior Directions duration for same trip segment — detect material ETA/route changes. */
   const riderRoutePrevRef = useRef<{ legKey: string; durationSec: number } | null>(null);
   const riderRouteAlertAtRef = useRef(0);
+  const lastRouteBumpRef = useRef(0);
+  const tripStatusRef = useRef(tripStatus);
+  const cashPaymentHealRef = useRef(false);
+  const driverInfoRef = useRef<any>(null);
+  const lastDriverPingRef = useRef<{ lat: number; lng: number } | null>(null);
+  tripStatusRef.current = tripStatus;
+  driverInfoRef.current = driverInfo;
+
+  useEffect(() => {
+    if (driverInfo && Object.keys(driverInfo).length > 0) {
+      setTripDriverCache(driverInfo);
+    }
+  }, [driverInfo]);
+
+  useEffect(() => {
+    if (!isRiderMapLiveTripStatus(tripStatus)) {
+      clearTripDriverCache();
+    }
+  }, [tripStatus]);
   // Identity verification states
   const [showIdentityModal, setShowIdentityModal]   = useState(false);
   const [showMismatchModal, setShowMismatchModal]   = useState(false);
@@ -160,13 +231,7 @@ export default function TrackingScreen() {
     []
   );
 
-  const getCoords = useCallback((value: unknown): { lat: number; lng: number } | null => {
-    if (!value || typeof value !== 'object') return null;
-    const record = value as Record<string, unknown>;
-    const lat = typeof record.lat === 'number' ? record.lat : typeof record.latitude === 'number' ? record.latitude : null;
-    const lng = typeof record.lng === 'number' ? record.lng : typeof record.longitude === 'number' ? record.longitude : null;
-    return lat != null && lng != null ? { lat, lng } : null;
-  }, []);
+  const getCoords = useCallback((value: unknown) => parseTripCoords(value), []);
 
   const effectiveTripId = params.tripId || currentTrip?.id || '';
   const { recordingStatus, currentRecording, reportSafetyIncident } = useTripSafetyRecording(currentTrip);
@@ -199,12 +264,18 @@ export default function TrackingScreen() {
     return `₦${Number(f).toLocaleString('en-NG')}`;
   }, [currentTrip?.fare]);
 
-  /** `pending_payment` covers unpaid fare and/or post-trip safety confirmations. */
+  const tripPaymentMethod = currentTrip?.payment_method ?? 'cash';
+
+  /** Unpaid fare on the post-trip screen (safety-only `pending_payment` stays false when fare is settled). */
   const financialPaymentPending = useMemo(() => {
     if (tripStatus !== 'pending_payment') return false;
-    const ps = String(paymentStatus || '').toLowerCase();
-    return ps === 'pending' || ps === 'unpaid' || ps === '';
+    return riderFinancialPaymentPending('completed', paymentStatus);
   }, [tripStatus, paymentStatus]);
+
+  const paymentMetaDisplay = useMemo(
+    () => formatPaymentMetaDisplay(tripPaymentMethod, paymentStatus),
+    [tripPaymentMethod, paymentStatus],
+  );
 
   const isFindingDriverPhase = useMemo(
     () => tripStatus === 'pending' || tripStatus === 'pending_driver_offers',
@@ -221,8 +292,18 @@ export default function TrackingScreen() {
   const showMapFirstOverlayDock =
     showMapFirstFindingDock || showMapFirstPaymentDock || showMapFirstLiveDock;
   const hideMapFirstScrollPanel = showMapFirstOverlayDock && !tripDetailsExpanded;
+  const mapOverlayMode = Boolean(showMapFirstOverlayDock && !tripDetailsExpanded);
   const mapFirstScrollPadBottom =
-    insets.bottom + (showMapFirstOverlayDock ? (showMapFirstPaymentDock ? 340 : 300) : 220);
+    insets.bottom +
+    (showMapFirstPaymentDock
+      ? 360
+      : showMapFirstLiveDock && tripStatus === 'ongoing'
+        ? 420
+        : showMapFirstLiveDock
+          ? 380
+          : showMapFirstFindingDock
+            ? 300
+            : 220);
 
   /** Short area line for assignment sheet (e.g. neighbourhood, city). */
   const pickupVicinityLabel = useMemo(() => {
@@ -243,6 +324,22 @@ export default function TrackingScreen() {
     setTripDetailsExpanded(false);
   }, [effectiveTripId]);
 
+  /** Book → tracking handoff: align UI with persisted trip before first status poll. */
+  useEffect(() => {
+    if (!effectiveTripId || !currentTrip || currentTrip.id !== effectiveTripId) return;
+    const hydrated = normalizeTripStatus(currentTrip.status, currentTrip.payment_status);
+    setTripStatus((prev) => {
+      if (isRiderMapLiveTripStatus(hydrated)) return hydrated;
+      if (
+        (prev === 'pending' || prev === 'pending_driver_offers') &&
+        isRiderMapFirstTripStatus(hydrated)
+      ) {
+        return hydrated;
+      }
+      return prev;
+    });
+  }, [effectiveTripId, currentTrip?.id, currentTrip?.status, currentTrip?.payment_status]);
+
   useEffect(() => {
     riderRoutePrevRef.current = null;
     riderRouteAlertAtRef.current = 0;
@@ -256,7 +353,7 @@ export default function TrackingScreen() {
     const active = isRiderMapLiveTripStatus(tripStatus);
     const key = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
     if (!active || !key || Platform.OS === 'web') return;
-    const id = setInterval(() => setRouteRefreshTick((n) => n + 1), 72_000);
+    const id = setInterval(() => setRouteRefreshTick((n) => n + 1), 90_000);
     return () => clearInterval(id);
   }, [tripStatus, effectiveTripId]);
 
@@ -401,14 +498,64 @@ export default function TrackingScreen() {
   const dropoffCoords = getCoords(currentTrip?.dropoff_location);
   const liveDriverCoords = getCoords(driverLocation);
 
+  const handleRecenterMap = useCallback(() => {
+    const m = nativeMapRef.current as {
+      animateCamera?: (c: object, o?: object) => void;
+      fitToCoordinates?: (c: object[], o?: object) => void;
+    } | null;
+    if (!m) return;
+    try {
+      if (liveDriverCoords && m.animateCamera) {
+        m.animateCamera(
+          {
+            center: { latitude: liveDriverCoords.lat, longitude: liveDriverCoords.lng },
+            zoom: 16,
+            pitch: 0,
+          },
+          { duration: 500 },
+        );
+        return;
+      }
+      if (pickupCoords && dropoffCoords && m.fitToCoordinates) {
+        m.fitToCoordinates(
+          [
+            { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
+            { latitude: dropoffCoords.lat, longitude: dropoffCoords.lng },
+          ],
+          {
+            edgePadding: { top: 100, right: 48, bottom: mapFirstScrollPadBottom, left: 48 },
+            animated: true,
+          },
+        );
+      }
+    } catch {
+      /* map ref not ready */
+    }
+  }, [liveDriverCoords, pickupCoords, dropoffCoords, mapFirstScrollPadBottom]);
+
+  const liveEta = useETACountdown(serverEtaSeconds, trackingStatus);
+
   const driverPickupApproach = useMemo(() => {
     if (tripStatus !== 'accepted' || !liveDriverCoords || !pickupCoords) return null;
     const m = haversineM(liveDriverCoords, pickupCoords);
     if (!Number.isFinite(m)) return null;
-    const km = m / 1000;
-    const min = Math.max(1, Math.round((km / 28) * 60));
+    const km =
+      distanceRemainingKm != null && Number.isFinite(Number(distanceRemainingKm))
+        ? Number(distanceRemainingKm)
+        : m / 1000;
+    const min =
+      liveEta.etaMinutes != null && liveEta.etaMinutes > 0
+        ? liveEta.etaMinutes
+        : Math.max(1, Math.round((km / 28) * 60));
     return { km, min, meters: m };
-  }, [tripStatus, liveDriverCoords, pickupCoords, haversineM]);
+  }, [
+    tripStatus,
+    liveDriverCoords,
+    pickupCoords,
+    haversineM,
+    liveEta.etaMinutes,
+    distanceRemainingKm,
+  ]);
   // Prefer road-snapped Google Directions polyline; fall back to straight-segment heuristic
   const routePolyline =
     snappedPolyline.length > 0
@@ -442,7 +589,7 @@ export default function TrackingScreen() {
     };
   }, [pickupCoords?.lat, pickupCoords?.lng, dropoffCoords?.lat, dropoffCoords?.lng, routeRefreshTick]);
 
-  // Road-snapped polyline + ETA from Google Directions (traffic-aware when available); refreshes when driver moves or on a timer.
+  // Directions polyline refresh (expensive) — decoupled from per-second driver GPS; backend ETA is primary.
   useEffect(() => {
     const GOOGLE_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
     if (!GOOGLE_KEY) {
@@ -454,13 +601,17 @@ export default function TrackingScreen() {
       snappedPolylineKeyRef.current = '';
       return;
     }
-    const originCoords = tripStatus === 'ongoing' ? pickupCoords : (liveDriverCoords ?? pickupCoords);
+    if (tripStatus === 'accepted' && serverEtaSeconds != null) {
+      setDirectionsEtaMin(null);
+      return;
+    }
+    const originCoords = tripStatus === 'ongoing' ? pickupCoords : pickupCoords;
     const destCoords = tripStatus === 'ongoing' ? dropoffCoords : pickupCoords;
     if (!originCoords || !destCoords) {
       setDirectionsEtaMin(null);
       return;
     }
-    const key = `${tripStatus === 'ongoing' ? 'drop' : 'pickup'}|${originCoords.lat.toFixed(3)},${originCoords.lng.toFixed(3)}|${destCoords.lat.toFixed(3)},${destCoords.lng.toFixed(3)}|t${routeRefreshTick}`;
+    const key = `${tripStatus}|${originCoords.lat.toFixed(4)},${originCoords.lng.toFixed(4)}|${destCoords.lat.toFixed(4)},${destCoords.lng.toFixed(4)}|t${routeRefreshTick}`;
     if (key === snappedPolylineKeyRef.current) return;
     snappedPolylineKeyRef.current = key;
     fetchDirections(originCoords.lat, originCoords.lng, destCoords.lat, destCoords.lng, GOOGLE_KEY)
@@ -496,17 +647,7 @@ export default function TrackingScreen() {
       .catch(() => {
         setDirectionsEtaMin(null);
       });
-  }, [
-    tripStatus,
-    routeRefreshTick,
-    effectiveTripId,
-    pickupCoords?.lat,
-    pickupCoords?.lng,
-    dropoffCoords?.lat,
-    dropoffCoords?.lng,
-    liveDriverCoords?.lat,
-    liveDriverCoords?.lng,
-  ]);
+  }, [tripStatus, routeRefreshTick, effectiveTripId, pickupCoords?.lat, pickupCoords?.lng, dropoffCoords?.lat, dropoffCoords?.lng, serverEtaSeconds]);
 
   const mapTitle =
     tripStatus === 'accepted'
@@ -531,7 +672,9 @@ export default function TrackingScreen() {
           ? 'Your trip is currently in progress'
           : tripStatus === 'pending_payment'
             ? financialPaymentPending
-              ? 'Pay your driver (cash or in-app) or open trip receipt to settle.'
+              ? isCashPaymentMethod(tripPaymentMethod)
+                ? 'Pay your driver in cash, then confirm on the receipt.'
+                : `Settle your fare · ${paymentMetaDisplay.line}`
               : 'Confirm safe arrival or Invisible Shield steps so we can finalize your trip.'
             : tripStatus === 'cancelled'
               ? 'Your trip was cancelled.'
@@ -559,8 +702,47 @@ export default function TrackingScreen() {
       const screenStatus = shieldPendingConfirmation || safeArrivalPendingConfirmation ? 'pending_payment' : normalizedStatus;
       setTripStatus(screenStatus);
       setPaymentStatus(data.payment_status || 'pending');
-      setDriverInfo(data.driver_info || null);
-      setDriverLocation(data.driver_location || null);
+      const normalizedDriver = normalizeDriverInfo(data.driver_info);
+      setDriverInfo(normalizedDriver);
+      setTripDriverCache(normalizedDriver);
+      const le = data.live_eta as Record<string, unknown> | undefined;
+      const rawDl = data.driver_location as Record<string, unknown> | undefined;
+      const statusPing = parseTrackingPing({
+        driver_location: data.driver_location,
+        eta_seconds:
+          le?.eta_seconds != null
+            ? Number(le.eta_seconds)
+            : rawDl?.eta_seconds != null
+              ? Number(rawDl.eta_seconds)
+              : undefined,
+        distance_remaining_km:
+          le?.distance_km != null
+            ? Number(le.distance_km)
+            : rawDl?.distance_km != null
+              ? Number(rawDl.distance_km)
+              : undefined,
+        speed_kmh:
+          data.current_speed_kmh != null
+            ? Number(data.current_speed_kmh)
+            : rawDl?.speed_kmh != null
+              ? Number(rawDl.speed_kmh)
+              : le?.average_speed_kmh != null
+                ? Number(le.average_speed_kmh)
+                : undefined,
+      });
+      if (statusPing.etaSeconds != null) {
+        setServerEtaSeconds(Math.max(0, Math.floor(statusPing.etaSeconds)));
+      }
+      if (statusPing.distanceKm != null) setDistanceRemainingKm(statusPing.distanceKm);
+      if (statusPing.trackingStatus) setTrackingStatus(statusPing.trackingStatus);
+      if (statusPing.speedKmh != null) setSpeedKmh(statusPing.speedKmh);
+      if (statusPing.location) {
+        const loc = statusPing.location;
+        lastDriverPingRef.current = loc;
+        lastLocationAtRef.current = Date.now();
+        setLocationStale(false);
+        setDriverLocation(loc);
+      }
       setGuardianAlert(data.guardian_alert || null);
       setFaceVerifiedAtStart(Boolean(data.face_verified_at_start));
       setRiderFaceVerifiedAtPickup(Boolean(data.rider_face_verified_at_pickup));
@@ -573,20 +755,15 @@ export default function TrackingScreen() {
 
       {
         const prev = useAppStore.getState().currentTrip;
-        if (prev) {
-          setCurrentTrip({
-            ...prev,
-            status: (screenStatus || prev.status) as typeof prev.status,
-            driver_id: data.driver_info?.driver_id || prev.driver_id,
-            geo_fence_trip_lock: data.geo_fence_trip_lock || (prev as any).geo_fence_trip_lock,
-            speed_spike_alert: data.speed_spike_alert || (prev as any).speed_spike_alert,
-            gps_spoofing_alert: data.gps_spoofing_alert || (prev as any).gps_spoofing_alert,
-            invisible_shield_mode: data.invisible_shield_mode || (prev as any).invisible_shield_mode,
-            safe_arrival_check: data.safe_arrival_check || (prev as any).safe_arrival_check,
-            rider_face_verified_at_pickup:
-              data.rider_face_verified_at_pickup ?? (prev as any).rider_face_verified_at_pickup,
-          });
-        }
+        setCurrentTrip(
+          mergeTripFromStatusPayload(
+            prev?.id === effectiveTripId ? prev : null,
+            effectiveTripId,
+            riderId,
+            data as Record<string, unknown>,
+            screenStatus,
+          ),
+        );
       }
 
       if (
@@ -620,18 +797,48 @@ export default function TrackingScreen() {
     } finally {
       setLoading(false);
     }
+  }, [effectiveTripId, riderId, router, securityPromptShown, setCurrentTrip]);
+
+  /** Legacy cash trips may still have payment_status pending after drop-off — heal once. */
+  useEffect(() => {
+    if (!effectiveTripId || tripStatus !== 'pending_payment') return;
+    if (!isCashPaymentMethod(tripPaymentMethod)) return;
+    const ps = String(paymentStatus || '').toLowerCase();
+    if (ps === 'completed' || ps === 'paid') return;
+    if (cashPaymentHealRef.current) return;
+    cashPaymentHealRef.current = true;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await confirmTripPayment(effectiveTripId);
+        if (cancelled) return;
+        setPaymentStatus('completed');
+        setCurrentTrip((prev) =>
+          prev?.id === effectiveTripId ? { ...prev, payment_status: 'completed' } : prev,
+        );
+        void fetchStatus();
+      } catch {
+        cashPaymentHealRef.current = false;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     effectiveTripId,
-    riderId,
-    router,
-    securityPromptShown,
+    tripStatus,
+    tripPaymentMethod,
+    paymentStatus,
+    fetchStatus,
     setCurrentTrip,
   ]);
 
   const handleTripWs = useCallback(
     (msg: RiderTripWsMessage) => {
+      if (!riderId) return;
       const t = (msg.trip || {}) as Record<string, any>;
-      const normalizedStatus = normalizeTripStatus(msg.status, t.payment_status);
+      const hasTripBlob = Boolean(msg.trip && Object.keys(t).length > 0);
+      const normalizedStatus = normalizeTripStatus(msg.status ?? tripStatusRef.current, t.payment_status);
       const shieldPendingConfirmation =
         normalizedStatus === 'completed' &&
         Boolean(t.invisible_shield_mode?.active) &&
@@ -642,6 +849,50 @@ export default function TrackingScreen() {
         Boolean(t.safe_arrival_check?.required) &&
         !t.safe_arrival_check?.confirmed_at;
       const screenStatus = shieldPendingConfirmation || safeArrivalPendingConfirmation ? 'pending_payment' : normalizedStatus;
+      const statusChanged = screenStatus !== tripStatusRef.current;
+
+      const trackingPing = parseTrackingPing({
+        driver_location: msg.driver_location,
+        eta_seconds: msg.eta_seconds,
+        distance_remaining_km: msg.distance_remaining_km,
+        distance_remaining: (msg as Record<string, unknown>).distance_remaining as
+          | number
+          | undefined,
+        speed_kmh: (msg as Record<string, unknown>).speed_kmh as number | undefined,
+      });
+
+      if (trackingPing.etaSeconds != null) {
+        setServerEtaSeconds(Math.max(0, Math.floor(trackingPing.etaSeconds)));
+      }
+      if (trackingPing.distanceKm != null) {
+        setDistanceRemainingKm(trackingPing.distanceKm);
+      }
+      if (trackingPing.trackingStatus) {
+        setTrackingStatus(trackingPing.trackingStatus);
+      }
+      if (trackingPing.speedKmh != null) {
+        setSpeedKmh(trackingPing.speedKmh);
+      }
+
+      if (trackingPing.location) {
+        const loc = trackingPing.location;
+        if (driverPingMovedEnough(lastDriverPingRef.current, loc)) {
+          lastDriverPingRef.current = loc;
+          lastLocationAtRef.current = Date.now();
+          setLocationStale(false);
+          setDriverLocation(loc);
+          const now = Date.now();
+          if (now - lastRouteBumpRef.current > 45000) {
+            lastRouteBumpRef.current = now;
+            setRouteRefreshTick((n) => n + 1);
+          }
+        }
+      }
+
+      if (!statusChanged && !hasTripBlob) {
+        return;
+      }
+
       setTripStatus(screenStatus);
       if (t.payment_status) setPaymentStatus(String(t.payment_status));
       setFaceVerifiedAtStart(Boolean(t.face_verified_at_start));
@@ -652,55 +903,52 @@ export default function TrackingScreen() {
       setDriverStopReason((t.driver_stop_reason as any) || null);
       setInvisibleShieldMode(t.invisible_shield_mode || null);
       setSafeArrivalCheck(t.safe_arrival_check || null);
-      const dl = msg.driver_location as { lat?: unknown; lng?: unknown; updated_at?: string } | undefined;
-      if (
-        dl &&
-        typeof dl.lat === 'number' &&
-        typeof dl.lng === 'number' &&
-        Number.isFinite(dl.lat) &&
-        Number.isFinite(dl.lng)
-      ) {
-        setDriverLocation({
-          lat: dl.lat,
-          lng: dl.lng,
-          updated_at: typeof dl.updated_at === 'string' ? dl.updated_at : undefined,
-        });
-      }
+
       if (t.driver_id) {
-        // Merge with existing driverInfo to preserve profile_image, face_image and real rating
-        setDriverInfo((prev: any) => ({
-          ...(prev || {}),
-          driver_id: t.driver_id,
-          name: t.driver_name || prev?.name || 'Driver',
-          // Prefer real rating from the initial full load; fall back to trip's driver_rating
-          rating: prev?.rating ?? prev?.avg_rating ?? t.driver_rating ?? null,
-          vehicle: t.vehicle_model || prev?.vehicle || 'Vehicle',
-          plate: t.vehicle_plate || prev?.plate || '',
-          color: t.vehicle_color || prev?.color || '',
-          // Always preserve image + trip stats from the initial full load
-          profile_image: prev?.profile_image || null,
-          face_image: prev?.face_image || null,
-          total_trips: prev?.total_trips ?? t.total_trips,
-          completed_trips: prev?.completed_trips ?? t.completed_trips,
-        }));
+        setDriverInfo((prev: any) =>
+          normalizeDriverInfo({
+            ...(prev || {}),
+            driver_id: t.driver_id,
+            name: t.driver_name || prev?.name || 'Driver',
+            rating: prev?.rating ?? prev?.avg_rating ?? t.driver_rating ?? null,
+            vehicle: t.vehicle_model || prev?.vehicle || 'Vehicle',
+            plate: t.vehicle_plate || prev?.plate || '',
+            color: t.vehicle_color || prev?.color || '',
+            profile_image: prev?.profile_image || null,
+            face_image: prev?.face_image || null,
+            total_trips: prev?.total_trips ?? t.total_trips,
+            completed_trips: prev?.completed_trips ?? t.completed_trips,
+          }),
+        );
       }
-      {
+
+      if (hasTripBlob) {
         const prev = useAppStore.getState().currentTrip;
-        if (prev) {
-          setCurrentTrip({
-            ...prev,
-            status: (screenStatus || prev.status) as typeof prev.status,
-            driver_id: t.driver_id || prev.driver_id,
-            fare: t.fare != null ? Number(t.fare) : prev.fare,
-            geo_fence_trip_lock: t.geo_fence_trip_lock || (prev as any).geo_fence_trip_lock,
-            speed_spike_alert: t.speed_spike_alert || (prev as any).speed_spike_alert,
-            gps_spoofing_alert: t.gps_spoofing_alert || (prev as any).gps_spoofing_alert,
-            invisible_shield_mode: t.invisible_shield_mode || (prev as any).invisible_shield_mode,
-            safe_arrival_check: t.safe_arrival_check || (prev as any).safe_arrival_check,
-            rider_face_verified_at_pickup:
-              t.rider_face_verified_at_pickup ?? (prev as any).rider_face_verified_at_pickup,
-          });
-        }
+        const priorDriver = normalizeDriverInfo(driverInfoRef.current);
+        setCurrentTrip(
+          mergeTripFromStatusPayload(
+            prev?.id === effectiveTripId ? prev : null,
+            effectiveTripId,
+            riderId,
+            {
+              ...t,
+              status: screenStatus,
+              driver_info:
+                t.driver_id || priorDriver
+                  ? {
+                      ...(priorDriver || {}),
+                      driver_id: t.driver_id || priorDriver?.driver_id,
+                      name: t.driver_name || priorDriver?.name,
+                      vehicle_model: t.vehicle_model || priorDriver?.vehicle,
+                      vehicle_plate: t.vehicle_plate || priorDriver?.plate,
+                      vehicle_color: t.vehicle_color || priorDriver?.color,
+                      driver_rating: t.driver_rating ?? priorDriver?.rating,
+                    }
+                  : undefined,
+            },
+            screenStatus,
+          ),
+        );
       }
 
       if (
@@ -708,7 +956,7 @@ export default function TrackingScreen() {
         !pickupAlertSentRef.current &&
         arrivedPromptShownRef.current !== effectiveTripId
       ) {
-        pickupAlertSentRef.current    = true;
+        pickupAlertSentRef.current = true;
         arrivedPromptShownRef.current = effectiveTripId;
         setSecurityPromptShown(true);
         if (identityModalShownRef.current !== effectiveTripId) {
@@ -720,16 +968,57 @@ export default function TrackingScreen() {
       if (screenStatus === 'cancelled') {
         setCurrentTrip(null);
         navigateOnce(`cancelled-${effectiveTripId}`, () => router.replace('/(rider-tabs)/rider-home'));
+        return;
       }
       if (screenStatus === 'completed') {
         navigateOnce(`receipt-${effectiveTripId}`, () =>
           router.replace({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)
         );
+        return;
       }
-      void fetchStatus();
+      if (statusChanged) {
+        void fetchStatus();
+      }
     },
-    [effectiveTripId, router, setCurrentTrip, fetchStatus, navigateOnce]
+    [effectiveTripId, riderId, router, setCurrentTrip, fetchStatus, navigateOnce]
   );
+
+  useFocusEffect(
+    useCallback(() => {
+      if (!effectiveTripId || !riderId) return;
+      void fetchStatus();
+    }, [effectiveTripId, riderId, fetchStatus]),
+  );
+
+  useEffect(() => {
+    if (!effectiveTripId || !riderId) return;
+    const prev = useAppStore.getState().currentTrip;
+    if (prev?.id === effectiveTripId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await getActiveTrip(riderId);
+        if (cancelled) return;
+        const payload = res?.data;
+        if (payload?.active && payload?.trip?.id === effectiveTripId) {
+          const trip = payload.trip as Record<string, unknown>;
+          const st = normalizeTripStatus(
+            String(trip.status || ''),
+            String(trip.payment_status || ''),
+          );
+          setCurrentTrip(
+            mergeTripFromStatusPayload(null, effectiveTripId, riderId, trip, st),
+          );
+          setTripStatus(st);
+        }
+      } catch {
+        /* keep polling */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [effectiveTripId, riderId, setCurrentTrip]);
 
   const { connected: riderWsConnected } = useRiderTripRealtime({
     riderId,
@@ -738,6 +1027,29 @@ export default function TrackingScreen() {
     watchTripId: effectiveTripId || null,
     onTripUpdate: handleTripWs,
   });
+
+  useEffect(() => {
+    if (!__DEV__ || !['accepted', 'ongoing'].includes(tripStatus)) return;
+    const label = tripStatus === 'ongoing' ? 'ON TRIP REAL-TIME SYNC' : 'TRACKING STATE SYNC';
+    console.log(`=== ${label} ===`);
+    console.log('Driver location:', driverLocation);
+    console.log('Distance remaining (km):', distanceRemainingKm);
+    console.log('Speed (km/h):', speedKmh);
+    console.log('Server ETA (s):', serverEtaSeconds);
+    console.log('Display ETA (s):', liveEta.etaSeconds);
+    console.log('Tracking status:', trackingStatus);
+    console.log('WS connected:', riderWsConnected);
+    console.log('========================');
+  }, [
+    tripStatus,
+    driverLocation,
+    distanceRemainingKm,
+    speedKmh,
+    serverEtaSeconds,
+    liveEta.etaSeconds,
+    trackingStatus,
+    riderWsConnected,
+  ]);
 
   useEffect(() => {
     if (!effectiveTripId || !riderId) {
@@ -760,6 +1072,43 @@ export default function TrackingScreen() {
       clearInterval(interval);
     };
   }, [effectiveTripId, riderId, fetchStatus, riderWsConnected, tripStatus]);
+
+  useEffect(() => {
+    if (!effectiveTripId || !isRiderMapLiveTripStatus(tripStatus)) return;
+    let cancelled = false;
+    void (async () => {
+      const route = await fetchTripRoute(effectiveTripId);
+      if (cancelled || !route?.waypoints?.length) return;
+      setSnappedPolyline(
+        route.waypoints.map((p) => ({ latitude: p.lat, longitude: p.lng })),
+      );
+    })();
+    const pullEta = () => {
+      void fetchTripEta(effectiveTripId).then((eta) => {
+        if (!eta) return;
+        setServerEtaSeconds(eta.eta_seconds);
+        setTrackingStatus(eta.status);
+        if (Number.isFinite(eta.distance_km)) setDistanceRemainingKm(eta.distance_km);
+        if (Number.isFinite(eta.average_speed) && eta.average_speed > 0) {
+          setSpeedKmh(eta.average_speed);
+        }
+      });
+    };
+    if (!riderWsConnected) pullEta();
+    const etaIv = setInterval(pullEta, riderTripEtaFallbackPollMs(riderWsConnected));
+    return () => {
+      cancelled = true;
+      clearInterval(etaIv);
+    };
+  }, [effectiveTripId, tripStatus, riderWsConnected]);
+
+  useEffect(() => {
+    if (!isRiderMapLiveTripStatus(tripStatus)) return;
+    const staleIv = setInterval(() => {
+      setLocationStale(Date.now() - lastLocationAtRef.current > 22000);
+    }, 4000);
+    return () => clearInterval(staleIv);
+  }, [tripStatus]);
 
   // Check favorite status whenever driverInfo.driver_id becomes known
   useEffect(() => {
@@ -790,7 +1139,7 @@ export default function TrackingScreen() {
     if (Platform.OS !== 'web') {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     }
-    const t = setTimeout(() => setAcceptedBanner(false), 3200);
+    const t = setTimeout(() => setAcceptedBanner(false), RIDER_DRIVER_FOUND_HANDOFF_MS);
     return () => clearTimeout(t);
   }, [fromBookHandoff, tripStatus]);
 
@@ -834,8 +1183,7 @@ export default function TrackingScreen() {
       void Haptics.selectionAsync();
     }
     const openDetails = () => setTripDetailsExpanded(true);
-    const openShare = () =>
-      router.push({ pathname: '/rider/share-trip', params: { tripId: effectiveTripId } } as any);
+    const openShare = () => openShareTrip(router, effectiveTripId);
     const openSupport = () => router.push('/support' as any);
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(
@@ -1233,7 +1581,7 @@ export default function TrackingScreen() {
     if (financialPaymentPending) {
       items.push({
         id: 'pay',
-        label: 'Pay fare or confirm cash with driver',
+        label: paymentChecklistPayLabel(tripPaymentMethod),
         completed: false,
         onPress: () =>
           router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any),
@@ -1267,6 +1615,7 @@ export default function TrackingScreen() {
     return items;
   }, [
     financialPaymentPending,
+    tripPaymentMethod,
     tripStatus,
     safeArrivalCheck,
     invisibleShieldMode,
@@ -1283,55 +1632,61 @@ export default function TrackingScreen() {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#0A0F1A" />
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
-          <TouchableOpacity 
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
-          </TouchableOpacity>
-          <View style={styles.headerTitleWrap}>
-            {riderMapFirst && tripStatus === 'ongoing' ? (
-              <View style={styles.headerWordmarkRow} pointerEvents="none">
-                <Text style={styles.headerWordNex}>NEX</Text>
-                <Text style={styles.headerWordRyde}>RYDE</Text>
-              </View>
+      <SafeAreaView style={styles.safeArea} edges={mapOverlayMode ? [] : undefined}>
+        {!mapOverlayMode ? (
+          <View style={[styles.header, { paddingHorizontal: flow.padH }]}>
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+              <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+            </TouchableOpacity>
+            <View style={styles.headerTitleWrap}>
+              {riderMapFirst && tripStatus === 'ongoing' ? (
+                <View style={styles.headerWordmarkRow} pointerEvents="none">
+                  <Text style={styles.headerWordNex}>NEX</Text>
+                  <Text style={styles.headerWordRyde}>RYDE</Text>
+                </View>
+              ) : (
+                <Text style={styles.headerTitle} numberOfLines={1}>
+                  {tripStatus === 'accepted'
+                    ? 'Driver on the way'
+                    : tripStatus === 'arrived'
+                      ? 'Driver is here'
+                      : tripStatus === 'ongoing'
+                        ? 'Trip in Progress'
+                        : tripStatus === 'pending_payment'
+                          ? financialPaymentPending
+                            ? 'Trip completed — pay driver'
+                            : 'Trip completed — safety check'
+                          : tripStatus === 'cancelled'
+                            ? 'Trip Cancelled'
+                            : 'Finding Driver'}
+                </Text>
+              )}
+            </View>
+            {riderMapFirst ? (
+              <TouchableOpacity
+                style={styles.headerMenuBtn}
+                onPress={handleRideTripMenu}
+                hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                accessibilityRole="button"
+                accessibilityLabel="Trip menu"
+              >
+                <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.lightTextPrimary} />
+              </TouchableOpacity>
             ) : (
-              <Text style={styles.headerTitle} numberOfLines={1}>
-                {tripStatus === 'accepted'
-                  ? 'Driver on the way'
-                  : tripStatus === 'arrived'
-                    ? 'Driver is here'
-                    : tripStatus === 'ongoing'
-                      ? 'Trip in Progress'
-                      : tripStatus === 'pending_payment'
-                        ? financialPaymentPending
-                          ? 'Trip completed — pay driver'
-                          : 'Trip completed — safety check'
-                        : tripStatus === 'cancelled'
-                          ? 'Trip Cancelled'
-                          : 'Finding Driver'}
-              </Text>
+              <View style={styles.placeholder} />
             )}
           </View>
-          {riderMapFirst ? (
-            <TouchableOpacity
-              style={styles.headerMenuBtn}
-              onPress={handleRideTripMenu}
-              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
-              accessibilityRole="button"
-              accessibilityLabel="Trip menu"
-            >
-              <Ionicons name="ellipsis-horizontal" size={22} color={COLORS.lightTextPrimary} />
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.placeholder} />
-          )}
-        </View>
+        ) : (
+          <RiderTrackingMapChrome
+            topInset={insets.top}
+            padH={flow.padH}
+            onBack={() => router.back()}
+            onMenu={handleRideTripMenu}
+            phaseLabel={tripStatus === 'ongoing' ? 'On trip' : null}
+          />
+        )}
 
-        {acceptedBanner ? (
+        {acceptedBanner && !mapOverlayMode ? (
           <View
             style={[styles.acceptedToast, { top: insets.top + 52 }]}
             pointerEvents="none"
@@ -1345,7 +1700,7 @@ export default function TrackingScreen() {
             >
               <Ionicons name="checkmark-circle" size={22} color="#6EE7B7" />
               <View style={{ flex: 1 }}>
-                <Text style={styles.acceptedToastTitle}>Trip accepted</Text>
+                <Text style={styles.acceptedToastTitle}>Driver on the way</Text>
                 <Text style={styles.acceptedToastSub} numberOfLines={1}>
                   {rideAcceptedSubtitle}
                 </Text>
@@ -1359,6 +1714,7 @@ export default function TrackingScreen() {
             styles.content,
             { paddingHorizontal: riderMapFirst ? 0 : flow.padH },
             riderMapFirst && styles.mapFirstContentWrap,
+            mapOverlayMode && styles.contentMapOverlay,
           ]}
         >
           {!riderMapFirst && isFindingDriverPhase ? (
@@ -1408,19 +1764,18 @@ export default function TrackingScreen() {
                 routeCoordinates={routePolyline}
               />
             ) : (
-              (() => {
-                const RideMap = require('@/src/components/RideMap.native').default;
-                return (
                   <View
                     style={
-                      riderMapFirst
-                        ? {
-                            height: mapFirstPanelHeight,
-                            width: '100%',
-                            marginBottom: SPACING.sm,
-                            paddingHorizontal: Math.max(SPACING.sm, Math.round(flow.padH * 0.85)),
-                          }
-                        : { flex: 1, minHeight: 260, marginBottom: SPACING.lg }
+                      mapOverlayMode
+                        ? styles.mapFullBleed
+                        : riderMapFirst
+                          ? {
+                              height: mapFirstPanelHeight,
+                              width: '100%',
+                              marginBottom: SPACING.sm,
+                              paddingHorizontal: Math.max(SPACING.sm, Math.round(flow.padH * 0.85)),
+                            }
+                          : { flex: 1, minHeight: 260, marginBottom: SPACING.lg }
                     }
                   >
                     <RideMap
@@ -1431,8 +1786,21 @@ export default function TrackingScreen() {
                       directionsEtaMin={directionsEtaMin}
                       pickup={currentTrip?.pickup_location?.address || (params.pickup as string) || 'Pickup'}
                       destination={currentTrip?.dropoff_location?.address || (params.destination as string) || 'Destination'}
-                      activeDriverLocation={liveDriverCoords}
-                      activeDriverMoving={Boolean(driverInfo?.is_moving)}
+                      activeDriverLocation={
+                        liveDriverCoords
+                          ? {
+                              ...liveDriverCoords,
+                              heading:
+                                Number(driverLocation?.heading) ||
+                                undefined,
+                            }
+                          : null
+                      }
+                      activeDriverMoving={
+                        Boolean(driverInfo?.is_moving) ||
+                        (liveDriverCoords != null && !locationStale)
+                      }
+                      serverEtaSeconds={serverEtaSeconds}
                       activeDriverMeta={{
                         name: driverInfo?.name,
                         vehicle: driverInfo?.vehicle,
@@ -1480,8 +1848,6 @@ export default function TrackingScreen() {
                       onCancelRide={promptCancelRide}
                     />
                   </View>
-                );
-              })()
             )
           ) : (
             <View style={styles.mapPlaceholder}>
@@ -1519,18 +1885,16 @@ export default function TrackingScreen() {
               <View style={styles.identityRow}>
                 {/* Avatar */}
                 <View style={[styles.idAvatarWrap, { borderColor: tripStatus === 'arrived' ? '#22E5A0' : '#334155' }]}>
-                  {(driverInfo.profile_image || driverInfo.face_image) ? (
-                    <Image
-                      source={{ uri: driverInfo.profile_image || driverInfo.face_image }}
-                      style={styles.idAvatar}
-                    />
-                  ) : (
-                    <LinearGradient colors={['#1e40af', '#7c3aed']} style={styles.idAvatar}>
-                      <Text style={{ fontSize: 22, fontWeight: '900', color: '#FFF' }}>
-                        {(driverInfo.name || 'D').charAt(0).toUpperCase()}
-                      </Text>
-                    </LinearGradient>
-                  )}
+                  <TripProfileAvatar
+                    size={56}
+                    faceUri={driverAvatarSources(driverInfo).face}
+                    profileUri={driverAvatarSources(driverInfo).profile}
+                    borderWidth={0}
+                    borderColor="transparent"
+                    accessibilityLabel={`Photo of ${formatDriverDisplayField(driverInfo.name) || 'driver'}`}
+                    showOnlineDot={tripStatus === 'arrived'}
+                    onlineDotColor="#22E5A0"
+                  />
                   {tripStatus === 'arrived' && (
                     <View style={styles.idArrivedDot}>
                       <Ionicons name="location" size={10} color="#022C22" />
@@ -1540,12 +1904,12 @@ export default function TrackingScreen() {
 
                 {/* Driver name + vehicle */}
                 <View style={{ flex: 1, gap: 3 }}>
-                  <Text style={styles.idName}>{driverInfo.name || 'Your Driver'}</Text>
-                  <Text style={styles.idVehicle}>{driverInfo.vehicle || 'Vehicle'}</Text>
-                  {driverInfo.color ? (
+                  <Text style={styles.idName}>{formatDriverDisplayField(driverInfo.name) || 'Your Driver'}</Text>
+                  <Text style={styles.idVehicle}>{formatDriverDisplayField(driverInfo.vehicle) || 'Vehicle'}</Text>
+                  {formatDriverDisplayField(driverInfo.color) ? (
                     <View style={styles.idColorRow}>
-                      <View style={[styles.idColorDot, { backgroundColor: resolveTrackingColorDot(driverInfo.color) }]} />
-                      <Text style={styles.idColorText}>{driverInfo.color}</Text>
+                      <View style={[styles.idColorDot, { backgroundColor: resolveTrackingColorDot(formatDriverDisplayField(driverInfo.color)) }]} />
+                      <Text style={styles.idColorText}>{formatDriverDisplayField(driverInfo.color)}</Text>
                     </View>
                   ) : null}
                   {driverInfo.rating != null && (
@@ -1583,7 +1947,7 @@ export default function TrackingScreen() {
                       <View style={{ flex: 1, backgroundColor: '#FFF' }} />
                       <View style={{ flex: 1, backgroundColor: '#006600' }} />
                     </View>
-                    <Text style={styles.idPlateNumber}>{driverInfo.plate}</Text>
+                    <Text style={styles.idPlateNumber}>{formatDriverDisplayField(driverInfo.plate)}</Text>
                   </View>
                   <Text style={styles.idPlateSub}>Verify this number on the vehicle</Text>
                 </View>
@@ -1735,7 +2099,9 @@ export default function TrackingScreen() {
                           ? 'You can contact your driver using chat or call'
                           : tripStatus === 'pending_payment'
                             ? financialPaymentPending
-                              ? `Pay your driver or use in-app payment · status: ${paymentStatus || 'pending'}`
+                              ? isCashPaymentMethod(tripPaymentMethod)
+                                ? 'Pay your driver in cash, then confirm below.'
+                                : `Settle your fare · ${paymentMetaDisplay.line}`
                               : 'Confirm the safety prompts below — payment may already be recorded.'
                             : tripStatus === 'cancelled'
                               ? 'You can return to home and book another ride'
@@ -2075,7 +2441,7 @@ export default function TrackingScreen() {
                     onPress={() => router.push({ pathname: '/rider/trip-receipt', params: { tripId: effectiveTripId } } as any)}
                     activeOpacity={0.88}
                     accessibilityRole="button"
-                    accessibilityLabel="Complete payment for this trip"
+                    accessibilityLabel={paymentDockPayButtonLabel(tripPaymentMethod)}
                   >
                     <LinearGradient
                       colors={[...RIDER_MAP_PRIMARY_CTA_GRADIENT]}
@@ -2083,8 +2449,14 @@ export default function TrackingScreen() {
                       end={{ x: 1, y: 1 }}
                       style={[styles.actionBtn, styles.actionBtnPayFareGrad]}
                     >
-                      <Ionicons name="wallet-outline" size={20} color="#022C22" />
-                      <Text style={[styles.actionBtnText, styles.actionBtnPayFareText]}>Complete payment</Text>
+                      <Ionicons
+                        name={isCashPaymentMethod(tripPaymentMethod) ? 'cash' : 'wallet'}
+                        size={20}
+                        color="#022C22"
+                      />
+                      <Text style={[styles.actionBtnText, styles.actionBtnPayFareText]}>
+                        {paymentDockPayButtonLabel(tripPaymentMethod)}
+                      </Text>
                     </LinearGradient>
                   </TouchableOpacity>
                 ) : null}
@@ -2151,7 +2523,18 @@ export default function TrackingScreen() {
 
         {showMapFirstOverlayDock ? (
           <>
-            <RiderLiveTripDockFade height={Math.min(280, mapFirstScrollPadBottom)} />
+            {showMapFirstLiveDock ? (
+              <RiderTrackingRecenterButton
+                bottom={mapFirstScrollPadBottom + 12}
+                right={flow.padH + 8}
+                onPress={handleRecenterMap}
+              />
+            ) : null}
+            {tripStatus === 'ongoing' ? (
+              <RiderOnTripRadiantDockFade height={Math.min(340, mapFirstScrollPadBottom + 48)} />
+            ) : (
+              <RiderLiveTripDockFade height={Math.min(300, mapFirstScrollPadBottom + 40)} />
+            )}
             {showMapFirstFindingDock ? (
               <RiderFindingTripDock
                 loading={loading}
@@ -2178,6 +2561,7 @@ export default function TrackingScreen() {
                 loading={loading}
                 fareDisplay={riderMapFareDisplay}
                 financialPaymentPending={financialPaymentPending}
+                paymentMethod={tripPaymentMethod}
                 paymentStatus={paymentStatus}
                 checklist={paymentChecklist}
                 onPay={() =>
@@ -2191,57 +2575,86 @@ export default function TrackingScreen() {
                 bottomInset={insets.bottom}
               />
             ) : null}
-            {showMapFirstLiveDock ? (
-            <RiderLiveTripDock
-              tripStatus={tripStatus}
-              loading={loading}
-              driverInfo={driverInfo}
-              driverPickupApproach={driverPickupApproach}
-              riderProfileImage={user?.profile_image ?? null}
-              riderDisplayName={user?.name ?? null}
-              identityConfirmed={identityConfirmed}
-              driverLocation={driverLocation}
-              driverMoving={Boolean(driverInfo?.is_moving)}
-              fareDisplay={riderMapFareDisplay}
-              distanceKm={currentTrip?.distance_km ?? null}
-              etaMin={directionsEtaMin}
-              durationMins={currentTrip?.duration_mins ?? null}
-              pickupLabel={
-                (params.pickup as string) ||
-                currentTrip?.pickup_location?.address ||
-                'Your pickup'
-              }
-              destinationLabel={
-                (params.destination as string) ||
-                currentTrip?.dropoff_location?.address ||
-                'Destination'
-              }
-              callAllowed={callAllowed}
-              onCallDriver={handleCallDriverPress}
-              onChatDriver={() =>
-                router.push({ pathname: '/chat', params: { tripId: effectiveTripId } } as any)
-              }
-              onShowPickupCode={() =>
-                router.push({
-                  pathname: '/rider/security-code',
-                  params: { trip_id: effectiveTripId },
-                } as any)
-              }
-              onVerifyIdentity={() => setShowIdentityModal(true)}
-              onOpenTripDetails={() => setTripDetailsExpanded(true)}
-              onCancelRide={() => void handleCancelRide()}
-              onHelp={() => router.push('/support' as any)}
-              onWallet={() => router.push('/(rider-tabs)/rider-wallet' as any)}
-              onShare={() => router.push('/rider/share-trip' as any)}
-              bottomInset={insets.bottom}
-              isFavoriteDriver={isFavoriteDriver}
-              favoriteLoading={addingFavorite || checkingFavorite}
-              onToggleFavorite={
-                driverInfo?.driver_id && !isFavoriteDriver
-                  ? () => setShowFavoritePrompt(true)
-                  : undefined
-              }
-            />
+            {showMapFirstLiveDock && tripStatus === 'ongoing' ? (
+              <RiderOnTripRadiantDock
+                loading={loading}
+                driverInfo={driverInfo}
+                fareDisplay={riderMapFareDisplay}
+                totalTripKm={currentTrip?.distance_km ?? null}
+                distanceRemainingKm={distanceRemainingKm}
+                speedKmh={speedKmh ?? driverLocation?.speed_kmh ?? null}
+                serverEtaSeconds={serverEtaSeconds}
+                trackingStatus={trackingStatus}
+                locationStale={locationStale}
+                wsConnected={riderWsConnected}
+                callAllowed={callAllowed}
+                onCallDriver={handleCallDriverPress}
+                onChatDriver={() =>
+                  router.push({ pathname: '/chat', params: { tripId: effectiveTripId } } as any)
+                }
+                onShare={() => openShareTrip(router, effectiveTripId)}
+                onOpenTripDetails={() => setTripDetailsExpanded(true)}
+                bottomInset={insets.bottom}
+              />
+            ) : null}
+            {showMapFirstLiveDock && tripStatus !== 'ongoing' ? (
+              <RiderLiveTripDock
+                tripStatus={tripStatus}
+                loading={loading}
+                driverInfo={driverInfo}
+                driverPickupApproach={driverPickupApproach}
+                identityConfirmed={identityConfirmed}
+                driverLocation={driverLocation}
+                driverMoving={Boolean(driverInfo?.is_moving)}
+                fareDisplay={riderMapFareDisplay}
+                distanceKm={distanceRemainingKm}
+                etaMin={
+                  serverEtaSeconds != null
+                    ? liveEta.etaMinutes
+                    : liveEta.etaMinutes ?? directionsEtaMin
+                }
+                serverEtaSeconds={serverEtaSeconds}
+                trackingStatus={trackingStatus}
+                locationStale={locationStale}
+                wsConnected={riderWsConnected}
+                durationMins={currentTrip?.duration_mins ?? null}
+                pickupLabel={
+                  (params.pickup as string) ||
+                  currentTrip?.pickup_location?.address ||
+                  'Your pickup'
+                }
+                destinationLabel={
+                  (params.destination as string) ||
+                  currentTrip?.dropoff_location?.address ||
+                  'Destination'
+                }
+                callAllowed={callAllowed}
+                onCallDriver={handleCallDriverPress}
+                onChatDriver={() =>
+                  router.push({ pathname: '/chat', params: { tripId: effectiveTripId } } as any)
+                }
+                pickupCodeEnabled={currentTrip?.pickup_code_required !== false}
+                onShowPickupCode={() =>
+                  router.push({
+                    pathname: '/rider/security-code',
+                    params: { trip_id: effectiveTripId },
+                  } as any)
+                }
+                onVerifyIdentity={() => setShowIdentityModal(true)}
+                onOpenTripDetails={() => setTripDetailsExpanded(true)}
+                onCancelRide={() => void handleCancelRide()}
+                onHelp={() => router.push('/support' as any)}
+                onWallet={() => router.push('/(rider-tabs)/rider-wallet' as any)}
+                onShare={() => openShareTrip(router, effectiveTripId)}
+                bottomInset={insets.bottom}
+                isFavoriteDriver={isFavoriteDriver}
+                favoriteLoading={addingFavorite || checkingFavorite}
+                onToggleFavorite={
+                  driverInfo?.driver_id && !isFavoriteDriver
+                    ? () => setShowFavoritePrompt(true)
+                    : undefined
+                }
+              />
             ) : null}
           </>
         ) : null}
@@ -2267,15 +2680,18 @@ export default function TrackingScreen() {
       <DriverArrivalIdentityModal
         visible={showIdentityModal}
         driver={driverInfo ? {
-          driver_id: driverInfo.driver_id || '',
-          name: driverInfo.name || 'Driver',
+          driver_id: String(driverInfo.driver_id || ''),
+          name: formatDriverDisplayField(driverInfo.name) || 'Driver',
           rating: driverInfo.rating ?? driverInfo.avg_rating ?? null,
           profile_image: driverInfo.profile_image || null,
           face_image: driverInfo.face_image || null,
-          vehicle: driverInfo.vehicle || '',
-          plate: driverInfo.plate || '',
-          color: driverInfo.color || '',
-          vehicle_type: driverInfo.vehicle_type || driverInfo.vehicle || '',
+          vehicle: formatDriverDisplayField(driverInfo.vehicle) || 'Vehicle',
+          plate: formatDriverDisplayField(driverInfo.plate) || '',
+          color: formatDriverDisplayField(driverInfo.color) || '',
+          vehicle_type:
+            formatDriverDisplayField(driverInfo.vehicle_type) ||
+            formatDriverDisplayField(driverInfo.vehicle) ||
+            '',
         } : null}
         riderNearPickup={riderNearPickup}
         pickupCodeVerified={riderFaceVerifiedAtPickup}
@@ -2418,6 +2834,13 @@ const styles = StyleSheet.create({
   },
   mapFirstContentWrap: {
     paddingHorizontal: 0,
+  },
+  contentMapOverlay: {
+    flex: 1,
+  },
+  mapFullBleed: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   tripLiveStripOuter: {
     paddingHorizontal: SPACING.lg,

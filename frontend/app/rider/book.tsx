@@ -22,13 +22,14 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter, useLocalSearchParams, useFocusEffect } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { BlurView } from 'expo-blur';
 import Constants from 'expo-constants';
 import LocationAutocomplete from '@/src/components/LocationAutocomplete';
 import { useAppStore } from '@/src/store/appStore';
+import { useRiderHasActiveTrip } from '@/src/hooks/useRiderHasActiveTrip';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import {
   BACKEND_URL,
@@ -69,6 +70,7 @@ import { resolvePublicMediaUri } from '@/src/utils/resolvePublicMediaUri';
 import { fetchDrivingRoute } from '@/src/services/drivingRouteApi';
 import { useRiderTripRealtime, type RiderTripWsMessage } from '@/src/hooks/useRiderTripRealtime';
 import { isRiderMapLiveTripStatus } from '@/src/constants/tripRealtimeRhythm';
+import { tripLocationRecord } from '@/src/utils/tripCoords';
 import { TrafficAI, type TrafficRoute } from '@/src/services/trafficAI';
 import MapComponent from '@/src/components/MapComponent';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
@@ -78,6 +80,10 @@ import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { RIDER_PRIMARY_CTA_GRADIENT } from '@/src/constants/riderRideChrome';
+import {
+  RIDER_DRIVER_FOUND_HANDOFF_MS,
+  riderHandoffCountdownSec,
+} from '@/src/constants/riderTripHandoff';
 
 /** Set `EXPO_PUBLIC_BOOKING_PROMO=false` to hide the booking promo strip entirely. */
 const BOOKING_PROMO_ENABLED = String(process.env.EXPO_PUBLIC_BOOKING_PROMO ?? 'true').toLowerCase() !== 'false';
@@ -744,6 +750,8 @@ function BookInDriveStyle() {
     destLng?: string;
   }>();
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
+  const currentTrip = useAppStore((s) => s.currentTrip);
+  const hasActiveTrip = useRiderHasActiveTrip();
   const { user, userId: riderId, token, canCallAuthedApi } = useAuthedUserId();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
@@ -782,6 +790,14 @@ function BookInDriveStyle() {
   const searchCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [tripId, setTripId] = useState<string | null>(null);
   const [driverFound, setDriverFound] = useState<any>(null);
+
+  /** Active trip lives on tracking — block overlapping book UI. */
+  useFocusEffect(
+    useCallback(() => {
+      if (!hasActiveTrip || !currentTrip?.id) return;
+      router.replace({ pathname: '/rider/tracking', params: { tripId: currentTrip.id } } as any);
+    }, [hasActiveTrip, currentTrip?.id, router]),
+  );
   const driverPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const calculateInFlightRef = useRef(false);
   const offerInFlightRef = useRef(false);
@@ -899,13 +915,23 @@ function BookInDriveStyle() {
     }
   }, []);
 
-  /** After driver accepts, hand off to map-first tracking (one finding UI on book overlay). */
+  const [handoffCountdown, setHandoffCountdown] = useState<number | null>(null);
+  const handoffTickRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  /** After driver accepts — show "Driver found" briefly, then map-first tracking. */
   const navigateToLiveTracking = useCallback(
     (id: string, opts?: { immediate?: boolean }) => {
-      if (!id || trackingHandoffRef.current) return;
-      trackingHandoffRef.current = true;
+      if (!id) return;
       clearDriverPoll();
+      if (handoffTickRef.current) {
+        clearInterval(handoffTickRef.current);
+        handoffTickRef.current = null;
+      }
+      setHandoffCountdown(null);
       const go = () => {
+        if (trackingHandoffRef.current) return;
+        trackingHandoffRef.current = true;
+        setHandoffCountdown(null);
         router.replace({
           pathname: '/rider/tracking',
           params: {
@@ -915,19 +941,43 @@ function BookInDriveStyle() {
             fromBook: 'true',
           },
         } as any);
+        setSearchingForDriver(false);
       };
       if (opts?.immediate) {
-        setSearchingForDriver(false);
         go();
         return;
       }
-      setTimeout(() => {
-        setSearchingForDriver(false);
-        go();
-      }, 500);
+      if (trackingHandoffRef.current) return;
+      setTimeout(go, RIDER_DRIVER_FOUND_HANDOFF_MS);
     },
     [router, pickup, destination, clearDriverPoll],
   );
+
+  useEffect(() => {
+    if (!driverFound || !tripId || trackingHandoffRef.current) {
+      setHandoffCountdown(null);
+      if (handoffTickRef.current) {
+        clearInterval(handoffTickRef.current);
+        handoffTickRef.current = null;
+      }
+      return;
+    }
+    const total = riderHandoffCountdownSec(RIDER_DRIVER_FOUND_HANDOFF_MS);
+    setHandoffCountdown(total);
+    if (handoffTickRef.current) clearInterval(handoffTickRef.current);
+    handoffTickRef.current = setInterval(() => {
+      setHandoffCountdown((c) => {
+        if (c == null || c <= 1) return null;
+        return c - 1;
+      });
+    }, 1000);
+    return () => {
+      if (handoffTickRef.current) {
+        clearInterval(handoffTickRef.current);
+        handoffTickRef.current = null;
+      }
+    };
+  }, [driverFound, tripId]);
 
   /** Schedule screen with route context (“Later”) — lightweight, non-blocking. */
   const openScheduleRide = () => {
@@ -1215,30 +1265,12 @@ function BookInDriveStyle() {
         id,
         rider_id: riderId || '',
         driver_id: t?.driver_id || null,
-        pickup_location:
-          pl && typeof pl === 'object'
-            ? {
-                lat: Number(pl.lat),
-                lng: Number(pl.lng),
-                address: String(pl.address || ''),
-              }
-            : {
-                lat: pickupCoords?.lat || currentLocation?.lat || 0,
-                lng: pickupCoords?.lng || currentLocation?.lng || 0,
-                address: pickup,
-              },
-        dropoff_location:
-          dl && typeof dl === 'object'
-            ? {
-                lat: Number(dl.lat),
-                lng: Number(dl.lng),
-                address: String(dl.address || ''),
-              }
-            : {
-                lat: destinationCoords?.lat || 0,
-                lng: destinationCoords?.lng || 0,
-                address: destination,
-              },
+        pickup_location: tripLocationRecord(
+          pl,
+          pickupCoords ?? currentLocation,
+          pickup,
+        ),
+        dropoff_location: tripLocationRecord(dl, destinationCoords, destination),
         distance_km: Number(t?.distance_km ?? fareDetails?.distance_km ?? 0),
         duration_mins: Number(
           t?.duration_mins ??
@@ -2307,7 +2339,46 @@ function BookInDriveStyle() {
       const result = await res.json().catch(() => ({}));
       if (res.ok && (result.trip || result.success)) {
         const tid = result.trip?.id || result.trip_id || null;
+        const tripFromApi = result.trip as Record<string, unknown> | undefined;
         setTripId(tid);
+        if (tid && riderId) {
+          const pendingStatus =
+            tripFromApi?.status === 'pending_driver_offers' ? 'pending_driver_offers' : 'pending';
+          setCurrentTrip({
+            id: tid,
+            rider_id: riderId,
+            driver_id: (tripFromApi?.driver_id as string) || null,
+            pickup_location: tripLocationRecord(
+              tripFromApi?.pickup_location,
+              pickupCoords ?? currentLocation,
+              pickup,
+            ),
+            dropoff_location: tripLocationRecord(
+              tripFromApi?.dropoff_location,
+              destinationCoords,
+              destination,
+            ),
+            distance_km: Number(tripFromApi?.distance_km ?? fareForBid?.distance_km ?? 0),
+            duration_mins: Number(
+              tripFromApi?.duration_mins ??
+                fareForBid?.duration_mins ??
+                fareForBid?.duration_min ??
+                fareForBid?.estimated_time_minutes ??
+                0,
+            ),
+            fare: Number(tripFromApi?.fare ?? tripFromApi?.offered_fare ?? bid ?? 0),
+            surge_multiplier: Number(fareForBid?.surge_multiplier || 1),
+            status: pendingStatus,
+            payment_method: (tripFromApi?.payment_method as string) || payMethod,
+            payment_status: String(tripFromApi?.payment_status || 'pending'),
+            rider_rating: null,
+            driver_rating: null,
+            created_at: String(tripFromApi?.created_at || new Date().toISOString()),
+            accepted_at: null,
+            started_at: null,
+            completed_at: null,
+          });
+        }
         setSearchingForDriver(true);
         // Start cancellation countdown (90 s matches server offer expiry)
         setSearchCountdown(90);
@@ -2395,16 +2466,12 @@ function BookInDriveStyle() {
             id,
             rider_id: riderId || '',
             driver_id: data.driver_info.driver_id || null,
-            pickup_location: {
-              lat: pickupCoords?.lat || 0,
-              lng: pickupCoords?.lng || 0,
-              address: pickup,
-            },
-            dropoff_location: {
-              lat: destinationCoords?.lat || 0,
-              lng: destinationCoords?.lng || 0,
-              address: destination,
-            },
+            pickup_location: tripLocationRecord(
+              data.pickup_location,
+              pickupCoords ?? currentLocation,
+              pickup,
+            ),
+            dropoff_location: tripLocationRecord(data.dropoff_location, destinationCoords, destination),
             distance_km: Number(fareDetails?.distance_km || 0),
             duration_mins: Number(
               fareDetails?.duration_mins ||
@@ -2440,16 +2507,16 @@ function BookInDriveStyle() {
               id,
               rider_id: riderId || '',
               driver_id: finalData.driver_info.driver_id || null,
-              pickup_location: {
-                lat: pickupCoords?.lat || 0,
-                lng: pickupCoords?.lng || 0,
-                address: pickup,
-              },
-              dropoff_location: {
-                lat: destinationCoords?.lat || 0,
-                lng: destinationCoords?.lng || 0,
-                address: destination,
-              },
+              pickup_location: tripLocationRecord(
+                finalData.pickup_location,
+                pickupCoords ?? currentLocation,
+                pickup,
+              ),
+              dropoff_location: tripLocationRecord(
+                finalData.dropoff_location,
+                destinationCoords,
+                destination,
+              ),
               distance_km: Number(fareDetails?.distance_km || 0),
               duration_mins: Number(
               fareDetails?.duration_mins ||
@@ -3944,6 +4011,7 @@ function BookInDriveStyle() {
         routeMinLabel={searchRouteMinLabel}
         searchCountdown={searchCountdown}
         driverMatched={matchedDriverForOverlay}
+        handoffCountdownSec={handoffCountdown}
         onMenuPress={() => {
           if (Platform.OS !== 'web') void Haptics.selectionAsync();
           router.back();
@@ -3968,6 +4036,7 @@ function BookInDriveStyle() {
             Alert.alert('Chat unavailable', 'Trip is still being set up. Try again in a moment.');
             return;
           }
+          if (Platform.OS !== 'web') void Haptics.selectionAsync();
           router.push({ pathname: '/chat', params: { tripId } } as any);
         }}
       />

@@ -23,4 +23,13 @@ def rider_trip_payload_from_doc(trip: Optional[dict]) -> dict[str, Any]:
         "vehicle_color": trip.get("vehicle_color"),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
+        "pickup_code_required": bool(trip.get("pickup_code_required", True)),
+        "pickup_code_verified": bool(
+            trip.get("pickup_code_verified") or trip.get("security_code_verified")
+        ),
+        "pickup_code": (
+            trip.get("pickup_code") or trip.get("security_code")
+            if trip.get("pickup_code_required", True)
+            else None
+        ),
     }

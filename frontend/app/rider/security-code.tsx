@@ -71,6 +71,7 @@ export default function PickUpCodeScreen() {
   const [codeRevealed, setCodeRevealed] = useState(false);
   const [copied, setCopied] = useState(false);
   const [pickupAddress, setPickupAddress] = useState('');
+  const [pickupCodeRequired, setPickupCodeRequired] = useState(true);
 
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -115,6 +116,13 @@ export default function PickUpCodeScreen() {
 
   const applyTripPayload = useCallback(
     (trip: Record<string, any>, statusPayload?: Record<string, any>) => {
+      const required = trip.pickup_code_required !== false;
+      setPickupCodeRequired(required);
+      if (!required) {
+        setPickupCode('');
+        setTripStatus(String(trip.status || statusPayload?.status || ''));
+        return;
+      }
       const code = String(trip.pickup_code || trip.security_code || '');
       const verified = Boolean(trip.pickup_code_verified || trip.security_code_verified);
       setPickupCode(code);
@@ -485,6 +493,18 @@ export default function PickUpCodeScreen() {
             {/* Code */}
             {loading ? (
               <ActivityIndicator color="#34F5B8" size="large" style={styles.loader} />
+            ) : !pickupCodeRequired ? (
+              <View style={styles.offCard}>
+                <Ionicons name="keypad-outline" size={40} color="#64748B" />
+                <Text style={styles.offTitle}>Pickup code is off</Text>
+                <Text style={styles.offSub}>
+                  You turned off pickup codes in Settings. Your driver can start the trip without a
+                  code — still verify their plate and name.
+                </Text>
+                <TouchableOpacity style={styles.offBtn} onPress={() => router.back()} activeOpacity={0.88}>
+                  <Text style={styles.offBtnTxt}>Back to trip</Text>
+                </TouchableOpacity>
+              </View>
             ) : canShowCode ? (
               <TouchableOpacity
                 activeOpacity={0.92}
@@ -921,4 +941,33 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
   backTripTxt: { fontSize: 14, fontWeight: '700', color: 'rgba(255,255,255,0.45)' },
+  offCard: {
+    alignItems: 'center',
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    marginTop: SPACING.md,
+    borderRadius: BORDER_RADIUS.xl,
+    backgroundColor: 'rgba(15,23,42,0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    gap: 12,
+  },
+  offTitle: { fontSize: 20, fontWeight: '900', color: '#F8FAFC' },
+  offSub: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#94A3B8',
+    textAlign: 'center',
+    lineHeight: 21,
+  },
+  offBtn: {
+    marginTop: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    backgroundColor: 'rgba(52,245,184,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(52,245,184,0.35)',
+  },
+  offBtnTxt: { fontSize: 15, fontWeight: '800', color: '#34F5B8' },
 });

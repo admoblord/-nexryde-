@@ -13,10 +13,10 @@ interface Props {
 export function DriverStatusWidget({ isOnline }: Props) {
   const statusColor = isOnline ? '#22C55E' : '#64748B';
   const statusLabel = isOnline ? 'Online' : 'Offline';
-  const btnLabel = isOnline ? 'Resume' : 'Go Online';
+  const btnLabel = isOnline ? 'Open app' : 'Go Online';
   const btnBg = isOnline ? '#166534' : '#22C55E';
   const btnText = isOnline ? '#4ADE80' : '#052E16';
-  const actionUri = isOnline ? 'nexryde://action/resume' : 'nexryde://action/go_online';
+  const actionUri = isOnline ? 'nexryde://action/open_app' : 'nexryde://action/go_online';
 
   return (
     <FlexWidget
