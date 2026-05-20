@@ -228,6 +228,21 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
     const v = Number(raw.time_fee);
     return Number.isFinite(v) && v >= 0 ? v : null;
   })();
+  const distanceKm = (() => {
+    const v = Number(raw.distance_km);
+    return Number.isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null;
+  })();
+  const durationMins = (() => {
+    const v = Number(raw.duration_mins ?? raw.duration_minutes);
+    return Number.isFinite(v) && v > 0 ? Math.round(v) : null;
+  })();
+  const drop = raw.dropoff_location;
+  let dropoffLabel: string | null = null;
+  if (typeof drop === 'string' && drop.trim()) dropoffLabel = drop.trim();
+  else if (drop && typeof drop === 'object') {
+    const addr = (drop as Record<string, unknown>).address ?? (drop as Record<string, unknown>).name;
+    if (typeof addr === 'string' && addr.trim()) dropoffLabel = addr.trim();
+  }
   return {
     tripId: merged.id,
     tripDisplayId: `Trip ${formatTripShortIdForUi(merged.id)}`,
@@ -243,6 +258,9 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
     baseFareNgn,
     distanceFareNgn,
     timeFareNgn,
+    distanceKm,
+    durationMins,
+    dropoffLabel,
   };
 }
 

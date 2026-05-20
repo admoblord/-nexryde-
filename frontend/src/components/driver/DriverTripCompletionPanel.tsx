@@ -22,9 +22,9 @@ import { BlurView } from 'expo-blur';
 import * as Haptics from 'expo-haptics';
 import { DOCK_BLUR_INTENSITY } from '@/src/components/driver/driverDockTheme';
 
-const NEON = '#39FF14';
+const NEON = '#22C55E';
 const winH = Dimensions.get('window').height;
-const SHEET_HEIGHT = Math.max(440, Math.round(winH * 0.58));
+const SHEET_HEIGHT = Math.max(520, Math.round(winH * 0.88));
 
 export type TripCompletionPayload = {
   tripId: string;
@@ -32,8 +32,8 @@ export type TripCompletionPayload = {
   riderName: string;
   riderPhoto: string | null;
   fare: number;
-  paymentMethod: string;
-  paymentPending: boolean;
+  paymentMethod?: string;
+  paymentPending?: boolean;
   alreadyRated: boolean;
   mysteryBonusNgn?: number | null;
   riderRatingAvg?: number | null;
@@ -41,13 +41,15 @@ export type TripCompletionPayload = {
   baseFareNgn?: number | null;
   distanceFareNgn?: number | null;
   timeFareNgn?: number | null;
+  distanceKm?: number | null;
+  durationMins?: number | null;
+  dropoffLabel?: string | null;
 };
 
 type Props = {
   payload: TripCompletionPayload;
   onDismiss: () => void;
   onSubmitRating: (stars: number, comment: string) => Promise<void>;
-  /** Trip list / receipt path — secondary CTA in mock. */
   onViewDetails?: () => void;
 };
 
@@ -56,15 +58,94 @@ function formatFare(n: number): string {
   return `₦${Math.round(n).toLocaleString()}`;
 }
 
-function earningsBreakdownLine(p: TripCompletionPayload): string | null {
-  const b = p.baseFareNgn;
-  const d = p.distanceFareNgn;
-  const t = p.timeFareNgn;
-  if (b == null || d == null || t == null) return null;
-  if (![b, d, t].every((x) => Number.isFinite(x) && x >= 0)) return null;
-  const sum = Math.round(b + d + t);
-  if (sum <= 0) return null;
-  return `Base Fare ₦${Math.round(b).toLocaleString()} + Distance ₦${Math.round(d).toLocaleString()} + Time ₦${Math.round(t).toLocaleString()} = ₦${sum.toLocaleString()}`;
+function CompletionBrandHeader() {
+  return (
+    <View style={styles.brandHeader}>
+      <View style={styles.brandLeft}>
+        <LinearGradient colors={['#22C55E', '#16A34A']} style={styles.brandLogo}>
+          <Text style={styles.brandLogoTxt}>NX</Text>
+        </LinearGradient>
+        <View style={styles.brandWord}>
+          <Text style={styles.brandNex}>NEX</Text>
+          <Text style={styles.brandR}>R</Text>
+          <Text style={styles.brandYde}>YDE</Text>
+        </View>
+      </View>
+      <View style={styles.driverPill}>
+        <Ionicons name="car-sport" size={13} color={NEON} />
+        <Text style={styles.driverPillTxt}>DRIVER</Text>
+      </View>
+    </View>
+  );
+}
+
+function EarningsBreakdownGrid({ payload }: { payload: TripCompletionPayload }) {
+  const bonus = payload.mysteryBonusNgn != null && Number(payload.mysteryBonusNgn) > 0;
+  const cols = [
+    {
+      key: 'base',
+      label: 'Base fare',
+      value: payload.baseFareNgn,
+      sub: null as string | null,
+    },
+    {
+      key: 'dist',
+      label: 'Distance',
+      value: payload.distanceFareNgn,
+      sub: payload.distanceKm != null ? `${payload.distanceKm} km` : null,
+    },
+    {
+      key: 'time',
+      label: 'Time',
+      value: payload.timeFareNgn,
+      sub: payload.durationMins != null ? `${payload.durationMins} min` : null,
+    },
+    ...(bonus
+      ? [
+          {
+            key: 'bonus',
+            label: 'Bonus',
+            value: Number(payload.mysteryBonusNgn),
+            sub: null as string | null,
+            highlight: true,
+          },
+        ]
+      : []),
+  ];
+  const hasAny = cols.some((c) => c.value != null && Number(c.value) >= 0);
+
+  if (!hasAny) {
+    return (
+      <Text style={styles.earnBreakMuted}>
+        Fare breakdown appears when meter line items are on the trip record.
+      </Text>
+    );
+  }
+
+  return (
+    <View style={styles.earnGrid}>
+      {cols.map((col, i) => (
+        <View
+          key={col.key}
+          style={[
+            styles.earnCol,
+            i > 0 && styles.earnColBorder,
+            'highlight' in col && col.highlight && styles.earnColBonus,
+          ]}
+        >
+          <Text style={[styles.earnColLbl, 'highlight' in col && col.highlight && styles.earnColLblBonus]}>
+            {'highlight' in col && col.highlight ? 'Bonus ⭐' : col.label}
+          </Text>
+          <Text style={[styles.earnColVal, 'highlight' in col && col.highlight && styles.earnColValBonus]}>
+            {col.value != null && Number.isFinite(Number(col.value))
+              ? formatFare(Number(col.value))
+              : '—'}
+          </Text>
+          {col.sub ? <Text style={styles.earnColSub}>{col.sub}</Text> : null}
+        </View>
+      ))}
+    </View>
+  );
 }
 
 export default function DriverTripCompletionPanel({
@@ -80,24 +161,38 @@ export default function DriverTripCompletionPanel({
   const [thanks, setThanks] = useState(payload.alreadyRated);
   const [busy, setBusy] = useState(false);
   const fade = useRef(new Animated.Value(0)).current;
-  const sheetY = useRef(new Animated.Value(48)).current;
+  const sheetY = useRef(new Animated.Value(56)).current;
+  const checkScale = useRef(new Animated.Value(0)).current;
 
   const riderFirst = useMemo(() => {
     const t = payload.riderName.trim() || 'Your rider';
     return t.split(/\s+/)[0] || t;
   }, [payload.riderName]);
 
-  const breakdown = useMemo(() => earningsBreakdownLine(payload), [payload]);
+  const tripSummaryLine = useMemo(() => {
+    const parts: string[] = [];
+    if (payload.distanceKm != null) parts.push(`${payload.distanceKm} km`);
+    if (payload.durationMins != null) parts.push(`${payload.durationMins} min`);
+    return parts.length ? parts.join(' · ') : null;
+  }, [payload.distanceKm, payload.durationMins]);
+
   const showRating = !payload.alreadyRated && !thanks;
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(fade, { toValue: 1, duration: 280, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      Animated.spring(sheetY, { toValue: 0, friction: 9, tension: 62, useNativeDriver: true }),
+      Animated.timing(fade, { toValue: 1, duration: 300, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.spring(sheetY, { toValue: 0, friction: 9, tension: 58, useNativeDriver: true }),
     ]).start();
-  }, [fade, sheetY]);
+    Animated.spring(checkScale, {
+      toValue: 1,
+      friction: 6,
+      tension: 48,
+      delay: 120,
+      useNativeDriver: true,
+    }).start();
+  }, [fade, sheetY, checkScale]);
 
-  const handleAcceptNextRide = async () => {
+  const handleConfirmContinue = async () => {
     if (busy) return;
     if (showRating && stars > 0) {
       setBusy(true);
@@ -123,14 +218,14 @@ export default function DriverTripCompletionPanel({
     else onDismiss();
   };
 
-  const topPillTop = insets.top + 52;
+  const topPillTop = insets.top + 48;
 
   return (
     <View style={styles.root} pointerEvents="box-none">
       <Animated.View style={[styles.backdropWrap, { opacity: fade }]} pointerEvents="box-none">
         <LinearGradient
-          colors={['rgba(2,6,23,0.05)', 'rgba(2,6,23,0.28)', 'rgba(2,6,23,0.88)']}
-          locations={[0, 0.38, 1]}
+          colors={['rgba(2,6,23,0.08)', 'rgba(2,6,23,0.45)', 'rgba(2,6,23,0.92)']}
+          locations={[0, 0.35, 1]}
           style={StyleSheet.absoluteFillObject}
           pointerEvents="none"
         />
@@ -139,10 +234,9 @@ export default function DriverTripCompletionPanel({
         ) : null}
       </Animated.View>
 
-      {/* Map-area success pill (mock) */}
       <Animated.View style={[styles.topPillWrap, { top: topPillTop, opacity: fade }]} pointerEvents="none">
         <LinearGradient
-          colors={['#22E5A0', '#16A34A', '#0D9F6E']}
+          colors={['#34F5B8', '#22C55E', '#16A34A']}
           start={{ x: 0, y: 0.5 }}
           end={{ x: 1, y: 0.5 }}
           style={styles.topPillGrad}
@@ -159,7 +253,7 @@ export default function DriverTripCompletionPanel({
           styles.sheet,
           {
             height: SHEET_HEIGHT,
-            paddingBottom: Math.max(insets.bottom, 16),
+            paddingBottom: Math.max(insets.bottom, 20),
             transform: [{ translateY: sheetY }],
           },
         ]}
@@ -167,23 +261,18 @@ export default function DriverTripCompletionPanel({
         {Platform.OS === 'ios' || Platform.OS === 'android' ? (
           <BlurView intensity={DOCK_BLUR_INTENSITY} tint="dark" style={StyleSheet.absoluteFillObject} />
         ) : (
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(11,14,17,0.96)' }]} />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(8,11,22,0.97)' }]} />
         )}
         <LinearGradient
-          colors={['rgba(57,255,20,0.07)', 'rgba(2,6,23,0.94)', '#0B0E11']}
+          colors={['rgba(34,197,94,0.06)', 'rgba(8,11,22,0.98)', '#0A0F1A']}
           start={{ x: 0.5, y: 0 }}
-          end={{ x: 0.5, y: 0.5 }}
+          end={{ x: 0.5, y: 0.45 }}
           style={StyleSheet.absoluteFillObject}
           pointerEvents="none"
         />
 
         <View style={styles.handleRail}>
-          <LinearGradient
-            colors={['rgba(57,255,20,0.55)', 'rgba(0,123,255,0.35)', 'rgba(57,255,20,0.5)']}
-            start={{ x: 0, y: 0.5 }}
-            end={{ x: 1, y: 0.5 }}
-            style={styles.handle}
-          />
+          <View style={styles.handle} />
         </View>
 
         <ScrollView
@@ -191,97 +280,85 @@ export default function DriverTripCompletionPanel({
           contentContainerStyle={styles.scrollContent}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          bounces={false}
         >
-          <View style={styles.confettiRow}>
-            <Ionicons name="sparkles" size={16} color="#A78BFA" style={styles.confettiLeft} />
-            <Ionicons name="gift" size={15} color="#F472B6" style={styles.confettiRight} />
-          </View>
+          <CompletionBrandHeader />
 
-          <View style={styles.sheetHeadline}>
-            <LinearGradient colors={['#34F5B8', '#0D9F6E']} style={styles.sheetHeadIcon}>
+          <LinearGradient
+            colors={['#34F5B8', '#22C55E', '#15803D']}
+            start={{ x: 0, y: 0.5 }}
+            end={{ x: 1, y: 0.5 }}
+            style={styles.successBanner}
+          >
+            <View style={styles.successBannerIcon}>
               <Ionicons name="checkmark" size={22} color="#022C22" />
-            </LinearGradient>
-            <Text style={styles.sheetHeadTitle}>Great job! Trip completed</Text>
-          </View>
+            </View>
+            <Text style={styles.successBannerTxt}>TRIP COMPLETED</Text>
+          </LinearGradient>
 
-          <View style={styles.riderCard}>
-            {payload.riderPhoto ? (
-              <Image source={{ uri: payload.riderPhoto }} style={styles.riderAvatar} />
-            ) : (
-              <View style={styles.riderAvatarPh}>
-                <Text style={styles.riderAvatarTxt}>
-                  {(payload.riderName.trim().charAt(0) || 'R').toUpperCase()}
+          <View style={styles.tripSummaryCard}>
+            <View style={styles.tripSummaryLeft}>
+              <View style={styles.tripSummaryIconWrap}>
+                <Ionicons name="navigate" size={18} color={NEON} />
+              </View>
+              <View style={styles.tripSummaryTextCol}>
+                {tripSummaryLine ? (
+                  <Text style={styles.tripSummaryMeta}>{tripSummaryLine.toUpperCase()}</Text>
+                ) : null}
+                <Text style={styles.tripSummaryTitle} numberOfLines={2}>
+                  {payload.dropoffLabel || 'Drop-off completed'}
                 </Text>
               </View>
-            )}
-            <View style={styles.riderMetaCol}>
-              <Text style={styles.riderNameFull} numberOfLines={1}>
-                {payload.riderName.trim() || riderFirst}
-              </Text>
-              <View style={styles.riderStatsRow}>
-                {typeof payload.riderRatingAvg === 'number' && payload.riderRatingAvg > 0 ? (
-                  <>
-                    <Ionicons name="star" size={14} color="#FBBF24" />
-                    <Text style={styles.riderStatTxt}>{payload.riderRatingAvg.toFixed(1)}</Text>
-                  </>
-                ) : null}
-                {typeof payload.riderTripCount === 'number' && payload.riderTripCount > 0 ? (
-                  <>
-                    {typeof payload.riderRatingAvg === 'number' && payload.riderRatingAvg > 0 ? (
-                      <Text style={styles.riderStatSep}>|</Text>
-                    ) : null}
-                    <Text style={styles.riderStatTxt}>
-                      {payload.riderTripCount.toLocaleString()} trips
-                    </Text>
-                  </>
-                ) : null}
-              </View>
+            </View>
+            <View style={styles.miniMapDecor} pointerEvents="none">
+              <View style={styles.miniMapRoute} />
+              <Ionicons name="location" size={22} color={NEON} style={styles.miniMapPin} />
             </View>
           </View>
 
-          <View style={styles.earningsHero}>
-            <LinearGradient
-              colors={['rgba(57,255,20,0.35)', 'rgba(13,159,110,0.55)', 'rgba(6,78,59,0.95)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-            />
-            <LinearGradient
-              colors={['rgba(255,255,255,0.12)', 'transparent', 'rgba(255,255,255,0.04)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={StyleSheet.absoluteFillObject}
-              pointerEvents="none"
-            />
-            <Text style={styles.totalEarnLbl}>TOTAL EARNINGS</Text>
-            <Text style={styles.totalEarnVal}>{formatFare(payload.fare)}</Text>
-            {breakdown ? (
-              <Text style={styles.totalEarnBreak} numberOfLines={3}>
-                {breakdown}
+          <View style={styles.celebrationCard}>
+            <Animated.View
+              style={[
+                styles.celebrationGlow,
+                { transform: [{ scale: checkScale }] },
+              ]}
+            >
+              <LinearGradient colors={['#4ADE80', '#22C55E', '#16A34A']} style={styles.celebrationCheck}>
+                <Ionicons name="checkmark" size={40} color="#022C22" />
+              </LinearGradient>
+            </Animated.View>
+            <Text style={styles.celebrationGreat}>Great job!</Text>
+            <Text style={styles.celebrationDone}>Trip completed</Text>
+            <View style={styles.celebrationRiderRow}>
+              {payload.riderPhoto ? (
+                <Image source={{ uri: payload.riderPhoto }} style={styles.celebrationAvatar} />
+              ) : (
+                <View style={styles.celebrationAvatarPh}>
+                  <Text style={styles.celebrationAvatarTxt}>
+                    {(payload.riderName.trim().charAt(0) || 'R').toUpperCase()}
+                  </Text>
+                </View>
+              )}
+              <Text style={styles.celebrationRiderName} numberOfLines={1}>
+                {payload.riderName.trim() || riderFirst}
               </Text>
-            ) : (
-              <Text style={styles.totalEarnBreakMuted}>Full fare breakdown appears when the trip includes meter line items.</Text>
-            )}
-            {payload.paymentPending ? (
-              <View style={styles.pendingInline}>
-                <Ionicons name="time-outline" size={14} color="#FDE68A" />
-                <Text style={styles.pendingInlineTxt}>Payment pending rider confirmation</Text>
+            </View>
+          </View>
+
+          <View style={styles.earningsCard}>
+            <View style={styles.earningsTopRow}>
+              <Text style={styles.earningsLbl}>TOTAL EARNINGS</Text>
+              <View style={styles.earningsWalletIcon}>
+                <Ionicons name="wallet" size={20} color={NEON} />
               </View>
-            ) : null}
-            {payload.mysteryBonusNgn != null && Number(payload.mysteryBonusNgn) > 0 ? (
-              <View style={styles.bonusInline}>
-                <Ionicons name="sparkles" size={14} color="#E9D5FF" />
-                <Text style={styles.bonusInlineTxt}>
-                  +₦{Math.round(Number(payload.mysteryBonusNgn)).toLocaleString()} mystery bonus
-                </Text>
-              </View>
-            ) : null}
+            </View>
+            <Text style={styles.earningsAmount}>{formatFare(payload.fare)}</Text>
+            <View style={styles.earningsDivider} />
+            <EarningsBreakdownGrid payload={payload} />
           </View>
 
           {showRating ? (
-            <View style={styles.rateBlock}>
-              <Text style={styles.rateAsk}>How was {riderFirst}?</Text>
+            <View style={styles.feedbackCard}>
+              <Text style={styles.feedbackTitle}>How was {riderFirst}?</Text>
               <View style={styles.starsRow}>
                 {[1, 2, 3, 4, 5].map((n) => {
                   const filled = n <= (hoveredStar || stars);
@@ -300,7 +377,7 @@ export default function DriverTripCompletionPanel({
                     >
                       <Ionicons
                         name={filled ? 'star' : 'star-outline'}
-                        size={40}
+                        size={36}
                         color={filled ? '#FBBF24' : '#475569'}
                       />
                     </TouchableOpacity>
@@ -308,18 +385,19 @@ export default function DriverTripCompletionPanel({
                 })}
               </View>
               <Text style={styles.tapStarHint}>Tap a star to rate</Text>
-              <View style={styles.commentRow}>
-                <Ionicons name="chatbubble-ellipses-outline" size={20} color="#64748B" style={styles.commentIcon} />
+              <View style={styles.commentBox}>
+                <Ionicons name="chatbubble-ellipses-outline" size={18} color="#64748B" />
                 <TextInput
                   style={styles.commentInput}
-                  placeholder="Add a comment (optional)"
+                  placeholder="Add an optional comment..."
                   placeholderTextColor="#64748B"
                   value={comment}
                   onChangeText={setComment}
                   multiline
-                  maxLength={280}
+                  maxLength={120}
                 />
               </View>
+              <Text style={styles.charCount}>{comment.length}/120</Text>
             </View>
           ) : (
             <View style={styles.postRateNote}>
@@ -327,21 +405,21 @@ export default function DriverTripCompletionPanel({
               <Text style={styles.postRateNoteTxt}>
                 {payload.alreadyRated
                   ? 'Rating already on file for this trip.'
-                  : 'Thanks — your private feedback was saved.'}
+                  : 'Thanks — your feedback was saved.'}
               </Text>
             </View>
           )}
 
           <TouchableOpacity
-            style={[styles.ctaPrimaryOuter, busy && styles.ctaDisabled]}
-            onPress={() => void handleAcceptNextRide()}
+            style={[styles.ctaPrimary, busy && styles.ctaDisabled]}
+            onPress={() => void handleConfirmContinue()}
             disabled={busy}
             activeOpacity={0.9}
             accessibilityRole="button"
-            accessibilityLabel="Accept next ride"
+            accessibilityLabel="Confirm and continue"
           >
             <LinearGradient
-              colors={['#5DFFC7', '#34F5B8', '#0D9F6E']}
+              colors={['#4ADE80', '#22C55E', '#16A34A']}
               start={{ x: 0, y: 0.5 }}
               end={{ x: 1, y: 0.5 }}
               style={styles.ctaPrimaryGrad}
@@ -350,43 +428,32 @@ export default function DriverTripCompletionPanel({
                 <ActivityIndicator color="#022C22" />
               ) : (
                 <>
-                  <View style={styles.ctaCircleIcon}>
-                    <Ionicons name="arrow-forward" size={18} color="#022C22" />
-                  </View>
-                  <Text style={styles.ctaPrimaryTxt}>ACCEPT NEXT RIDE</Text>
-                  <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.45)" />
+                  <Ionicons name="checkmark-circle" size={22} color="#022C22" />
+                  <Text style={styles.ctaPrimaryTxt}>Confirm & Continue</Text>
+                  <Ionicons name="chevron-forward" size={20} color="rgba(2,44,34,0.5)" />
                 </>
               )}
             </LinearGradient>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.ctaSecondaryOuter}
+            style={styles.ctaSecondary}
             onPress={handleViewDetails}
             disabled={busy}
-            activeOpacity={0.9}
+            activeOpacity={0.88}
             accessibilityRole="button"
             accessibilityLabel="View trip details"
           >
-            <LinearGradient
-              colors={['#2563EB', '#1D4ED8', '#172554']}
-              start={{ x: 0, y: 0.5 }}
-              end={{ x: 1, y: 0.5 }}
-              style={styles.ctaSecondaryGrad}
-            >
-              <View style={styles.ctaCircleIconBlue}>
-                <Ionicons name="list" size={18} color="#F8FAFC" />
-              </View>
-              <Text style={styles.ctaSecondaryTxt}>VIEW DETAILS</Text>
-              <Ionicons name="chevron-forward" size={22} color="rgba(248,250,252,0.45)" />
-            </LinearGradient>
+            <Ionicons name="document-text-outline" size={20} color="#94A3B8" />
+            <Text style={styles.ctaSecondaryTxt}>View trip details</Text>
+            <Ionicons name="chevron-forward" size={18} color="#64748B" />
           </TouchableOpacity>
 
-          {payload.tripDisplayId ? (
-            <Text style={styles.footerTripId} numberOfLines={1}>
-              {payload.tripDisplayId}
-            </Text>
-          ) : null}
+          <View style={styles.footer}>
+            <Ionicons name="heart" size={14} color={NEON} style={{ marginBottom: 6 }} />
+            <Text style={styles.footerThanks}>Thanks for the ride!</Text>
+            <Text style={styles.footerBrand}>NEXRYDE</Text>
+          </View>
         </ScrollView>
       </Animated.View>
     </View>
@@ -399,10 +466,7 @@ const styles = StyleSheet.create({
     zIndex: 50,
     justifyContent: 'flex-end',
   },
-  backdropWrap: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 0,
-  },
+  backdropWrap: { ...StyleSheet.absoluteFillObject, zIndex: 0 },
   topPillWrap: {
     position: 'absolute',
     left: 0,
@@ -414,16 +478,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 22,
+    paddingVertical: 11,
+    paddingHorizontal: 20,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.35)',
+    borderColor: 'rgba(255,255,255,0.3)',
     shadowColor: NEON,
     shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.85,
-    shadowRadius: 16,
-    elevation: 14,
+    shadowOpacity: 0.7,
+    shadowRadius: 14,
+    elevation: 12,
   },
   topPillIconCircle: {
     width: 28,
@@ -434,291 +498,334 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   topPillTxt: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: 1.2,
+    letterSpacing: 1.1,
   },
   sheet: {
     zIndex: 2,
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    paddingHorizontal: 20,
-    paddingTop: 6,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 18,
+    paddingTop: 4,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(57,255,20,0.25)',
+    borderColor: 'rgba(34,197,94,0.22)',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -12 },
-    shadowOpacity: 0.5,
-    shadowRadius: 28,
-    elevation: 36,
+    shadowOffset: { width: 0, height: -10 },
+    shadowOpacity: 0.45,
+    shadowRadius: 24,
+    elevation: 32,
   },
-  handleRail: { alignItems: 'center', paddingTop: 6, paddingBottom: 8 },
-  handle: { width: 48, height: 4, borderRadius: 100 },
+  handleRail: { alignItems: 'center', paddingTop: 8, paddingBottom: 6 },
+  handle: {
+    width: 44,
+    height: 4,
+    borderRadius: 100,
+    backgroundColor: 'rgba(148,163,184,0.45)',
+  },
   scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 12, flexGrow: 1 },
-  confettiRow: {
-    height: 18,
-    marginBottom: 4,
-    position: 'relative',
-  },
-  confettiLeft: { position: 'absolute', left: 4, top: 0, opacity: 0.85 },
-  confettiRight: { position: 'absolute', right: 8, top: 2, opacity: 0.85 },
-  sheetHeadline: {
+  scrollContent: { paddingBottom: 8 },
+  brandHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 16,
-    paddingHorizontal: 4,
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    paddingTop: 4,
   },
-  sheetHeadIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+  brandLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  brandLogo: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
   },
-  sheetHeadTitle: {
-    flex: 1,
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: -0.4,
-    lineHeight: 26,
-  },
-  riderCard: {
+  brandLogoTxt: { fontSize: 12, fontWeight: '900', color: '#F8FAFC' },
+  brandWord: { flexDirection: 'row' },
+  brandNex: { fontSize: 17, fontWeight: '900', color: '#F8FAFC' },
+  brandR: { fontSize: 17, fontWeight: '900', color: NEON },
+  brandYde: { fontSize: 17, fontWeight: '900', color: '#F8FAFC' },
+  driverPill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    marginBottom: 16,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 18,
-    backgroundColor: 'rgba(15,23,42,0.65)',
+    gap: 5,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(51,65,85,0.5)',
+    borderColor: 'rgba(34,197,94,0.45)',
+    backgroundColor: 'rgba(34,197,94,0.08)',
   },
-  riderAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  driverPillTxt: { fontSize: 11, fontWeight: '800', color: NEON, letterSpacing: 0.6 },
+  successBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginBottom: 14,
+  },
+  successBannerIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  successBannerTxt: {
+    fontSize: 16,
+    fontWeight: '900',
+    color: '#F8FAFC',
+    letterSpacing: 1,
+  },
+  tripSummaryCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,23,42,0.65)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+    padding: 14,
+    marginBottom: 14,
+    gap: 10,
+  },
+  tripSummaryLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12, minWidth: 0 },
+  tripSummaryIconWrap: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tripSummaryTextCol: { flex: 1, minWidth: 0 },
+  tripSummaryMeta: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: NEON,
+    letterSpacing: 0.8,
+    marginBottom: 4,
+  },
+  tripSummaryTitle: { fontSize: 15, fontWeight: '800', color: '#F8FAFC', lineHeight: 20 },
+  miniMapDecor: {
+    width: 72,
+    height: 56,
+    borderRadius: 12,
+    backgroundColor: 'rgba(2,6,23,0.85)',
+    borderWidth: 1,
+    borderColor: 'rgba(51,65,85,0.6)',
+    overflow: 'hidden',
+    justifyContent: 'flex-end',
+    alignItems: 'flex-end',
+    padding: 6,
+  },
+  miniMapRoute: {
+    position: 'absolute',
+    left: 8,
+    top: 28,
+    right: 20,
+    height: 3,
+    borderRadius: 2,
+    backgroundColor: NEON,
+    opacity: 0.85,
+    transform: [{ rotate: '-12deg' }],
+  },
+  miniMapPin: { zIndex: 2 },
+  celebrationCard: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(51,65,85,0.45)',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  celebrationGlow: {
+    marginBottom: 12,
+    shadowColor: NEON,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.9,
+    shadowRadius: 20,
+    elevation: 14,
+  },
+  celebrationCheck: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 2,
-    borderColor: 'rgba(57,255,20,0.4)',
+    borderColor: 'rgba(255,255,255,0.25)',
   },
-  riderAvatarPh: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+  celebrationGreat: { fontSize: 16, fontWeight: '800', color: NEON, marginBottom: 2 },
+  celebrationDone: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', marginBottom: 14 },
+  celebrationRiderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  celebrationAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(34,197,94,0.4)',
+  },
+  celebrationAvatarPh: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(30,41,59,0.95)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: 'rgba(51,65,85,0.55)',
   },
-  riderAvatarTxt: { fontSize: 20, fontWeight: '900', color: '#94A3B8' },
-  riderMetaCol: { flex: 1, minWidth: 0 },
-  riderNameFull: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', letterSpacing: -0.3 },
-  riderStatsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-    flexWrap: 'wrap',
+  celebrationAvatarTxt: { fontSize: 16, fontWeight: '900', color: '#94A3B8' },
+  celebrationRiderName: { fontSize: 16, fontWeight: '800', color: '#F8FAFC', maxWidth: 200 },
+  earningsCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.35)',
+    backgroundColor: 'rgba(15,23,42,0.7)',
+    padding: 18,
+    marginBottom: 14,
   },
-  riderStatTxt: { fontSize: 13, fontWeight: '700', color: '#CBD5E1' },
-  riderStatSep: { fontSize: 13, fontWeight: '700', color: '#475569', marginHorizontal: 2 },
-  earningsHero: {
-    borderRadius: 20,
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-    marginBottom: 18,
-    overflow: 'hidden',
-    borderWidth: 1.5,
-    borderColor: 'rgba(57,255,20,0.55)',
-    shadowColor: NEON,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.35,
-    shadowRadius: 18,
-    elevation: 12,
-  },
-  totalEarnLbl: {
-    fontSize: 11,
-    fontWeight: '900',
-    color: 'rgba(248,250,252,0.88)',
-    letterSpacing: 1.4,
-    marginBottom: 6,
-  },
-  totalEarnVal: {
-    fontSize: 36,
-    fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: -1.2,
-    marginBottom: 8,
-  },
-  totalEarnBreak: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: 'rgba(248,250,252,0.92)',
-    lineHeight: 18,
-  },
-  totalEarnBreakMuted: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: 'rgba(226,232,240,0.75)',
-    lineHeight: 17,
-  },
-  pendingInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(251,191,36,0.35)',
-  },
-  pendingInlineTxt: { flex: 1, fontSize: 11, fontWeight: '700', color: '#FDE68A' },
-  bonusInline: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 8,
-  },
-  bonusInlineTxt: { fontSize: 12, fontWeight: '700', color: '#E9D5FF' },
-  rateBlock: { marginBottom: 16 },
-  rateAsk: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: '#F1F5F9',
-    marginBottom: 12,
-    letterSpacing: -0.2,
-  },
-  starsRow: {
+  earningsTopRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
+    alignItems: 'center',
     marginBottom: 8,
+  },
+  earningsLbl: {
+    fontSize: 11,
+    fontWeight: '900',
+    color: NEON,
+    letterSpacing: 1.2,
+  },
+  earningsWalletIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'rgba(34,197,94,0.15)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.3)',
+  },
+  earningsAmount: {
+    fontSize: 40,
+    fontWeight: '900',
+    color: '#FFFFFF',
+    letterSpacing: -1,
+    marginBottom: 14,
+  },
+  earningsDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(148,163,184,0.35)',
+    marginBottom: 14,
+  },
+  earnGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  earnCol: { flex: 1, minWidth: 72, paddingHorizontal: 4, paddingVertical: 4 },
+  earnColBorder: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: 'rgba(148,163,184,0.3)' },
+  earnColBonus: {},
+  earnColLbl: { fontSize: 10, fontWeight: '700', color: '#94A3B8', marginBottom: 4 },
+  earnColLblBonus: { color: NEON },
+  earnColVal: { fontSize: 13, fontWeight: '800', color: '#F8FAFC' },
+  earnColValBonus: { color: NEON },
+  earnColSub: { fontSize: 10, fontWeight: '600', color: '#64748B', marginTop: 2 },
+  earnBreakMuted: { fontSize: 12, fontWeight: '600', color: '#64748B', lineHeight: 17 },
+  feedbackCard: {
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(51,65,85,0.5)',
+    backgroundColor: 'rgba(15,23,42,0.55)',
+    padding: 18,
+    marginBottom: 14,
+  },
+  feedbackTitle: { fontSize: 17, fontWeight: '900', color: '#F8FAFC', marginBottom: 12 },
+  starsRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 6,
   },
   tapStarHint: {
     fontSize: 12,
     fontWeight: '600',
     color: '#64748B',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
   },
-  commentRow: {
+  commentBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(51,65,85,0.75)',
-    backgroundColor: 'rgba(15,23,42,0.85)',
-    paddingLeft: 12,
-    paddingRight: 12,
-    paddingVertical: 10,
     gap: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(51,65,85,0.65)',
+    backgroundColor: 'rgba(2,6,23,0.6)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  commentIcon: { marginTop: 4 },
   commentInput: {
     flex: 1,
-    minHeight: 44,
-    maxHeight: 100,
+    minHeight: 48,
+    maxHeight: 88,
     color: '#F8FAFC',
     fontSize: 14,
     fontWeight: '600',
     textAlignVertical: 'top',
-    paddingTop: 4,
+    paddingTop: 2,
   },
+  charCount: { fontSize: 11, fontWeight: '600', color: '#64748B', textAlign: 'right', marginTop: 6 },
   postRateNote: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    padding: 14,
     borderRadius: 14,
     backgroundColor: 'rgba(15,23,42,0.55)',
-    marginBottom: 16,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: 'rgba(57,255,20,0.2)',
+    borderColor: 'rgba(34,197,94,0.2)',
   },
   postRateNoteTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: '#CBD5E1', lineHeight: 18 },
-  ctaPrimaryOuter: {
-    borderRadius: 16,
+  ctaPrimary: {
+    borderRadius: 999,
     overflow: 'hidden',
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    shadowColor: '#22E5A0',
-    shadowOffset: { width: 0, height: 6 },
+    marginBottom: 10,
+    shadowColor: NEON,
+    shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.35,
-    shadowRadius: 12,
-    elevation: 10,
+    shadowRadius: 10,
+    elevation: 8,
   },
   ctaDisabled: { opacity: 0.65 },
   ctaPrimaryGrad: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-  },
-  ctaCircleIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(2,44,34,0.2)',
-    alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(2,44,34,0.25)',
+    gap: 10,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
   },
-  ctaPrimaryTxt: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#022C22',
-    letterSpacing: 0.9,
-  },
-  ctaSecondaryOuter: {
-    borderRadius: 16,
-    overflow: 'hidden',
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(59,130,246,0.35)',
-  },
-  ctaSecondaryGrad: {
+  ctaPrimaryTxt: { fontSize: 16, fontWeight: '900', color: '#022C22' },
+  ctaSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 14,
-  },
-  ctaCircleIconBlue: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
     justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 15,
+    borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(148,163,184,0.35)',
+    backgroundColor: 'rgba(15,23,42,0.4)',
+    marginBottom: 16,
   },
-  ctaSecondaryTxt: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: 0.85,
-  },
-  footerTripId: {
-    textAlign: 'center',
-    fontSize: 11,
-    fontWeight: '800',
-    color: '#475569',
-    marginTop: 4,
-  },
+  ctaSecondaryTxt: { fontSize: 15, fontWeight: '800', color: '#94A3B8' },
+  footer: { alignItems: 'center', paddingTop: 4, paddingBottom: 8 },
+  footerThanks: { fontSize: 13, fontWeight: '600', color: '#94A3B8', marginBottom: 4 },
+  footerBrand: { fontSize: 14, fontWeight: '900', color: '#E2E8F0', letterSpacing: 1 },
 });
