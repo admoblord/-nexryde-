@@ -32,7 +32,13 @@ Ibeju-Lekki, Festac, Gbagada, Magodo — plus Sky Mall (Jakande) sub-polygon und
 
 **TIER 2 — PREMIUM / FAR**
 
-• All distances: ₦3,255/km (average flat card)
+• 0–3 km: ₦1,850/km (same short band as Tier 1)
+
+• 3–15 km: ₦3,255/km (premium / far medium haul)
+
+• 15+ km: ₦812/km (same long-haul band as Tier 1 — prevents runaway totals)
+
+Corridor trips (Peace Garden ↔ Ikorodu/Ikeja) use calibrated ₦/km up to 20 km, then taper toward the 15+ band.
 
 Areas: Ikeja, Peace Garden, Ikorodu, Berger, Badagry, Epe, and **Mainland** (metro
 fallback). **Eti-Osa** is listed administratively under Tier 2; geographically it
@@ -168,6 +174,12 @@ PEAK_SURGE_LAGride = 1.0
 
 # City-wide fare factor (all zones, all service tiers) — applied after distance×area×service, before surge.
 LAGOS_MARKET_WIDE_FARE_MULTIPLIER = 1.02
+
+# Hard ceiling on Lagos trip total (economy baseline); surge applied before cap in breakdown.
+LAGOS_MAX_TRIP_FARE_NGN = 100_000.0
+
+# Above this ₦/km, long trips (>20 km) taper toward Tier-1 15+ band.
+LAGOS_LONG_HAUL_TAPER_KM = 20.0
 
 # Response / analytics id for Lagos Lagride payloads
 LAGOS_LAGPRIDE_SPEC_ID = "lagride_lagos_exact_v1"
@@ -358,6 +370,28 @@ def peace_garden_corridor_rate_per_km(
     return None
 
 
+def _apply_lagos_long_haul_taper(distance_km: float, rate_per_km: float) -> float:
+    """High ₦/km cards taper after 20 km so long routes stay in the formula family."""
+    d = max(0.0, float(distance_km))
+    rate = float(rate_per_km)
+    if rate <= TIER1_RATE_15_PLUS_KM * 1.15:
+        return rate
+    if d <= LAGOS_LONG_HAUL_TAPER_KM:
+        return rate
+    tapered = rate * (LAGOS_LONG_HAUL_TAPER_KM / d)
+    return max(TIER1_RATE_15_PLUS_KM, tapered)
+
+
+def lagride_tier2_rate_per_km(distance_km: float) -> float:
+    """Tier 2 banded — same distance structure as Tier 1; 3–15 km keeps premium flat card."""
+    d = max(0.0, float(distance_km))
+    if d < 3.0:
+        return TIER1_RATE_0_3_KM
+    if d < 15.0:
+        return TIER2_FLAT_PER_KM
+    return TIER1_RATE_15_PLUS_KM
+
+
 def _one_way_lagos_area_rate_per_km(
     tier: int,
     distance_km: float,
@@ -372,16 +406,17 @@ def _one_way_lagos_area_rate_per_km(
 ) -> float:
     """₦/km for one direction: this end is pickup, other end is dropoff."""
     z = (zone_label or "").strip()
+    d = max(0.0, float(distance_km))
     corridor = peace_garden_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-    if corridor is not None and z == "lagride_t2_peace_garden":
-        return corridor
+    if corridor is not None and (z == "lagride_t2_peace_garden" or z == "lagride_t2_ikorodu" or z == "lagride_t2_ikeja"):
+        return _apply_lagos_long_haul_taper(d, corridor)
     if tier == 2 and z == "lagride_t2_peace_garden":
         pg = peace_garden_destination_rate_per_km(other_lat, other_lng)
         if pg is not None:
-            return pg
+            return _apply_lagos_long_haul_taper(d, pg)
     if tier == 1:
-        return lagride_tier1_rate_per_km(distance_km, zone_label)
-    return TIER2_FLAT_PER_KM
+        return lagride_tier1_rate_per_km(d, zone_label)
+    return _apply_lagos_long_haul_taper(d, lagride_tier2_rate_per_km(d))
 
 
 def lagride_lagos_symmetric_area_rate_per_km(
@@ -478,10 +513,14 @@ def lagride_lagos_area_rate_per_km(
 
 
 def lagride_distance_band_key(tier: int, distance_km: float) -> str:
-    """Tier 1: 0–3 / 3–15 / 15+ km bands; Tier 2: single flat card for all distances."""
-    if tier == 2:
-        return "tier2_all_distances"
+    """Tier 1 & 2: 0–3 / 3–15 / 15+ km bands."""
     d = max(0.0, float(distance_km))
+    if tier == 2:
+        if d < 3.0:
+            return "tier2_0_3_km"
+        if d < 15.0:
+            return "tier2_3_15_km"
+        return "tier2_15_plus_km"
     if d < 3.0:
         return "0_3_km"
     if d < 15.0:
@@ -709,7 +748,11 @@ def lagride_fare_bucket_label(
         if d < 15.0:
             return "lagride_t1_3_15_km"
         return "lagride_t1_15_plus_km"
-    return "lagride_t2_flat"
+    if d < 3.0:
+        return "lagride_t2_0_3_km"
+    if d < 15.0:
+        return "lagride_t2_3_15_km"
+    return "lagride_t2_15_plus_km"
 
 
 def build_lagos_lagride_fare_breakdown(
@@ -732,9 +775,34 @@ def build_lagos_lagride_fare_breakdown(
     """Full-shaped dict compatible with ``server.calculate_fare`` / fare estimate."""
     route_time_min = nexryde_route_time_minutes(duration_min, traffic_duration_min)
     tier, zone = classify_lagos_lagride_pickup(pickup_lat, pickup_lng)
-    rate, sym_meta = lagride_lagos_symmetric_area_rate_per_km(
-        distance_km, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
-    )
+    if (
+        pickup_lat is not None
+        and pickup_lng is not None
+        and dropoff_lat is not None
+        and dropoff_lng is not None
+    ):
+        rate, sym_meta = lagride_lagos_symmetric_area_rate_per_km(
+            distance_km, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+        )
+    else:
+        rate = _one_way_lagos_area_rate_per_km(
+            tier,
+            distance_km,
+            zone,
+            dropoff_lat,
+            dropoff_lng,
+            pickup_lat=pickup_lat,
+            pickup_lng=pickup_lng,
+            dropoff_lat=dropoff_lat,
+            dropoff_lng=dropoff_lng,
+        )
+        sym_meta = {
+            "symmetric_fare": False,
+            "rate_forward_km": round(rate, 4),
+            "rate_reverse_km": round(rate, 4),
+            "pickup_zone": zone,
+            "dropoff_zone": None,
+        }
     _drop_tier, drop_zone = classify_lagos_lagride_pickup(dropoff_lat, dropoff_lng)
     svc_m = lagride_lagos_service_multiplier(service_key)
 
@@ -761,6 +829,10 @@ def build_lagos_lagride_fare_breakdown(
     subtotal = round(distance_line * svc_m * float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER), 2)
     total_raw = subtotal * dynamic_multiplier
     total_fare = max(200.0, round(total_raw))
+    fare_capped = False
+    if total_fare > LAGOS_MAX_TRIP_FARE_NGN:
+        total_fare = round(LAGOS_MAX_TRIP_FARE_NGN)
+        fare_capped = True
 
     fare_bucket = lagride_fare_bucket_label(tier, d, zone, dropoff_lat, dropoff_lng)
     if tier == 1 and d < 3:
@@ -785,6 +857,12 @@ def build_lagos_lagride_fare_breakdown(
         band_note = f"Peace Garden ↔ {dest} @ ₦{round(rate)}/km (symmetric corridor)"
         if sym_meta.get("symmetric_fare"):
             band_note += f" (was ₦{round(sym_meta['rate_forward_km'])}/km one-way)"
+    elif tier == 2 and d < 3:
+        band_note = "0–3 km @ ₦1,850/km"
+    elif tier == 2 and d < 15:
+        band_note = "3–15 km @ ₦3,255/km"
+    elif tier == 2:
+        band_note = f"15+ km @ ₦{round(rate)}/km"
     else:
         band_note = "Tier 2 @ ₦3,255/km"
 
@@ -808,6 +886,8 @@ def build_lagos_lagride_fare_breakdown(
     lagride_profile["rate_forward_km"] = sym_meta.get("rate_forward_km")
     lagride_profile["rate_reverse_km"] = sym_meta.get("rate_reverse_km")
     lagride_profile["dropoff_zone_key"] = drop_zone
+    lagride_profile["fare_capped"] = fare_capped
+    lagride_profile["lagos_max_fare_ngn"] = LAGOS_MAX_TRIP_FARE_NGN
 
     lm_pb = float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
     price_breakdown = (

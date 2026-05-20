@@ -207,7 +207,7 @@ def test_verification_totals_lekki_ikoyi_yaba_festac():
 
 
 def test_example_5_generic_tier2_premium_18km():
-    """Ex 5 (generic Tier 2 e.g. Ikeja): 18 × ₦3,255 × premium ratio × 1.0 surge."""
+    """Tier 2 @ 18 km uses 15+ band (₦812/km), not flat ₦3,255 — long-haul alignment."""
     m = lagride_lagos_service_multiplier("premium")
     f2 = build_lagos_lagride_fare_breakdown(
         distance_km=18.0,
@@ -224,7 +224,8 @@ def test_example_5_generic_tier2_premium_18km():
         short_trip_threshold_km=5.0,
     )
     assert f2["location_zone"] == "lagride_t2_ikeja"
-    assert f2["total_fare"] == round(18.0 * 3255 * m * LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
+    assert f2["fare_bucket"] == "lagride_t2_15_plus_km"
+    assert f2["total_fare"] == round(18.0 * 812.0 * m * LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
 
 
 def test_example_5_peace_garden_to_ikorodu_premium_18km():
@@ -268,7 +269,44 @@ def test_example_6_lekki_21_65km_omni():
     )
     line = round(21.65 * TIER1_15_PLUS_RATES_BY_ZONE["lagride_t1_lekki"], 2)
     assert f["total_fare"] == round(round(line * LAGRIDE_SERVICE_OMNI, 2) * LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
-    assert f["total_fare"] == 6285.0
+
+
+def test_no_lagos_fare_exceeds_100k_across_zones():
+    """Every zone pair @ up to 60 km stays at or below LAGOS_MAX_TRIP_FARE_NGN (economy)."""
+    from lagride_lagos_pricing import LAGOS_MAX_TRIP_FARE_NGN
+
+    zones = {
+        "lekki": (6.48, 3.52),
+        "ikeja": (6.605, 3.340),
+        "ikorodu": (6.660, 3.550),
+        "peace_garden": (6.625, 3.510),
+        "vi": (6.45, 3.40),
+        "festac": (6.50, 3.24),
+    }
+    for km in (15, 30, 45, 60):
+        for a in zones.values():
+            for b in zones.values():
+                if a == b:
+                    continue
+                f = build_lagos_lagride_fare_breakdown(
+                    distance_km=float(km),
+                    duration_min=60,
+                    traffic_duration_min=60,
+                    service_key="economy",
+                    demand_ratio=0.0,
+                    is_raining=False,
+                    pickup_lat=a[0],
+                    pickup_lng=a[1],
+                    dropoff_lat=b[0],
+                    dropoff_lng=b[1],
+                    max_multiplier=2.5,
+                    cancellation_fee=300,
+                    min_fare=200,
+                    short_trip_threshold_km=5.0,
+                )
+                assert f["total_fare"] <= LAGOS_MAX_TRIP_FARE_NGN, (
+                    f"₦{f['total_fare']} > cap for {km}km"
+                )
 
 
 def test_symmetric_fare_ikorodu_peace_garden_round_trip():
