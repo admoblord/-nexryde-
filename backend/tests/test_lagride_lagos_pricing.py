@@ -271,6 +271,74 @@ def test_example_6_lekki_21_65km_omni():
     assert f["total_fare"] == 6285.0
 
 
+def test_symmetric_fare_ikorodu_peace_garden_round_trip():
+    """A→B and B→A at same km should match (symmetric min rate)."""
+    kw = dict(
+        distance_km=18.0,
+        duration_min=35,
+        traffic_duration_min=35,
+        service_key="economy",
+        demand_ratio=0.0,
+        is_raining=False,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+    )
+    pg_lat, pg_lng = 6.62, 3.51
+    iko_lat, iko_lng = 6.65, 3.52
+    f_out = build_lagos_lagride_fare_breakdown(
+        **kw,
+        pickup_lat=pg_lat,
+        pickup_lng=pg_lng,
+        dropoff_lat=iko_lat,
+        dropoff_lng=iko_lng,
+    )
+    f_back = build_lagos_lagride_fare_breakdown(
+        **kw,
+        pickup_lat=iko_lat,
+        pickup_lng=iko_lng,
+        dropoff_lat=pg_lat,
+        dropoff_lng=pg_lng,
+    )
+    assert f_out["total_fare"] == f_back["total_fare"]
+    assert f_out["lagride_rate_per_km"] == PEACE_GARDEN_TO_IKORODU_PER_KM
+    assert f_back["lagride_rate_per_km"] == PEACE_GARDEN_TO_IKORODU_PER_KM
+
+
+def test_symmetric_fare_ikorodu_vi_round_trip():
+    kw = dict(
+        distance_km=30.0,
+        duration_min=45,
+        traffic_duration_min=45,
+        service_key="economy",
+        demand_ratio=0.0,
+        is_raining=False,
+        max_multiplier=2.5,
+        cancellation_fee=300,
+        min_fare=0,
+        short_trip_threshold_km=5.0,
+    )
+    vi_lat, vi_lng = 6.45, 3.40
+    iko_lat, iko_lng = 6.65, 3.52
+    f_to = build_lagos_lagride_fare_breakdown(
+        **kw,
+        pickup_lat=iko_lat,
+        pickup_lng=iko_lng,
+        dropoff_lat=vi_lat,
+        dropoff_lng=vi_lng,
+    )
+    f_from = build_lagos_lagride_fare_breakdown(
+        **kw,
+        pickup_lat=vi_lat,
+        pickup_lng=vi_lng,
+        dropoff_lat=iko_lat,
+        dropoff_lng=iko_lng,
+    )
+    assert f_to["total_fare"] == f_from["total_fare"]
+    assert f_to["total_fare"] < 35_000
+
+
 def test_peace_garden_to_ikorodu_and_ikeja_18km():
     # Peace Garden pickup → Ikorodu: ₦57,424 @ 18 km
     f_ik = build_lagos_lagride_fare_breakdown(

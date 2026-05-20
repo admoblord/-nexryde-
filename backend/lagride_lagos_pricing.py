@@ -10,8 +10,11 @@ FORMULA (no base fare, no time term — road distance from Directions / Routes):
 
 Optional ``Lagos_Market_Multiplier`` (currently **1.02**) is a single city-wide factor on all Lagos pickups and vehicle tiers; tune via ``LAGOS_MARKET_WIDE_FARE_MULTIPLIER``.
 
-``Distance`` = driving route km. ``Area_Rate`` = ₦/km from pickup tier/zone (and
-Peace Garden → dropoff corridor where applicable). Final total is rounded to whole ₦.
+``Distance`` = driving route km. ``Area_Rate`` = ₦/km from **symmetric** zone logic:
+the engine evaluates the trip A→B and B→A (swap pickup/dropoff roles) and uses
+``min(rate_ab, rate_ba)`` so the same corridor costs about the same in both directions
+(surge may still differ slightly at booking time). Peace Garden ↔ Ikorodu/Ikeja
+corridors apply in **both** directions. Final total is rounded to whole ₦.
 
 AREA RATES (baseline card)
 ----------------------------
@@ -320,7 +323,7 @@ def classify_lagos_lagride_pickup(pickup_lat: float | None, pickup_lng: float | 
 def peace_garden_destination_rate_per_km(
     dropoff_lat: float | None, dropoff_lng: float | None
 ) -> float | None:
-    """Peace Garden → Ikorodu / Ikeja corridor rates; ``None`` if dropoff unknown or other area."""
+    """Peace Garden pickup → Ikorodu / Ikeja dropoff corridor; ``None`` if not matched."""
     if dropoff_lat is None or dropoff_lng is None:
         return None
     lat, lng = float(dropoff_lat), float(dropoff_lng)
@@ -329,6 +332,102 @@ def peace_garden_destination_rate_per_km(
     if _t2_ikeja(lat, lng):
         return PEACE_GARDEN_TO_IKEJA_PER_KM
     return None
+
+
+def peace_garden_corridor_rate_per_km(
+    pickup_lat: float | None,
+    pickup_lng: float | None,
+    dropoff_lat: float | None,
+    dropoff_lng: float | None,
+) -> float | None:
+    """Bidirectional Peace Garden ↔ Ikorodu / Ikeja calibrated ₦/km when both ends match."""
+    if pickup_lat is None or pickup_lng is None or dropoff_lat is None or dropoff_lng is None:
+        return None
+    plat, plng = float(pickup_lat), float(pickup_lng)
+    dlat, dlng = float(dropoff_lat), float(dropoff_lng)
+    pg_pick = _t2_peace_garden(plat, plng)
+    pg_drop = _t2_peace_garden(dlat, dlng)
+    if pg_pick and _t2_ikorodu(dlat, dlng):
+        return PEACE_GARDEN_TO_IKORODU_PER_KM
+    if pg_drop and _t2_ikorodu(plat, plng):
+        return PEACE_GARDEN_TO_IKORODU_PER_KM
+    if pg_pick and _t2_ikeja(dlat, dlng):
+        return PEACE_GARDEN_TO_IKEJA_PER_KM
+    if pg_drop and _t2_ikeja(plat, plng):
+        return PEACE_GARDEN_TO_IKEJA_PER_KM
+    return None
+
+
+def _one_way_lagos_area_rate_per_km(
+    tier: int,
+    distance_km: float,
+    zone_label: str,
+    other_lat: float | None,
+    other_lng: float | None,
+    *,
+    pickup_lat: float | None = None,
+    pickup_lng: float | None = None,
+    dropoff_lat: float | None = None,
+    dropoff_lng: float | None = None,
+) -> float:
+    """₦/km for one direction: this end is pickup, other end is dropoff."""
+    z = (zone_label or "").strip()
+    corridor = peace_garden_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    if corridor is not None and z == "lagride_t2_peace_garden":
+        return corridor
+    if tier == 2 and z == "lagride_t2_peace_garden":
+        pg = peace_garden_destination_rate_per_km(other_lat, other_lng)
+        if pg is not None:
+            return pg
+    if tier == 1:
+        return lagride_tier1_rate_per_km(distance_km, zone_label)
+    return TIER2_FLAT_PER_KM
+
+
+def lagride_lagos_symmetric_area_rate_per_km(
+    distance_km: float,
+    pickup_lat: float | None,
+    pickup_lng: float | None,
+    dropoff_lat: float | None,
+    dropoff_lng: float | None,
+) -> tuple[float, dict[str, Any]]:
+    """
+    Same ₦/km for A→B and B→A at equal distance: min(forward one-way, reverse one-way).
+    """
+    tier_a, zone_a = classify_lagos_lagride_pickup(pickup_lat, pickup_lng)
+    tier_b, zone_b = classify_lagos_lagride_pickup(dropoff_lat, dropoff_lng)
+    d = max(0.0, float(distance_km))
+
+    rate_ab = _one_way_lagos_area_rate_per_km(
+        tier_a,
+        d,
+        zone_a,
+        dropoff_lat,
+        dropoff_lng,
+        pickup_lat=pickup_lat,
+        pickup_lng=pickup_lng,
+        dropoff_lat=dropoff_lat,
+        dropoff_lng=dropoff_lng,
+    )
+    rate_ba = _one_way_lagos_area_rate_per_km(
+        tier_b,
+        d,
+        zone_b,
+        pickup_lat,
+        pickup_lng,
+        pickup_lat=dropoff_lat,
+        pickup_lng=dropoff_lng,
+        dropoff_lat=pickup_lat,
+        dropoff_lng=pickup_lng,
+    )
+    effective = min(rate_ab, rate_ba)
+    return effective, {
+        "symmetric_fare": rate_ab != rate_ba,
+        "rate_forward_km": round(rate_ab, 4),
+        "rate_reverse_km": round(rate_ba, 4),
+        "pickup_zone": zone_a,
+        "dropoff_zone": zone_b,
+    }
 
 
 def lagride_tier1_rate_per_km(distance_km: float, zone_label: str = "") -> float:
@@ -351,15 +450,31 @@ def lagride_lagos_area_rate_per_km(
     zone_label: str = "",
     dropoff_lat: float | None = None,
     dropoff_lng: float | None = None,
+    pickup_lat: float | None = None,
+    pickup_lng: float | None = None,
 ) -> float:
-    z = (zone_label or "").strip()
-    if tier == 2 and z == "lagride_t2_peace_garden":
-        pg = peace_garden_destination_rate_per_km(dropoff_lat, dropoff_lng)
-        if pg is not None:
-            return pg
-    if tier == 1:
-        return lagride_tier1_rate_per_km(distance_km, zone_label)
-    return TIER2_FLAT_PER_KM
+    """₦/km; when pickup+dropoff coords exist, uses symmetric min(A→B, B→A)."""
+    if (
+        pickup_lat is not None
+        and pickup_lng is not None
+        and dropoff_lat is not None
+        and dropoff_lng is not None
+    ):
+        rate, _meta = lagride_lagos_symmetric_area_rate_per_km(
+            distance_km, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+        )
+        return rate
+    return _one_way_lagos_area_rate_per_km(
+        tier,
+        distance_km,
+        zone_label,
+        dropoff_lat,
+        dropoff_lng,
+        pickup_lat=pickup_lat,
+        pickup_lng=pickup_lng,
+        dropoff_lat=dropoff_lat,
+        dropoff_lng=dropoff_lng,
+    )
 
 
 def lagride_distance_band_key(tier: int, distance_km: float) -> str:
@@ -617,7 +732,10 @@ def build_lagos_lagride_fare_breakdown(
     """Full-shaped dict compatible with ``server.calculate_fare`` / fare estimate."""
     route_time_min = nexryde_route_time_minutes(duration_min, traffic_duration_min)
     tier, zone = classify_lagos_lagride_pickup(pickup_lat, pickup_lng)
-    rate = lagride_lagos_area_rate_per_km(tier, distance_km, zone, dropoff_lat, dropoff_lng)
+    rate, sym_meta = lagride_lagos_symmetric_area_rate_per_km(
+        distance_km, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng
+    )
+    _drop_tier, drop_zone = classify_lagos_lagride_pickup(dropoff_lat, dropoff_lng)
     svc_m = lagride_lagos_service_multiplier(service_key)
 
     wat_now = datetime.utcnow() + timedelta(hours=1)
@@ -658,13 +776,15 @@ def build_lagos_lagride_fare_breakdown(
             if zone in TIER1_15_PLUS_RATES_BY_ZONE
             else f"15+ km @ ₦{int(TIER1_RATE_15_PLUS_KM)}/km"
         )
-    elif zone == "lagride_t2_peace_garden" and peace_garden_destination_rate_per_km(dropoff_lat, dropoff_lng):
+    elif peace_garden_corridor_rate_per_km(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng) is not None:
         dest = (
             "Ikorodu"
             if rate == PEACE_GARDEN_TO_IKORODU_PER_KM
-            else ("Ikeja" if rate == PEACE_GARDEN_TO_IKEJA_PER_KM else "")
+            else ("Ikeja" if rate == PEACE_GARDEN_TO_IKEJA_PER_KM else "corridor")
         )
-        band_note = f"Peace Garden → {dest} @ ₦{round(rate)}/km (calibrated)" if dest else "Peace Garden (dropoff band)"
+        band_note = f"Peace Garden ↔ {dest} @ ₦{round(rate)}/km (symmetric corridor)"
+        if sym_meta.get("symmetric_fare"):
+            band_note += f" (was ₦{round(sym_meta['rate_forward_km'])}/km one-way)"
     else:
         band_note = "Tier 2 @ ₦3,255/km"
 
@@ -684,6 +804,10 @@ def build_lagos_lagride_fare_breakdown(
         dropoff_lng=dropoff_lng,
         total_fare=float(total_fare),
     )
+    lagride_profile["symmetric_fare"] = bool(sym_meta.get("symmetric_fare"))
+    lagride_profile["rate_forward_km"] = sym_meta.get("rate_forward_km")
+    lagride_profile["rate_reverse_km"] = sym_meta.get("rate_reverse_km")
+    lagride_profile["dropoff_zone_key"] = drop_zone
 
     lm_pb = float(LAGOS_MARKET_WIDE_FARE_MULTIPLIER)
     price_breakdown = (
