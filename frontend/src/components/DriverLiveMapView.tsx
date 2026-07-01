@@ -12,7 +12,7 @@
  *  – Smooth marker position transitions
  */
 
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo, memo } from 'react';
 import {
   View,
   Text,
@@ -48,6 +48,7 @@ import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { startupLog } from '@/src/utils/driverStartupTrace';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import notificationService from '@/src/services/notifications';
 import { DriverBrandHeaderRow } from '@/src/components/driver/DriverBrandChrome';
@@ -563,7 +564,7 @@ function ZoomButton({
 }
 
 /* ─────────────────────── Main component ───────────────────────── */
-export default function DriverLiveMapView({
+function DriverLiveMapViewInner({
   driverCoords,
   isOnline,
   driverCanReceiveOffers,
@@ -614,7 +615,7 @@ export default function DriverLiveMapView({
   const flow = useFlowLayout();
   const router = useRouter();
   const { user } = useAppStore();
-  const { userId: driverId, canCallAuthedApi, token } = useAuthedUserId();
+  const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const [mapInboxUnread, setMapInboxUnread] = useState(0);
   const mapRef = useRef<MapView>(null);
   const cameraZoomRef = useRef(15);
@@ -648,6 +649,10 @@ export default function DriverLiveMapView({
   const [useTileFallback, setUseTileFallback] = useState(false);
   const [cameraUnlocked, setCameraUnlocked] = useState(false);
   const [mapLayout, setMapLayout] = useState<{ width: number; height: number } | null>(null);
+
+  useEffect(() => {
+    if (isOnline) startupLog('MAP_INIT', { component: 'DriverLiveMapView' });
+  }, [isOnline]);
 
   const logMapEvent = useCallback((event: string, extra?: Record<string, unknown>) => {
     if (!__DEV__) return;
@@ -1757,12 +1762,27 @@ export default function DriverLiveMapView({
   }, [activeTrip?.status, activeTrip?.id, arrivedAtMs]);
 
   const [tripLegSec, setTripLegSec] = useState(0);
+  // Client anchor used when started_at hasn't synced yet from backend
+  const tripStartClientRef = useRef<number | null>(null);
   useEffect(() => {
-    if (String(activeTrip?.status) !== 'ongoing' || !Number.isFinite(startedAtMs)) {
+    const isOngoing = String(activeTrip?.status) === 'ongoing';
+    if (!isOngoing) {
       setTripLegSec(0);
+      tripStartClientRef.current = null;
       return;
     }
-    const tick = () => setTripLegSec(Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000)));
+    // Prefer server-provided started_at; fall back to client anchor
+    let anchor: number;
+    if (Number.isFinite(startedAtMs) && startedAtMs > 0) {
+      anchor = startedAtMs;
+      tripStartClientRef.current = null; // server time is authoritative
+    } else {
+      if (tripStartClientRef.current == null) {
+        tripStartClientRef.current = Date.now();
+      }
+      anchor = tripStartClientRef.current;
+    }
+    const tick = () => setTripLegSec(Math.max(0, Math.floor((Date.now() - anchor) / 1000)));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
@@ -2138,6 +2158,7 @@ export default function DriverLiveMapView({
         toolbarEnabled={false}
         onRegionChangeComplete={onRegionChangeComplete}
         onMapReady={() => {
+          startupLog('MAP_READY', { platform: Platform.OS });
           console.log('✅ MAP READY - Google Maps initialized successfully');
           setMapReady(true);
           console.log('[NEXRYDE_MAP_SDK] onMapReady', {
@@ -2428,7 +2449,7 @@ export default function DriverLiveMapView({
             coordinate={{ latitude: driverCoords.lat, longitude: driverCoords.lng }}
             anchor={{ x: 0.5, y: 0.5 }}
             flat={false}
-            tracksViewChanges={Boolean(activeTrip) || (isOnline && !activeTrip)}
+            tracksViewChanges={false}
             rotation={driverCoords.heading ?? 0}
           >
             <CarMarker
@@ -2472,9 +2493,7 @@ export default function DriverLiveMapView({
           style={[
             styles.bottomMapFade,
             {
-              height: isWaitingAtPickupNoCode
-                ? Math.min(140, 72 + insets.bottom)
-                : Math.min(320, 200 + insets.bottom),
+              height: Math.min(200, 140 + insets.bottom),
             },
           ]}
           pointerEvents="none"
@@ -3005,7 +3024,6 @@ export default function DriverLiveMapView({
           pointerEvents="box-none"
         >
           {String(activeTrip.status) === 'accepted' && onTripOpenNavigation ? (
-            pickupNavDockExpanded ? (
               <DriverNavigatePickupDock
                 riderName={activeTrip.rider_name || 'Rider'}
                 riderPhoto={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
@@ -3058,28 +3076,6 @@ export default function DriverLiveMapView({
                     : undefined
                 }
               />
-            ) : (
-              <TouchableOpacity
-                style={[styles.pickupDockCollapsedBar, styles.pickupDockCollapsedBarLight]}
-                onPress={() => setPickupNavDockExpanded(true)}
-                activeOpacity={0.88}
-                accessibilityRole="button"
-                accessibilityLabel="Expand navigate to pickup card"
-              >
-                <View style={styles.pickupCollapsedLiveDot} />
-                <View style={{ flex: 1, marginLeft: 10, minWidth: 0 }}>
-                  <Text style={styles.pickupDockCollapsedTxtLight}>En route to pickup</Text>
-                  <Text style={styles.pickupDockCollapsedSubLight} numberOfLines={1}>
-                    {pickupAddrShort || 'Pickup'}
-                    {dropAddrShort ? ` → ${dropAddrShort}` : ''}
-                  </Text>
-                </View>
-                <Text style={styles.pickupDockCollapsedEtaLight}>
-                  {displayTripEtaMin != null ? `${displayTripEtaMin} min` : 'Open'}
-                </Text>
-                <Ionicons name="chevron-up" size={20} color="#2563EB" />
-              </TouchableOpacity>
-            )
           ) : String(activeTrip.status) === 'arrived' && !pickupVerifiedAtPickup && onTripStart ? (
             <DriverArrivedPickupDock
               expanded={arrivedDockExpanded}
@@ -3353,7 +3349,7 @@ export default function DriverLiveMapView({
               <TripProfileAvatar
                 size={48}
                 uri={activeTrip.rider_profile_image ? String(activeTrip.rider_profile_image) : null}
-                person={activeTrip as Record<string, unknown>}
+                person={activeTrip as unknown as Record<string, unknown>}
                 role="rider"
                 borderColor="rgba(96,165,250,0.45)"
                 accessibilityLabel={`Photo of ${activeTrip.rider_name || 'rider'}`}
@@ -4572,15 +4568,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(37,99,235,0.98)',
-    paddingHorizontal: 13,
+    backgroundColor: 'rgba(0,212,126,0.15)',
+    paddingHorizontal: 14,
     paddingVertical: 9,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(191,219,254,0.38)',
-    shadowColor: '#2563EB',
+    borderRadius: 999,
+    borderWidth: 1.5,
+    borderColor: 'rgba(0,212,126,0.5)',
+    shadowColor: '#00D47E',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.25,
     shadowRadius: 8,
     elevation: 4,
   },
@@ -4588,13 +4584,13 @@ const styles = StyleSheet.create({
     width: 7,
     height: 7,
     borderRadius: 4,
-    backgroundColor: '#F8FAFC',
+    backgroundColor: '#00D47E',
   },
   oiOnlineTxt: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '900',
-    color: '#F8FAFC',
-    letterSpacing: 1,
+    color: '#00D47E',
+    letterSpacing: 0.8,
   },
   oiEarnCenter: {
     flex: 1,
@@ -4831,11 +4827,11 @@ const styles = StyleSheet.create({
   },
   oiListenCard: {
     borderRadius: 18,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    backgroundColor: 'rgba(30,58,138,0.28)',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(0,212,126,0.07)',
     borderWidth: 1,
-    borderColor: 'rgba(96,165,250,0.28)',
+    borderColor: 'rgba(0,212,126,0.22)',
   },
   oiListenRow: {
     flexDirection: 'row',
@@ -4867,17 +4863,17 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(147,197,253,0.45)',
   },
   oiWaitTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: 0.1,
-    lineHeight: 20,
+    letterSpacing: -0.2,
+    lineHeight: 21,
   },
   oiWaitSub: {
     fontSize: 12,
     fontWeight: '600',
-    color: '#94A3B8',
-    marginTop: 3,
+    color: '#64748B',
+    marginTop: 4,
     lineHeight: 17,
   },
   oiActionRow: {
@@ -4902,19 +4898,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    paddingVertical: 13,
+    paddingVertical: 14,
     paddingHorizontal: 18,
     borderRadius: 14,
-    backgroundColor: 'rgba(127,29,29,0.28)',
+    backgroundColor: 'rgba(239,68,68,0.12)',
     borderWidth: 1,
-    borderColor: 'rgba(252,165,165,0.38)',
-    minHeight: 48,
+    borderColor: 'rgba(239,68,68,0.35)',
+    minHeight: 52,
   },
   oiGoOfflineText: {
     fontSize: 15,
     fontWeight: '900',
-    color: '#FEE2E2',
-    letterSpacing: 0.75,
+    color: '#FCA5A5',
+    letterSpacing: 0.5,
   },
   onlineNavFab: {
     position: 'absolute',
@@ -7236,3 +7232,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.2,
   },
 });
+
+// Wrap in React.memo to prevent re-renders from parent state changes
+// that do not affect driver map state, and in TripMapErrorBoundary so
+// a native map crash cannot kill the entire driver screen.
+import { TripMapErrorBoundary } from '@/src/components/TripMapErrorBoundary';
+
+const DriverLiveMapViewMemo = memo(DriverLiveMapViewInner);
+
+export default function DriverLiveMapView(props: Parameters<typeof DriverLiveMapViewInner>[0]) {
+  return (
+    <TripMapErrorBoundary>
+      <DriverLiveMapViewMemo {...props} />
+    </TripMapErrorBoundary>
+  );
+}

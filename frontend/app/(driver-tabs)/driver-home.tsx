@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useLocalSearchParams } from 'expo-router';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
   saveDriverState,
   updateDriverOnlineStatus,
@@ -36,8 +37,6 @@ import { flushTripLocationQueue } from '@/src/utils/tripLocationQueue';
 import {
   BACKEND_URL,
   getAuthHeaders,
-  getDriverSubscriptionStatus,
-  reportDriverSimSwapSignal,
   formatApiDetail,
   messageFromAxiosError,
   getDriverWithdrawals,
@@ -48,6 +47,16 @@ import {
   completeTrip,
   rateTrip,
 } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
+import { getValidToken } from '@/src/lib/tokenStore';
+import {
+  startupLog,
+  startupStepStart,
+  startupStepEnd,
+} from '@/src/utils/driverStartupTrace';
+import { fetchWithTimeout } from '@/src/utils/fetchWithTimeout';
+import { useDriverBoot, type DriverBootRedirect } from '@/src/hooks/useDriverBoot';
+import { DriverBootShell } from '@/src/components/driver/DriverBootShell';
 
 
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
@@ -264,21 +273,8 @@ function tripToCompletionPayload(merged: Trip & Record<string, unknown>): TripCo
   };
 }
 
-function openGoogleNavigation(lat: number | null, lng: number | null, addressFallback?: string) {
-  if (lat != null && lng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
-    const url =
-      Platform.select({
-        ios: `maps:0,0?q=${lat},${lng}`,
-        android: `google.navigation:q=${lat},${lng}`,
-      }) || `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-    Linking.openURL(url).catch(() => {
-      Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
-    });
-  } else if (addressFallback) {
-    const encoded = encodeURIComponent(addressFallback);
-    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${encoded}`);
-  }
-}
+// Navigation helpers are imported from the shared utility
+import { openGoogleNavigation, promptExternalNavigation } from '@/src/utils/openExternalNavigation';
 
 /** Map backend `ride_offer` WebSocket payload to the trip shape used by the offer modal + accept API. */
 function mapWsRideOfferToTrip(data: Record<string, unknown>) {
@@ -320,6 +316,7 @@ function mapWsRideOfferToTrip(data: Record<string, unknown>) {
 // Feature arrays built inside component to use translations
 
 export default function ModernDriverHome() {
+  const toast = useErrorToast();
   const router = useRouter();
   const {
     user,
@@ -332,6 +329,38 @@ export default function ModernDriverHome() {
   } = useAppStore();
   const { userId: driverId, canCallAuthedApi } = useAuthedUserId();
 
+  const handleBootRedirect = useCallback(
+    (redirect: DriverBootRedirect) => {
+      if (!user) return;
+      const step = redirect.step;
+      if (step === 'terms') {
+        router.replace({ pathname: '/(auth)/driver-terms', params: driverTermsRouteParams(user) });
+      } else if (step === 'documents') {
+        router.replace({ pathname: '/(auth)/driver-documents', params: driverDocumentsRouteParams(user) });
+      } else if (step === 'documents_rejected') {
+        router.replace({
+          pathname: '/(auth)/driver-verification-status',
+          params: driverDocumentsRouteParams(user),
+        });
+      } else if (step === 'profile') {
+        router.replace({ pathname: '/(auth)/driver-profile', params: driverProfileRouteParams(user) });
+      }
+    },
+    [user, router],
+  );
+
+  const boot = useDriverBoot({
+    driverId,
+    enabled: Boolean(driverId && canCallAuthedApi),
+    onRedirect: handleBootRedirect,
+  });
+
+  const verificationStatus = boot.verificationStatus;
+  const subscriptionStatus = boot.subscriptionStatus;
+  const trialTripsCompleted = boot.trialTripsCompleted;
+  const trialTripsTarget = boot.trialTripsTarget;
+  const trialExtended = boot.trialExtended;
+
   // ── Quick-access action (from widget tap or app shortcut) ─────────────────
   const { action: rawAction } = useLocalSearchParams<{ action?: string }>();
   const pendingAction = typeof rawAction === 'string' ? rawAction : '';
@@ -340,6 +369,11 @@ export default function ModernDriverHome() {
   const [isOnline, setIsOnline] = useState(false);
   const isOnlineRef = useRef(isOnline);
   isOnlineRef.current = isOnline;
+
+  useEffect(() => {
+    if (boot.lockedPendingApproval) setIsOnline(false);
+  }, [boot.lockedPendingApproval]);
+
   // Sync to global store so _layout can style the tab bar for map mode
   useEffect(() => { setStoreIsOnline(isOnline); }, [isOnline]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -385,11 +419,13 @@ export default function ModernDriverHome() {
       if (isInitial) { setEarningsLoading(true); setEarningsError(false); }
       try {
         const [todayRes, weekRes] = await Promise.all([
-          fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
+          fetchWithTimeout(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=today`, {
             headers: getAuthHeaders(),
+            timeoutMs: 5000,
           }),
-          fetch(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`, {
+          fetchWithTimeout(`${BACKEND_URL}/api/driver/earnings/${driverId}?period=week`, {
             headers: getAuthHeaders(),
+            timeoutMs: 5000,
           }),
         ]);
         if (!mounted) return;
@@ -431,18 +467,12 @@ export default function ModernDriverHome() {
       clearInterval(interval);
     };
   }, [driverId, user?.total_trips]);
-  const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
-  const [subscriptionStatus, setSubscriptionStatus] = useState<string | null>(null);
-  const [trialTripsCompleted, setTrialTripsCompleted] = useState<number>(0);
-  const [trialTripsTarget, setTrialTripsTarget] = useState<number>(20);
-  const [trialExtended, setTrialExtended] = useState<boolean>(false);
   const driverApproved = verificationStatus === 'approved';
   const trialReady = subscriptionStatus ? ['trial', 'active', 'grace_period'].includes(subscriptionStatus) : false;
   const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
   const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
   const driverCanReceiveOffers = driverApproved && trialReady;
   const verificationLocked = Boolean(verificationStatus && !driverApproved);
-  const [checkingOnboarding, setCheckingOnboarding] = useState(true);
   const [incomingRide, setIncomingRide] = useState<any>(null);
   const incomingOfferAlertKey =
     incomingRide?.offer_id != null
@@ -469,7 +499,6 @@ export default function ModernDriverHome() {
   } | null>(null);
   const lastLocationPushAtRef = useRef<number>(0);
   const lastLocationPushCoordsRef = useRef<{ lat: number; lng: number } | null>(null);
-  const [simSignalSent, setSimSignalSent] = useState(false);
   const onlineToggleInFlightRef = useRef(false);
   const [toggleSyncing, setToggleSyncing] = useState(false);
   const [earningsLoading, setEarningsLoading] = useState(true);
@@ -503,8 +532,9 @@ export default function ModernDriverHome() {
     let mounted = true;
     (async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
+        const res = await fetchWithTimeout(`${BACKEND_URL}/api/drivers/${driverId}/categories`, {
           headers: getAuthHeaders(),
+          timeoutMs: 5000,
         });
         if (res.ok && mounted) {
           const data = await res.json();
@@ -574,19 +604,34 @@ export default function ModernDriverHome() {
 
   const handleTripOpenNavigation = useCallback(() => {
     if (!currentTrip) return;
-    const st = currentTrip.status;
+    const st  = currentTrip.status;
     const pick = currentTrip.pickup_location;
     const drop = currentTrip.dropoff_location;
-    const pv = !!(currentTrip.pickup_code_verified || currentTrip.security_code_verified);
-    if (st === 'accepted' && pick) {
-      openGoogleNavigation(Number(pick.lat), Number(pick.lng), pick.address);
-    } else if (st === 'arrived' && pv && drop) {
-      openGoogleNavigation(Number(drop.lat), Number(drop.lng), drop.address);
-    } else if (st === 'arrived' && pick) {
-      openGoogleNavigation(Number(pick.lat), Number(pick.lng), pick.address);
+    // Phase-aware navigation: pickup when heading there, destination when on trip
+    if ((st === 'accepted' || st === 'arrived') && pick) {
+      promptExternalNavigation({
+        lat: Number(pick.lat),
+        lng: Number(pick.lng),
+        label: pick.address || 'Pickup',
+      });
     } else if (st === 'ongoing' && drop) {
-      openGoogleNavigation(Number(drop.lat), Number(drop.lng), drop.address);
+      promptExternalNavigation({
+        lat: Number(drop.lat),
+        lng: Number(drop.lng),
+        label: drop.address || 'Destination',
+      });
     }
+  }, [currentTrip]);
+
+  // Dedicated handler to navigate to the trip destination (used by arrived dock preview)
+  const handleTripNavigateToDestination = useCallback(() => {
+    if (!currentTrip?.dropoff_location) return;
+    const drop = currentTrip.dropoff_location;
+    promptExternalNavigation({
+      lat: Number(drop.lat),
+      lng: Number(drop.lng),
+      label: drop.address || 'Destination',
+    });
   }, [currentTrip]);
 
   const handleTripMarkArrived = useCallback(async () => {
@@ -601,11 +646,11 @@ export default function ModernDriverHome() {
         const d = (e as { response?: { data?: { detail?: string } } }).response?.data?.detail;
         if (typeof d === 'string') msg = d;
       }
-      Alert.alert('Could not update', msg);
+      toast.show(msg, 'error');
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip?.id, driverId, setCurrentTrip]);
+  }, [currentTrip?.id, driverId, setCurrentTrip, toast]);
 
   const handleTripStart = useCallback(() => {
     if (!currentTrip?.id || !driverId) return;
@@ -624,11 +669,11 @@ export default function ModernDriverHome() {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch (e: unknown) {
-      Alert.alert('Could not start trip', messageFromAxiosError(e, 'Try again in a moment.'));
+      toast.show(messageFromAxiosError(e, 'Could not start trip. Try again in a moment.'), 'error');
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip, setCurrentTrip]);
+  }, [currentTrip, setCurrentTrip, toast]);
 
   const handleTripCancelFromDock = useCallback(async () => {
     if (!currentTrip?.id || !driverId) return;
@@ -640,11 +685,11 @@ export default function ModernDriverHome() {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
       }
     } catch (e: unknown) {
-      Alert.alert('Could not cancel', messageFromAxiosError(e, 'Try again in a moment.'));
+      toast.show(messageFromAxiosError(e, 'Could not cancel trip. Try again in a moment.'), 'error');
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip?.id, driverId, setCurrentTrip]);
+  }, [currentTrip?.id, driverId, setCurrentTrip, toast]);
 
   const handleTripPauseFromDock = useCallback(() => {
     Alert.alert(
@@ -680,11 +725,11 @@ export default function ModernDriverHome() {
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     } catch (e: unknown) {
-      Alert.alert('Could not complete', messageFromAxiosError(e, 'Try again in a moment.'));
+      toast.show(messageFromAxiosError(e, 'Could not complete trip. Try again in a moment.'), 'error');
     } finally {
       setTripActionBusy(null);
     }
-  }, [currentTrip, setCurrentTrip]);
+  }, [currentTrip, setCurrentTrip, toast]);
 
   const handleTripComplete = useCallback(() => {
     if (!currentTrip?.id) return;
@@ -730,17 +775,27 @@ export default function ModernDriverHome() {
 
   const hydrateOnlineState = async () => {
     if (!driverId) return;
+    startupStepStart('profile_hydrate');
+    startupLog('PROFILE_FETCH_START', { source: 'hydrateOnlineState' });
     try {
-      const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/profile`, {
-        headers: getAuthHeaders(),
-      });
-      if (!response.ok) return;
+      const response = await fetchWithTimeout(
+        `${BACKEND_URL}/api/drivers/${driverId}/profile`,
+        { headers: getAuthHeaders(), timeoutMs: 8000 },
+      );
+      if (!response.ok) {
+        startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', { ok: false, status: response.status });
+        return;
+      }
       const profile = await response.json();
       const serverOnline = Boolean(profile?.is_online);
       setIsOnline(serverOnline);
-      // Persist authoritative server state so the widget and smart-resume reflect reality
       void updateDriverOnlineStatus(serverOnline, driverId);
-    } catch {}
+      startupStepEnd('PROFILE_FETCH_END', 'profile_hydrate', { ok: true, isOnline: serverOnline });
+    } catch (e) {
+      startupStepEnd('PROFILE_FETCH_FAILED', 'profile_hydrate', {
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
   };
   const fetchIncomingRide = useCallback(async () => {
     if (!driverId || !canCallAuthedApi) return;
@@ -763,6 +818,10 @@ export default function ModernDriverHome() {
   const slideAnim = useRef(new Animated.Value(30)).current;
 
   useEffect(() => {
+    startupLog('SCREEN_MOUNT', { screen: 'driver-home', driverId: driverId ?? null });
+  }, [driverId]);
+
+  useEffect(() => {
     Animated.parallel([
       Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
       Animated.spring(slideAnim, { toValue: 0, friction: 8, useNativeDriver: true }),
@@ -775,8 +834,6 @@ export default function ModernDriverHome() {
   useEffect(() => {
     if (!driverId) return;
 
-    // Check onboarding status first — this is the verification gate
-    checkOnboardingStatus();
     hydrateOnlineState();
 
     void saveDriverState({
@@ -812,78 +869,115 @@ export default function ModernDriverHome() {
         hydrateOnlineState();
         void getQueueSize().then(setOfflineQueueCount);
         void syncQueuedRequests();
-        // Re-check verification status when app comes to foreground — reflects admin approval instantly
-        void checkOnboardingStatus();
+        boot.refresh();
       }
     });
     return () => {
       sub.remove();
     };
-  }, [driverId]);
+  }, [driverId, boot.refresh]);
+
+  // Pause home-screen GPS when DriverTripLocationBridge is active (accepted/arrived/ongoing).
+  // The bridge is the single GPS owner during active trips to avoid triple concurrent watchers.
+  const bridgeActive = Boolean(
+    currentTrip?.id &&
+    ['accepted', 'arrived', 'ongoing'].includes(String(currentTrip?.status || '').toLowerCase())
+  );
 
   useEffect(() => {
-    let mounted = true;
+    if (bridgeActive) return; // Bridge owns GPS during active trip
+    let cancelled = false;
     let locationSub: Location.LocationSubscription | null = null;
+    let lastStorePushMs = 0;
+    let lastStoreLat: number | null = null;
+    let lastStoreLng: number | null = null;
+
+    const pushLocation = (c: { lat: number; lng: number; heading: number; speedKmh?: number }, force = false) => {
+      const now = Date.now();
+      const moved =
+        lastStoreLat == null ||
+        lastStoreLng == null ||
+        Math.abs(c.lat - lastStoreLat) > 0.00008 ||
+        Math.abs(c.lng - lastStoreLng) > 0.00008;
+      if (!force && !moved && now - lastStorePushMs < 3000) return;
+      lastStorePushMs = now;
+      lastStoreLat = c.lat;
+      lastStoreLng = c.lng;
+      setDriverCoords(c);
+      setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
+    };
 
     const bootstrapLocation = async () => {
+      startupStepStart('location');
+      startupLog('LOCATION_START');
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== 'granted') return;
+        if (status !== 'granted' || cancelled) {
+          startupLog('LOCATION_FAILED', { reason: status !== 'granted' ? 'permission_denied' : 'cancelled' });
+          return;
+        }
 
         const lastKnown = await Location.getLastKnownPositionAsync();
-        if (mounted && lastKnown) {
+        if (!cancelled && lastKnown) {
           const c = {
             lat: lastKnown.coords.latitude,
             lng: lastKnown.coords.longitude,
             heading: lastKnown.coords.heading ?? 0,
             speedKmh: lastKnown.coords.speed != null ? (lastKnown.coords.speed * 3.6) : undefined,
           };
-          setDriverCoords(c);
-          setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
+          pushLocation(c, true);
         }
 
+        if (cancelled) return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-        if (mounted) {
+        if (!cancelled) {
           const c = {
             lat: loc.coords.latitude,
             lng: loc.coords.longitude,
             heading: loc.coords.heading ?? 0,
             speedKmh: loc.coords.speed != null ? (loc.coords.speed * 3.6) : undefined,
           };
-          setDriverCoords(c);
-          setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
+          pushLocation(c, true);
+          startupStepEnd('LOCATION_SUCCESS', 'location');
         }
 
-        locationSub = await Location.watchPositionAsync(
+        if (cancelled) return;
+        const created = await Location.watchPositionAsync(
           {
-            // 5 s interval when online (for map follow), 12 s when offline
-            // Backend push is further debounced (15 s + 50 m) so no extra API calls
+            // 5 s interval for map follow; backend push debounced separately
             accuracy: Location.Accuracy.Balanced,
             timeInterval: 5000,
             distanceInterval: 10,
           },
           (update) => {
-            if (mounted) {
-              const c = {
-                lat: update.coords.latitude,
-                lng: update.coords.longitude,
-                heading: update.coords.heading ?? 0,
-                speedKmh: update.coords.speed != null ? (update.coords.speed * 3.6) : undefined,
-              };
-              setDriverCoords(c);
-              setCurrentLocation({ latitude: c.lat, longitude: c.lng, address: '' });
-            }
+            if (cancelled) return;
+            const c = {
+              lat: update.coords.latitude,
+              lng: update.coords.longitude,
+              heading: update.coords.heading ?? 0,
+              speedKmh: update.coords.speed != null ? (update.coords.speed * 3.6) : undefined,
+            };
+            pushLocation(c);
           }
         );
+        // If effect cleaned up while awaiting, remove immediately (async race fix)
+        if (cancelled) {
+          created.remove();
+          return;
+        }
+        locationSub = created;
       } catch (e) {
+        startupStepEnd('LOCATION_FAILED', 'location', {
+          error: e instanceof Error ? e.message : String(e),
+        });
       }
     };
     bootstrapLocation();
     return () => {
-      mounted = false;
-      if (locationSub) locationSub.remove();
+      cancelled = true;
+      locationSub?.remove();
     };
-  }, []);
+  }, [bridgeActive]);
 
   // Push live location to backend — smart throttle to minimise API calls
   useEffect(() => {
@@ -922,51 +1016,6 @@ export default function ModernDriverHome() {
     if (AppState.currentState === 'active') void flushTripLocationQueue();
   }, [currentTrip?.id]);
 
-  // SIM Swap Protection — runs at most once per 24h per device, never blocks UI
-  const [simSwapAlert, setSimSwapAlert] = useState(false);
-  useEffect(() => {
-    if (!driverId || simSignalSent) return;
-    const sendSimRiskSignal = async () => {
-      try {
-        const fpKey = `nexryde_sim_fp_${driverId}`;
-        const cooldownKey = `nexryde_sim_check_ts_${driverId}`;
-
-        // Local 24h cooldown — skip if checked within the last 24 hours
-        const lastCheckTs = await SecureStore.getItemAsync(cooldownKey);
-        if (lastCheckTs && Date.now() - Number(lastCheckTs) < 86_400_000) {
-          return; // Not due yet
-        }
-
-        // Generate or retrieve stable device fingerprint
-        let fingerprint = await SecureStore.getItemAsync(fpKey);
-        if (!fingerprint) {
-          // First-time: generate a stable ID based on user + platform (no random)
-          fingerprint = `simfp_${driverId.slice(-8)}_${Platform.OS}_${String(Platform.Version).replace(/\./g, '')}_v1`;
-          await SecureStore.setItemAsync(fpKey, fingerprint);
-        }
-
-        // NOTE: we do NOT send phone — the backend already has the registered phone.
-        // Sending app-state phone caused false positives due to format differences
-        // (e.g. "08012345678" vs "+2348012345678" for the same number).
-        await reportDriverSimSwapSignal(driverId, {
-          sim_fingerprint: fingerprint,
-          carrier_name: 'unknown',
-        });
-
-        // Record successful check time
-        await SecureStore.setItemAsync(cooldownKey, String(Date.now()));
-      } catch (error: any) {
-        if (error?.response?.status === 423) {
-          // Show a non-blocking in-app banner instead of a modal Alert
-          setSimSwapAlert(true);
-        }
-        // Any other error (network etc.) — silently ignore, try again next session
-      } finally {
-        setSimSignalSent(true);
-      }
-    };
-    void sendSimRiskSignal();
-  }, [simSignalSent, driverId]);
 
   // Real-time ride offers via WebSocket; HTTP polling only as fallback (slower when WS is up).
   useEffect(() => {
@@ -997,8 +1046,8 @@ export default function ModernDriverHome() {
       driverOffersReconnectTimerRef.current = setTimeout(() => connect(), delay);
     };
 
-    const connect = () => {
-      if (cancelled || !isOnlineRef.current || !driverId || !token) return;
+    const connect = async () => {
+      if (cancelled || !isOnlineRef.current || !driverId) return;
       if (driverOffersReconnectTimerRef.current) {
         clearTimeout(driverOffersReconnectTimerRef.current);
         driverOffersReconnectTimerRef.current = null;
@@ -1012,23 +1061,45 @@ export default function ModernDriverHome() {
         driverOffersWsRef.current = null;
       }
 
+      let liveToken = await getValidToken();
+      if (!liveToken || cancelled || !isOnlineRef.current) return;
+
       const base = getWsBaseUrl();
-      const wsUrl = `${base}/api/ws/driver/offers/${encodeURIComponent(driverId)}?token=${encodeURIComponent(token)}`;
+      const wsUrl = `${base}/api/ws/driver/offers/${encodeURIComponent(driverId)}?token=${encodeURIComponent(liveToken)}`;
+      startupLog('REALTIME_CONNECT', { channel: 'driver_offers' });
       const ws = new WebSocket(wsUrl);
       driverOffersWsRef.current = ws;
 
       ws.onopen = () => {
         if (cancelled) return;
+        startupLog('REALTIME_CONNECTED', { channel: 'driver_offers' });
         driverOffersReconnectAttemptsRef.current = 0;
         setDriverOffersWsConnected(true);
         void fetchIncomingRide();
+        // Keepalive ping every 30 s to prevent server 90s idle timeout
+        const pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try { ws.send(JSON.stringify({ type: 'ping' })); } catch { /* ignore */ }
+          }
+        }, 30_000);
+        // Store so onclose can clear it
+        (ws as any)._pingInterval = pingInterval;
       };
 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data as string);
-          if (data.type !== 'ride_offer') return;
-          const mapped = mapWsRideOfferToTrip(data);
+          // Backend sends type:"new_offer" with the offer nested under data.offer;
+          // older versions sent type:"ride_offer" with flat fields. Support both.
+          let offerPayload: Record<string, unknown>;
+          if (data.type === 'new_offer' && data.offer && typeof data.offer === 'object') {
+            offerPayload = data.offer as Record<string, unknown>;
+          } else if (data.type === 'ride_offer') {
+            offerPayload = data as Record<string, unknown>;
+          } else {
+            return;
+          }
+          const mapped = mapWsRideOfferToTrip(offerPayload);
           if (!mapped.id || !mapped.offer_id) return;
           setIncomingRide((prev: any) => {
             if (prev?.offer_id === mapped.offer_id) return prev;
@@ -1047,6 +1118,10 @@ export default function ModernDriverHome() {
       };
 
       ws.onclose = () => {
+        if ((ws as any)._pingInterval) {
+          clearInterval((ws as any)._pingInterval);
+          (ws as any)._pingInterval = null;
+        }
         if (cancelled) return;
         driverOffersWsRef.current = null;
         setDriverOffersWsConnected(false);
@@ -1291,9 +1366,8 @@ export default function ModernDriverHome() {
           setIncomingRide(null);
           return;
         }
-        const res = await fetch(`${BACKEND_URL}/api/trips/${tripId}/accept`, {
+        const res = await authedFetch(`${BACKEND_URL}/api/trips/${tripId}/accept`, {
           method: 'PUT',
-          headers: getAuthHeaders(),
           body: JSON.stringify({
             driver_id: driverId,
             offer_id: incomingRide?.offer_id,
@@ -1328,7 +1402,7 @@ export default function ModernDriverHome() {
           setCurrentTrip(mergedTrip);
           setIncomingRide(null);
         } else {
-          Alert.alert('Could not accept', formatApiDetail(data?.detail) || 'This offer may have expired. Try the next one.');
+          toast.show(formatApiDetail(data?.detail) || 'Could not accept — this offer may have expired. Try the next one.', 'warning');
         }
       } catch (e) {
         await queueDriverRideAcceptance(
@@ -1372,12 +1446,35 @@ export default function ModernDriverHome() {
   const handleToggleOnline = async () => {
     if (onlineToggleInFlightRef.current) return;
     if (!driverId) {
-      Alert.alert('Profile Required', 'Please login again to continue.');
+      Alert.alert('Session Expired', 'Your session has ended. Please log in again to continue.');
+      return;
+    }
+
+    // ── Pre-flight token check ─────────────────────────────────────────────────
+    // If the token is expired or missing, refresh it NOW before any guard checks.
+    // This prevents the driver landing on a stale "Verification in review" error
+    // that is actually just a session expiry, not a genuine approval block.
+    const token = await getValidToken();
+    if (!token) {
+      Alert.alert(
+        'Session Expired',
+        'Your session has ended. Please log in again to continue.',
+        [{ text: 'OK', onPress: () => router.replace('/(auth)/login' as Href) }],
+      );
       return;
     }
 
     const nextStatus = !isOnline;
+
+    // ── Approval guard ─────────────────────────────────────────────────────────
+    // verificationStatus===null means the onboarding check hasn't completed yet
+    // (network issue or the token was being refreshed). Re-trigger it rather than
+    // wrongly showing "Verification in review" to an approved driver.
     if (nextStatus && !driverApproved) {
+      if (verificationStatus === null || boot.isRefreshing) {
+        boot.refresh();
+        return;
+      }
       Alert.alert(
         'Verification in review',
         'Your documents are saved with NEXRYDE. You can use the dashboard now, but you can go online and receive rides only after approval. You get a free 20-trip activity trial once approved.',
@@ -1398,9 +1495,9 @@ export default function ModernDriverHome() {
     onlineToggleInFlightRef.current = true;
     setToggleSyncing(true);
     try {
-      const res = await fetch(
+      const res = await authedFetch(
         `${BACKEND_URL}/api/drivers/${driverId}/online?is_online=${nextStatus}`,
-        { method: 'PUT', headers: getAuthHeaders() }
+        { method: 'PUT' }
       );
       const data = await res.json();
       if (!res.ok) {
@@ -1440,148 +1537,32 @@ export default function ModernDriverHome() {
       setIsOnline(nextStatus);
       if (nextStatus) {
         fetchIncomingRide();
+        // Start background GPS so location updates continue when app is minimised.
+        import('@/src/tasks/backgroundLocationTask').then(({ startDriverBackgroundLocation }) => {
+          void startDriverBackgroundLocation();
+        });
       } else {
         setIncomingRide(null);
+        // Stop background GPS when driver goes offline.
+        import('@/src/tasks/backgroundLocationTask').then(({ stopDriverBackgroundLocation }) => {
+          void stopDriverBackgroundLocation();
+        });
       }
       // Persist so widget and smart-resume reflect the new status instantly
       if (driverId) {
         void updateDriverOnlineStatus(nextStatus, driverId);
       }
     } catch {
-      Alert.alert('Network Error', 'Could not update online status. Check your connection.');
+      toast.show('Could not update online status. Check your connection.', 'error');
     } finally {
       onlineToggleInFlightRef.current = false;
       setToggleSyncing(false);
     }
   };
   
-  const checkOnboardingStatus = async (retryCount = 0) => {
-    try {
-      if (!driverId || !user) {
-        setCheckingOnboarding(false);
-        return;
-      }
-
-      // Check if driver has completed onboarding
-      const response = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`, {
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) {
-        // Retry up to 2 times on transient server errors before giving up gracefully
-        if (response.status >= 500 && retryCount < 2) {
-          await new Promise(r => setTimeout(r, 1500 * (retryCount + 1)));
-          return checkOnboardingStatus(retryCount + 1);
-        }
-        // 4xx or exhausted retries: show dashboard with limited state, don't trap driver
-        if (__DEV__) console.warn('onboarding-status fetch failed', response.status);
-        setVerificationStatus('pending_review');
-        setCheckingOnboarding(false);
-        return;
-      }
-
-      if (response.ok) {
-        const status = await response.json();
-        const lockedPendingApproval =
-          status.completed === true && status.can_go_online === false;
-
-        setVerificationStatus(
-          status.verification_status ||
-            (status.completed && !lockedPendingApproval ? 'approved' : 'pending_review'),
-        );
-
-        if (lockedPendingApproval) {
-          setSubscriptionStatus('locked_until_approval');
-          setIsOnline(false);
-        }
-
-        if (!status.completed) {
-          // Redirect driver to the appropriate onboarding step
-          if (status.step === 'terms') {
-            router.replace({
-              pathname: '/(auth)/driver-terms',
-              params: driverTermsRouteParams(user),
-            });
-            return;
-          } else if (status.step === 'documents') {
-            router.replace({
-              pathname: '/(auth)/driver-documents',
-              params: driverDocumentsRouteParams(user),
-            });
-            return;
-          } else if (status.step === 'documents_rejected') {
-            router.replace({
-              pathname: '/(auth)/driver-verification-status',
-              params: driverDocumentsRouteParams(user),
-            });
-            return;
-          } else if (status.step === 'documents_review') {
-            setSubscriptionStatus('locked_until_approval');
-            setIsOnline(false);
-            setCheckingOnboarding(false);
-            return;
-          } else if (status.step === 'profile') {
-            router.replace({
-              pathname: '/(auth)/driver-profile',
-              params: driverProfileRouteParams(user),
-            });
-            return;
-          }
-          // Incomplete but unknown step (e.g. not_found, error) — do NOT run subscription "approved" path
-          if (__DEV__) console.warn('[driver-home] onboarding incomplete unhandled step', status.step);
-          setVerificationStatus(status.verification_status || 'pending_review');
-          setCheckingOnboarding(false);
-          return;
-        }
-
-        // Driver completed onboarding API flow — verification may still be pending until admin approves
-        setVerificationStatus(
-          status.verification_status || (lockedPendingApproval ? 'pending_review' : 'approved'),
-        );
-        try {
-          const subRes = await getDriverSubscriptionStatus();
-          const sub = subRes.data || {};
-          setSubscriptionStatus(sub.status || 'none');
-          setTrialTripsCompleted(sub.trial_trips_completed ?? 0);
-          setTrialTripsTarget(sub.trial_trips_target ?? 20);
-          setTrialExtended(sub.trial_extended ?? false);
-        } catch {
-          if (!lockedPendingApproval) {
-            setSubscriptionStatus('none');
-          }
-        }
-        if (lockedPendingApproval) {
-          setSubscriptionStatus('locked_until_approval');
-          setIsOnline(false);
-        }
-      }
-    } catch (error) {
-      if (__DEV__) console.warn('Error checking onboarding status', error);
-    } finally {
-      setCheckingOnboarding(false);
-    }
-  };
-  
-  // Show loading while checking onboarding
-  if (checkingOnboarding) {
-    return (
-      <SafeAreaView style={styles.container} edges={['top']}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 28, width: '100%' }}>
-          <ActivityIndicator size="large" color={COLORS.accentGreen} />
-          <Text style={{ marginTop: 16, color: COLORS.lightTextSecondary, fontSize: 16, fontWeight: '600' }}>
-            Checking your status...
-          </Text>
-          <View style={{ marginTop: 24, width: '100%', gap: 12 }}>
-            <SkeletonBlock height={18} width="55%" />
-            <SkeletonBlock height={14} width="100%" />
-            <SkeletonBlock height={14} width="88%" />
-          </View>
-        </View>
-      </SafeAreaView>
-    );
-  }
-  
-  /* ── LIVE MAP MODE: full-screen when driver is online ── */
+  /* ── LIVE MAP MODE: full-screen when driver is online ──
+   * CRITICAL: check isOnline BEFORE boot gate.
+   * If the driver already tapped GO ONLINE, show the map immediately. */
   if (isOnline) {
     return (
       <View style={{ flex: 1, backgroundColor: '#0a0f1e' }}>
@@ -1672,33 +1653,25 @@ export default function ModernDriverHome() {
         {/* Feature hub drawer */}
         <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
 
-        {/* SIM Swap Banner */}
-        {simSwapAlert && (
-          <View style={[styles.simSwapBanner, { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999 }]}>
-            <View style={styles.simSwapBannerIconWrap}>
-              <Ionicons name="shield-half-outline" size={20} color="#FFF" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.simSwapBannerTitle}>Security Alert: New SIM Detected</Text>
-              <Text style={styles.simSwapBannerText}>
-                Your account has been temporarily secured. If this wasn't you, contact support immediately.
-              </Text>
-            </View>
-            <TouchableOpacity onPress={() => setSimSwapAlert(false)} style={{ padding: 6, alignSelf: 'flex-start' }}>
-              <Ionicons name="close" size={18} color="rgba(255,255,255,0.7)" />
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
     );
   }
 
-  /* ═══════════════════════════════════════════════════════════════════
-     OFFLINE HOME — reference go-online layout (map, stats, GO above tabs)
-     ═══════════════════════════════════════════════════════════════════ */
-  return <DriverOfflineHome
+  /* ── Uber boot shell: cached SWR + 8s gate + retry ── */
+  return (
+    <DriverBootShell
+      isGateOpen={boot.isGateOpen || isOnline}
+      error={boot.error}
+      retrying={boot.retrying}
+      fromCache={boot.fromCache}
+      onRetry={boot.retry}
+      onSignIn={() => router.replace('/(auth)/login' as Href)}
+      onContinueOffline={boot.continueOffline}
+    >
+      <DriverOfflineHome
     driverCoords={driverCoords}
     earnings={earnings}
+    earningsLoading={earningsLoading}
     profileImageUri={user?.profile_image ?? null}
     driverRating={typeof user?.rating === 'number' && Number.isFinite(user.rating) ? user.rating : 0}
     surgeActive={!!(surgePricing?.is_surge)}
@@ -1710,7 +1683,6 @@ export default function ModernDriverHome() {
     trialTripsTarget={trialTripsTarget}
     trialExtended={trialExtended}
     verificationStatus={verificationStatus}
-    simSwapAlert={simSwapAlert}
     toggling={toggleSyncing}
     featureHubOpen={featureHubOpen}
     onGoOnline={handleToggleOnline}
@@ -1722,7 +1694,6 @@ export default function ModernDriverHome() {
     onTrips={() => guardedPush('/(driver-tabs)/driver-trips')}
     onProfile={() => guardedPush('/(driver-tabs)/driver-profile')}
     onOpenSubscription={() => guardedPush('/driver/subscription')}
-    onDismissSimSwap={() => setSimSwapAlert(false)}
     rideRequestModal={
       <DriverRideRequestModal
         visible={!!incomingRide}
@@ -1741,9 +1712,176 @@ export default function ModernDriverHome() {
     featureHubDrawer={
       <FeatureHubDrawer visible={featureHubOpen} onClose={() => setFeatureHubOpen(false)} role="driver" />
     }
-  />;
+      />
+    </DriverBootShell>
+  );
 }
 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   OFFLINE HOME — layout-stable map + stats (no vertical reflow)
+   ═══════════════════════════════════════════════════════════════════════════ */
+const OFFLINE_MAP_LAYER_HEIGHT = 208;
+const OFFLINE_MAP_FOOTER_HEIGHT = 48;
+const OFFLINE_MAP_CARD_HEIGHT = OFFLINE_MAP_LAYER_HEIGHT + OFFLINE_MAP_FOOTER_HEIGHT;
+const OFFLINE_STATS_ROW_HEIGHT = 72;
+const OFFLINE_TRIAL_SLOT_HEIGHT = 60;
+const OFFLINE_SURGE_SLOT_HEIGHT = 52;
+
+const INITIAL_OFFLINE_MAP_REGION = {
+  latitude: 6.5244,
+  longitude: 3.3792,
+  latitudeDelta: 0.055,
+  longitudeDelta: 0.055,
+} as const;
+
+type DriverOfflineMapPreviewProps = {
+  latitude: number | null;
+  longitude: number | null;
+  onHeatmapPress: () => void;
+};
+
+const DriverOfflineMapPreview = React.memo(function DriverOfflineMapPreview({
+  latitude,
+  longitude,
+  onHeatmapPress,
+}: DriverOfflineMapPreviewProps) {
+  const mapRef = useRef<MapView | null>(null);
+  const didCenterOnce = useRef(false);
+  const mountLogged = useRef(false);
+  const lastMapPushRef = useRef(0);
+  const [displayCoords, setDisplayCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    if (__DEV__ && !mountLogged.current) {
+      mountLogged.current = true;
+      console.log('[DRIVER_HOME_MAP_MOUNT]');
+    }
+  }, []);
+
+  /* Throttle marker/camera feed — layout is fixed; avoid re-render churn from GPS stream */
+  useEffect(() => {
+    if (latitude == null || longitude == null) return;
+    const now = Date.now();
+    const elapsed = now - lastMapPushRef.current;
+    const push = () => {
+      lastMapPushRef.current = Date.now();
+      setDisplayCoords({ lat: latitude, lng: longitude });
+    };
+    if (lastMapPushRef.current === 0 || elapsed >= 3000) {
+      push();
+      return;
+    }
+    const timer = setTimeout(push, 3000 - elapsed);
+    return () => clearTimeout(timer);
+  }, [latitude, longitude]);
+
+  useEffect(() => {
+    if (displayCoords == null || !mapRef.current || didCenterOnce.current) return;
+    didCenterOnce.current = true;
+    mapRef.current.animateToRegion(
+      {
+        latitude: displayCoords.lat,
+        longitude: displayCoords.lng,
+        latitudeDelta: 0.055,
+        longitudeDelta: 0.055,
+      },
+      300,
+    );
+  }, [displayCoords]);
+
+  return (
+    <View style={ohStyles.mapCard}>
+      <View style={ohStyles.mapMapLayer}>
+        <MapView
+          ref={mapRef}
+          style={StyleSheet.absoluteFillObject}
+          provider={PROVIDER_GOOGLE}
+          customMapStyle={NEXRYDE_MAP_STYLE}
+          initialRegion={INITIAL_OFFLINE_MAP_REGION}
+          scrollEnabled={false}
+          zoomEnabled={false}
+          pitchEnabled={false}
+          rotateEnabled={false}
+          showsUserLocation={false}
+          showsMyLocationButton={false}
+          showsCompass={false}
+          showsPointsOfInterest
+          showsBuildings={false}
+          showsTraffic={false}
+          toolbarEnabled={false}
+          liteMode={Platform.OS === 'android'}
+          moveOnMarkerPress={false}
+        >
+          {displayCoords != null ? (
+            <Marker
+              coordinate={{ latitude: displayCoords.lat, longitude: displayCoords.lng }}
+              anchor={{ x: 0.5, y: 1 }}
+              tracksViewChanges={false}
+            >
+              <View style={ohStyles.mapPinWrap} collapsable={false}>
+                <Ionicons name="location" size={44} color="#22E5A0" />
+              </View>
+            </Marker>
+          ) : null}
+        </MapView>
+
+        <LinearGradient
+          colors={['rgba(6,11,20,0.2)', 'transparent', 'rgba(6,11,20,0.88)']}
+          locations={[0, 0.45, 1]}
+          style={ohStyles.mapVignette}
+          pointerEvents="none"
+        />
+
+        <View style={ohStyles.liveBadge} pointerEvents="none">
+          <Ionicons name="location-outline" size={11} color="#94A3B8" />
+          <Text style={ohStyles.liveBadgeText}>YOUR AREA</Text>
+        </View>
+
+        <View style={ohStyles.mapLocBadge} pointerEvents="none">
+          <Text style={[ohStyles.mapLocText, displayCoords == null && ohStyles.mapLocTextMuted]}>
+            {displayCoords != null ? 'Your location' : 'Locating…'}
+          </Text>
+        </View>
+      </View>
+
+      <TouchableOpacity
+        style={ohStyles.mapFooterCta}
+        onPress={onHeatmapPress}
+        activeOpacity={0.88}
+        accessibilityRole="button"
+        accessibilityLabel="See ride opportunities in your area"
+      >
+        <Ionicons name="scan-outline" size={18} color="#22E5A0" />
+        <Text style={ohStyles.mapFooterCtaText}>See ride opportunities in your area</Text>
+      </TouchableOpacity>
+    </View>
+  );
+});
+
+function DriverOfflineStatCell({
+  icon,
+  label,
+  value,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={ohStyles.statChip} onPress={onPress} activeOpacity={0.78}>
+      <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
+        <Ionicons name={icon} size={17} color="#22E5A0" />
+      </View>
+      <Text style={ohStyles.statChipValue} numberOfLines={1}>
+        {value}
+      </Text>
+      <Text style={ohStyles.statChipLabel}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    OFFLINE HOME COMPONENT
@@ -1751,6 +1889,7 @@ export default function ModernDriverHome() {
 function DriverOfflineHome({
   driverCoords,
   earnings,
+  earningsLoading,
   profileImageUri,
   driverRating,
   surgeActive,
@@ -1762,7 +1901,6 @@ function DriverOfflineHome({
   trialTripsTarget,
   trialExtended,
   verificationStatus,
-  simSwapAlert,
   toggling,
   featureHubOpen: _featureHubOpen,
   onGoOnline,
@@ -1774,12 +1912,12 @@ function DriverOfflineHome({
   onTrips,
   onProfile,
   onOpenSubscription,
-  onDismissSimSwap,
   rideRequestModal,
   featureHubDrawer,
 }: {
   driverCoords: { lat: number; lng: number; heading?: number } | null;
   earnings: { today: number; trips: number; week: number; tripHoursToday?: number };
+  earningsLoading: boolean;
   profileImageUri: string | null;
   driverRating: number;
   surgeActive: boolean;
@@ -1791,7 +1929,6 @@ function DriverOfflineHome({
   trialTripsTarget: number;
   trialExtended: boolean;
   verificationStatus: string | null;
-  simSwapAlert: boolean;
   toggling: boolean;
   featureHubOpen: boolean;
   onGoOnline: () => void;
@@ -1803,15 +1940,17 @@ function DriverOfflineHome({
   onTrips: () => void;
   onProfile: () => void;
   onOpenSubscription: () => void;
-  onDismissSimSwap: () => void;
   rideRequestModal: React.ReactNode;
   featureHubDrawer: React.ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
-  const mapRef = useRef<MapView | null>(null);
   const goPulse = useRef(new Animated.Value(1)).current;
+
+  const mapPinLat = driverCoords?.lat ?? null;
+  const mapPinLng = driverCoords?.lng ?? null;
+  const handleHeatmapPress = useCallback(() => onHeatmap(), [onHeatmap]);
 
   /* Time-based greeting */
   const hour = new Date().getHours();
@@ -1857,35 +1996,11 @@ function DriverOfflineHome({
     return () => loop.stop();
   }, [driverApproved, trialReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const mapRegion = useMemo(
-    () =>
-      driverCoords
-        ? {
-            latitude: driverCoords.lat,
-            longitude: driverCoords.lng,
-            latitudeDelta: 0.055,
-            longitudeDelta: 0.055,
-          }
-        : { latitude: 6.5244, longitude: 3.3792, latitudeDelta: 0.1, longitudeDelta: 0.1 },
-    [driverCoords?.lat, driverCoords?.lng],
-  );
-
-  useEffect(() => {
-    if (!driverCoords || !mapRef.current) return;
-    mapRef.current.animateToRegion(
-      {
-        latitude: driverCoords.lat,
-        longitude: driverCoords.lng,
-        latitudeDelta: 0.055,
-        longitudeDelta: 0.055,
-      },
-      480,
-    );
-  }, [driverCoords?.lat, driverCoords?.lng]);
-
   const fmtNGN = (n: number) =>
     n >= 1000 ? `₦${(n / 1000).toFixed(1)}k` : `₦${Math.round(n).toLocaleString()}`;
 
+  const earningsLabel = earningsLoading ? '—' : fmtNGN(earnings.today);
+  const tripsLabel = earningsLoading ? '—' : String(earnings.trips);
   const ratingLabel =
     driverRating > 0 && driverRating <= 5 ? driverRating.toFixed(1) : '—';
 
@@ -1893,6 +2008,7 @@ function DriverOfflineHome({
   const needsSubscription = driverApproved && !trialReady;
   const trialRemaining = Math.max(0, trialTripsTarget - trialTripsCompleted);
   const showTrialProgress = driverApproved && subscriptionStatus === 'trial' && trialTripsTarget > 0;
+  const showSurgeStrip = surgeActive || surgePricing?.is_peak_window;
   const profileReadyDot = driverApproved && trialReady;
 
   const goHalftoneDots = useMemo(
@@ -1950,135 +2066,62 @@ function DriverOfflineHome({
           <Text style={ohStyles.heroSub}>Tap GO to start receiving trips</Text>
         </View>
 
-        {showTrialProgress && (
-          <TouchableOpacity
-            style={ohStyles.trialProgressChip}
-            activeOpacity={0.86}
-            onPress={onOpenSubscription}
-          >
-            <View style={ohStyles.trialProgressDot} />
-            <Text style={ohStyles.trialProgressText}>
-              Free trial: {trialTripsCompleted}/{trialTripsTarget} • {trialRemaining} left
-            </Text>
-            {trialExtended && (
-              <View style={ohStyles.trialExtBadge}>
-                <Text style={ohStyles.trialExtText}>Extended</Text>
-              </View>
-            )}
-            <Ionicons name="chevron-forward" size={16} color="#64748B" />
-          </TouchableOpacity>
-        )}
-
-        <View style={ohStyles.mapCard}>
-          <View style={ohStyles.mapMapLayer}>
-            <MapView
-              ref={mapRef}
-              style={StyleSheet.absoluteFillObject}
-              provider={PROVIDER_GOOGLE}
-              customMapStyle={NEXRYDE_MAP_STYLE}
-              initialRegion={mapRegion}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              pitchEnabled={false}
-              rotateEnabled={false}
-              showsUserLocation={false}
-              showsMyLocationButton={false}
-              showsCompass={false}
-              showsPointsOfInterest
-              showsBuildings={false}
-              showsTraffic={false}
-              toolbarEnabled={false}
-              liteMode={Platform.OS === 'android'}
+        <View style={ohStyles.trialProgressSlot}>
+          {showTrialProgress ? (
+            <TouchableOpacity
+              style={ohStyles.trialProgressChip}
+              activeOpacity={0.86}
+              onPress={onOpenSubscription}
             >
-              {driverCoords && (
-                <Marker
-                  coordinate={{ latitude: driverCoords.lat, longitude: driverCoords.lng }}
-                  anchor={{ x: 0.5, y: 1 }}
-                >
-                  <View style={ohStyles.mapPinWrap} collapsable={false}>
-                    <Ionicons name="location" size={44} color="#22E5A0" />
-                  </View>
-                </Marker>
+              <View style={ohStyles.trialProgressDot} />
+              <Text style={ohStyles.trialProgressText}>
+                Free trial: {trialTripsCompleted}/{trialTripsTarget} • {trialRemaining} left
+              </Text>
+              {trialExtended && (
+                <View style={ohStyles.trialExtBadge}>
+                  <Text style={ohStyles.trialExtText}>Extended</Text>
+                </View>
               )}
-            </MapView>
-
-            <LinearGradient
-              colors={['rgba(6,11,20,0.2)', 'transparent', 'rgba(6,11,20,0.88)']}
-              locations={[0, 0.45, 1]}
-              style={ohStyles.mapVignette}
-              pointerEvents="none"
-            />
-
-            <View style={ohStyles.liveBadge} pointerEvents="none">
-              <Ionicons name="radio" size={11} color="#F87171" />
-              <Animated.View style={[ohStyles.liveDot, { opacity: livePulse }]} />
-              <Text style={ohStyles.liveBadgeText}>LIVE</Text>
-            </View>
-
-            {driverCoords ? (
-              <View style={ohStyles.mapLocBadge} pointerEvents="none">
-                <Text style={ohStyles.mapLocText}>Your location</Text>
-              </View>
-            ) : null}
-          </View>
-
-          <TouchableOpacity
-            style={ohStyles.mapFooterCta}
-            onPress={onHeatmap}
-            activeOpacity={0.88}
-            accessibilityRole="button"
-            accessibilityLabel="See ride opportunities in your area"
-          >
-            <Ionicons name="scan-outline" size={18} color="#22E5A0" />
-            <Text style={ohStyles.mapFooterCtaText}>See ride opportunities in your area</Text>
-          </TouchableOpacity>
+              <Ionicons name="chevron-forward" size={16} color="#64748B" />
+            </TouchableOpacity>
+          ) : null}
         </View>
+
+        <DriverOfflineMapPreview
+          latitude={mapPinLat}
+          longitude={mapPinLng}
+          onHeatmapPress={handleHeatmapPress}
+        />
 
         <View style={ohStyles.statsStrip}>
-          <TouchableOpacity style={ohStyles.statChip} onPress={onEarnings} activeOpacity={0.78}>
-            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
-              <Ionicons name="wallet-outline" size={17} color="#22E5A0" />
-            </View>
-            <Text style={ohStyles.statChipValue}>{fmtNGN(earnings.today)}</Text>
-            <Text style={ohStyles.statChipLabel}>Earnings</Text>
-          </TouchableOpacity>
+          <DriverOfflineStatCell icon="wallet-outline" label="Earnings" value={earningsLabel} onPress={onEarnings} />
           <View style={ohStyles.statDivider} />
-          <TouchableOpacity style={ohStyles.statChip} onPress={onTrips} activeOpacity={0.78}>
-            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
-              <Ionicons name="car-outline" size={17} color="#22E5A0" />
-            </View>
-            <Text style={ohStyles.statChipValue}>{earnings.trips}</Text>
-            <Text style={ohStyles.statChipLabel}>Trips</Text>
-          </TouchableOpacity>
+          <DriverOfflineStatCell icon="car-outline" label="Trips" value={tripsLabel} onPress={onTrips} />
           <View style={ohStyles.statDivider} />
-          <TouchableOpacity style={ohStyles.statChip} onPress={onProfile} activeOpacity={0.78}>
-            <View style={[ohStyles.statIconWrap, ohStyles.statIconWrapGreen]}>
-              <Ionicons name="stats-chart" size={17} color="#22E5A0" />
-            </View>
-            <Text style={ohStyles.statChipValue}>{ratingLabel}</Text>
-            <Text style={ohStyles.statChipLabel}>Rating</Text>
-          </TouchableOpacity>
+          <DriverOfflineStatCell icon="stats-chart" label="Rating" value={ratingLabel} onPress={onProfile} />
         </View>
 
-        {surgeActive || surgePricing?.is_peak_window ? (
-          <TouchableOpacity
-            style={ohStyles.surgeStrip}
-            onPress={onHeatmap}
-            activeOpacity={0.85}
-            accessibilityRole="button"
-            accessibilityLabel="Open demand heatmap"
-          >
-            <Ionicons name={surgeActive ? 'flash' : 'time'} size={15} color="#FBBF24" />
-            <Text style={ohStyles.surgeStripText} numberOfLines={2}>
-              {typeof surgePricing?.driver_message === 'string' && surgePricing.driver_message.trim().length > 0
-                ? surgePricing.driver_message
-                : surgeActive
-                  ? 'Surge is on — open Heatmap for the best zones'
-                  : 'Peak hour — open Heatmap to position for more trips'}
-            </Text>
-            <Ionicons name="chevron-forward" size={14} color="#FCD34D" />
-          </TouchableOpacity>
-        ) : null}
+        <View style={ohStyles.surgeSlot}>
+          {showSurgeStrip ? (
+            <TouchableOpacity
+              style={ohStyles.surgeStrip}
+              onPress={onHeatmap}
+              activeOpacity={0.85}
+              accessibilityRole="button"
+              accessibilityLabel="Open demand heatmap"
+            >
+              <Ionicons name={surgeActive ? 'flash' : 'time'} size={15} color="#FBBF24" />
+              <Text style={ohStyles.surgeStripText} numberOfLines={2}>
+                {typeof surgePricing?.driver_message === 'string' && surgePricing.driver_message.trim().length > 0
+                  ? surgePricing.driver_message
+                  : surgeActive
+                    ? 'Surge is on — open Heatmap for the best zones'
+                    : 'Peak hour — open Heatmap to position for more trips'}
+              </Text>
+              <Ionicons name="chevron-forward" size={14} color="#FCD34D" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         <View style={ohStyles.prayerSlot}>
           <PrayerStripWidget />
@@ -2091,7 +2134,7 @@ function DriverOfflineHome({
             <View style={{ flex: 1 }}>
               <Text style={ohStyles.bannerTitle}>Verification Pending</Text>
               <Text style={ohStyles.bannerBody}>
-                {verificationStatus === 'pending'
+                {(verificationStatus === 'pending' || verificationStatus === 'pending_review')
                   ? 'Your documents are being reviewed. You can drive once approved.'
                   : 'Complete your document verification to start driving.'}
               </Text>
@@ -2100,29 +2143,20 @@ function DriverOfflineHome({
           </View>
         )}
         {needsSubscription && (
-          <View style={ohStyles.bannerInfo}>
+          <TouchableOpacity
+            style={ohStyles.bannerInfo}
+            onPress={onOpenSubscription}
+            activeOpacity={0.85}
+          >
             <Ionicons name="flash-outline" size={18} color="#3B82F6" />
             <View style={{ flex: 1 }}>
               <Text style={[ohStyles.bannerTitle, { color: '#93C5FD' }]}>Activate Trial</Text>
               <Text style={ohStyles.bannerBody}>Start your free trial to receive ride requests.</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#3B82F6" />
-          </View>
+          </TouchableOpacity>
         )}
 
-        {/* SIM Swap banner */}
-        {simSwapAlert && (
-          <View style={[ohStyles.bannerDanger, { marginBottom: 14 }]}>
-            <Ionicons name="shield-half-outline" size={18} color="#FFF" />
-            <View style={{ flex: 1 }}>
-              <Text style={[ohStyles.bannerTitle, { color: '#FCA5A5' }]}>Security Alert</Text>
-              <Text style={ohStyles.bannerBody}>New SIM detected. Contact support if this wasn't you.</Text>
-            </View>
-            <TouchableOpacity onPress={onDismissSimSwap} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close" size={18} color="rgba(255,255,255,0.6)" />
-            </TouchableOpacity>
-          </View>
-        )}
         </View>
       </ScrollView>
 
@@ -2154,16 +2188,16 @@ function DriverOfflineHome({
                 accessibilityLabel={toggling ? 'Connecting to go online' : 'Go online and receive ride requests'}
               >
                 <LinearGradient
-                  colors={['#2BFFB1', '#22E5A0', '#0BB87A']}
+                  colors={['#00F09A', '#00D47E', '#00A862']}
                   style={[ohStyles.goBtnGrad, ohStyles.goBtnGradClip]}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
                   <View style={ohStyles.goBtnInner}>
                     {toggling ? (
-                      <ActivityIndicator size="small" color="#FFFFFF" />
+                      <ActivityIndicator size="small" color="#022C22" />
                     ) : (
-                      <Ionicons name="radio" size={22} color="rgba(255,255,255,0.95)" />
+                      <Ionicons name="radio" size={24} color="#022C22" />
                     )}
                     <Text style={ohStyles.goBtnTextLight}>
                       {toggling ? 'Connecting…' : 'GO ONLINE'}
@@ -2285,21 +2319,22 @@ const ohStyles = StyleSheet.create({
   offlinePillText: { fontSize: 11, fontWeight: '800', color: '#94A3B8', letterSpacing: 2 },
 
   /* Hero */
-  heroWrap: { paddingTop: 6, paddingBottom: 18 },
-  heroGreeting: { fontSize: 11, fontWeight: '700', color: '#94A3B8', marginBottom: 6, letterSpacing: 1.4, textTransform: 'uppercase' },
+  heroWrap: { paddingTop: 8, paddingBottom: 20 },
+  heroGreeting: { fontSize: 11, fontWeight: '700', color: '#22E5A0', marginBottom: 8, letterSpacing: 1.6, textTransform: 'uppercase' },
   heroTitle: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: '900',
     color: '#F8FAFC',
-    letterSpacing: -1.6,
-    lineHeight: 38,
-    textShadowColor: 'rgba(0,0,0,0.45)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    letterSpacing: -1.2,
+    lineHeight: 40,
   },
-  heroSub: { fontSize: 15, fontWeight: '600', color: '#78869B', marginTop: 8, letterSpacing: 0.12, lineHeight: 22 },
-  trialProgressChip: {
+  heroSub: { fontSize: 15, fontWeight: '500', color: '#64748B', marginTop: 6, letterSpacing: 0.1, lineHeight: 22 },
+  trialProgressSlot: {
+    height: OFFLINE_TRIAL_SLOT_HEIGHT,
     marginBottom: 12,
+    justifyContent: 'center',
+  },
+  trialProgressChip: {
     minHeight: 48,
     borderRadius: 16,
     paddingHorizontal: 14,
@@ -2327,8 +2362,9 @@ const ohStyles = StyleSheet.create({
   },
   trialExtText: { fontSize: 10, fontWeight: '800', color: '#F59E0B' },
 
-  /* Map card — preview + heatmap entry (matches reference layout) */
+  /* Map card — preview + heatmap entry (fixed height — no tile-load reflow) */
   mapCard: {
+    height: OFFLINE_MAP_CARD_HEIGHT,
     borderRadius: 24,
     overflow: 'hidden',
     borderWidth: 1,
@@ -2342,10 +2378,11 @@ const ohStyles = StyleSheet.create({
     elevation: 14,
   },
   mapMapLayer: {
-    height: 208,
+    height: OFFLINE_MAP_LAYER_HEIGHT,
     width: '100%',
     position: 'relative',
     backgroundColor: '#0c1220',
+    overflow: 'hidden',
   },
   mapPinWrap: {
     alignItems: 'center',
@@ -2375,19 +2412,20 @@ const ohStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(34,229,160,0.4)',
     overflow: 'hidden',
+    minHeight: 28,
+    textAlign: 'center',
   },
+  mapLocTextMuted: { color: '#64748B', borderColor: 'rgba(100,116,139,0.35)' },
   mapFooterCta: {
+    height: OFFLINE_MAP_FOOTER_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    paddingVertical: 14,
     paddingHorizontal: 16,
     backgroundColor: 'rgba(5,10,18,0.96)',
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: 'rgba(34,229,160,0.2)',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
   },
   mapFooterCtaText: {
     flex: 1,
@@ -2411,18 +2449,18 @@ const ohStyles = StyleSheet.create({
     borderColor: 'rgba(248,113,113,0.38)',
   },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#F87171' },
-  liveBadgeText: { fontSize: 10, fontWeight: '900', color: '#F87171', letterSpacing: 1.2 },
+  liveBadgeText: { fontSize: 10, fontWeight: '900', color: '#94A3B8', letterSpacing: 1.2 },
 
-  /* Stats — earnings / trips / rating */
+  /* Stats — earnings / trips / rating (fixed row — placeholders same size as values) */
   statsStrip: {
     flexDirection: 'row',
     alignItems: 'center',
+    height: OFFLINE_STATS_ROW_HEIGHT,
     marginHorizontal: 0,
     marginBottom: 14,
     backgroundColor: 'rgba(15,23,42,0.55)',
     borderRadius: 22,
     paddingHorizontal: 18,
-    paddingVertical: 17,
     borderWidth: 1,
     borderColor: 'rgba(59,130,246,0.1)',
     shadowColor: '#000',
@@ -2431,7 +2469,7 @@ const ohStyles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 5,
   },
-  statChip: { flex: 1, alignItems: 'center', gap: 4 },
+  statChip: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   statIconWrap: {
     width: 34,
     height: 34,
@@ -2440,7 +2478,15 @@ const ohStyles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 3,
   },
-  statChipValue: { fontSize: 18, fontWeight: '900', color: '#E2E8F0', letterSpacing: -0.5 },
+  statChipValue: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#E2E8F0',
+    letterSpacing: -0.5,
+    minHeight: 22,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
   statChipLabel: { fontSize: 10, fontWeight: '700', color: '#94A3B8', letterSpacing: 0.55, textTransform: 'uppercase' },
   statDivider: { width: 1, height: 40, backgroundColor: 'rgba(255,255,255,0.07)' },
   statIconWrapGreen: {
@@ -2448,11 +2494,15 @@ const ohStyles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(34,229,160,0.2)',
   },
+  surgeSlot: {
+    height: OFFLINE_SURGE_SLOT_HEIGHT,
+    marginBottom: 12,
+    justifyContent: 'center',
+  },
   surgeStrip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    marginBottom: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
     borderRadius: 16,
@@ -2560,29 +2610,29 @@ const ohStyles = StyleSheet.create({
   },
   goBtn: {
     width: '100%',
-    borderRadius: 28,
-    shadowColor: '#22E5A0',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 22,
-    elevation: 16,
+    borderRadius: 20,
+    shadowColor: '#00D47E',
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.55,
+    shadowRadius: 24,
+    elevation: 20,
   },
   goBtnOuterRing: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    borderRadius: 28,
+    left: -4,
+    right: -4,
+    top: -4,
+    bottom: -4,
+    borderRadius: 24,
     borderWidth: 2,
-    borderColor: 'rgba(34,229,160,0.55)',
+    borderColor: 'rgba(0,212,126,0.4)',
   },
   goBtnGrad: {
-    borderRadius: 28,
-    paddingVertical: 18,
+    borderRadius: 20,
+    paddingVertical: 20,
     paddingHorizontal: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   goBtnGradClip: {
     overflow: 'hidden',
@@ -2592,13 +2642,13 @@ const ohStyles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 14,
+    gap: 12,
   },
   goBtnTextLight: {
-    fontSize: 19,
+    fontSize: 20,
     fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: 3,
+    color: '#022C22',
+    letterSpacing: 2,
   },
   goHalftone: {
     position: 'absolute',

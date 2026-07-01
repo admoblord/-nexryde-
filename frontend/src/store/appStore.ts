@@ -7,7 +7,7 @@ export interface User {
   phone: string;
   name: string | null;
   email: string | null;
-  role: 'rider' | 'driver';
+  role: 'rider' | 'driver' | 'admin';
   is_verified: boolean;
   profile_image: string | null;
   rating: number;
@@ -111,6 +111,7 @@ interface AppState {
   // Auth
   user: User | null;
   token: string | null;
+  refreshToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
   
@@ -131,6 +132,7 @@ interface AppState {
   // Actions
   setUser: (user: User | null) => void;
   setToken: (token: string | null) => void;
+  setRefreshToken: (token: string | null) => void;
   setIsAuthenticated: (value: boolean) => void;
   setIsLoading: (value: boolean) => void;
   setDriverProfile: (profile: DriverProfile | null) => void;
@@ -151,6 +153,7 @@ export const useAppStore = create<AppState>()(
       // Initial state
       user: null,
       token: null,
+      refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
       driverProfile: null,
@@ -165,6 +168,7 @@ export const useAppStore = create<AppState>()(
       // Actions
       setUser: (user) => set({ user }),
       setToken: (token) => set({ token }),
+      setRefreshToken: (refreshToken) => set({ refreshToken }),
       setIsAuthenticated: (value) => set({ isAuthenticated: value }),
       setIsLoading: (value) => set({ isLoading: value }),
       setDriverProfile: (profile) => set({ driverProfile: profile }),
@@ -190,24 +194,60 @@ export const useAppStore = create<AppState>()(
       
       logout: async () => {
         try {
+          const { getCachedToken } = await import('@/src/lib/tokenStore');
+          const { clearTokens } = await import('@/src/lib/tokenStore');
+          const refreshFromStore = await (async () => {
+            try {
+              const SecureStore = await import('expo-secure-store');
+              return await SecureStore.getItemAsync('refresh_token');
+            } catch {
+              return null;
+            }
+          })();
+          if (refreshFromStore) {
+            try {
+              const { BACKEND_URL } = await import('@/src/services/api');
+              fetch(`${BACKEND_URL}/api/auth/logout`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ refresh_token: refreshFromStore }),
+              }).catch(() => {});
+            } catch {
+              /* non-fatal */
+            }
+          }
+          await clearTokens();
+        } catch {
+          /* non-fatal */
+        }
+
+        try {
           const { clearTripDriverCache } = await import('@/src/utils/tripDriverCache');
           clearTripDriverCache();
         } catch {
           /* non-fatal */
         }
+        // Cancel scheduled offer notifications so they don't fire after logout
+        try {
+          const { cancelOfferNotifications } = await import('@/src/services/nexrydeScheduledNotifications');
+          await cancelOfferNotifications();
+        } catch {
+          /* non-fatal */
+        }
+
         // Clear SecureStore session
         try {
           const { clearUserSession } = await import('@/utils/authStorage');
           await clearUserSession();
-          console.log('✅ SecureStore session cleared');
-        } catch (error) {
-          console.error('❌ Error clearing SecureStore:', error);
+        } catch {
+          /* non-fatal */
         }
         
         // Clear store state
         set({
           user: null,
           token: null,
+          refreshToken: null,
           isAuthenticated: false,
           driverProfile: null,
           subscription: null,
@@ -224,11 +264,15 @@ export const useAppStore = create<AppState>()(
       storage: createJSONStorage(() => AsyncStorage),
       partialize: (state) => ({
         user: state.user,
-        token: state.token,
+        // token is intentionally excluded — kept in SecureStore only (see authStorage.ts).
+        // Persisting JWT in AsyncStorage is insecure on rooted/jailbroken devices.
         isAuthenticated: state.isAuthenticated,
         currentTrip: state.currentTrip,
         isOnline: state.isOnline,
-      })
+      }),
+      onRehydrateStorage: () => () => {
+        void import('@/src/lib/tokenStore').then(({ warmTokenCache }) => warmTokenCache());
+      },
     }
   )
 );

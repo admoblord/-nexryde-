@@ -15,7 +15,6 @@ import { ProfileMergedPreferences } from '@/src/components/profile/ProfileMerged
 import { useAppStore } from '@/src/store/appStore';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function SettingsScreen() {
   const router = useRouter();
@@ -27,7 +26,7 @@ export default function SettingsScreen() {
   const prefVariant = user?.role === 'driver' ? 'driver' : 'rider';
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

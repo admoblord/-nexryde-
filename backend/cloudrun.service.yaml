@@ -1,0 +1,178 @@
+##############################################################################
+# NexRyde Backend — Cloud Run Service Definition
+#
+# Deploy with:
+#   gcloud run services replace backend/cloudrun.service.yaml \
+#     --region us-central1
+#
+# ── First-time Secret Manager setup ─────────────────────────────────────────
+#
+#   # 1. Create each secret (one-time):
+#   for SECRET in JWT_SECRET MONGODB_URI SQUAD_SECRET_KEY SQUAD_PUBLIC_KEY \
+#       SQUAD_WEBHOOK_SECRET ADMIN_PASSWORD REDIS_URL BREVO_API_KEY \
+#       GOOGLE_MAPS_API_KEY NEXRYDE_OPS_KEY ADMIN_OPS_KEY; do
+#     gcloud secrets create $SECRET --replication-policy=automatic
+#   done
+#
+#   # 2. Populate values:
+#   echo -n "$(openssl rand -hex 32)" | gcloud secrets versions add JWT_SECRET --data-file=-
+#   echo -n "$(openssl rand -hex 32)" | gcloud secrets versions add NEXRYDE_OPS_KEY --data-file=-
+#   echo -n "mongodb+srv://..."        | gcloud secrets versions add MONGODB_URI --data-file=-
+#   # … repeat for each secret
+#
+#   # 3. Grant the Cloud Run service account read access:
+#   PROJECT_ID=$(gcloud config get-value project)
+#   SA=$(gcloud run services describe nexryde-backend --region us-central1 \
+#         --format='value(spec.template.spec.serviceAccountName)')
+#   for SECRET in JWT_SECRET MONGODB_URI SQUAD_SECRET_KEY SQUAD_PUBLIC_KEY \
+#       SQUAD_WEBHOOK_SECRET ADMIN_PASSWORD REDIS_URL BREVO_API_KEY \
+#       GOOGLE_MAPS_API_KEY NEXRYDE_OPS_KEY; do
+#     gcloud secrets add-iam-policy-binding $SECRET \
+#       --member="serviceAccount:${SA}" \
+#       --role="roles/secretmanager.secretAccessor"
+#   done
+#
+#   # 4. Build and push:
+#   gcloud builds submit --tag gcr.io/$PROJECT_ID/nexryde-backend ./backend
+#
+#   # 5. Deploy:
+#   gcloud run services replace backend/cloudrun.service.yaml --region us-central1
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexryde-backend
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: us-central1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+            requests:
+              cpu: "1"
+              memory: 512Mi
+
+          # ── All env vars in one flat list ─────────────────────────────────
+          env:
+            # Non-sensitive plain config
+            - name: NEXRYDE_ENV
+              value: production
+            - name: DB_NAME
+              value: nexryde_db
+            - name: MONGO_MAX_POOL_SIZE
+              value: "25"
+            - name: JWT_EXPIRY_HOURS
+              value: "24"
+            - name: ADMIN_EMAIL
+              value: admin@admoblordgroup.com
+            - name: CORS_ORIGINS
+              value: "https://nexryde.app,https://admin.nexryde.app,exp://,nexryde://"
+            - name: SQUAD_BASE_URL
+              value: "https://api.squadco.com"
+            - name: SQUAD_CHECKOUT_BASE_URL
+              value: "https://pay.squadco.com"
+            - name: NEXRYDE_PUBLIC_BACKEND_URL
+              value: "https://nexryde-backend-993913300770.us-central1.run.app"
+            - name: SQUAD_DLQ_AUTOREPLAY
+              value: "1"
+            # Trusted hosts — Host-header spoofing guard (comma-separated, no scheme)
+            - name: TRUSTED_HOSTS
+              value: "nexryde-backend-993913300770.us-central1.run.app,nexryde.app,admin.nexryde.app"
+
+            # Secrets from Secret Manager
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: JWT_SECRET
+                  key: latest
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: MONGODB_URI
+                  key: latest
+            - name: SQUAD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_SECRET_KEY
+                  key: latest
+            - name: SQUAD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_PUBLIC_KEY
+                  key: latest
+            - name: SQUAD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_WEBHOOK_SECRET
+                  key: latest
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_PASSWORD
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL
+                  key: latest
+            - name: BREVO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: BREVO_API_KEY
+                  key: latest
+            - name: GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: GOOGLE_MAPS_API_KEY
+                  key: latest
+            - name: NEXRYDE_OPS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: NEXRYDE_OPS_KEY
+                  key: latest
+            - name: ADMIN_OPS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_OPS_KEY
+                  key: latest
+            # SENTRY_DSN: add secret once Sentry project is created (P3 item)
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12

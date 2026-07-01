@@ -22,8 +22,7 @@ import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useThemeColors } from '@/src/constants/theme';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
-import { completeRiderVerification, verifyFace, verifyRiderNin, getRiderVerificationStatus } from '@/src/services/api';
+import { completeRiderVerification, verifyFace, getRiderVerificationStatus } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { RiderFaceLivenessCapture } from '@/src/components/rider/RiderFaceLivenessCapture';
 import { apiErrorMessage } from '@/src/utils/apiErrorMessage';
@@ -38,22 +37,7 @@ const BORDER = 'rgba(52,211,153,0.22)';
 const INPUT_BG = 'rgba(2,6,23,0.65)';
 const ERR = '#F87171';
 
-const STEPS = ['About you', 'National ID', 'Biometric'] as const;
-
-type NinVerifyPayload = {
-  format_ok?: boolean;
-  registry_checked?: boolean;
-  registry_verified?: boolean;
-  name_match_ok?: boolean;
-  message?: string;
-} | null;
-
-function ninAllowsProceed(v: NinVerifyPayload): boolean {
-  if (!v || !v.format_ok) return false;
-  if (v.name_match_ok === false) return false;
-  if (v.registry_checked && !v.registry_verified) return false;
-  return true;
-}
+const STEPS = ['About you', 'Biometric'] as const;
 
 export default function RiderVerificationScreen() {
   const router = useRouter();
@@ -82,10 +66,6 @@ export default function RiderVerificationScreen() {
   const [name, setName] = useState(user?.name || '');
   const [phone, setPhone] = useState(user?.phone || '');
   const [address, setAddress] = useState((user as { address?: string })?.address || '');
-  const [nin, setNin] = useState(String((user as { nin?: string })?.nin || ''));
-
-  const [ninVerify, setNinVerify] = useState<NinVerifyPayload>(null);
-  const [ninChecking, setNinChecking] = useState(false);
 
   const [faceVerified, setFaceVerified] = useState(Boolean((user as { face_verified?: boolean })?.face_verified));
   const [facePreview, setFacePreview] = useState<string | null>(null);
@@ -102,21 +82,11 @@ export default function RiderVerificationScreen() {
   const addressOk = addressTrim.length >= 8 && addressTrim.length <= 500;
 
   const profileOk = nameOk && phoneOk && addressOk;
-  const ninFormatOk = /^\d{11}$/.test(nin.trim());
-  const ninDigits = nin.replace(/\D/g, '').length;
-
-  const canGoStep1 = profileOk;
-  const canGoStep2 = ninFormatOk;
-  const canSubmit = profileOk && ninFormatOk && faceVerified && Boolean(riderId);
+  const canSubmit = profileOk && faceVerified && Boolean(riderId);
 
   const nameErr = attemptedProfile && !nameOk ? 'Enter your full name (3–120 characters).' : null;
   const phoneErr = attemptedProfile && !phoneOk ? 'Enter a valid phone number (at least 10 digits).' : null;
   const addressErr = attemptedProfile && !addressOk ? 'Enter your full home address (at least 8 characters).' : null;
-
-  const ninHint = useMemo(() => {
-    if (!ninVerify) return null;
-    return ninVerify.message || null;
-  }, [ninVerify]);
 
   /** If user is already fully verified (e.g. race with another tab), skip this screen. */
   useEffect(() => {
@@ -144,7 +114,6 @@ export default function RiderVerificationScreen() {
     setName(user.name || '');
     setPhone(user.phone || '');
     setAddress((user as { address?: string })?.address || '');
-    setNin(String((user as { nin?: string })?.nin || ''));
     setFaceVerified(Boolean((user as { face_verified?: boolean })?.face_verified));
   }, [user?.id]);
 
@@ -162,53 +131,6 @@ export default function RiderVerificationScreen() {
     [],
   );
 
-  const handleVerifyNin = useCallback(async () => {
-    if (!riderId || !canCallAuthedApi) {
-      Alert.alert('Session expired', 'Please log in again.', [
-        { text: 'Log in', onPress: () => router.replace('/(auth)/login') },
-      ]);
-      return;
-    }
-    if (nameTrim.length < 3) {
-      Alert.alert('Full name needed', 'Enter the name that matches your ID before running an optional registry check.');
-      return;
-    }
-    if (!ninFormatOk) {
-      Alert.alert('Invalid NIN', 'Enter all 11 digits of your National Identification Number.');
-      return;
-    }
-    setNinChecking(true);
-    try {
-      const res = await verifyRiderNin(riderId, nin.trim(), nameTrim);
-      const data = res.data as NinVerifyPayload & Record<string, unknown>;
-      const payload: NinVerifyPayload = {
-        format_ok: Boolean(data?.format_ok),
-        registry_checked: Boolean(data?.registry_checked),
-        registry_verified: Boolean(data?.registry_verified),
-        name_match_ok: data?.name_match_ok !== false,
-        message: typeof data?.message === 'string' ? data.message : undefined,
-      };
-      setNinVerify(payload);
-      if (ninAllowsProceed(payload)) {
-        if (Platform.OS !== 'web') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        }
-      } else {
-        if (Platform.OS !== 'web') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-        }
-        Alert.alert(
-          'Optional check',
-          typeof data?.message === 'string' ? data.message : 'Registry could not confirm this combination. You can still continue if format is valid.',
-        );
-      }
-    } catch (e: unknown) {
-      Alert.alert('Check failed', apiErrorMessage(e, 'Could not reach the server. Try again.'));
-      setNinVerify(null);
-    } finally {
-      setNinChecking(false);
-    }
-  }, [riderId, canCallAuthedApi, nameTrim, nin, ninFormatOk, router]);
 
   const handleFaceNative = useCallback(() => {
     if (!riderId || !canCallAuthedApi) {
@@ -288,7 +210,7 @@ export default function RiderVerificationScreen() {
       return;
     }
     if (!canSubmit) {
-      Alert.alert('Incomplete', 'Complete each step: personal details, 11-digit NIN, and biometric scan.');
+      Alert.alert('Incomplete', 'Complete each step: personal details and biometric scan.');
       return;
     }
     setLoading(true);
@@ -297,7 +219,6 @@ export default function RiderVerificationScreen() {
         name: nameTrim,
         phone: phone.trim(),
         address: addressTrim,
-        nin: nin.trim(),
       });
       const updatedUser = (res.data as { user?: typeof user } | undefined)?.user || {
         ...user,
@@ -305,7 +226,6 @@ export default function RiderVerificationScreen() {
         name: nameTrim,
         phone: phone.trim(),
         address: addressTrim,
-        nin: nin.trim(),
       };
       setUser(updatedUser);
       await saveUserSession({ ...updatedUser, token: token || null });
@@ -342,7 +262,7 @@ export default function RiderVerificationScreen() {
   };
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (
@@ -381,8 +301,7 @@ export default function RiderVerificationScreen() {
                     style={[styles.stepChip, active && styles.stepChipActive, done && styles.stepChipDone]}
                     onPress={() => {
                       if (i === 0) bumpStep(0);
-                      if (i === 1 && canGoStep1) bumpStep(1);
-                      if (i === 2 && canGoStep1 && canGoStep2) bumpStep(2);
+                      if (i === 1 && profileOk) bumpStep(1);
                     }}
                     activeOpacity={0.85}
                     accessibilityRole="button"
@@ -468,7 +387,7 @@ export default function RiderVerificationScreen() {
                       bumpStep(1);
                     }}
                     accessibilityRole="button"
-                    accessibilityLabel="Continue to national ID step"
+                    accessibilityLabel="Continue to biometric step"
                   >
                     <Text style={styles.primaryBtnTxt}>Continue</Text>
                     <Ionicons name="arrow-forward" size={18} color="#022C22" />
@@ -478,118 +397,6 @@ export default function RiderVerificationScreen() {
 
               {step === 1 ? (
                 <>
-                  <Text style={[styles.sectionTitle, { color: palette.text }]}>National Identification Number</Text>
-                  <Text style={[styles.sectionHint, { color: palette.muted }]}>
-                    Enter your 11-digit NIN. We validate format and save it securely for admin review.
-                  </Text>
-
-                  <Field
-                    icon="card-outline"
-                    label="NIN (11 digits)"
-                    error={ninDigits > 0 && !ninFormatOk ? 'NIN must be exactly 11 digits.' : null}
-                    labelColor={palette.text}
-                    mutedColor={palette.muted}
-                  >
-                    <TextInput
-                      style={[
-                        styles.input,
-                        { backgroundColor: palette.inputBg, color: palette.text },
-                        ninDigits > 0 && !ninFormatOk ? styles.inputErr : null,
-                      ]}
-                      value={nin}
-                      onChangeText={(v) => {
-                        setNin(v.replace(/\D/g, '').slice(0, 11));
-                        setNinVerify(null);
-                      }}
-                      keyboardType="number-pad"
-                      placeholder="Enter 11 digits"
-                      placeholderTextColor={palette.placeholder}
-                      maxLength={11}
-                      accessibilityLabel="National Identification Number"
-                    />
-                    <View style={styles.ninMetaRow}>
-                      <Text style={[styles.ninCounter, ninFormatOk && styles.ninCounterOk]}>{ninDigits}/11 digits</Text>
-                      {ninFormatOk ? (
-                        <View style={styles.ninOkPill}>
-                          <Ionicons name="checkmark-circle" size={14} color={MINT} />
-                          <Text style={styles.ninOkPillTxt}>Format OK</Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </Field>
-
-                  <TouchableOpacity
-                    style={[styles.secondaryBtn, (ninChecking || !ninFormatOk) && styles.btnDisabled]}
-                    disabled={ninChecking || !ninFormatOk}
-                    onPress={() => void handleVerifyNin()}
-                    accessibilityRole="button"
-                    accessibilityLabel="Optional registry pre-check"
-                  >
-                    {ninChecking ? (
-                      <ActivityIndicator color={MINT} />
-                    ) : (
-                      <>
-                        <Ionicons name="information-circle-outline" size={20} color={MINT} />
-                        <Text style={styles.secondaryBtnTxt} numberOfLines={2}>
-                          Optional: registry pre-check
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  {ninVerify ? (
-                    <View style={styles.ninStatus}>
-                      <View style={styles.ninRow}>
-                        <Ionicons
-                          name={ninVerify.format_ok ? 'checkmark-circle' : 'close-circle'}
-                          size={18}
-                          color={ninVerify.format_ok ? MINT : ERR}
-                        />
-                        <Text style={styles.ninRowTxt}>Format (11 digits)</Text>
-                      </View>
-                      {ninVerify.registry_checked ? (
-                        <View style={styles.ninRow}>
-                          <Ionicons
-                            name={ninVerify.registry_verified ? 'shield-checkmark' : 'alert-circle'}
-                            size={18}
-                            color={ninVerify.registry_verified ? MINT : '#FBBF24'}
-                          />
-                          <Text style={styles.ninRowTxt}>
-                            {ninVerify.registry_verified ? 'Registry confirmed' : 'Registry did not confirm'}
-                          </Text>
-                        </View>
-                      ) : (
-                        <View style={styles.ninRow}>
-                          <Ionicons name="information-circle-outline" size={18} color="#38BDF8" />
-                          <Text style={styles.ninRowTxt}>Registry API not configured — format-only mode</Text>
-                        </View>
-                      )}
-                      {ninHint ? <Text style={styles.ninHint}>{ninHint}</Text> : null}
-                    </View>
-                  ) : (
-                    <Text style={styles.infoTxt}>When you have 11 digits, you can continue — no extra tap required.</Text>
-                  )}
-
-                  <View style={styles.rowBtns}>
-                    <TouchableOpacity style={styles.ghostBtn} onPress={() => bumpStep(0)} accessibilityRole="button">
-                      <Text style={styles.ghostBtnTxt}>Back</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.primaryBtn, styles.primaryBtnFlex, !canGoStep2 && styles.btnDisabled]}
-                      disabled={!canGoStep2}
-                      onPress={() => bumpStep(2)}
-                      accessibilityRole="button"
-                      accessibilityLabel="Continue to biometric step"
-                    >
-                      <Text style={styles.primaryBtnTxt}>Continue</Text>
-                      <Ionicons name="arrow-forward" size={18} color="#022C22" />
-                    </TouchableOpacity>
-                  </View>
-                </>
-              ) : null}
-
-              {step === 2 ? (
-                <>
                   <Text style={[styles.sectionTitle, { color: palette.text }]}>Biometric face capture</Text>
                   <Text style={[styles.sectionHint, { color: palette.muted }]}>
                     On mobile: two-frame live scan. Your portrait is stored for admin review and trip safety checks.
@@ -597,7 +404,6 @@ export default function RiderVerificationScreen() {
 
                   <View style={styles.checklist}>
                     <CheckRow ok={profileOk} label="Personal details" />
-                    <CheckRow ok={ninFormatOk} label="NIN format" />
                     <CheckRow ok={faceVerified} label="Biometric" />
                   </View>
 
@@ -631,7 +437,7 @@ export default function RiderVerificationScreen() {
                   </TouchableOpacity>
 
                   <View style={styles.rowBtns}>
-                    <TouchableOpacity style={styles.ghostBtn} onPress={() => bumpStep(1)} accessibilityRole="button">
+                    <TouchableOpacity style={styles.ghostBtn} onPress={() => bumpStep(0)} accessibilityRole="button">
                       <Text style={styles.ghostBtnTxt}>Back</Text>
                     </TouchableOpacity>
                   </View>

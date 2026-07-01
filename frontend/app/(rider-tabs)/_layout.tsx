@@ -10,11 +10,14 @@ import useActiveTripCoordinator from '@/src/hooks/useActiveTripCoordinator';
 import ActiveTripBar from '@/src/components/ActiveTripBar';
 import usePanicShakeGuard from '@/src/hooks/usePanicShakeGuard';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import { TAB_BAR_HEIGHT } from '@/src/hooks/useBottomPad';
 import { useRequireRole } from '@/src/hooks/useRequireRole';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { warmTokenCache } from '@/src/lib/tokenStore';
+import { useRiderRidePhaseNavigation } from '@/src/hooks/useRiderRidePhaseNavigation';
 
 function NotifIcon({
   color,
@@ -42,12 +45,17 @@ function NotifIcon({
 export default function RiderTabLayout() {
   const { t } = useLanguage();
   const { colors, isDark } = useThemeColors();
-  const roleOk = useRequireRole('rider');
-  const { userId, canCallAuthedApi } = useAuthedUserId();
+  const allowed = useRequireRole('rider');
+  const hasHydrated = usePersistStoreReady();
+  const { userId } = useAuthedUserId();
   const [unreadCount, setUnreadCount] = useState(0);
   const insets = useSafeAreaInsets();
   useActiveTripCoordinator();
   usePanicShakeGuard();
+
+  useEffect(() => {
+    void warmTokenCache();
+  }, []);
 
   const tabScreenOptions = useMemo(
     () => ({
@@ -74,13 +82,13 @@ export default function RiderTabLayout() {
   );
 
   useEffect(() => {
-    if (!canCallAuthedApi || !userId) return;
+    if (!allowed || !userId) return;
     let cancelled = false;
     const fetchUnread = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/users/${userId}/notifications?unread_only=true&limit=1`, {
-          headers: getAuthHeaders(),
-        });
+        const res = await authedFetch(
+          `${BACKEND_URL}/api/users/${userId}/notifications?unread_only=true&limit=1`,
+        );
         if (res.ok) {
           const data = await res.json();
           const count = data?.unread_count ?? (Array.isArray(data?.notifications) ? data.notifications.length : 0);
@@ -91,11 +99,11 @@ export default function RiderTabLayout() {
     fetchUnread();
     const iv = setInterval(fetchUnread, 30000);
     return () => { cancelled = true; clearInterval(iv); };
-  }, [canCallAuthedApi, userId]);
+  }, [allowed, userId]);
 
-  if (!roleOk) {
-    return <AuthLoadingGate />;
-  }
+  useRiderRidePhaseNavigation();
+
+  if (!hasHydrated || !allowed) return null;
 
   return (
     <>

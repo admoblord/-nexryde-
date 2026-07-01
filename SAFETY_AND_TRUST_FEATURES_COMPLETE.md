@@ -275,8 +275,8 @@ GET    /api/users/{user_id}/emergency-contacts
 DELETE /api/users/{user_id}/emergency-contacts/{phone}
 
 # SOS System
-POST   /api/trips/{trip_id}/sos
-  Body: { location_lat, location_lng }
+POST   /api/sos/trigger
+  Body: { trip_id, location_lat, location_lng, auto_triggered? }
 
 # Trip Sharing (TODO: Backend API)
 POST   /api/trips/{trip_id}/share

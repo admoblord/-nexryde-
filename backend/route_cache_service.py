@@ -477,5 +477,44 @@ async def get_route_owners_leaderboard():
     }
 
 
+import math as _math
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Straight-line distance in metres."""
+    R = 6_371_000
+    dlat = _math.radians(lat2 - lat1)
+    dlng = _math.radians(lng2 - lng1)
+    a = (_math.sin(dlat / 2) ** 2
+         + _math.cos(_math.radians(lat1)) * _math.cos(_math.radians(lat2))
+         * _math.sin(dlng / 2) ** 2)
+    return R * 2 * _math.atan2(_math.sqrt(a), _math.sqrt(1 - a))
+
+
+@route_cache_router.get("/deviation-check")
+async def check_route_deviation(
+    origin_lat: float,
+    origin_lng: float,
+    current_lat: float,
+    current_lng: float,
+    threshold_m: float = 150.0,
+):
+    """
+    Returns whether the driver has deviated enough from the cached route origin
+    to warrant a fresh Directions API call.
+
+    The frontend calls this before fetchDirections() — if `should_recalculate`
+    is False the caller keeps its cached polyline, saving an API request.
+
+    Threshold default 150 m covers normal GPS jitter and slow traffic crawl.
+    Raise to 300 m for highway trips where lane-level precision is unnecessary.
+    """
+    dist_m = _haversine_m(origin_lat, origin_lng, current_lat, current_lng)
+    return {
+        "should_recalculate": dist_m > threshold_m,
+        "deviation_m": round(dist_m, 1),
+        "threshold_m": threshold_m,
+    }
+
+
 # Export router
 __all__ = ['route_cache_router', 'RouteCacheService']

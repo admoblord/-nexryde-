@@ -26,7 +26,6 @@ import { apiErrorMessage } from '@/src/utils/apiErrorMessage';
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useThemeColors } from '@/src/constants/theme';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 const MINT = '#34D399';
 const MINT_DARK = '#059669';
@@ -115,7 +114,7 @@ export default function DriverDocumentsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const { storeReady, token } = useAuthedApiReady();
+  const { storeReady, canCallAuthedApi } = useAuthedApiReady();
   const { colors, isDark } = useThemeColors();
 
   const palette = useMemo(
@@ -385,7 +384,15 @@ export default function DriverDocumentsScreen() {
       );
       return;
     }
-    if (!token) {
+    if (!canCallAuthedApi) {
+      Alert.alert('Session expired', 'Please sign in again to upload documents.', [
+        { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
+      ]);
+      return;
+    }
+    const { getValidToken } = await import('@/src/lib/tokenStore');
+    const liveToken = await getValidToken();
+    if (!liveToken) {
       Alert.alert('Session expired', 'Please sign in again to upload documents.', [
         { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
       ]);
@@ -455,12 +462,22 @@ export default function DriverDocumentsScreen() {
         await AsyncStorage.removeItem(draftCacheKey);
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         Alert.alert(
-          'Submitted',
-          'Your documents are with the Nexryde team for review. You will be notified once verified.',
+          'Documents submitted',
+          'Complete profile while we review your documents.',
           [
             {
-              text: 'Go to dashboard',
-              onPress: () => router.replace('/(driver-tabs)/driver-home'),
+              text: 'Continue to profile',
+              onPress: () => {
+                router.push({
+                  pathname: '/(auth)/driver-profile',
+                  params: {
+                    driver_id: String(params.driver_id || data.driver_id || ''),
+                    phone: params.phone as string,
+                    name: params.name as string,
+                    email: params.email as string,
+                  },
+                });
+              },
             },
           ],
         );
@@ -490,7 +507,7 @@ export default function DriverDocumentsScreen() {
   const ninDigits = cleanNinNumber.length;
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

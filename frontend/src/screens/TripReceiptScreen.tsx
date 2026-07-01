@@ -139,10 +139,23 @@ export default function TripReceiptScreen() {
   const { userId, canCallAuthedApi } = useAuthedUserId();
 
   // ── Data state ──────────────────────────────────────────────────────────
-  const [loading, setLoading]               = useState(true);
-  const [trip,    setTrip]                  = useState<TripData | null>(null);
+  // Seed instantly from the in-memory trip so the summary renders immediately
+  // (Uber/Bolt: the receipt is non-blocking — it must never hang on a fetch).
+  const seededTrip = useMemo<TripData | null>(() => {
+    const c = useAppStore.getState().currentTrip as TripData | null;
+    return c && c.id === params.tripId ? c : null;
+  }, [params.tripId]);
+  const [loading, setLoading]               = useState(!seededTrip);
+  const [trip,    setTrip]                  = useState<TripData | null>(seededTrip);
   const [blackBox, setBlackBox]             = useState<any>(null);
   const [loadingBlackBox, setLoadingBlackBox] = useState(false);
+
+  // The trip is terminally completed once we reach the receipt — release the
+  // rider's active-trip lock immediately so the home screen unlocks and the
+  // booking flow is available again (no "New bookings are paused" / no loop).
+  useEffect(() => {
+    useAppStore.getState().setCurrentTrip(null);
+  }, []);
 
   // ── Interaction state ────────────────────────────────────────────────────
   const [isFavorite,      setIsFavorite]      = useState(false);
@@ -1005,20 +1018,27 @@ export default function TripReceiptScreen() {
 
               <View style={s.detailFareCard}>
                 <Text style={s.detailFareTitle}>Fare detail</Text>
-                {[
-                  { label: 'Base fare', val: view.baseFare },
-                  { label: `Distance (${view.distance})`, val: view.distanceFare },
-                  { label: `Time (${view.duration})`, val: view.timeFare },
-                  ...(view.trafficFare > 0 ? [{ label: 'Traffic', val: view.trafficFare }] : []),
-                ].map(({ label, val }) => (
-                  <View key={label} style={s.fareRow}>
-                    <Text style={s.fareLabel}>{label}</Text>
-                    <Text style={s.fareVal}>
-                      {CURRENCY}
-                      {Number(val).toLocaleString()}
-                    </Text>
-                  </View>
-                ))}
+                {(() => {
+                  // Only show line items that actually have a value — never render
+                  // stray ₦0 base/time rows. If the meter breakdown is unavailable,
+                  // fall back to a single "Trip fare" row equal to the total.
+                  const rows = [
+                    { label: 'Base fare', val: view.baseFare },
+                    { label: `Distance (${view.distance})`, val: view.distanceFare },
+                    { label: `Time (${view.duration})`, val: view.timeFare },
+                    { label: 'Traffic', val: view.trafficFare },
+                  ].filter(({ val }) => Number(val) > 0);
+                  const items = rows.length > 0 ? rows : [{ label: 'Trip fare', val: view.total }];
+                  return items.map(({ label, val }) => (
+                    <View key={label} style={s.fareRow}>
+                      <Text style={s.fareLabel}>{label}</Text>
+                      <Text style={s.fareVal}>
+                        {CURRENCY}
+                        {Number(val).toLocaleString()}
+                      </Text>
+                    </View>
+                  ));
+                })()}
               </View>
 
               <View style={s.blackCard}>

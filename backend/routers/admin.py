@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from typing import Optional, Dict, List, Any
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+import asyncio
 import hashlib
 import logging
 import os
@@ -17,6 +18,7 @@ import uuid
 ADMIN_DIR = Path(__file__).resolve().parent.parent / "admin"
 
 from database import db, SUBSCRIPTION_CONFIG
+from user_biometrics import get_user_biometrics, has_stored_face
 from auth_guard import require_authenticated, verify_owner_strict
 from route_cache import get_api_usage_summary
 
@@ -28,10 +30,17 @@ admin_router = APIRouter(prefix="/api", tags=["Admin"])
 _admin_email = os.environ.get("ADMIN_EMAIL", "admin@admoblordgroup.com")
 _admin_password = os.environ.get("ADMIN_PASSWORD")
 if not _admin_password:
-    logger.warning("ADMIN_PASSWORD not set in environment - using a generated fallback")
-    import secrets as _secrets
-    _admin_password = _secrets.token_urlsafe(24)
-    logger.info(f"Generated admin password (set ADMIN_PASSWORD env var to override): {_admin_password}")
+    # Never log the generated password — doing so leaks credentials into logs.
+    # In production ADMIN_PASSWORD must be set in Secret Manager / env vars.
+    _admin_password = secrets.token_urlsafe(24)
+    _nexryde_env = os.environ.get("NEXRYDE_ENV", "production")
+    if _nexryde_env == "production":
+        # Fail loudly in production so the misconfiguration is caught immediately.
+        import sys as _sys
+        logger.error("ADMIN_PASSWORD is not set — refusing to start in production with a random credential")
+        _sys.exit(1)
+    else:
+        logger.warning("ADMIN_PASSWORD not set; using a generated fallback for this %s run (set the env var)", _nexryde_env)
 ADMIN_CREDENTIALS = {_admin_email: _admin_password}
 ADMIN_SESSION_TTL_HOURS = int(os.environ.get("ADMIN_SESSION_TTL_HOURS", "72"))
 
@@ -222,15 +231,18 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
     rider = await db.users.find_one(
         {"id": rider_id},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "phone": 1, "nin": 1,
-         "face_image": 1, "profile_image": 1, "face_verified": 1,
+         "profile_image": 1, "face_verified": 1,
          "nin_verified": 1, "nin_registry_verified": 1,
-         "face_liveness_score": 1, "face_capture_meta": 1,
+         "face_liveness_score": 1,
          "address": 1, "gender": 1, "created_at": 1,
          "is_verified": 1, "suspended_until": 1, "blocked": 1,
          "referral_code": 1, "username": 1},
     )
     if not rider:
         raise HTTPException(status_code=404, detail="Rider not found")
+
+    biometrics = await get_user_biometrics(rider_id)
+    face_image = biometrics.get("face_image")
 
     # Audit log: track who accessed sensitive identity data
     await db.admin_identity_access_log.insert_one({
@@ -261,12 +273,12 @@ async def admin_get_rider_identity(rider_id: str, request: Request):
         "nin":             rider.get("nin"),            # Full NIN for admin
         "nin_masked":      _mask_nin(rider.get("nin")), # Masked for display
         "has_nin":         bool(rider.get("nin")),
-        "face_image":      rider.get("face_image"),     # Base64 face-ID capture
-        "profile_image":   rider.get("profile_image"),  # Profile photo
-        "has_face_image":  bool(rider.get("face_image")),
+        "face_image":      face_image,
+        "profile_image":   rider.get("profile_image"),
+        "has_face_image":  bool(face_image),
+        "face_capture_meta": biometrics.get("face_capture_meta"),
         "has_profile_image": bool(rider.get("profile_image")),
-        "face_liveness_score": rider.get("face_liveness_score"),
-        "face_capture_meta": rider.get("face_capture_meta"),
+        "face_liveness_score": rider.get("face_liveness_score") or biometrics.get("face_liveness_score"),
         "suspended_until": rider.get("suspended_until"),
         "blocked":         rider.get("blocked", False),
         "referral_code":   rider.get("referral_code"),
@@ -317,12 +329,7 @@ async def admin_get_rider_profile(rider_id: str):
             {"_id": 0, "id": 1},
         )
     )
-    has_face_image = bool(
-        await db.users.find_one(
-            {"id": rider_id, "face_image": {"$exists": True, "$ne": None, "$ne": ""}},
-            {"_id": 0, "id": 1},
-        )
-    )
+    has_face_image = await has_stored_face(rider_id)
 
     def _mask_nin(nin_val: str | None) -> str:
         if not nin_val or len(nin_val) < 5:
@@ -394,7 +401,11 @@ async def admin_get_driver_full_profile(driver_id: str):
         raise HTTPException(status_code=404, detail="Driver not found")
 
     profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
-    docs = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0}) or {}
+    # Admin profile view lists document metadata only; the binary is fetched
+    # on demand via /admin/drivers/{id}/document/{type}. Never load blobs here.
+    docs = await db.driver_documents.find_one(
+        {"driver_id": driver_id}, {"_id": 0, "documents.data": 0}
+    ) or {}
     violations = await db.violations.find({"user_id": driver_id}).sort("created_at", -1).to_list(50)
     for v in violations:
         v["_id"] = str(v["_id"])
@@ -411,7 +422,9 @@ async def admin_get_driver_full_profile(driver_id: str):
             "uploaded_at": doc_data.get("uploaded_at"),
             "expiry_date": doc_data.get("expiry_date"),
             "capture_mode": doc_data.get("capture_mode"),
-            "has_data": bool(doc_data.get("data")),
+            # data is projected out for performance — presence is inferred from
+            # stored size or a GCS file key (post-migration), never the blob itself.
+            "has_data": bool(doc_data.get("size_bytes") or doc_data.get("file_key") or doc_data.get("gcs_key")),
         })
 
     return {
@@ -481,13 +494,22 @@ async def admin_get_driver_full_profile(driver_id: str):
 @admin_router.get("/admin/drivers/{driver_id}/document/{doc_type}")
 async def admin_get_driver_document(driver_id: str, doc_type: str):
     """Get a specific document file for a driver (returns base64 data)."""
-    docs = await db.driver_documents.find_one({"driver_id": driver_id})
+    # Project only the requested document's metadata — never the whole archive.
+    docs = await db.driver_documents.find_one(
+        {"driver_id": driver_id}, {"_id": 0, f"documents.{doc_type}": 1}
+    )
     if not docs:
         raise HTTPException(status_code=404, detail="No documents found for this driver")
 
     doc_data = (docs.get("documents") or {}).get(doc_type)
     if not doc_data:
         raise HTTPException(status_code=404, detail=f"Document '{doc_type}' not found")
+
+    # Binary now lives in private GCS; resolve bytes by key (legacy inline fallback).
+    import base64 as _b64
+    from driver_doc_storage import fetch_document_binary
+    raw = await fetch_document_binary(driver_id, doc_type, doc_data)
+    data_b64 = _b64.b64encode(raw).decode("utf-8") if raw is not None else None
 
     return {
         "driver_id": driver_id,
@@ -497,7 +519,7 @@ async def admin_get_driver_document(driver_id: str, doc_type: str):
         "size_bytes": doc_data.get("size_bytes"),
         "uploaded_at": doc_data.get("uploaded_at"),
         "expiry_date": doc_data.get("expiry_date"),
-        "data": doc_data.get("data"),
+        "data": data_b64,
     }
 
 
@@ -1533,7 +1555,7 @@ async def get_driver_suspension_status(driver_id: str, request: Request):
 # Import for category severity map
 from driver_report_system import CATEGORY_SEVERITY_MAP
 
-@admin_router.get("/api/admin/dashboard")
+@admin_router.get("/admin/dashboard-stats")
 async def get_admin_dashboard():
     """Get admin dashboard statistics"""
     try:
@@ -1655,7 +1677,7 @@ async def cleanup_test_data():
 async def get_api_usage(days: int = 7, http_request: Request = None):
     """Return Google Maps API usage stats and cache hit rates for the last N days."""
     from admin_guard import require_admin_request
-    require_admin_request(http_request)
+    await require_admin_request(http_request)
     rows = await get_api_usage_summary(db, days=days)
     total_real = sum(r.get("real_calls", 0) for r in rows)
     total_cached = sum(r.get("cached_hits", 0) for r in rows)
@@ -1725,7 +1747,7 @@ async def admin_unsuspend_user(user_id: str, request: Request):
     """Admin: fully reactivate a user — clears suspension, deactivation, bans,
     booking blocks, forced-offline, and all active violations."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
     return await _perform_admin_unsuspend(user_id, pardoned_by="admin")
 
 
@@ -1733,7 +1755,7 @@ async def admin_unsuspend_user(user_id: str, request: Request):
 async def admin_unsuspend_by_email(request: Request, body: UnsuspendByEmailBody):
     """Admin: same as ``/unsuspend`` but lookup by email (case-insensitive)."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
     raw = (body.email or "").strip()
     if not raw or "@" not in raw:
         raise HTTPException(status_code=400, detail="Valid email required")
@@ -1753,7 +1775,7 @@ async def admin_create_test_driver(request: Request):
     Accepts optional JSON body: {"email": "you@gmail.com", "name": "Test Driver"}
     Returns email and user_id so you can log in immediately via email OTP."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
 
     import uuid as _uuid
     now_iso = datetime.utcnow().isoformat()
@@ -1871,7 +1893,7 @@ async def admin_force_approve_driver(driver_id: str, request: Request):
     here — use /admin/drivers/{id}/clear-sim-swap to lift that separately.
     Useful for test accounts and emergency unblocks."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
 
     user = await db.users.find_one({"id": driver_id}, {"_id": 0, "id": 1, "name": 1, "phone": 1, "role": 1})
     if not user:
@@ -1948,7 +1970,7 @@ async def clear_monthly_verification_suspensions(http_request: Request):
     """One-shot: unblock all drivers suspended solely for monthly_verification_overdue.
     Verified drivers should never be hard-blocked by monthly photo reminders."""
     from admin_guard import require_admin_request
-    require_admin_request(http_request)
+    await require_admin_request(http_request)
     now_iso = datetime.utcnow().isoformat()
 
     # Clear from driver_profiles
@@ -1969,12 +1991,155 @@ async def clear_monthly_verification_suspensions(http_request: Request):
     }
 
 
+@admin_router.get("/admin/live-stats")
+async def get_admin_live_stats(http_request: Request):
+    """
+    Comprehensive real-time dashboard stats.
+    Returns everything the admin control-center needs in a single request.
+    """
+    from admin_guard import require_admin_request
+    await require_admin_request(http_request)
+
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    week_start  = today_start - timedelta(days=today_start.weekday())
+    month_start = today_start.replace(day=1)
+
+    # ── Parallel queries ─────────────────────────────────────────────────────
+    (
+        online_drivers,
+        total_drivers,
+        pending_verification,
+        total_riders,
+        active_riders,
+        today_trips_docs,
+        week_trips_docs,
+        active_trips_count,
+        wallet_agg,
+        sub_revenue_agg,
+        support_open,
+        support_total,
+        sos_active,
+        failed_payments,
+    ) = await asyncio.gather(
+        db.driver_profiles.count_documents({"is_online": True}),
+        db.driver_profiles.count_documents({}),
+        db.driver_profiles.count_documents({"verification_status": "pending"}),
+        db.users.count_documents({"role": "rider"}),
+        db.trips.count_documents({"status": {"$in": ["accepted", "arrived", "ongoing"]}, "created_at": {"$gte": today_start}}),
+        db.trips.aggregate([
+            {"$match": {"created_at": {"$gte": today_start}}},
+            {"$group": {"_id": "$status", "count": {"$sum": 1}, "fare_sum": {"$sum": "$fare"}}},
+        ]).to_list(20),
+        db.trips.aggregate([
+            {"$match": {"created_at": {"$gte": week_start}}},
+            {"$group": {"_id": None, "total": {"$sum": 1}, "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}}, "revenue": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, "$fare", 0]}}}},
+        ]).to_list(1),
+        db.trips.count_documents({"status": {"$in": ["accepted", "arrived", "ongoing"]}}),
+        db.wallets.aggregate([
+            {"$group": {"_id": None, "total_balance": {"$sum": "$balance"}, "total_wallets": {"$sum": 1}, "avg_balance": {"$avg": "$balance"}}},
+        ]).to_list(1),
+        db.subscriptions.aggregate([
+            {"$match": {"status": {"$in": ["active", "trial"]}}},
+            {"$group": {"_id": "$plan_type", "count": {"$sum": 1}, "revenue": {"$sum": "$amount_paid"}}},
+        ]).to_list(20),
+        db.support_tickets.count_documents({"status": {"$in": ["open", "pending"]}}),
+        db.support_tickets.count_documents({}),
+        db.sos_alerts.count_documents({"status": {"$ne": "resolved"}}),
+        db.transactions.count_documents({"status": "failed", "created_at": {"$gte": today_start}}),
+    )
+
+    # ── Today trip breakdown ─────────────────────────────────────────────────
+    today_by_status: dict[str, int] = {}
+    today_fare_sum = 0.0
+    for row in today_trips_docs:
+        s = str(row.get("_id") or "unknown")
+        c = int(row.get("count", 0))
+        today_by_status[s] = c
+        if s == "completed":
+            today_fare_sum = float(row.get("fare_sum") or 0)
+
+    today_total    = sum(today_by_status.values())
+    today_complete = today_by_status.get("completed", 0)
+    today_cancel   = today_by_status.get("cancelled", 0)
+    today_failed   = today_by_status.get("failed", 0)
+    today_success_rate = round((today_complete / today_total * 100) if today_total > 0 else 0, 1)
+
+    # ── Week summary ─────────────────────────────────────────────────────────
+    week_row = week_trips_docs[0] if week_trips_docs else {}
+    week_total     = int(week_row.get("total", 0))
+    week_completed = int(week_row.get("completed", 0))
+    week_revenue   = float(week_row.get("revenue") or 0)
+
+    # ── Wallet totals ─────────────────────────────────────────────────────────
+    w = wallet_agg[0] if wallet_agg else {}
+    wallet_total_balance = float(w.get("total_balance") or 0)
+    wallet_count         = int(w.get("total_wallets") or 0)
+    wallet_avg           = float(w.get("avg_balance") or 0)
+
+    # ── Subscription revenue ─────────────────────────────────────────────────
+    sub_active_count = sum(int(r.get("count", 0)) for r in sub_revenue_agg)
+    sub_total_revenue = sum(float(r.get("revenue") or 0) for r in sub_revenue_agg)
+
+    # ── 7-day rides sparkline (last 7 days, one data point per day) ──────────
+    sparkline_pipeline = [
+        {"$match": {"created_at": {"$gte": today_start - timedelta(days=6)}}},
+        {"$group": {"_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$created_at"}}, "total": {"$sum": 1}, "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}}}},
+        {"$sort": {"_id": 1}},
+    ]
+    sparkline_raw = await db.trips.aggregate(sparkline_pipeline).to_list(7)
+    sparkline = [{"date": r["_id"], "total": r["total"], "completed": r["completed"]} for r in sparkline_raw]
+
+    return {
+        "ts": now.isoformat(),
+        "drivers": {
+            "online":       online_drivers,
+            "total":        total_drivers,
+            "offline":      total_drivers - online_drivers,
+            "pending_verification": pending_verification,
+            "utilisation_pct": round((online_drivers / total_drivers * 100) if total_drivers > 0 else 0, 1),
+        },
+        "riders": {
+            "total":        total_riders,
+            "active_today": active_riders,
+        },
+        "trips": {
+            "active_now":       active_trips_count,
+            "today_total":      today_total,
+            "today_completed":  today_complete,
+            "today_cancelled":  today_cancel,
+            "today_failed":     today_failed + failed_payments,
+            "today_revenue_ngn": round(today_fare_sum, 2),
+            "today_success_rate": today_success_rate,
+            "week_total":       week_total,
+            "week_completed":   week_completed,
+            "week_revenue_ngn": round(week_revenue, 2),
+        },
+        "subscriptions": {
+            "active":       sub_active_count,
+            "total_revenue_ngn": round(sub_total_revenue, 2),
+            "by_plan":      [{"plan": r.get("_id"), "count": r.get("count"), "revenue": r.get("revenue")} for r in sub_revenue_agg],
+        },
+        "wallets": {
+            "total_balance_ngn": round(wallet_total_balance, 2),
+            "wallet_count":      wallet_count,
+            "avg_balance_ngn":   round(wallet_avg, 2),
+        },
+        "support": {
+            "open_tickets":  support_open,
+            "total_tickets": support_total,
+            "sos_active":    sos_active,
+        },
+        "sparkline_7d": sparkline,
+    }
+
+
 @admin_router.get("/admin/route-cache/stats")
 async def get_route_cache_stats(http_request: Request = None):
     """Return current route cache size and expiry info."""
     from admin_guard import require_admin_request
     from route_cache import _lru
-    require_admin_request(http_request)
+    await require_admin_request(http_request)
     cached_count = await db.route_cache.count_documents({})
     lru_count = len(_lru)
     # Purge expired entries from MongoDB

@@ -38,7 +38,8 @@ if not JWT_SECRET:
     else:
         raise RuntimeError("JWT_SECRET environment variable is required")
 
-# Rate limiting storage (in production, use Redis)
+# Rate limiting — Redis-backed (falls back to in-memory when Redis unavailable)
+from redis_store import store as _redis_store
 request_counts: Dict[str, List[float]] = defaultdict(list)
 blocked_ips: Dict[str, float] = {}
 
@@ -137,55 +138,73 @@ class RateLimiter:
     
     async def check_rate_limit(self, request: Request, identifier: str = None) -> bool:
         """
-        Check if request is within rate limit
-        
-        Args:
-            request: FastAPI Request object
-            identifier: Custom identifier (default: IP address)
-        
-        Returns:
-            True if allowed, raises HTTPException if blocked
+        Check if request is within rate limit — Redis-backed for multi-instance safety.
+        Falls back to in-memory when Redis is unavailable or slow (>1.5s).
         """
-        # Get identifier (IP address or custom)
-        client_ip = identifier or request.client.host
-        
-        # Check if IP is blocked
+        client_ip = identifier or (request.client.host if request.client else "unknown")
+
+        # Redis-backed sliding window counter (atomic incr)
+        redis_key = f"rl:{client_ip}:{self.window_seconds}:{self.max_requests}"
+        block_key = f"rl:block:{client_ip}"
+
+        try:
+            await asyncio.wait_for(
+                self._check_rate_limit_redis(redis_key, block_key, client_ip),
+                timeout=1.5,
+            )
+            return True
+        except asyncio.TimeoutError:
+            logger.warning("Rate limit Redis slow — in-memory fallback for %s", client_ip)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        return self._check_rate_limit_memory(client_ip)
+
+    async def _check_rate_limit_redis(self, redis_key: str, block_key: str, client_ip: str) -> bool:
+        blocked_until_str = await _redis_store.get(block_key)
+        if blocked_until_str:
+            remaining = int(float(blocked_until_str) - time.time())
+            if remaining > 0:
+                raise HTTPException(status_code=429, detail=f"Too many requests. Blocked for {remaining} seconds.")
+            await _redis_store.delete(block_key)
+
+        count = await _redis_store.incr(redis_key, ttl=self.window_seconds)
+
+        if count > self.max_requests:
+            block_until = time.time() + 300
+            await _redis_store.set(block_key, str(block_until), ttl=300)
+            logger.warning("RATE LIMIT EXCEEDED: %s - blocked 5 min (Redis)", client_ip)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Rate limit exceeded. {count} requests in {self.window_seconds}s. Blocked for 5 minutes.",
+            )
+        return True
+
+    def _check_rate_limit_memory(self, client_ip: str) -> bool:
+        # In-memory fallback
         if client_ip in blocked_ips:
             block_until = blocked_ips[client_ip]
             if time.time() < block_until:
                 time_remaining = int(block_until - time.time())
-                raise HTTPException(
-                    status_code=429,
-                    detail=f"Too many requests. Blocked for {time_remaining} seconds."
-                )
-            else:
-                # Unblock
-                del blocked_ips[client_ip]
-        
-        # Get request times for this IP
+                raise HTTPException(status_code=429, detail=f"Too many requests. Blocked for {time_remaining} seconds.")
+            del blocked_ips[client_ip]
+
         now = time.time()
-        request_times = request_counts[client_ip]
-        
-        # Remove old requests outside window
-        request_times = [t for t in request_times if now - t < self.window_seconds]
+        request_times = [t for t in request_counts[client_ip] if now - t < self.window_seconds]
         request_counts[client_ip] = request_times
-        
-        # Check if over limit
+
         if len(request_times) >= self.max_requests:
-            # Block IP for 5 minutes
-            blocked_ips[client_ip] = now + (5 * 60)
-            
-            logger.warning(f"🚨 RATE LIMIT EXCEEDED: {client_ip} - Blocked for 5 minutes")
-            
+            blocked_ips[client_ip] = now + 300
+            logger.warning("RATE LIMIT EXCEEDED: %s - blocked 5 min (in-memory fallback)", client_ip)
             raise HTTPException(
                 status_code=429,
-                detail=f"Rate limit exceeded. {len(request_times)} requests in {self.window_seconds}s. Blocked for 5 minutes."
+                detail=f"Rate limit exceeded. {len(request_times)} requests in {self.window_seconds}s. Blocked for 5 minutes.",
             )
-        
-        # Add current request
+
         request_times.append(now)
         request_counts[client_ip] = request_times
-        
         return True
 
 
@@ -239,7 +258,7 @@ def verify_request_signature(data: str, signature: str, secret: str) -> bool:
 import random
 import string
 
-# 2FA codes storage (in production, use Redis with expiry)
+# 2FA codes — Redis-backed (300s TTL) with in-memory fallback dict.
 twofa_codes: Dict[str, Dict] = {}
 
 
@@ -248,15 +267,38 @@ def generate_2fa_code(length: int = 6) -> str:
     return ''.join(random.choices(string.digits, k=length))
 
 
+async def _store_2fa(email: str, code: str) -> None:
+    import json as _json
+    payload = _json.dumps({"code": code, "attempts": 0, "expires_at": time.time() + 300})
+    try:
+        await _redis_store.set(f"2fa:{email}", payload, ttl=300)
+    except Exception:
+        twofa_codes[email] = {"code": code, "expires_at": time.time() + 300, "attempts": 0}
+
+
+async def _get_2fa(email: str) -> Optional[Dict]:
+    import json as _json
+    try:
+        raw = await _redis_store.get(f"2fa:{email}")
+        if raw:
+            return _json.loads(raw)
+    except Exception:
+        pass
+    return twofa_codes.get(email)
+
+
+async def _delete_2fa(email: str) -> None:
+    try:
+        await _redis_store.delete(f"2fa:{email}")
+    except Exception:
+        pass
+    twofa_codes.pop(email, None)
+
+
 async def send_2fa_code(email: str, phone: str = None) -> bool:
     """Generate and store a 6-digit admin 2FA code; deliver via Brevo transactional email."""
     code = generate_2fa_code()
-
-    twofa_codes[email] = {
-        "code": code,
-        "expires_at": time.time() + (5 * 60),
-        "attempts": 0,
-    }
+    await _store_2fa(email, code)
 
     try:
         from services.brevo_transactional_mail import brevo_send_transactional, brevo_simple_notification_html
@@ -275,47 +317,40 @@ async def send_2fa_code(email: str, phone: str = None) -> bool:
         )
         return True
     except Exception as e:
-        twofa_codes.pop(email, None)
+        await _delete_2fa(email)
         logger.warning("Admin 2FA email delivery failed for %s: %s", email, e)
         return False
 
 
 async def verify_2fa_code(email: str, code: str) -> bool:
     """
-    Verify 2FA code
-    
-    Args:
-        email: Admin email
-        code: 6-digit code
-    
-    Returns:
-        True if valid, False otherwise
-    
-    Raises:
-        HTTPException: If too many attempts or expired
+    Verify 2FA code — Redis-backed for multi-instance safety.
     """
-    if email not in twofa_codes:
+    import json as _json
+    twofa_data = await _get_2fa(email)
+    if not twofa_data:
         raise HTTPException(status_code=400, detail="No 2FA code found. Request a new one.")
-    
-    twofa_data = twofa_codes[email]
-    
-    # Check expiry
-    if time.time() > twofa_data["expires_at"]:
-        del twofa_codes[email]
+
+    if time.time() > twofa_data.get("expires_at", 0):
+        await _delete_2fa(email)
         raise HTTPException(status_code=400, detail="2FA code expired. Request a new one.")
-    
-    # Check attempts (max 3)
-    if twofa_data["attempts"] >= 3:
-        del twofa_codes[email]
+
+    if twofa_data.get("attempts", 0) >= 3:
+        await _delete_2fa(email)
         raise HTTPException(status_code=403, detail="Too many failed attempts. Request a new code.")
-    
-    # Verify code
-    if code == twofa_data["code"]:
-        del twofa_codes[email]  # Remove used code
+
+    if code == twofa_data.get("code"):
+        await _delete_2fa(email)
         return True
-    else:
-        twofa_data["attempts"] += 1
-        return False
+
+    # Increment attempts
+    twofa_data["attempts"] = twofa_data.get("attempts", 0) + 1
+    try:
+        remaining_ttl = max(1, int(twofa_data.get("expires_at", time.time() + 60) - time.time()))
+        await _redis_store.set(f"2fa:{email}", _json.dumps(twofa_data), ttl=remaining_ttl)
+    except Exception:
+        twofa_codes[email] = twofa_data
+    return False
 
 
 # ==================== IP WHITELISTING ====================

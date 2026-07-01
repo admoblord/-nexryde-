@@ -25,7 +25,6 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 import * as ImagePicker from 'expo-image-picker';
 import {
   createNexrydeStory,
@@ -270,7 +269,7 @@ export default function NexrydeStoriesScreen() {
   );
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

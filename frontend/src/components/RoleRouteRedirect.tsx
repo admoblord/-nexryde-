@@ -2,7 +2,6 @@ import React, { useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 type RoleRouteRedirectProps = {
   riderHref: string;
@@ -16,13 +15,13 @@ export default function RoleRouteRedirect({
   fallbackHref = '/(auth)/login',
 }: RoleRouteRedirectProps) {
   const router = useRouter();
-  const storeReady = usePersistStoreReady();
+  const hasHydrated = usePersistStoreReady();
   const user = useAppStore((state) => state.user);
-  const token = useAppStore((state) => state.token);
+  const isAuthenticated = useAppStore((state) => state.isAuthenticated);
 
   useEffect(() => {
-    if (!storeReady) return;
-    if (!user?.id || !token) {
+    if (!hasHydrated) return;
+    if (!user?.id || !isAuthenticated) {
       router.replace(fallbackHref as any);
       return;
     }
@@ -31,7 +30,8 @@ export default function RoleRouteRedirect({
     } else {
       router.replace(riderHref as any);
     }
-  }, [storeReady, user?.id, user?.role, token, driverHref, riderHref, fallbackHref, router]);
+  }, [hasHydrated, user?.id, user?.role, isAuthenticated, driverHref, riderHref, fallbackHref, router]);
 
-  return <AuthLoadingGate />;
+  if (!hasHydrated) return null;
+  return null;
 }

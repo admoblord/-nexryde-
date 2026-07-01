@@ -5,6 +5,7 @@ from typing import Optional, List
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 import asyncio
+import hashlib as _hashlib
 import logging
 import os
 import random
@@ -16,6 +17,12 @@ from email.message import EmailMessage
 import httpx
 
 from database import db
+from user_biometrics import (
+    LOGIN_MAX_TIME_MS,
+    USER_BLOB_EXCLUDE_PROJECTION,
+    get_reference_face_image,
+    upsert_face_template,
+)
 from face_match import (
     face_template_match_confidence,
     FACE_MATCH_SENSITIVE_MIN,
@@ -24,6 +31,7 @@ from face_match import (
     FACE_TEMPLATE_SIMSWAP_MIN,
 )
 from security_advanced import create_jwt_token, auth_limiter, otp_limiter, check_brute_force, record_failed_login, clear_login_attempts
+
 from services.brevo_transactional_mail import (
     BrevoMailError,
     brevo_is_configured,
@@ -42,6 +50,26 @@ from services.nexryde_brevo_unified_otp import (
 
 logger = logging.getLogger('server')
 auth_router = APIRouter(prefix="/api", tags=["Auth"])
+
+# Login must not pull multi-MB face blobs over Atlas — causes NetworkTimeout on existing users.
+_LOGIN_USER_PROJECTION = {
+    "_id": 1,
+    "id": 1,
+    "email": 1,
+    "name": 1,
+    "role": 1,
+    "phone": 1,
+    "profile_image": 1,
+    "rating": 1,
+    "verification_status": 1,
+    "driver_verification_status": 1,
+    "city": 1,
+    "wallet_balance": 1,
+    "nin_verified": 1,
+    "subscription_status": 1,
+    "is_suspended": 1,
+    "suspension_reason": 1,
+}
 
 # Config
 def _env_truthy(name: str) -> bool:
@@ -77,7 +105,9 @@ def generate_otp() -> str:
 
 def _pin_hash(user_id: str, pin: str) -> str:
     import hashlib
-    secret = os.environ.get("JWT_SECRET", "nexryde-fortress")
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise RuntimeError("JWT_SECRET environment variable is not set — cannot hash PIN")
     return hashlib.sha256(f"{secret}:{user_id}:{pin}".encode()).hexdigest()
 
 # Auth-specific models
@@ -156,80 +186,49 @@ class UnifiedEmailOtpVerifyBody(BaseModel):
     otp: str = Field(..., min_length=6, max_length=6, pattern=r"^\d{6}$")
 
 
-async def _complete_existing_user_email_login(email: str, device_id: Optional[str]) -> dict:
+async def _complete_existing_user_email_login(user: dict, device_id: Optional[str] = None) -> dict:
     """
-    Issue JWT or driver fortress challenge for an existing user (passwordless email).
-    Used by /auth/email-signin and /auth/email-otp/verify after OTP check.
+    Issue JWT for an existing user (passwordless email).
+    Caller must pass the user document — avoids a second DB round-trip.
     """
-    user = await db.users.find_one({"email": email})
     if not user:
         raise HTTPException(status_code=500, detail="Internal error")
 
-    if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
-        profile_check = await db.driver_profiles.find_one(
-            {"user_id": user["id"]}, {"_id": 0, "verification_status": 1}
-        ) or {}
-        if profile_check.get("verification_status") in ("approved", "verified"):
-            _now_iso = datetime.now(timezone.utc).isoformat()
-            await db.users.update_one(
-                {"id": user["id"]},
-                {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""},
-                 "$set": {"sim_swap_lock_cleared_at": _now_iso, "sim_swap_lock_cleared_source": "email_login_verified_driver"}}
-            )
-            await db.driver_profiles.update_one(
-                {"user_id": user["id"]},
-                {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
-            )
-        else:
-            raise HTTPException(
-                status_code=423,
-                detail="SIM Swap Protection lock active. Complete secondary identity reconfirmation.",
-            )
+    user = dict(user)
+    if "_id" in user:
+        user["_id"] = str(user["_id"])
+    role = user.get("role", "rider")
+    uid = user["id"]
 
-    user = await db.users.find_one({"email": email})
-    if not user:
-        raise HTTPException(status_code=500, detail="Internal error")
+    access_token = create_access_token(uid, role)
+    raw_refresh = create_refresh_token(uid, role)
+    refresh_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
 
-    if user.get("role") == "driver":
-        driver_profile = await db.driver_profiles.find_one(
-            {"user_id": user["id"]},
-            {"_id": 0, "fortress_known_devices": 1, "face_image": 1},
-        ) or {}
-        dev = (device_id or "").strip()
-        known_devices = set(driver_profile.get("fortress_known_devices") or [])
-        if not user.get("fortress_exempt") and (not dev or dev not in known_devices):
-            challenge_id = str(uuid.uuid4())
-            expires_at = datetime.now(timezone.utc) + timedelta(minutes=8)
-            await db.driver_login_fortress_challenges.insert_one(
-                {
-                    "id": challenge_id,
-                    "user_id": user["id"],
-                    "email": email,
-                    "device_id": dev or None,
-                    "expires_at": expires_at,
-                    "status": "pending",
-                    "created_at": datetime.now(timezone.utc),
-                }
-            )
-            masked_phone = ""
-            phone = str(user.get("phone") or "")
-            if len(phone) >= 6:
-                masked_phone = f"{phone[:4]}****{phone[-2:]}"
-            return {
-                "message": "Driver Account Fortress verification required.",
-                "fortress_required": True,
-                "challenge_id": challenge_id,
-                "masked_phone": masked_phone,
-                "pin_setup_required": not bool(user.get("driver_account_pin_hash")),
-            }
+    from db_resilience import with_mongo_retry
 
-    user["_id"] = str(user["_id"])
-    token = create_jwt_token(user["id"], user.get("role", "rider"))
+    await with_mongo_retry(
+        lambda: db.refresh_tokens.insert_one({
+            "token_hash": refresh_hash,
+            "user_id": uid,
+            "role": role,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+            "revoked": False,
+        }),
+        label="refresh_token_insert",
+    )
+
     return {
-        "message": "Login successful",
-        "is_new_user": False,
-        "user": user,
-        "token": token,
+        "message":       "Login successful",
+        "is_new_user":   False,
+        "user":          user,
+        # New clients use access_token / refresh_token.
+        # Legacy clients still receive "token" for backward compatibility.
+        "token":         access_token,
+        "access_token":  access_token,
+        "refresh_token": raw_refresh,
+        "token_type":    "bearer",
+        "expires_in":    JWT_ACCESS_EXPIRY_MINUTES * 60,
     }
 
 
@@ -258,7 +257,6 @@ def create_user_dict(**kwargs):
         "created_at": datetime.now(timezone.utc).isoformat(),
         "is_verified": False,
         "face_verified": False,
-        "face_image": None,
         "profile_image": None,
         "google_id": None,
         "rating": 5.0,
@@ -304,7 +302,6 @@ def create_driver_profile_dict(user_id):
         "license_uploaded": False,
         "vehicle_docs_uploaded": False,
         "selfie_verified": False,
-        "face_image": None,
         "vehicle_type": None,
         "vehicle_model": None,
         "vehicle_plate": None,
@@ -796,8 +793,23 @@ async def verify_otp(request: OTPVerify, http_request: Request):
         user["is_verified"] = True
         user["_id"] = str(user["_id"])
         clear_login_attempts(request.phone)
-        token = create_jwt_token(user["id"], user.get("role", "rider"))
-        return {"message": "Login successful", "user": user, "token": token, "is_new_user": False, "verified": True}
+        _uid  = user["id"]
+        _role = user.get("role", "rider")
+        _access  = create_access_token(_uid, _role)
+        _raw_ref = create_refresh_token(_uid, _role)
+        await db.refresh_tokens.insert_one({
+            "token_hash": _hashlib.sha256(_raw_ref.encode()).hexdigest(),
+            "user_id":    _uid,
+            "role":       _role,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+            "revoked":    False,
+        })
+        return {
+            "message": "Login successful", "user": user, "is_new_user": False, "verified": True,
+            "token": _access, "access_token": _access, "refresh_token": _raw_ref,
+            "token_type": "bearer", "expires_in": JWT_ACCESS_EXPIRY_MINUTES * 60,
+        }
     
     clear_login_attempts(request.phone)
     return {"message": "OTP verified", "is_new_user": True, "verified": True}
@@ -994,15 +1006,27 @@ async def google_sign_in(request: GoogleSignInRequest):
         raise HTTPException(status_code=400, detail="Google sign-in failed")
 
 @auth_router.post("/auth/email-signin")
-async def email_sign_in(request: EmailSignInRequest):
+async def email_sign_in(request_obj: Request, request: EmailSignInRequest):
     """Email sign-in: existing users log in directly, new users continue registration (legacy / hybrid)."""
+    from db_resilience import ensure_mongo_warm, with_mongo_retry
+
     email = (request.email or "").strip().lower()
+    await auth_limiter.check_rate_limit(request_obj, f"email_signin:{email}")
     if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
         raise HTTPException(status_code=400, detail="Invalid email address")
 
-    user = await db.users.find_one({"email": email})
+    await ensure_mongo_warm()
+
+    user = await with_mongo_retry(
+        lambda: db.users.find_one(
+            {"email": email},
+            _LOGIN_USER_PROJECTION,
+            max_time_ms=LOGIN_MAX_TIME_MS,
+        ),
+        label="email_signin_lookup",
+    )
     if user:
-        return await _complete_existing_user_email_login(email, request.device_id)
+        return await _complete_existing_user_email_login(user, request.device_id)
 
     suggested_name = (request.name or email.split("@")[0].replace(".", " ").title()).strip() or "Nexryde User"
     return {
@@ -1063,9 +1087,13 @@ async def verify_email_otp(request: EmailOTPVerifyRequest):
 
     await db.email_otp_records.delete_one({"email": email})
 
-    existing = await db.users.find_one({"email": email})
+    existing = await db.users.find_one(
+        {"email": email},
+        _LOGIN_USER_PROJECTION,
+        max_time_ms=LOGIN_MAX_TIME_MS,
+    )
     if existing:
-        login_result = await _complete_existing_user_email_login(email, request.device_id)
+        login_result = await _complete_existing_user_email_login(existing, request.device_id)
         return {**login_result, "verified": True, "message": login_result.get("message", "Login successful")}
 
     now = datetime.now(timezone.utc)
@@ -1106,7 +1134,7 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
         await db.driver_login_fortress_challenges.update_one({"id": request.challenge_id}, {"$set": {"status": "expired"}})
         raise HTTPException(status_code=400, detail="Fortress challenge expired")
 
-    user = await db.users.find_one({"id": challenge.get("user_id")})
+    user = await db.users.find_one({"id": challenge.get("user_id")}, USER_BLOB_EXCLUDE_PROJECTION)
     if not user or user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
 
@@ -1127,40 +1155,31 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
             {"$set": {"driver_account_pin_hash": expected_hash, "driver_account_pin_set_at": datetime.now(timezone.utc).isoformat()}},
         )
 
-    profile = await db.driver_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "face_image": 1, "fortress_known_devices": 1}) or {}
-    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    profile = await db.driver_profiles.find_one(
+        {"user_id": user["id"]},
+        {"_id": 0, "fortress_known_devices": 1},
+    ) or {}
+    reference_face = await get_reference_face_image(user["id"])
+    if not reference_face:
+        reference_face = user.get("profile_image")
     now_iso = datetime.now(timezone.utc).isoformat()
     confidence: float
     if not reference_face:
-        # No template yet: enroll (same idea as first Face ID scan).
-        await db.users.update_one(
-            {"id": user["id"]},
-            {
-                "$set": {
-                    "face_image": request.face_image,
-                    "face_enrolled_at": now_iso,
-                    "face_enrolled_source": "driver_fortress_bootstrap",
-                    "face_template_stored_at": now_iso,
-                    "face_verified": True,
-                    "face_unlock_enrolled": True,
-                }
+        await upsert_face_template(
+            user["id"],
+            request.face_image,
+            source="driver_fortress_bootstrap",
+            user_meta={
+                "face_enrolled_at": now_iso,
+                "face_enrolled_source": "driver_fortress_bootstrap",
             },
-        )
-        await db.driver_profiles.update_one(
-            {"user_id": user["id"]},
-            {
-                "$set": {
-                    "face_image": request.face_image,
-                    "face_enrolled_at": now_iso,
-                    "face_enrolled_source": "driver_fortress_bootstrap",
-                    "face_template_stored_at": now_iso,
-                }
+            profile_meta={
+                "face_enrolled_at": now_iso,
+                "face_enrolled_source": "driver_fortress_bootstrap",
             },
-            upsert=True,
         )
         confidence = 100.0
     else:
-        # Same person + PIN + phone: match like phone face unlock, then save this scan as the new template.
         confidence = face_template_match_confidence(reference_face, request.face_image)
         if confidence < FORTRESS_FACE_BLOCK_BELOW:
             logger.warning(
@@ -1177,32 +1196,20 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
             if confidence >= FORTRESS_FACE_MIN_CONFIDENCE
             else "driver_fortress_same_person_unlock"
         )
-        await db.users.update_one(
-            {"id": user["id"]},
-            {
-                "$set": {
-                    "face_image": request.face_image,
-                    "face_refreshed_at": now_iso,
-                    "face_refreshed_source": refresh_source,
-                    "face_last_confidence": confidence,
-                    "face_template_stored_at": now_iso,
-                    "face_verified": True,
-                    "face_unlock_enrolled": True,
-                }
+        await upsert_face_template(
+            user["id"],
+            request.face_image,
+            source=refresh_source,
+            confidence=confidence,
+            user_meta={
+                "face_refreshed_at": now_iso,
+                "face_refreshed_source": refresh_source,
             },
-        )
-        await db.driver_profiles.update_one(
-            {"user_id": user["id"]},
-            {
-                "$set": {
-                    "face_image": request.face_image,
-                    "face_refreshed_at": now_iso,
-                    "face_refreshed_source": refresh_source,
-                    "face_last_confidence": confidence,
-                    "face_template_stored_at": now_iso,
-                }
+            profile_meta={
+                "face_refreshed_at": now_iso,
+                "face_refreshed_source": refresh_source,
+                "face_last_confidence": confidence,
             },
-            upsert=True,
         )
 
     device_id = challenge.get("device_id")
@@ -1227,13 +1234,25 @@ async def verify_driver_fortress(request: DriverFortressVerifyRequest):
         {"id": request.challenge_id},
         {"$set": {"status": "verified", "verified_at": datetime.now(timezone.utc), "face_confidence": confidence}},
     )
-    user = await db.users.find_one({"id": user["id"]})
+    user = await db.users.find_one({"id": user["id"]}, USER_BLOB_EXCLUDE_PROJECTION)
     user["_id"] = str(user["_id"])
-    token = create_jwt_token(user["id"], user.get("role", "driver"))
+    _uid  = user["id"]
+    _role = user.get("role", "driver")
+    _access  = create_access_token(_uid, _role)
+    _raw_ref = create_refresh_token(_uid, _role)
+    await db.refresh_tokens.insert_one({
+        "token_hash": _hashlib.sha256(_raw_ref.encode()).hexdigest(),
+        "user_id":    _uid,
+        "role":       _role,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+        "revoked":    False,
+    })
     return {
         "message": "Driver Account Fortress verified. Your face is saved for the next time you unlock.",
         "user": user,
-        "token": token,
+        "token": _access, "access_token": _access, "refresh_token": _raw_ref,
+        "token_type": "bearer", "expires_in": JWT_ACCESS_EXPIRY_MINUTES * 60,
         "face_confidence": confidence,
         "face_template_saved": True,
     }
@@ -1245,8 +1264,10 @@ async def admin_clear_sim_swap_lock(request: Request):
     body = await request.json()
     phone = body.get("phone", "").strip()
     user_id = body.get("user_id", "").strip()
+    import os as _os
     admin_key = body.get("admin_key", "")
-    if admin_key != "nexryde_admin_2030":
+    expected_key = (_os.environ.get("ADMIN_OPS_KEY") or "").strip()
+    if not expected_key or admin_key != expected_key:
         raise HTTPException(status_code=403, detail="Forbidden")
     query = {}
     if user_id:
@@ -1274,7 +1295,7 @@ async def admin_clear_sim_swap_lock(request: Request):
 @auth_router.post("/auth/driver-sim-swap/reconfirm")
 async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest):
     normalized_phone = normalize_phone(request.phone)
-    user = await db.users.find_one({"phone": normalized_phone}, {"_id": 0})
+    user = await db.users.find_one({"phone": normalized_phone}, {"_id": 0, **USER_BLOB_EXCLUDE_PROJECTION})
     if not user or user.get("role") != "driver":
         raise HTTPException(status_code=404, detail="Driver account not found for this phone")
     lock = user.get("sim_swap_lock") or {}
@@ -1285,8 +1306,9 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
     if not pin_hash or pin_hash != _pin_hash(user["id"], request.pin):
         raise HTTPException(status_code=403, detail="Invalid PIN")
 
-    profile = await db.driver_profiles.find_one({"user_id": user["id"]}, {"_id": 0, "face_image": 1}) or {}
-    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    reference_face = await get_reference_face_image(user["id"])
+    if not reference_face:
+        reference_face = user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference found")
     confidence = face_template_match_confidence(reference_face, request.face_image)
@@ -1297,37 +1319,26 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
         )
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    await db.users.update_one(
-        {"id": user["id"]},
-        {
-            "$set": {
-                "face_image": request.face_image,
-                "face_template_stored_at": now_iso,
-                "face_refreshed_at": now_iso,
-                "face_refreshed_source": "sim_swap_reconfirm",
-                "face_last_confidence": confidence,
-                "face_verified": True,
-                "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
-                "earnings_frozen": False,
-            }
+    await upsert_face_template(
+        user["id"],
+        request.face_image,
+        source="sim_swap_reconfirm",
+        confidence=confidence,
+        user_meta={
+            "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
+            "earnings_frozen": False,
+            "face_refreshed_at": now_iso,
+            "face_refreshed_source": "sim_swap_reconfirm",
+        },
+        profile_meta={
+            "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
+            "pending_identity_reconfirm": False,
+            "face_refreshed_at": now_iso,
+            "face_refreshed_source": "sim_swap_reconfirm",
+            "face_last_confidence": confidence,
         },
     )
-    await db.driver_profiles.update_one(
-        {"user_id": user["id"]},
-        {
-            "$set": {
-                "face_image": request.face_image,
-                "face_template_stored_at": now_iso,
-                "face_refreshed_at": now_iso,
-                "face_refreshed_source": "sim_swap_reconfirm",
-                "face_last_confidence": confidence,
-                "sim_swap_lock": {"active": False, "cleared_at": now_iso, "source": "secondary_reconfirm"},
-                "pending_identity_reconfirm": False,
-            }
-        },
-        upsert=True,
-    )
-    fresh = await db.users.find_one({"id": user["id"]})
+    fresh = await db.users.find_one({"id": user["id"]}, USER_BLOB_EXCLUDE_PROJECTION)
     fresh["_id"] = str(fresh["_id"])
     token = create_jwt_token(fresh["id"], fresh.get("role", "driver"))
     return {
@@ -1340,22 +1351,16 @@ async def reconfirm_driver_after_sim_swap(request: DriverSimSwapReconfirmRequest
 
 @auth_router.post("/auth/register")
 async def register(request: RegisterRequest, http_request: Request):
+    from security_advanced import general_limiter
+    await general_limiter.check_rate_limit(http_request, f"register:{(request.email or request.phone or '').strip().lower()}")
     # Check for existing user by phone or email
     normalized_phone = normalize_phone(request.phone) if request.phone else None
     if request.phone:
         existing = await db.users.find_one({"phone": normalized_phone})
         if existing:
             if request.role == "driver" and existing.get("role") == "driver":
-                authenticated_user_id = getattr(http_request.state, "user_id", None)
-                if authenticated_user_id != existing.get("id"):
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "code": "PHONE_EXISTS_VERIFY_REQUIRED",
-                            "message": "This phone already has a driver account. Verify the phone or sign in to continue registration.",
-                        },
-                    )
-
+                # Phone is contact-only (rider calling / NexRyde records) — no SMS OTP gate.
+                # Same number on an unfinished driver signup always resumes that account.
                 now_iso = datetime.now(timezone.utc).isoformat()
                 await db.users.update_one(
                     {"id": existing["id"]},
@@ -1398,6 +1403,10 @@ async def register(request: RegisterRequest, http_request: Request):
         if existing:
             raise HTTPException(status_code=400, detail="User with this Google account already exists")
     
+    # Only rider and driver are valid public registration roles — block privilege escalation
+    if request.role not in ("rider", "driver"):
+        raise HTTPException(status_code=400, detail="Invalid role. Only 'rider' or 'driver' allowed.")
+
     # Validate role-specific requirements
     if request.role == "driver" and not request.terms_accepted:
         raise HTTPException(status_code=400, detail="Drivers must accept terms and conditions")
@@ -1435,37 +1444,67 @@ async def register(request: RegisterRequest, http_request: Request):
 
     # Keep email_verifications collection untouched when OTP flow is disabled.
     
-    token = create_jwt_token(user["id"], user.get("role", "rider"))
+    uid  = user["id"]
+    role = user.get("role", "rider")
+    access_token  = create_access_token(uid, role)
+    raw_refresh   = create_refresh_token(uid, role)
+    refresh_hash  = _hashlib.sha256(raw_refresh.encode()).hexdigest()
+    await db.refresh_tokens.insert_one({
+        "token_hash": refresh_hash,
+        "user_id":    uid,
+        "role":       role,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "expires_at": (datetime.now(timezone.utc) + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+        "revoked":    False,
+    })
+
     if user.get("email"):
         from services.product_notification_email import schedule_registration_welcome_email
-
         schedule_registration_welcome_email(
             to_email=str(user["email"]),
             name=str(user.get("name") or ""),
-            role=str(user.get("role") or "rider"),
+            role=str(role),
         )
-    return {"message": "Registration successful", "user": user, "token": token}
+    return {
+        "message":       "Registration successful",
+        "user":          user,
+        "token":         access_token,
+        "access_token":  access_token,
+        "refresh_token": raw_refresh,
+        "token_type":    "bearer",
+        "expires_in":    JWT_ACCESS_EXPIRY_MINUTES * 60,
+    }
+
+class LogoutBody(BaseModel):
+    refresh_token: str | None = None
 
 @auth_router.post("/auth/logout")
-async def logout(request: Request, response: Response):
-    """Logout user and clear session"""
+async def logout(request: Request, response: Response, body: LogoutBody = LogoutBody()):
+    """Logout user: revoke refresh token and clear session."""
+    import hashlib as _hashlib
     try:
-        # Get session token from cookie
+        # Revoke refresh token from DB so it cannot be used again
+        raw_refresh = (body.refresh_token or "").strip()
+        if raw_refresh:
+            token_hash = _hashlib.sha256(raw_refresh.encode()).hexdigest()
+            await db.refresh_tokens.update_one(
+                {"token_hash": token_hash},
+                {"$set": {"revoked": True}},
+            )
+
+        # Also clear any legacy session-cookie session
         session_token = request.cookies.get("session_token")
-        
         if session_token:
-            # Delete session from database
             await db.user_sessions.delete_one({"session_token": session_token})
-        
-        # Clear session cookie
+
         response.delete_cookie(
             key="session_token",
             path="/",
             secure=True,
             httponly=True,
-            samesite="none"
+            samesite="none",
         )
-        
+
         return {"message": "Logout successful"}
     except Exception as e:
         logger.error(f"Logout error: {str(e)}")
@@ -1555,4 +1594,86 @@ async def brevo_unified_otp_verify_endpoint(
 async def brevo_unified_otp_status_endpoint(email: EmailStr = Query(..., description="Email to inspect")):
     """Debug: pending OTP metadata for this email (per-server process memory only)."""
     return await brevo_unified_otp_status(email_raw=str(email))
+
+
+# ── JWT Refresh Token Endpoint ────────────────────────────────────────────────
+# Uber-standard: short-lived access tokens (15 min) + long-lived refresh token (7 days).
+# The refresh token is stored in the DB with a TTL; each use rotates it.
+
+JWT_ACCESS_EXPIRY_MINUTES = 15
+JWT_REFRESH_EXPIRY_DAYS   = 7
+
+import hashlib as _hashlib
+import time as _time
+
+
+def create_access_token(user_id: str, role: str) -> str:
+    from security_advanced import create_jwt_token
+    from datetime import timedelta
+    return create_jwt_token(user_id, role, expires_delta=timedelta(minutes=JWT_ACCESS_EXPIRY_MINUTES))
+
+
+def create_refresh_token(user_id: str, role: str) -> str:
+    """Create a 7-day refresh token and return the opaque token string."""
+    import secrets
+    return secrets.token_urlsafe(48)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+@auth_router.post("/auth/refresh-token")
+async def refresh_access_token(body: RefreshRequest, http_request: Request):
+    """
+    Exchange a valid refresh token for a new access + refresh token pair (rotation).
+    Old refresh token is invalidated immediately after use.
+    """
+    raw = (body.refresh_token or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="refresh_token is required")
+
+    # Look up refresh token in DB
+    token_hash = _hashlib.sha256(raw.encode()).hexdigest()
+    record = await db.refresh_tokens.find_one({"token_hash": token_hash, "revoked": {"$ne": True}})
+    if not record:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+
+    expires_at = record.get("expires_at")
+    if expires_at:
+        try:
+            exp_dt = datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else expires_at
+            if exp_dt.replace(tzinfo=None) < datetime.utcnow():
+                raise HTTPException(status_code=401, detail="Refresh token has expired")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    user_id = record.get("user_id")
+    role    = record.get("role", "rider")
+
+    # Rotate: revoke old token
+    await db.refresh_tokens.update_one({"token_hash": token_hash}, {"$set": {"revoked": True}})
+
+    # Issue new pair
+    new_access  = create_access_token(user_id, role)
+    new_refresh = create_refresh_token(user_id, role)
+    new_hash    = _hashlib.sha256(new_refresh.encode()).hexdigest()
+
+    await db.refresh_tokens.insert_one({
+        "token_hash":  new_hash,
+        "user_id":     user_id,
+        "role":        role,
+        "created_at":  datetime.utcnow().isoformat(),
+        "expires_at":  (datetime.utcnow() + timedelta(days=JWT_REFRESH_EXPIRY_DAYS)).isoformat(),
+        "revoked":     False,
+    })
+
+    return {
+        "access_token":  new_access,
+        "refresh_token": new_refresh,
+        "token_type":    "bearer",
+        "expires_in":    JWT_ACCESS_EXPIRY_MINUTES * 60,
+    }
 

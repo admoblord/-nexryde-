@@ -57,7 +57,7 @@ function maskDigit(_d: string, revealed: boolean): string {
 export default function PickUpCodeScreen() {
   const router = useRouter();
   const { currentTrip, setCurrentTrip } = useAppStore();
-  const { user, userId: riderId, token, canCallAuthedApi } = useAuthedUserId();
+  const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const params = useLocalSearchParams();
   const paramTripId = (params.trip_id as string) || (params.tripId as string) || '';
 
@@ -236,8 +236,7 @@ export default function PickUpCodeScreen() {
 
   useRiderTripRealtime({
     riderId,
-    token,
-    enabled: Boolean(canCallAuthedApi && riderId && token && (tripId || paramTripId) && !codeVerified),
+    enabled: Boolean(canCallAuthedApi && riderId && (tripId || paramTripId) && !codeVerified),
     watchTripId: tripId || paramTripId,
     onTripUpdate: handleWsUpdate,
   });

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
   View,
   Text,
@@ -81,6 +82,7 @@ type TopupState =
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function RiderWalletScreen() {
+  const toast = useErrorToast();
   const { user } = useAppStore();
   const { userId: uid, canCallAuthedApi } = useAuthedUserId();
   const tabPad = useTabBottomPad(8);
@@ -249,7 +251,7 @@ export default function RiderWalletScreen() {
     await saveWalletCheckoutSession({ userId: uid, transaction_ref: String(ref), checkout_url: url, amount_ngn: amountNgn, savedAt: new Date().toISOString() });
     setPendingMeta({ ref: String(ref), url, amount: amountNgn });
     const ok = await openSquadCheckoutUrl(url);
-    if (!ok) { Alert.alert('Checkout', 'Could not open the payment page. Try again.'); return false; }
+    if (!ok) { toast.show('Could not open the payment page. Try again.', 'error'); return false; }
     return true;
   };
 
@@ -260,16 +262,16 @@ export default function RiderWalletScreen() {
       const res = await initiateRiderWalletCheckout(amount, true);
       const data = res.data || {};
       if (isWalletCheckoutInitOk(data)) { setCheckoutFailed(false); await persistAndOpenCheckout(data); }
-      else { setCheckoutFailed(true); Alert.alert('Payment', WALLET_CHECKOUT_USER_ERROR); }
+      else { setCheckoutFailed(true); toast.show(WALLET_CHECKOUT_USER_ERROR, 'error'); }
     } catch (e: unknown) {
       setCheckoutFailed(true);
-      Alert.alert('Payment', messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR));
+      toast.show(messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR), 'error');
     } finally { setBusy(null); }
   };
 
   const startCardCheckout = async () => {
     const amount = parsedAmount();
-    if (amount < 100) { Alert.alert('Amount', 'Minimum top-up is ₦100'); return; }
+    if (amount < 100) { toast.show('Minimum top-up is ₦100', 'warning'); return; }
     setBusy('checkout');
     setCheckoutFailed(false);
     try {
@@ -278,7 +280,7 @@ export default function RiderWalletScreen() {
       if (isWalletCheckoutInitOk(data)) { setCheckoutFailed(false); await persistAndOpenCheckout(data); }
       else {
         setCheckoutFailed(true);
-        Alert.alert('Payment', WALLET_CHECKOUT_USER_ERROR);
+        toast.show(WALLET_CHECKOUT_USER_ERROR, 'error');
       }
     } catch (e: unknown) {
       if (axios.isAxiosError(e) && e.response?.status === 409) {
@@ -296,11 +298,11 @@ export default function RiderWalletScreen() {
           );
         } else {
           setCheckoutFailed(true);
-          Alert.alert('Payment', messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR));
+          toast.show(messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR), 'error');
         }
       } else {
         setCheckoutFailed(true);
-        Alert.alert('Payment', messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR));
+        toast.show(messageFromAxiosError(e, WALLET_CHECKOUT_USER_ERROR), 'error');
       }
     } finally { setBusy(null); }
   };

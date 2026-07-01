@@ -11,6 +11,7 @@ import * as LocalAuthentication from 'expo-local-authentication';
 const KEYS = {
   USER_DATA: 'user_data',
   AUTH_TOKEN: 'auth_token',
+  REFRESH_TOKEN: 'refresh_token',
   USER_ID: 'user_id',
   USER_ROLE: 'user_role',
   IS_LOGGED_IN: 'is_logged_in',
@@ -28,9 +29,13 @@ export async function saveUserSession(userData: any) {
     await SecureStore.setItemAsync(KEYS.USER_ROLE, userData.role || '');
     await SecureStore.setItemAsync(KEYS.IS_LOGGED_IN, 'true');
     
-    // Store auth token if available
+    // Store access token
     if (userData.token) {
       await SecureStore.setItemAsync(KEYS.AUTH_TOKEN, userData.token);
+    }
+    // Store refresh token (7-day lifetime for seamless re-auth)
+    if (userData.refresh_token) {
+      await SecureStore.setItemAsync(KEYS.REFRESH_TOKEN, userData.refresh_token);
     }
     
     console.log('✅ User session saved successfully');
@@ -60,11 +65,13 @@ export async function getUserSession() {
     
     const userData = JSON.parse(userDataString);
     const token = await SecureStore.getItemAsync(KEYS.AUTH_TOKEN);
+    const refresh_token = await SecureStore.getItemAsync(KEYS.REFRESH_TOKEN);
     
     console.log('✅ User session retrieved successfully');
     return {
       ...userData,
-      token
+      token,
+      ...(refresh_token ? { refresh_token } : {}),
     };
   } catch (error) {
     console.error('❌ Error retrieving user session:', error);
@@ -116,6 +123,7 @@ export async function clearUserSession() {
   try {
     await SecureStore.deleteItemAsync(KEYS.USER_DATA);
     await SecureStore.deleteItemAsync(KEYS.AUTH_TOKEN);
+    await SecureStore.deleteItemAsync(KEYS.REFRESH_TOKEN);
     await SecureStore.deleteItemAsync(KEYS.USER_ID);
     await SecureStore.deleteItemAsync(KEYS.USER_ROLE);
     await SecureStore.deleteItemAsync(KEYS.IS_LOGGED_IN);

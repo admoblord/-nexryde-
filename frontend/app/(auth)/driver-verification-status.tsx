@@ -4,11 +4,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BACKEND_URL, formatApiDetail, getAuthHeaders } from '@/src/services/api';
+import { BACKEND_URL, formatApiDetail } from '@/src/services/api';
 import { COLORS, FONT_SIZE, SPACING, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 
 type VerificationState = {
   step?: string;
@@ -26,7 +26,7 @@ type VerificationState = {
 export default function DriverVerificationStatusScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { storeReady, token, canCallAuthedApi } = useAuthedApiReady();
+  const { storeReady, canCallAuthedApi } = useAuthedApiReady();
   const surf = useOnboardingSurfaces();
   const driverId = String(params.driver_id || '');
   const [loading, setLoading] = useState(() => Boolean(driverId));
@@ -37,7 +37,7 @@ export default function DriverVerificationStatusScreen() {
       setLoading(false);
       return;
     }
-    if (!token) {
+    if (!canCallAuthedApi) {
       setLoading(false);
       Alert.alert('Session expired', 'Please sign in again to check your verification status.', [
         { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
@@ -46,9 +46,7 @@ export default function DriverVerificationStatusScreen() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`, {
-        headers: getAuthHeaders(),
-      });
+      const res = await authedFetch(`${BACKEND_URL}/api/drivers/${driverId}/onboarding-status`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         Alert.alert('Could not check status', formatApiDetail(data?.detail) || 'Please try again.');
@@ -73,7 +71,7 @@ export default function DriverVerificationStatusScreen() {
     } finally {
       setLoading(false);
     }
-  }, [driverId, params.phone, params.name, params.email, router, token]);
+  }, [canCallAuthedApi, driverId, params.phone, params.name, params.email, router]);
 
   useEffect(() => {
     if (!driverId) {
@@ -95,10 +93,10 @@ export default function DriverVerificationStatusScreen() {
     : 'Your documents have been submitted and are waiting for review. You do not need to upload them again unless they are rejected.';
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
-  const needsSignIn = storeReady && driverId.length > 0 && !token;
+  const needsSignIn = storeReady && driverId.length > 0 && !canCallAuthedApi;
 
   return (
     <View style={[styles.container, { backgroundColor: surf.screen }]}>

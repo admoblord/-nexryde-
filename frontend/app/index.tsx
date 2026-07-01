@@ -14,24 +14,29 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { getUserSession, isUserLoggedIn } from '@/utils/authStorage';
+import { setTokens, warmTokenCache } from '@/src/lib/tokenStore';
 import { useAppStore } from '@/src/store/appStore';
 import { loadDriverState } from '@/src/services/driverStateService';
 import { awaitPersistHydration } from '@/src/hooks/usePersistStoreReady';
 import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
+import { warmBackendConnection } from '@/src/utils/warmBackend';
+import { startupLog } from '@/src/utils/driverStartupTrace';
+import { timedStartupRequestOrNull } from '@/src/utils/startupRequestLog';
+import { STARTUP_REQUEST_TIMEOUT_MS, STARTUP_GLOBAL_WATCHDOG_MS } from '@/src/constants/startupPolicy';
 
 const { width, height } = Dimensions.get('window');
 
 const C = {
-  bg: '#020617',
-  bgMid: '#0B1223',
-  green: '#22C55E',
+  bg: '#0D1420',
+  bgMid: '#19253F',
+  green: '#00D084',
   greenLight: '#4ADE80',
-  greenNeon: '#00FF7F',
-  blue: '#3B82F6',
-  blueDark: '#1D4ED8',
+  greenNeon: '#00D084',
+  blue: '#0066FF',
+  blueDark: '#1A4FCC',
   white: '#FFFFFF',
-  muted: '#94A3B8',
-  dim: '#334155',
+  muted: '#A8B8D0',
+  dim: '#4B5A72',
 };
 
 const DRIVER_CAMERA_RESUME_KEY = '@driver_documents_camera_resume';
@@ -43,7 +48,12 @@ export default function SplashScreen() {
 
   const setUser = useAppStore((s) => s.setUser);
   const setIsAuthenticated = useAppStore((s) => s.setIsAuthenticated);
-  const setToken = useAppStore((s) => s.setToken);
+
+  // Wake Cloud Run while splash/CTA is visible — before user reaches login.
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    warmBackendConnection(true);
+  }, []);
 
   // ── Fast-resume: skip animations entirely for returning logged-in users ────
   const [skipAnimation, setSkipAnimation] = useState(false);
@@ -69,6 +79,19 @@ export default function SplashScreen() {
   const glowScale = useRef(new Animated.Value(1)).current;
   const ctaFade = useRef(new Animated.Value(0)).current;
   const ctaY = useRef(new Animated.Value(40)).current;
+
+  // Returning users skip entry animation — snap opacities to visible (avoid opacity-0 flash).
+  useEffect(() => {
+    if (!skipAnimation) return;
+    screenFade.setValue(1);
+    logoOpacity.setValue(1);
+    logoScale.setValue(1);
+    textFade.setValue(1);
+    textY.setValue(0);
+    taglineFade.setValue(1);
+    leftBarY.setValue(0);
+    rightBarY.setValue(0);
+  }, [skipAnimation, screenFade, logoOpacity, logoScale, textFade, textY, taglineFade, leftBarY, rightBarY]);
 
   // ── Helper ─────────────────────────────────────────────────────────
   const isDriverCameraResumeActive = async (userData: any) => {
@@ -144,18 +167,30 @@ export default function SplashScreen() {
   useEffect(() => {
     if (Platform.OS === 'web') { setChecking(false); return; }
 
-    const safetyTimeout = setTimeout(() => setChecking(false), 3000);
+    const safetyTimeout = setTimeout(() => {
+      startupLog('STARTUP_TIMEOUT', { screen: 'splash', afterMs: STARTUP_GLOBAL_WATCHDOG_MS });
+      setChecking(false);
+    }, STARTUP_GLOBAL_WATCHDOG_MS);
     checkSession();
     return () => clearTimeout(safetyTimeout);
   }, []);
 
   const checkSession = async () => {
+    startupLog('APP_START', { screen: 'splash' });
     try {
       try {
         await awaitPersistHydration();
-        const isLoggedIn = await isUserLoggedIn();
+        const isLoggedIn = await timedStartupRequestOrNull(
+          'splash_is_logged_in',
+          () => isUserLoggedIn(),
+          STARTUP_REQUEST_TIMEOUT_MS,
+        );
         if (isLoggedIn) {
-          const userData = await getUserSession();
+          const userData = await timedStartupRequestOrNull(
+            'splash_get_user_session',
+            () => getUserSession(),
+            STARTUP_REQUEST_TIMEOUT_MS,
+          );
           if (!userData) { setChecking(false); return; }
 
           const { isBiometricEnabled, authenticateWithBiometrics, isBiometricSupported } =
@@ -172,8 +207,9 @@ export default function SplashScreen() {
           }
 
           setUser(userData);
-          setToken(userData.token || null);
           setIsAuthenticated(true);
+          void setTokens(userData.token || '', userData.refresh_token);
+          void warmTokenCache();
 
           const authedUser = {
             id: userData.id,
@@ -192,7 +228,7 @@ export default function SplashScreen() {
             }
           }
 
-          await routeAuthedUser(router, authedUser, userData.token || null);
+          void routeAuthedUser(router, authedUser, userData.token || null);
           setChecking(false);
           return;
         }
@@ -220,7 +256,7 @@ export default function SplashScreen() {
     <Animated.View style={[styles.root, { opacity: screenFade }]}>
       {/* Background gradient */}
       <LinearGradient
-        colors={[C.bg, C.bgMid, '#0D1F3C']}
+        colors={[C.bg, C.bgMid, C.bg]}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
@@ -277,7 +313,8 @@ export default function SplashScreen() {
         <View style={[styles.taglineDot, { backgroundColor: C.blue }]} />
       </Animated.View>
 
-      {/* ── LOADING DOTS (while checking) or CTA (no session) ─────── */}
+      {/* ── LOADING DOTS (while checking) or CTA (no session) — fixed slot avoids layout jump ── */}
+      <View style={styles.bottomActionSlot}>
       {checking ? (
         <View style={styles.dotsRow}>
           <Animated.View style={[styles.dot, { opacity: dot1 }]} />
@@ -336,6 +373,7 @@ export default function SplashScreen() {
           </TouchableOpacity>
         </Animated.View>
       ) : null}
+      </View>
 
       {/* Bottom tag */}
       <View style={styles.bottomTag}>
@@ -501,6 +539,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     marginTop: 8,
+  },
+  bottomActionSlot: {
+    minHeight: 220,
+    width: '100%',
+    justifyContent: 'flex-start',
+    alignItems: 'center',
   },
   dot: {
     width: 8,

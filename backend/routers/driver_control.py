@@ -64,59 +64,43 @@ async def check_zone_capacity(lat: float, lng: float) -> dict:
 
 @driver_control_router.post("/driver/go-online")
 async def driver_go_online(request: Request):
-    """Attempt to put the driver online.  Blocked if zone cap reached or on cooldown."""
+    """Attempt to put the driver online. Delegates to the full subscription/doc-gated toggle."""
+    # This endpoint is intentionally thin — all real enforcement is inside
+    # the primary toggle_driver_online handler in routers/drivers.py.
+    # We re-use that logic here so zone/cooldown features remain available
+    # without bypassing subscription and document checks.
+    from routers.drivers import apply_driver_online_toggle
     driver_id = require_authenticated(request)
-    body = await request.json()
-    lat = float(body.get("lat") or body.get("latitude") or 0)
-    lng = float(body.get("lng") or body.get("longitude") or 0)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        lat = float(body.get("lat") or body.get("latitude") or 0)
+        lng = float(body.get("lng") or body.get("longitude") or 0)
+    except (TypeError, ValueError):
+        lat, lng = 0.0, 0.0
 
-    # Check active cooldown.
-    cooldown = await db.driver_ignore_cooldowns.find_one({
-        "driver_id": driver_id,
-        "active": True,
-        "expires_at": {"$gt": datetime.now(timezone.utc)},
-    })
-    if cooldown:
-        remaining = int((cooldown["expires_at"] - datetime.now(timezone.utc)).total_seconds() // 60)
-        raise HTTPException(
-            status_code=429,
-            detail=f"You are on a {remaining}-minute cooldown for ignoring ride requests. Please wait.",
-        )
-
-    # Check zone cap.
-    if lat and lng:
-        zone_info = await check_zone_capacity(lat, lng)
-        if not zone_info["allowed"]:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Zone is at capacity ({zone_info['max_drivers']} drivers). Try again shortly.",
-            )
-        zone_key = zone_info["zone_key"]
-    else:
-        zone_key = "unknown"
-
-    now = datetime.now(timezone.utc)
-    await db.driver_profiles.update_one(
-        {"user_id": driver_id},
-        {"$set": {
-            "is_online": True,
-            "current_zone": zone_key,
-            "last_heartbeat": now,
-            "went_online_at": now,
-        }},
-        upsert=True,
+    return await apply_driver_online_toggle(
+        driver_id=driver_id,
+        is_online=True,
+        lat=lat,
+        lng=lng,
+        request=request,
     )
-    return {"success": True, "zone_key": zone_key, "message": "You are now online."}
 
 
 @driver_control_router.post("/driver/go-offline")
 async def driver_go_offline(request: Request):
     driver_id = require_authenticated(request)
+    from driver_presence import set_driver_offline
+
     now = datetime.now(timezone.utc)
     await db.driver_profiles.update_one(
         {"user_id": driver_id},
         {"$set": {"is_online": False, "went_offline_at": now}},
     )
+    await set_driver_offline(driver_id)
     return {"success": True, "message": "You are now offline."}
 
 
@@ -126,22 +110,32 @@ async def driver_go_offline(request: Request):
 async def driver_heartbeat(request: Request):
     """Called regularly by the app to signal the driver is still active."""
     driver_id = require_authenticated(request)
-    body = await request.json()
+    from driver_presence import refresh_driver_presence
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     lat = body.get("lat") or body.get("latitude")
     lng = body.get("lng") or body.get("longitude")
     now = datetime.now(timezone.utc)
 
     update: dict = {"last_heartbeat": now}
+    lat_f = lng_f = None
     if lat is not None and lng is not None:
-        update["current_lat"] = float(lat)
-        update["current_lng"] = float(lng)
-        update["current_zone"] = _resolve_zone(float(lat), float(lng))
+        lat_f = float(lat)
+        lng_f = float(lng)
+        update["current_lat"] = lat_f
+        update["current_lng"] = lng_f
+        update["current_zone"] = _resolve_zone(lat_f, lng_f)
+        update["current_location"] = {"lat": lat_f, "lng": lng_f, "updated_at": now.isoformat()}
 
     await db.driver_profiles.update_one(
         {"user_id": driver_id},
         {"$set": update},
         upsert=True,
     )
+    await refresh_driver_presence(driver_id, lat=lat_f, lng=lng_f)
     return {"success": True}
 
 

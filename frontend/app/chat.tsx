@@ -21,7 +21,7 @@ import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { getValidToken } from '@/src/lib/tokenStore';
 
 // Derive WebSocket URL from BACKEND_URL
 const getWsUrl = () => {
@@ -53,7 +53,7 @@ export default function ChatScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const globalParams = useGlobalSearchParams();
-  const { user, token, currentTrip } = useAppStore();
+  const { user, currentTrip } = useAppStore();
   const authed = useRequireUserOrLogin();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId } = useAuthedUserId();
@@ -116,84 +116,84 @@ export default function ChatScreen() {
 
   // ==================== WebSocket Connection ====================
   const connectWebSocket = useCallback(() => {
-    if (!effectiveTripId || !userId || !token || !canCallAuthedApi) return;
-    // Cleanup existing connection
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    if (!effectiveTripId || !userId || !canCallAuthedApi) return;
+    void (async () => {
+      const liveToken = await getValidToken();
+      if (!liveToken) return;
+      // Cleanup existing connection
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
 
-    const wsEndpoint = `${WS_URL}/api/ws/chat/${effectiveTripId}/${userId}?token=${encodeURIComponent(token)}`;
-    const ws = new WebSocket(wsEndpoint);
-    wsRef.current = ws;
+      const wsEndpoint = `${WS_URL}/api/ws/chat/${effectiveTripId}/${userId}?token=${encodeURIComponent(liveToken)}`;
+      const ws = new WebSocket(wsEndpoint);
+      wsRef.current = ws;
 
-    ws.onopen = () => {
-      setWsConnected(true);
-      reconnectAttemptsRef.current = 0;
-      console.log('WebSocket connected');
-    };
+      ws.onopen = () => {
+        setWsConnected(true);
+        reconnectAttemptsRef.current = 0;
+        console.log('WebSocket connected');
+      };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
 
-        if (data.type === 'history') {
-          // Load full message history from WebSocket
-          const loaded: Message[] = (data.messages || []).map(mapBackendMsg);
-          setDriverMessages(loaded);
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
-        } else if (data.type === 'new_message') {
-          // Received a new message in real-time
-          const newMsg = mapBackendMsg(data);
-          setDriverMessages((prev) => {
-            if (prev.find((m) => m.id === newMsg.id)) return prev;
-            return [...prev, newMsg];
-          });
-          // Send read receipt if the message is from others
-          if (data.sender_id !== userId) {
-            ws.send(JSON.stringify({ type: 'read' }));
-          }
-          setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
-        } else if (data.type === 'typing') {
-          if (data.user_id !== userId) {
-            setOtherTyping(data.is_typing);
-            if (data.is_typing) {
-              if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
-              typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
+          if (data.type === 'history') {
+            const loaded: Message[] = (data.messages || []).map(mapBackendMsg);
+            setDriverMessages(loaded);
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 100);
+          } else if (data.type === 'new_message') {
+            const newMsg = mapBackendMsg(data);
+            setDriverMessages((prev) => {
+              if (prev.find((m) => m.id === newMsg.id)) return prev;
+              return [...prev, newMsg];
+            });
+            if (data.sender_id !== userId) {
+              ws.send(JSON.stringify({ type: 'read' }));
             }
+            setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+          } else if (data.type === 'typing') {
+            if (data.user_id !== userId) {
+              setOtherTyping(data.is_typing);
+              if (data.is_typing) {
+                if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => setOtherTyping(false), 3000);
+              }
+            }
+          } else if (data.type === 'messages_read') {
+            setDriverMessages((prev) =>
+              prev.map((m) => (m.sender === 'user' ? { ...m, isRead: true } : m))
+            );
+          } else if (data.type === 'connected') {
+            console.log('WS handshake confirmed:', data.message);
           }
-        } else if (data.type === 'messages_read') {
-          setDriverMessages((prev) =>
-            prev.map((m) => (m.sender === 'user' ? { ...m, isRead: true } : m))
-          );
-        } else if (data.type === 'connected') {
-          console.log('WS handshake confirmed:', data.message);
+        } catch (e) {
+          console.error('WS message parse error:', e);
         }
-      } catch (e) {
-        console.error('WS message parse error:', e);
-      }
-    };
+      };
 
-    ws.onerror = (e) => {
-      console.error('WebSocket error:', e);
-    };
+      ws.onerror = (e) => {
+        console.error('WebSocket error:', e);
+      };
 
-    ws.onclose = () => {
-      setWsConnected(false);
-      wsRef.current = null;
-      // Auto-reconnect with exponential backoff
-      const attempts = reconnectAttemptsRef.current;
-      if (attempts < 5) {
-        const delay = Math.min(1000 * Math.pow(2, attempts), 16000);
-        reconnectAttemptsRef.current = attempts + 1;
-        reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
-      }
-    };
-  }, [effectiveTripId, userId, user?.role, token, canCallAuthedApi, mapBackendMsg]);
+      ws.onclose = () => {
+        setWsConnected(false);
+        wsRef.current = null;
+        const attempts = reconnectAttemptsRef.current;
+        if (attempts < 5) {
+          const delay = Math.min(1000 * Math.pow(2, attempts), 16000);
+          reconnectAttemptsRef.current = attempts + 1;
+          reconnectTimeoutRef.current = setTimeout(connectWebSocket, delay);
+        }
+      };
+    })();
+  }, [effectiveTripId, userId, user?.role, canCallAuthedApi, mapBackendMsg]);
 
   // Connect/disconnect WebSocket based on tab and tripId
   useEffect(() => {
-    if (activeTab === 'driver' && effectiveTripId && userId && token && canCallAuthedApi) {
+    if (activeTab === 'driver' && effectiveTripId && userId && canCallAuthedApi) {
       connectWebSocket();
     }
     return () => {
@@ -206,7 +206,7 @@ export default function ChatScreen() {
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [activeTab, effectiveTripId, userId, token, canCallAuthedApi, connectWebSocket]);
+  }, [activeTab, effectiveTripId, userId, canCallAuthedApi, connectWebSocket]);
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
@@ -470,7 +470,7 @@ export default function ChatScreen() {
   };
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

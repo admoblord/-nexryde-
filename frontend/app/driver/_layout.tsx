@@ -1,19 +1,20 @@
 import { Stack } from 'expo-router';
+import { useEffect } from 'react';
 import { useThemeColors } from '@/src/constants/theme';
 import { useRequireRole } from '@/src/hooks/useRequireRole';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
+import { warmTokenCache } from '@/src/lib/tokenStore';
 
-/**
- * Stack for all `app/driver/*.tsx` routes. Screens are file-discovered; we only set
- * global options (same pattern as `app/rider/_layout.tsx`).
- */
 export default function DriverLayout() {
   const { colors } = useThemeColors();
-  const roleOk = useRequireRole('driver');
+  const allowed = useRequireRole('driver');
+  const hasHydrated = usePersistStoreReady();
 
-  if (!roleOk) {
-    return <AuthLoadingGate />;
-  }
+  useEffect(() => {
+    void warmTokenCache();
+  }, []);
+
+  if (!hasHydrated || !allowed) return null;
 
   return (
     <Stack

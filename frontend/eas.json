@@ -7,8 +7,11 @@
     "preview": {
       "distribution": "internal",
       "node": "20.19.4",
+      "prebuildCommand": "npx expo prebuild --platform android --no-install",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
+        "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
         "EAS_SKIP_AUTO_FINGERPRINT": "1"
       },
       "autoIncrement": true,
@@ -23,8 +26,11 @@
     "production": {
       "distribution": "store",
       "node": "20.19.4",
+      "prebuildCommand": "npx expo prebuild --platform android --no-install",
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://nexryde-backend-993913300770.us-central1.run.app",
+        "EXPO_PUBLIC_GOOGLE_MAPS_API_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
+        "EXPO_PUBLIC_GOOGLE_MAPS_ANDROID_KEY": "AIzaSyBmD2u8Nq-guiT3PJKYxdzr5bl-lL6nbsY",
         "EAS_SKIP_AUTO_FINGERPRINT": "1"
       },
       "autoIncrement": true,

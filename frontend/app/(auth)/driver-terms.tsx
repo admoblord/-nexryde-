@@ -17,15 +17,16 @@ import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
 import { useAppStore } from '@/src/store/appStore';
+import { setTokens } from '@/src/lib/tokenStore';
 import { saveUserSession } from '@/utils/authStorage';
 import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
 import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 
 export default function DriverTermsScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
   const canShowAuth = useRedirectIfAuthed();
   const surf = useOnboardingSurfaces();
   const [accepted, setAccepted] = useState(false);
@@ -37,33 +38,6 @@ export default function DriverTermsScreen() {
   const email = params.email as string;
   const googleId = params.google_id as string;
   const profileImage = params.picture as string;
-
-  const requestPhoneVerification = async () => {
-    if (!phone) {
-      router.replace({ pathname: '/(auth)/login', params: { flow: 'login', role: 'driver' } });
-      return;
-    }
-
-    const otpResponse = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ phone }),
-    });
-    const otpData = await otpResponse.json().catch(() => ({}));
-    if (!otpResponse.ok) {
-      const msg = formatApiDetail(otpData?.detail) || 'Could not send verification code. Please try again.';
-      Alert.alert('Phone verification needed', msg);
-      return;
-    }
-
-    router.replace({
-      pathname: '/(auth)/verify',
-      params: {
-        phone,
-        provider: otpData?.provider || 'sms',
-      },
-    });
-  };
 
   const handleAcceptAndContinue = async () => {
     if (!accepted) {
@@ -99,39 +73,12 @@ export default function DriverTermsScreen() {
           return;
         }
         setUser(driverUser);
-        setToken(resolvedToken);
+        await setTokens(resolvedToken, data?.refresh_token);
         setIsAuthenticated(true);
         await saveUserSession({ ...driverUser, token: resolvedToken });
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        router.replace({
-          pathname: '/(auth)/driver-documents',
-          params: {
-            driver_id: driverUser.id,
-            phone: driverUser.phone || phone,
-            name: driverUser.name || name,
-            email: driverUser.email || email,
-          },
-        });
+        await routeAuthedUser(router, driverUser, resolvedToken);
       } else {
-        const detail = data?.detail;
-        const code = detail && typeof detail === 'object' ? detail.code : undefined;
-        if (response.status === 409 && code === 'PHONE_EXISTS_VERIFY_REQUIRED') {
-          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-          Alert.alert(
-            'Continue existing registration',
-            'This phone already started driver signup. Verify the phone and we will take you back to the unfinished step.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Verify phone',
-                onPress: () => {
-                  void requestPhoneVerification();
-                },
-              },
-            ],
-          );
-          return;
-        }
         const msg = formatApiDetail(data?.detail) || 'Registration failed. Please try again.';
         Alert.alert('Could not finish signup', msg);
       }
@@ -143,7 +90,7 @@ export default function DriverTermsScreen() {
   };
 
   if (!canShowAuth) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

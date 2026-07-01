@@ -1,5 +1,5 @@
 """Drivers Router - Driver profile, location, documents, verification, stats, onboarding, earnings, heatmap."""
-from fastapi import APIRouter, HTTPException, Form, File, UploadFile, Request
+from fastapi import APIRouter, HTTPException, Form, File, UploadFile, Request, Depends
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone, timedelta
@@ -14,6 +14,8 @@ import asyncio
 import hashlib
 
 from database import db
+from user_biometrics import get_reference_face_image, has_stored_face
+from user_lookup import find_user_by_id, QUERY_MAX_TIME_MS
 from surge_pricing import SURGE_CONFIG
 from surge_demand import (
     haversine_km as _haversine_km,
@@ -36,6 +38,10 @@ try:
 except ImportError:
     async def send_driver_verification_notification(user_id, status, reason=None):
         pass
+
+# GPS write throttle: skip MongoDB update if the same driver pinged < 3s ago.
+_driver_gps_last_write: dict[str, float] = {}
+_DRIVER_GPS_THROTTLE_S = 3.0
 
 logger = logging.getLogger('server')
 drivers_router = APIRouter(prefix="/api", tags=["Drivers"])
@@ -138,7 +144,10 @@ async def _snapshot_approved_documents(
     When ``force=True`` the missing-docs guard is skipped so admin can approve
     even when the document archive is incomplete.
     """
-    archived = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0}) or {}
+    # Snapshot stores metadata only — never load the multi-MB binary blobs.
+    archived = await db.driver_documents.find_one(
+        {"driver_id": driver_id}, {"_id": 0, "documents.data": 0}
+    ) or {}
     missing = _missing_required_archived_docs(archived)
     if missing and not force:
         raise HTTPException(
@@ -217,46 +226,6 @@ def _parse_iso_datetime(value: Optional[str]) -> Optional[datetime]:
         return dt
     except Exception:
         return None
-
-
-async def _trigger_ghost_driver_lock(
-    user_id: str,
-    distance_km: float,
-    time_gap_seconds: float,
-    previous_location: dict,
-    incoming_location: dict,
-) -> None:
-    now_iso = datetime.now(timezone.utc).isoformat()
-    lock_payload = {
-        "active": True,
-        "reason": "ghost_driver_detected",
-        "detected_at": now_iso,
-        "distance_km": round(distance_km, 2),
-        "time_gap_seconds": int(time_gap_seconds),
-        "previous_location": previous_location,
-        "incoming_location": incoming_location,
-    }
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"ghost_driver_lock": lock_payload, "earnings_frozen": True}},
-    )
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"is_online": False, "ghost_driver_lock": lock_payload, "pending_identity_reconfirm": True}},
-        upsert=True,
-    )
-    await db.notifications.insert_one(
-        {
-            "id": str(uuid.uuid4()),
-            "user_id": user_id,
-            "type": "ghost_driver_lock",
-            "title": "Ghost Driver Protection Activated",
-            "message": "Concurrent location misuse was detected. Sessions locked and earnings frozen pending identity reconfirmation.",
-            "read": False,
-            "created_at": now_iso,
-            "data": lock_payload,
-        }
-    )
 
 
 def _compute_visibility_score(acceptance_rate: float, completion_rate: float, rating: float, cancellations: int, completed_trips: int) -> float:
@@ -393,7 +362,9 @@ VAULT_RELEASE_COOLDOWN_HOURS = 48
 
 
 def _vault_pin_hash(user_id: str, pin: str) -> str:
-    secret = os.environ.get("JWT_SECRET", "nexryde-fortress")
+    secret = os.environ.get("JWT_SECRET")
+    if not secret:
+        raise RuntimeError("JWT_SECRET environment variable is not set — cannot hash vault PIN")
     return hashlib.sha256(f"{secret}:{user_id}:{pin}".encode()).hexdigest()
 
 
@@ -665,81 +636,136 @@ async def get_driver_categories(user_id: str, http_request: Request):
 @drivers_router.put("/drivers/{user_id}/location")
 async def update_driver_location(user_id: str, request: LocationUpdate, http_request: Request):
     verify_owner_strict(http_request, user_id)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "ghost_driver_lock": 1})
-    if (user or {}).get("ghost_driver_lock", {}).get("active"):
-        raise HTTPException(
-            status_code=423,
-            detail="Ghost Driver Protection is active. Reconfirm identity to unlock this account.",
-        )
-    profile = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "current_location": 1}) or {}
-    current = profile.get("current_location") or {}
-    previous_lat = current.get("lat")
-    previous_lng = current.get("lng")
-    previous_updated_at = _parse_iso_datetime(current.get("updated_at"))
     now = datetime.now(timezone.utc)
-    if (
-        previous_lat is not None
-        and previous_lng is not None
-        and previous_updated_at is not None
-    ):
-        gap_seconds = max(1.0, (now - previous_updated_at).total_seconds())
-        jump_km = _haversine_km(float(previous_lat), float(previous_lng), float(request.latitude), float(request.longitude))
-        # Impossible fast geo jump strongly suggests concurrent account misuse/ghost driving.
-        if gap_seconds <= 120.0 and jump_km >= 30.0:
-            await _trigger_ghost_driver_lock(
-                user_id=user_id,
-                distance_km=jump_km,
-                time_gap_seconds=gap_seconds,
-                previous_location={
-                    "lat": float(previous_lat),
-                    "lng": float(previous_lng),
-                    "updated_at": current.get("updated_at"),
-                },
-                incoming_location={
-                    "lat": float(request.latitude),
-                    "lng": float(request.longitude),
+    # Throttle MongoDB write — accept the ping but skip DB if < 3s since last write.
+    import time as _time
+    last_write = _driver_gps_last_write.get(user_id, 0.0)
+    elapsed = _time.monotonic() - last_write
+    if elapsed >= _DRIVER_GPS_THROTTLE_S:
+        await db.driver_profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "current_location": {
+                    "lat": request.latitude,
+                    "lng": request.longitude,
                     "updated_at": now.isoformat(),
                     "device_id": request.device_id,
+                    # GeoJSON Point for $geoNear queries.
+                    "type": "Point",
+                    "coordinates": [request.longitude, request.latitude],
                 },
-            )
-            raise HTTPException(
-                status_code=423,
-                detail="Ghost Driver Protection triggered. Sessions locked and earnings frozen pending identity reconfirmation.",
-            )
-    await db.driver_profiles.update_one(
-        {"user_id": user_id},
-        {"$set": {"current_location": {"lat": request.latitude, "lng": request.longitude, "updated_at": now.isoformat(), "device_id": request.device_id}}}
-    )
+            }},
+        )
+        _driver_gps_last_write[user_id] = _time.monotonic()
     return {"message": "Location updated"}
 
-@drivers_router.put("/drivers/{user_id}/online")
-async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
-    verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0, "ghost_driver_lock": 1, "sim_swap_lock": 1})
+@drivers_router.put("/drivers/{driver_id}/online")
+async def put_driver_online(driver_id: str, is_online: bool, lat: float = 0, lng: float = 0, *, request: Request):
+    """PUT /drivers/{id}/online — zone/cooldown + subscription gates."""
+    return await apply_driver_online_toggle(
+        driver_id=driver_id,
+        is_online=is_online,
+        lat=lat,
+        lng=lng,
+        request=request,
+    )
 
-    # Ghost Driver lock check
-    if (user or {}).get("ghost_driver_lock", {}).get("active"):
-        raise HTTPException(status_code=423, detail="Ghost Driver Protection lock is active. Reconfirm identity to go online.")
 
-    # Auto-clear stale SIM swap locks for approved drivers.
-    # False positives were caused by phone-format mismatches (now fixed). Any driver
-    # with verification_status == "approved" whose sim_swap_lock is still active
-    # gets it silently cleared so they can work normally.
-    if (user or {}).get("sim_swap_lock", {}).get("active"):
-        profile_check = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0, "verification_status": 1}) or {}
-        if profile_check.get("verification_status") == "approved":
-            await db.users.update_one(
-                {"id": user_id},
-                {"$unset": {"sim_swap_lock": "", "earnings_frozen": ""}}
+async def apply_driver_online_toggle(
+    driver_id: str,
+    is_online: bool,
+    *,
+    lat: float = 0,
+    lng: float = 0,
+    request: Request,
+):
+    """Shared helper: full gate enforcement used by both /drivers/{id}/online and /driver/go-online."""
+    # Re-use the full implementation but map driver_id → user_id
+    # and apply zone + cooldown checks from driver_control if going online.
+    if is_online and lat and lng:
+        from routers.driver_control import check_zone_capacity
+        from database import db as _db
+        now_utc = datetime.now(timezone.utc)
+        cooldown = await _db.driver_ignore_cooldowns.find_one(
+            {
+                "driver_id": driver_id,
+                "active": True,
+                "expires_at": {"$gt": now_utc},
+            },
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
+        if cooldown:
+            remaining = int((cooldown["expires_at"] - now_utc).total_seconds() // 60)
+            raise HTTPException(
+                status_code=429,
+                detail=f"You are on a {remaining}-minute cooldown for ignoring ride requests.",
             )
+        zone_info = await check_zone_capacity(lat, lng)
+        if not zone_info["allowed"]:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Zone is at capacity ({zone_info['max_drivers']} drivers). Try again shortly.",
+            )
+        zone_key = zone_info["zone_key"]
+        # Persist zone before calling full gate (which sets is_online at the end)
+        await _db.driver_profiles.update_one(
+            {"user_id": driver_id},
+            {"$set": {"current_zone": zone_key, "went_online_at": now_utc}},
+            upsert=True,
+        )
+    return await toggle_driver_online(user_id=driver_id, is_online=is_online, request=request, lat=lat, lng=lng)
+
+
+async def toggle_driver_online(user_id: str, is_online: bool, request: Request, *, lat: float = 0.0, lng: float = 0.0):
+    verify_owner_strict(request, user_id)
+    from driver_presence import (
+        get_driver_presence,
+        is_driver_online,
+        refresh_driver_presence,
+        set_driver_offline,
+        set_driver_online,
+    )
+
+    if is_online:
+        # Idempotent: already online → refresh TTL and succeed (no error on double-tap).
+        if await is_driver_online(user_id):
+            await refresh_driver_presence(user_id, lat=lat or None, lng=lng or None)
             await db.driver_profiles.update_one(
                 {"user_id": user_id},
-                {"$unset": {"sim_swap_lock": "", "pending_identity_reconfirm": ""}}
+                {"$set": {"is_online": True}},
             )
-    if is_online:
-        profile = await db.driver_profiles.find_one({"user_id": user_id})
+            return {"message": "Driver is now online", "already_online": True}
+
+        # Lean projection — never pull bloated profile blobs on this hot path.
+        profile = await db.driver_profiles.find_one(
+            {"user_id": user_id},
+            {
+                "_id": 0,
+                "documents_verified": 1,
+                "verification_status": 1,
+                "profile_completed_at": 1,
+                "approved_at": 1,
+                "hours_driven_today": 1,
+                "vehicles": 1,
+                "vehicle_model": 1,
+                "vehicle_registered": 1,
+                "current_location": 1,
+                "active_categories": 1,
+                "vehicle_type": 1,
+                "is_online": 1,
+            },
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
         if not profile:
             raise HTTPException(status_code=403, detail="Complete your driver profile before going online")
+
+        vehicles = profile.get("vehicles") or []
+        has_vehicle = bool(vehicles) or bool(profile.get("vehicle_model")) or bool(profile.get("vehicle_registered"))
+        if not has_vehicle:
+            raise HTTPException(
+                status_code=403,
+                detail="Register a vehicle to go online. Add your vehicle in Driver Profile → Vehicle.",
+            )
 
         # ── CRITICAL gates: must be true to go online ─────────────────────────
         critical_missing = []
@@ -750,7 +776,7 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
         if critical_missing:
             raise HTTPException(
                 status_code=403,
-                detail=f"Account not yet approved. Missing: {', '.join(critical_missing)}"
+                detail=f"Account not yet approved. Missing: {', '.join(critical_missing)}",
             )
 
         # ── SOFT gates: warn but allow newer verified drivers a grace period ──
@@ -778,29 +804,50 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
             except Exception as compliance_error:
                 logger.warning(f"Compliance pre-check warning for {user_id}: {compliance_error}")
 
-        # Document expiry: only block if documents are critically expired (hard block)
-        try:
-            from driver_compliance import check_driver_document_expiry
-            docs_status = await check_driver_document_expiry(user_id)
-            if not docs_status.get("compliant", False) and docs_status.get("critically_expired"):
-                raise HTTPException(
-                    status_code=403,
-                    detail="One or more required documents have expired. Please renew them before going online."
-                )
-        except HTTPException:
-            raise
-        except Exception as compliance_error:
-            logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
+        # Document expiry: only block if documents are critically expired (hard block).
+        # Skip for recently approved drivers — same grace as monthly compliance.
+        if not approved_recently:
+            try:
+                from driver_compliance import check_driver_document_expiry
+                docs_status = await check_driver_document_expiry(user_id)
+                if not docs_status.get("compliant", False) and docs_status.get("critically_expired"):
+                    raise HTTPException(
+                        status_code=403,
+                        detail="One or more required documents have expired. Please renew them before going online."
+                    )
+            except HTTPException:
+                raise
+            except Exception as compliance_error:
+                logger.warning(f"Document expiry pre-check warning for {user_id}: {compliance_error}")
 
-        subscription = await db.subscriptions.find_one({"driver_id": user_id}, sort=[("created_at", -1)])
+        subscription = await db.subscriptions.find_one(
+            {"driver_id": user_id},
+            {"_id": 0, "id": 1, "status": 1, "end_date": 1, "trial_active": 1},
+            sort=[("created_at", -1)],
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
         if not subscription or subscription.get("status") not in {"active", "grace_period", "trial"}:
             await db.driver_profiles.update_one(
                 {"user_id": user_id},
                 {"$set": {"subscription_active": False, "is_online": False}},
                 upsert=True,
             )
-            await db.users.update_one({"id": user_id}, {"$set": {"subscription_active": False}})
-            raise HTTPException(status_code=403, detail="Active subscription required to go online")
+            await db.users.update_one(
+                {"id": user_id},
+                {"$set": {"subscription_active": False}},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail="No active plan. Start your verified-driver trial or subscribe to go online.",
+            )
+
+        # Trial gate: trust persisted subscription status on the hot path.
+        # Live trip re-count runs on the subscription screen, not every go-online tap.
+        if subscription.get("status") == "pending_payment":
+            raise HTTPException(
+                status_code=403,
+                detail="Your free trial trips are used up. Subscribe to a plan to go online.",
+            )
 
         now = datetime.utcnow()
         expiry = subscription.get("end_date")
@@ -847,18 +894,56 @@ async def toggle_driver_online(user_id: str, is_online: bool, request: Request):
         if status.get("can_go_online") is False:
             raise HTTPException(status_code=403, detail=status.get("message", "Cannot go online right now"))
 
-    await db.driver_profiles.update_one({"user_id": user_id}, {"$set": {"is_online": is_online}})
+        # Resolve GPS for Redis geo index (request body or stored current_location).
+        if not (lat and lng):
+            cloc = profile.get("current_location") or {}
+            try:
+                lat = float(cloc.get("lat") or 0)
+                lng = float(cloc.get("lng") or 0)
+            except (TypeError, ValueError):
+                lat, lng = 0.0, 0.0
+    else:
+        # Idempotent offline: already offline → success no-op.
+        if not await is_driver_online(user_id):
+            pres = await get_driver_presence(user_id)
+            if not pres:
+                await db.driver_profiles.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"is_online": False}},
+                )
+                return {"message": "Driver is now offline", "already_offline": True}
+
+    await db.driver_profiles.update_one(
+        {"user_id": user_id},
+        {"$set": {"is_online": is_online}},
+    )
 
     if is_online:
+        await set_driver_online(user_id, lat=lat, lng=lng)
+        # Surge sync is best-effort — never block go-online on demand scans.
         try:
-            from services.driver_surge_notifications import sync_driver_surge_alerts
+            import asyncio
 
-            profile_live = await db.driver_profiles.find_one({"user_id": user_id}, {"_id": 0}) or {}
-            user_live = await db.users.find_one({"id": user_id}, {"_id": 0, "city": 1}) or {}
-            profile_live["is_online"] = True
-            await sync_driver_surge_alerts(db, user_id, profile_live, user_live, notify=True)
+            async def _surge_after_online() -> None:
+                try:
+                    from services.driver_surge_notifications import sync_driver_surge_alerts
+
+                    profile_live = {
+                        "current_location": profile.get("current_location") or {"lat": lat, "lng": lng},
+                        "active_categories": profile.get("active_categories") if profile else [],
+                        "vehicle_type": profile.get("vehicle_type") if profile else "economy",
+                        "is_online": True,
+                    }
+                    user_live = await find_user_by_id(user_id, {"_id": 0, "city": 1}) or {}
+                    await sync_driver_surge_alerts(db, user_id, profile_live, user_live, notify=True)
+                except Exception as surge_exc:
+                    logger.warning("Surge alert on go-online skipped for %s: %s", user_id, surge_exc)
+
+            asyncio.create_task(_surge_after_online())
         except Exception as surge_exc:
-            logger.warning("Surge alert on go-online skipped for %s: %s", user_id, surge_exc)
+            logger.warning("Surge alert task on go-online skipped for %s: %s", user_id, surge_exc)
+    else:
+        await set_driver_offline(user_id)
 
     return {"message": f"Driver is now {'online' if is_online else 'offline'}"}
 
@@ -871,9 +956,9 @@ async def verify_face_at_ride_start(user_id: str, request: FaceVerificationReque
             detail="Live face verification provider is required. Mock verification is disabled in production.",
         )
     profile = await db.driver_profiles.find_one({"user_id": user_id})
-    if not profile or not profile.get("face_image"):
+    if not profile or not await has_stored_face(user_id):
         raise HTTPException(status_code=400, detail="No registered face image found.")
-    user = await db.users.find_one({"id": user_id})
+    user = await db.users.find_one({"id": user_id}, {"_id": 0, "id": 1, "name": 1})
     if not user:
         raise HTTPException(status_code=404, detail="Driver not found")
     await db.face_verifications.insert_one({"driver_id": user_id, "timestamp": datetime.now(timezone.utc), "verification_type": "ride_start", "status": "pending_ai_verification", "verified": True})
@@ -906,6 +991,9 @@ async def verify_driver_documents(
 ):
     """Validate, archive, and approve driver documents only when the full required set is present."""
     try:
+        # Rate-limit: 10 document submission attempts per hour per driver
+        from security_advanced import general_limiter
+        await general_limiter.check_rate_limit(http_request, f"verify_docs:{driver_id}")
         verify_owner_strict(http_request, driver_id)
         import base64
 
@@ -960,6 +1048,7 @@ async def verify_driver_documents(
                 pretty = exp_key.replace("_", " ")
                 raise HTTPException(status_code=400, detail=f"Expiry date required for {pretty}")
 
+        from document_compression import compress_driver_document_image, validate_compressed_document
         stored_docs = {}
         for doc_key, file in doc_files.items():
             if file:
@@ -972,16 +1061,34 @@ async def verify_driver_documents(
                     raise HTTPException(status_code=400, detail=f"{doc_key.replace('_', ' ')} exceeds 15MB upload limit")
                 if not _allowed_magic_bytes(content):
                     raise HTTPException(status_code=400, detail=f"{doc_key.replace('_', ' ')} file signature is invalid or unsupported")
+                # Compress before storing — reduces MongoDB doc size by ~80%
+                label = doc_key.replace("_", " ")
+                content, mime_out = compress_driver_document_image(content, file.content_type)
+                validate_compressed_document(content, mime_out, label=label)
                 sha256 = _sha256_bytes(content)
-                stored_docs[doc_key] = {
+                doc_meta = {
                     "filename": file.filename,
-                    "content_type": file.content_type,
-                    "data": base64.b64encode(content).decode("utf-8"),
+                    "content_type": mime_out,
                     "size_bytes": len(content),
                     "sha256": sha256,
                     "uploaded_at": datetime.now(timezone.utc).isoformat(),
                     "expiry_date": expiry_map.get(doc_key),
                 }
+                # Binaries go to PRIVATE GCS — only the object key lives in Mongo so
+                # driver_documents stays single-digit KB. Fall back to inline base64
+                # only if GCS is unavailable, so uploads never hard-fail.
+                from driver_doc_storage import store_document_binary
+                gcs_key = await store_document_binary(
+                    driver_id, doc_key, content, mime_out, sha256=sha256
+                )
+                if gcs_key:
+                    doc_meta["gcs_key"] = gcs_key
+                    doc_meta["storage"] = "gcs"
+                else:
+                    logger.warning("GCS unavailable; storing %s inline for %s", doc_key, driver_id)
+                    doc_meta["data"] = base64.b64encode(content).decode("utf-8")
+                    doc_meta["storage"] = "inline"
+                stored_docs[doc_key] = doc_meta
 
         # NIN digits-only: store under documents.nin so admin lists / archive checks match slip uploads.
         if nin_number_ok and "nin" not in stored_docs:
@@ -1132,12 +1239,30 @@ async def verify_driver_documents(
 async def get_driver_onboarding_status(driver_id: str, request: Request):
     try:
         verify_owner_strict(request, driver_id)
-        user = await db.users.find_one({"id": driver_id})
+        user = await find_user_by_id(driver_id, {"_id": 0, "id": 1, "terms_accepted": 1})
         if not user:
             return {"step": "not_found", "completed": False}
         if not user.get("terms_accepted"):
             return {"step": "terms", "completed": False}
-        profile = await db.driver_profiles.find_one({"user_id": driver_id})
+        # Lean projection — never pull the full (bloated) profile doc here. A slow
+        # full-document fetch was timing out against the frontend's startup budget,
+        # leaving approved drivers stranded on a stale "Waiting for approval" cache.
+        profile = await db.driver_profiles.find_one(
+            {"user_id": driver_id},
+            {
+                "_id": 0,
+                "verification_status": 1,
+                "documents_verified": 1,
+                "documents_submitted": 1,
+                "profile_completed": 1,
+                "vehicle_registered": 1,
+                "vehicle_model": 1,
+                "vehicles": 1,
+                "nin_number": 1,
+                "nin": 1,
+            },
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
         if not profile:
             return {"step": "documents", "completed": False}
 
@@ -1210,13 +1335,15 @@ async def get_driver_onboarding_status(driver_id: str, request: Request):
         if not profile.get("documents_verified") or verification_status != "approved":
             return {"step": "documents", "completed": False, "verification_status": verification_status or "not_submitted"}
 
-        # Admin / AI explicitly approved this driver — honour it regardless of profile_completed flag.
-        # Also auto-heal: patch profile_completed so future calls succeed without extra DB roundtrip.
+        # Approved docs but Step 3 not submitted — never auto-skip profile.
         if not profile.get("profile_completed"):
-            await db.driver_profiles.update_one(
-                {"user_id": driver_id},
-                {"$set": {"profile_completed": True, "onboarding_step": "approved"}}
-            )
+            return {
+                "step": "profile",
+                "completed": False,
+                "verification_status": verification_status,
+                "documents_submitted": documents_submitted,
+                "documents_verified": bool(profile.get("documents_verified")),
+            }
 
         # Compute driver_profile_complete: once all key checks pass, the driver should NEVER
         # see onboarding again. We include vehicles count from the stored vehicles array.
@@ -1456,8 +1583,26 @@ async def get_available_drivers(vehicle_type: Optional[str] = None, lat: Optiona
 @drivers_router.get("/drivers/{user_id}/stats")
 async def get_driver_stats(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id})
-    profile = await db.driver_profiles.find_one({"user_id": user_id})
+    user = await find_user_by_id(user_id, {"_id": 0, "rating": 1, "streaks": 1, "badges": 1})
+    profile = await db.driver_profiles.find_one(
+        {"user_id": user_id},
+        {
+            "_id": 0,
+            "acceptance_rate": 1,
+            "completion_rate": 1,
+            "visibility_score": 1,
+            "rank": 1,
+            "is_online": 1,
+            "hours_driven_today": 1,
+            "fatigue_warning": 1,
+            "smoothness_rating": 1,
+            "politeness_rating": 1,
+            "cleanliness_rating": 1,
+            "safety_rating": 1,
+            "cancellation_count": 1,
+        },
+        max_time_ms=QUERY_MAX_TIME_MS,
+    )
     subscription = await db.subscriptions.find_one({"driver_id": user_id, "status": {"$in": ["active", "trial", "grace_period"]}})
     completed_trips = await db.trips.count_documents(
         match_completed_trip_paid_for_earnings(driver_id=user_id)
@@ -1598,7 +1743,9 @@ Documents payload: {json.dumps(documents)}
                 mismatches = ai_result.get("mismatches") or []
                 missing_from_ai = ai_result.get("missing_documents") or []
 
-                archived_doc_record = await db.driver_documents.find_one({"driver_id": user_id})
+                archived_doc_record = await db.driver_documents.find_one(
+                    {"driver_id": user_id}, {"_id": 0, "documents.data": 0}
+                )
                 missing_archived = _missing_required_archived_docs(archived_doc_record)
                 stored_fraud_flags = (archived_doc_record or {}).get("forgery_flags") or []
                 stored_dup_hashes = (archived_doc_record or {}).get("duplicate_hashes") or []
@@ -1964,7 +2111,10 @@ async def admin_approve_verification(
     if not user_id:
         raise HTTPException(status_code=400, detail="Verification record missing user_id")
 
-    archived = await db.driver_documents.find_one({"driver_id": user_id}) or {}
+    # Only the metadata is needed to validate completeness — skip binary blobs.
+    archived = await db.driver_documents.find_one(
+        {"driver_id": user_id}, {"_id": 0, "documents.data": 0}
+    ) or {}
     missing = _missing_required_archived_docs(archived)
     if missing and not force:
         raise HTTPException(
@@ -2191,16 +2341,19 @@ async def admin_get_verification_document_image(
     if not verification:
         raise HTTPException(status_code=404, detail="Verification not found")
     driver_id = verification.get("user_id") or verification.get("driver_id")
-    archived = await db.driver_documents.find_one({"driver_id": driver_id}, {"_id": 0})
+    # Project only the one requested document's metadata — never the whole archive.
+    archived = await db.driver_documents.find_one(
+        {"driver_id": driver_id}, {"_id": 0, f"documents.{doc_key}": 1}
+    )
     if not archived:
         raise HTTPException(status_code=404, detail="No document archive for this driver")
     doc = (archived.get("documents") or {}).get(doc_key)
-    if not doc or not isinstance(doc, dict) or not doc.get("data"):
-        raise HTTPException(status_code=404, detail=f"Document '{doc_key}' not found or has no image data")
-    try:
-        raw_bytes = _b64.b64decode(doc["data"])
-    except Exception:
-        raise HTTPException(status_code=500, detail="Failed to decode document image")
+    if not doc or not isinstance(doc, dict):
+        raise HTTPException(status_code=404, detail=f"Document '{doc_key}' not found")
+    from driver_doc_storage import fetch_document_binary
+    raw_bytes = await fetch_document_binary(driver_id, doc_key, doc)
+    if raw_bytes is None:
+        raise HTTPException(status_code=404, detail=f"Document '{doc_key}' has no stored image data")
 
     # Typed NIN (no photo): serve as SVG so admin <img src="…/document-image/nin"> still previews.
     if doc_key == "nin" and doc.get("capture_mode") == "number_only":
@@ -2406,6 +2559,47 @@ async def update_driver_salary_mode(driver_id: str, payload: DriverSalaryModeUpd
 @drivers_router.get("/driver/earnings/{driver_id}")
 async def get_driver_earnings_dashboard(driver_id: str, request: Request, period: str = "today"):
     verify_owner_strict(request, driver_id)
+    try:
+        return await _build_driver_earnings_dashboard(driver_id, period)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("earnings dashboard failed driver=%s period=%s: %s", driver_id, period, exc)
+        return _empty_driver_earnings_dashboard(driver_id, period)
+
+
+def _empty_driver_earnings_dashboard(driver_id: str, period: str) -> dict:
+    tier_config = TIER_CONFIG.get("basic", TIER_CONFIG["basic"])
+    return {
+        "driver_id": driver_id,
+        "period": period,
+        "tier": {
+            "name": tier_config["name"],
+            "earning_potential": tier_config["earning_per_ride"],
+            "monthly_fee": tier_config["monthly_fee"],
+        },
+        "summary": {
+            "total_earnings": 0,
+            "total_trips": 0,
+            "total_distance_km": 0,
+            "total_time_mins": 0,
+            "traffic_compensation": 0,
+            "keep_percentage": 100,
+        },
+        "averages": {"per_trip": 0, "per_km": 0, "hourly": 0},
+        "projections": {"daily": 0, "weekly": 0, "monthly": 0},
+        "daily_breakdown": {},
+        "surge": {
+            "active": False,
+            "multiplier": 1.0,
+            "message": "Surge data unavailable",
+        },
+        "salary_mode": {"enabled": False, "monthly_income_target": 0, "achieved": 0, "remaining": 0, "progress_pct": 0},
+        "commission_message": "You keep 100% of all earnings. Riders pay you directly.",
+    }
+
+
+async def _build_driver_earnings_dashboard(driver_id: str, period: str) -> dict:
     # Use UTC for DB queries (all timestamps stored as UTC)
     now_utc = datetime.utcnow()
     # Use Nigeria WAT (UTC+1) for window/time-of-day logic so guarantee windows
@@ -2420,33 +2614,66 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
         start_date = now_utc - timedelta(days=30)
     else:
         start_date = now_utc.replace(hour=0, minute=0, second=0, microsecond=0) - WAT_OFFSET
-    trips = await db.trips.find(
-        match_completed_trip_paid_for_earnings(
-            driver_id=driver_id,
-            completed_at={"$gte": start_date},
-        )
-    ).to_list(500)
-    total_earnings = sum(t.get("fare", 0) for t in trips)
-    total_trips = len(trips)
-    total_distance = sum(t.get("distance_km", 0) for t in trips)
-    total_time = sum(t.get("duration_mins", 0) for t in trips)
-    traffic_compensation = sum(t.get("traffic_fee", 0) for t in trips)
+    period_match = match_completed_trip_paid_for_earnings(
+        driver_id=driver_id,
+        completed_at={"$gte": start_date},
+    )
+
+    summary_pipeline = [
+        {"$match": period_match},
+        {
+            "$group": {
+                "_id": None,
+                "total_earnings": {"$sum": {"$ifNull": ["$fare", 0]}},
+                "total_trips": {"$sum": 1},
+                "total_distance": {"$sum": {"$ifNull": ["$distance_km", 0]}},
+                "total_time": {"$sum": {"$ifNull": ["$duration_mins", 0]}},
+                "traffic_compensation": {"$sum": {"$ifNull": ["$traffic_fee", 0]}},
+            }
+        },
+    ]
+    daily_pipeline = [
+        {"$match": period_match},
+        {
+            "$group": {
+                "_id": {
+                    "$dateToString": {"format": "%Y-%m-%d", "date": "$completed_at"},
+                },
+                "trips": {"$sum": 1},
+                "earnings": {"$sum": {"$ifNull": ["$fare", 0]}},
+                "distance": {"$sum": {"$ifNull": ["$distance_km", 0]}},
+            }
+        },
+        {"$sort": {"_id": 1}},
+    ]
+
+    summary_rows, daily_rows = await asyncio.gather(
+        db.trips.aggregate(summary_pipeline, maxTimeMS=QUERY_MAX_TIME_MS).to_list(1),
+        db.trips.aggregate(daily_pipeline, maxTimeMS=QUERY_MAX_TIME_MS).to_list(32),
+    )
+    summary_row = summary_rows[0] if summary_rows else {}
+    total_earnings = float(summary_row.get("total_earnings", 0) or 0)
+    total_trips = int(summary_row.get("total_trips", 0) or 0)
+    total_distance = float(summary_row.get("total_distance", 0) or 0)
+    total_time = float(summary_row.get("total_time", 0) or 0)
+    traffic_compensation = float(summary_row.get("traffic_compensation", 0) or 0)
+    daily_breakdown = {
+        row["_id"]: {
+            "trips": int(row.get("trips", 0) or 0),
+            "earnings": float(row.get("earnings", 0) or 0),
+            "distance": float(row.get("distance", 0) or 0),
+        }
+        for row in daily_rows
+        if row.get("_id")
+    }
     tier_data = await db.driver_tiers.find_one({"driver_id": driver_id})
     current_tier = tier_data.get("tier", "basic") if tier_data else "basic"
     tier_config = TIER_CONFIG.get(current_tier, TIER_CONFIG["basic"])
-    daily_breakdown = {}
-    for trip in trips:
-        trip_date = trip.get("completed_at", now).strftime("%Y-%m-%d") if hasattr(trip.get("completed_at", now), "strftime") else str(trip.get("completed_at", ""))[:10]
-        if trip_date not in daily_breakdown:
-            daily_breakdown[trip_date] = {"trips": 0, "earnings": 0, "distance": 0}
-        daily_breakdown[trip_date]["trips"] += 1
-        daily_breakdown[trip_date]["earnings"] += trip.get("fare", 0)
-        daily_breakdown[trip_date]["distance"] += trip.get("distance_km", 0)
     avg_per_trip = total_earnings / total_trips if total_trips > 0 else 0
     avg_per_km = total_earnings / total_distance if total_distance > 0 else 0
     hours_worked = (now_utc - (start_date + WAT_OFFSET)).total_seconds() / 3600
     projected_daily = (total_earnings / hours_worked * 10) if hours_worked > 0 and period == "today" else total_earnings / max(1, (now_utc - start_date).days)
-    user_doc = await db.users.find_one({"id": driver_id}, {"_id": 0, "city": 1}) or {}
+    user_doc = await find_user_by_id(driver_id, {"_id": 0, "city": 1}) or {}
     profile = await db.driver_profiles.find_one(
         {"user_id": driver_id},
         {
@@ -2540,10 +2767,19 @@ async def get_driver_earnings_dashboard(driver_id: str, request: Request, period
             logger.warning("Surge inbox alert skipped for %s: %s", driver_id, surge_exc)
 
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    month_trips = await db.trips.find(
-        match_completed_trip_paid_for_earnings(driver_id=driver_id, completed_at={"$gte": month_start})
-    ).to_list(1000)
-    month_achieved = sum(float(t.get("fare", 0) or 0) for t in month_trips)
+    month_agg = await db.trips.aggregate(
+        [
+            {
+                "$match": match_completed_trip_paid_for_earnings(
+                    driver_id=driver_id,
+                    completed_at={"$gte": month_start},
+                )
+            },
+            {"$group": {"_id": None, "total": {"$sum": {"$ifNull": ["$fare", 0]}}}},
+        ],
+        maxTimeMS=QUERY_MAX_TIME_MS,
+    ).to_list(1)
+    month_achieved = float(month_agg[0]["total"]) if month_agg else 0.0
     salary_mode = _build_salary_mode_plan(
         float(((profile.get("salary_mode") or {}).get("monthly_income_target", 0) or 0)),
         month_achieved,
@@ -2611,8 +2847,15 @@ async def save_bank_details(driver_id: str, request: dict, http_request: Request
 async def get_bank_details(driver_id: str, http_request: Request):
     """Return saved driver bank details and whether payout routing is ready."""
     verify_owner_strict(http_request, driver_id)
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0}) or {}
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "bank_name": 1, "account_number": 1, "account_name": 1},
+        max_time_ms=QUERY_MAX_TIME_MS,
+    ) or {}
+    user = await find_user_by_id(
+        driver_id,
+        {"_id": 0, "bank_name": 1, "account_number": 1, "account_name": 1},
+    ) or {}
 
     bank_name = profile.get("bank_name") or user.get("bank_name")
     account_number = profile.get("account_number") or user.get("account_number")
@@ -2667,11 +2910,9 @@ async def get_earnings_vault(driver_id: str, http_request: Request):
 async def lock_earnings_vault(driver_id: str, request: EarningsVaultLockRequest, http_request: Request):
     """Move funds from spendable wallet into untouchable vault."""
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1, "earnings_frozen": 1}) or {}
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1}) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
-    if bool(user.get("earnings_frozen")):
-        raise HTTPException(status_code=423, detail="Earnings are frozen. Vault changes are paused.")
     amount = round(float(request.amount), 2)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
@@ -2709,11 +2950,9 @@ async def lock_earnings_vault(driver_id: str, request: EarningsVaultLockRequest,
 async def request_earnings_vault_unlock(driver_id: str, request: EarningsVaultUnlockRequest, http_request: Request):
     """Start 48-hour cooldown before vault funds can return to spendable wallet."""
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "earnings_vault_locked": 1, "earnings_vault_pending_release": 1, "earnings_frozen": 1}) or {}
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "earnings_vault_locked": 1, "earnings_vault_pending_release": 1}) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
-    if bool(user.get("earnings_frozen")):
-        raise HTTPException(status_code=423, detail="Earnings are frozen. Vault unlock is paused.")
     pending = user.get("earnings_vault_pending_release") or {}
     if pending.get("amount"):
         raise HTTPException(status_code=400, detail="An unlock is already in progress. Wait for the cooldown or complete release.")
@@ -2750,8 +2989,6 @@ async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultR
     user = await db.users.find_one({"id": driver_id}, {"_id": 0}) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
-    if bool(user.get("earnings_frozen")):
-        raise HTTPException(status_code=423, detail="Earnings are frozen.")
     pending = user.get("earnings_vault_pending_release") or {}
     release_amount = float(pending.get("amount") or 0.0)
     if release_amount <= 0:
@@ -2777,8 +3014,9 @@ async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultR
     pin_hash = str(user.get("driver_account_pin_hash") or "")
     if not pin_hash or pin_hash != _vault_pin_hash(driver_id, request.pin):
         raise HTTPException(status_code=403, detail="Invalid PIN")
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "face_image": 1}) or {}
-    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    reference_face = await get_reference_face_image(driver_id)
+    if not reference_face:
+        reference_face = user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference")
     confidence = face_match_confidence(reference_face, request.face_image)
@@ -2816,113 +3054,16 @@ async def confirm_earnings_vault_release(driver_id: str, request: EarningsVaultR
 
 @drivers_router.post("/drivers/{driver_id}/sim-swap-signal")
 async def report_sim_swap_signal(driver_id: str, request: SimSwapSignalRequest, http_request: Request):
-    """
-    SIM swap risk detection using device fingerprint only.
-
-    NOTE: Phone-number comparison was REMOVED. SIM swap fraud keeps the same
-    phone number on a new SIM — comparing phone numbers is the wrong signal and
-    caused false positives when app state and DB store numbers in different formats
-    (e.g. 08012345678 vs +2348012345678).
-
-    We only compare device-generated fingerprints, and only after the first
-    successful registration (grace period). Checks are rate-limited to once per 24h.
-    """
+    """No-op — SIM swap / device fingerprint locking removed for open driver access."""
     verify_owner_strict(http_request, driver_id)
-
-    profile = await db.driver_profiles.find_one(
-        {"user_id": driver_id},
-        {"_id": 0, "sim_fingerprint": 1, "sim_last_checked_at": 1, "verification_status": 1}
-    ) or {}
-
-    now_utc = datetime.now(timezone.utc)
-    now_iso = now_utc.isoformat()
-
-    # ── Rate limit: only run the check once every 24 hours ─────────────────
-    last_checked_raw = profile.get("sim_last_checked_at")
-    if last_checked_raw:
-        try:
-            last_checked = datetime.fromisoformat(str(last_checked_raw).replace("Z", "+00:00"))
-            if last_checked.tzinfo is None:
-                last_checked = last_checked.replace(tzinfo=timezone.utc)
-            if (now_utc - last_checked).total_seconds() < 86400:  # 24 hours
-                return {"success": True, "message": "SIM check skipped (rate limited)", "checked": False}
-        except Exception:
-            pass  # Proceed on parse error
-
-    # ── Fingerprint check ──────────────────────────────────────────────────
-    previous_fingerprint = str(profile.get("sim_fingerprint") or "")
-    incoming_fingerprint = str(request.sim_fingerprint or "")
-
-    # Grace period: if no fingerprint stored yet, just save it (first-time setup)
-    if not previous_fingerprint:
-        await db.driver_profiles.update_one(
-            {"user_id": driver_id},
-            {"$set": {
-                "sim_fingerprint": incoming_fingerprint,
-                "sim_carrier_name": request.carrier_name,
-                "sim_last_checked_at": now_iso,
-            }},
-            upsert=True,
-        )
-        return {"success": True, "message": "SIM fingerprint registered", "checked": True}
-
-    # Fingerprint changed — genuine SIM swap signal
-    if previous_fingerprint != incoming_fingerprint:
-        lock_payload = {
-            "active": True,
-            "reason": "sim_fingerprint_changed",
-            "detected_at": now_iso,
-            "carrier_name": request.carrier_name,
-            "previous_fingerprint_prefix": previous_fingerprint[:12],
-            "new_fingerprint_prefix": incoming_fingerprint[:12],
-        }
-        await db.users.update_one(
-            {"id": driver_id},
-            {"$set": {"sim_swap_lock": lock_payload, "earnings_frozen": True}}
-        )
-        await db.driver_profiles.update_one(
-            {"user_id": driver_id},
-            {"$set": {
-                "is_online": False,
-                "sim_swap_lock": lock_payload,
-                "pending_identity_reconfirm": True,
-                "sim_last_checked_at": now_iso,
-            }},
-            upsert=True,
-        )
-        await db.notifications.insert_one({
-            "id": str(uuid.uuid4()),
-            "user_id": driver_id,
-            "type": "sim_swap_lock",
-            "title": "Security Alert: SIM Change Detected",
-            "message": "A new SIM was detected on your device. Your account has been temporarily secured. Contact support if this was not you.",
-            "read": False,
-            "created_at": now_iso,
-            "data": lock_payload,
-        })
-        raise HTTPException(
-            status_code=423,
-            detail="Security alert: a new SIM was detected. Your account is temporarily secured pending identity reconfirmation.",
-        )
-
-    # Fingerprint unchanged — all good, update timestamp
-    await db.driver_profiles.update_one(
-        {"user_id": driver_id},
-        {"$set": {
-            "sim_fingerprint": incoming_fingerprint,
-            "sim_carrier_name": request.carrier_name,
-            "sim_last_checked_at": now_iso,
-        }},
-        upsert=True,
-    )
-    return {"success": True, "message": "SIM fingerprint check passed", "checked": True}
+    return {"success": True, "message": "SIM tracking disabled", "checked": False}
 
 
 @drivers_router.get("/drivers/{driver_id}/withdrawals")
 async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: int = 30, skip: int = 0):
     """Return driver's withdrawal transaction history, most recent first."""
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "wallet_balance": 1, "earnings_frozen": 1}) or {}
+    user = await find_user_by_id(driver_id, {"_id": 0, "wallet_balance": 1, "earnings_frozen": 1}) or {}
     wallet_balance = round(float(user.get("wallet_balance") or 0.0), 2)
     earnings_frozen = bool(user.get("earnings_frozen"))
 
@@ -2980,18 +3121,24 @@ async def get_driver_withdrawals(driver_id: str, http_request: Request, limit: i
 @drivers_router.post("/drivers/{driver_id}/withdraw-earnings")
 async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWithdrawalRequest, http_request: Request):
     """Withdraw driver wallet earnings only after live face confirmation."""
+    # Rate-limit: 5 withdrawal attempts per hour per driver
+    from security_advanced import general_limiter
+    await general_limiter.check_rate_limit(http_request, f"withdraw:{driver_id}")
     verify_owner_strict(http_request, driver_id)
-    user = await db.users.find_one({"id": driver_id}, {"_id": 0}) or {}
+    user = await db.users.find_one({"id": driver_id}, {"_id": 0, "role": 1, "wallet_balance": 1, "profile_image": 1}) or {}
     if user.get("role") != "driver":
         raise HTTPException(status_code=403, detail="Driver account required")
-    if bool(user.get("earnings_frozen")):
-        raise HTTPException(status_code=423, detail="Earnings are frozen pending security review.")
 
-    profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "face_image": 1, "bank_name": 1, "account_number": 1, "account_name": 1}) or {}
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "bank_name": 1, "account_number": 1, "account_name": 1},
+    ) or {}
     if not (profile.get("bank_name") and profile.get("account_number") and profile.get("account_name")):
         raise HTTPException(status_code=400, detail="Complete bank details before withdrawing earnings.")
 
-    reference_face = user.get("face_image") or profile.get("face_image") or user.get("profile_image")
+    reference_face = await get_reference_face_image(driver_id)
+    if not reference_face:
+        reference_face = user.get("profile_image")
     if not reference_face:
         raise HTTPException(status_code=400, detail="No registered face reference found for biometric withdrawal.")
     confidence = face_match_confidence(reference_face, request.face_image)
@@ -3004,27 +3151,32 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
         raise HTTPException(status_code=400, detail=f"Insufficient wallet balance. Available: ₦{current_balance:,.2f}")
 
     idem_key = (request.idempotency_key or "").strip()
-    if idem_key:
-        existing = await db.transactions.find_one(
-            {
-                "user_id": driver_id,
-                "source": "driver_withdrawal",
-                "meta.idempotency_key": idem_key,
-            },
-            {"_id": 0},
+    if not idem_key:
+        raise HTTPException(
+            status_code=400,
+            detail="idempotency_key is required to prevent duplicate withdrawals. Generate a UUID on the client.",
         )
-        if existing:
-            return {
-                "success": True,
-                "duplicate": True,
-                "message": "Withdrawal request already submitted.",
-                "withdrawn_amount": abs(float(existing.get("amount") or 0)),
-                "status": existing.get("status"),
-                "reference": existing.get("reference"),
-            }
+    existing = await db.transactions.find_one(
+        {
+            "user_id": driver_id,
+            "source": "driver_withdrawal",
+            "meta.idempotency_key": idem_key,
+        },
+        {"_id": 0},
+    )
+    if existing:
+        return {
+            "success": True,
+            "duplicate": True,
+            "message": "Withdrawal request already submitted.",
+            "withdrawn_amount": abs(float(existing.get("amount") or 0)),
+            "status": existing.get("status"),
+            "reference": existing.get("reference"),
+        }
 
     withdraw_reference = f"withdraw_{uuid.uuid4().hex[:12]}"
-    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
+    # Insert ledger entry FIRST — if the process crashes before the $inc, the
+    # ledger shows the pending withdrawal and the admin can reconcile.
     await db.transactions.insert_one(
         {
             "id": str(uuid.uuid4()),
@@ -3043,10 +3195,12 @@ async def withdraw_earnings_with_biometric(driver_id: str, request: BiometricWit
                 "bank_name": profile.get("bank_name"),
                 "account_number": profile.get("account_number"),
                 "account_name": profile.get("account_name"),
-                "idempotency_key": idem_key or None,
+                "idempotency_key": idem_key,
             },
         }
     )
+    # Debit balance AFTER ledger is committed
+    await db.users.update_one({"id": driver_id}, {"$inc": {"wallet_balance": -amount}})
     await db.face_verifications.insert_one(
         {
             "driver_id": driver_id,

@@ -5,34 +5,45 @@ import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 
 type AppRole = 'rider' | 'driver';
 
-/** Where to send a user who opened the wrong role’s shell. */
 const OTHER_ROLE_HOME: Record<AppRole, string> = {
   rider: '/(driver-tabs)/driver-home',
   driver: '/(rider-tabs)/rider-home',
 };
 
 /**
- * After persist hydration: require `user.id` and `user.role === expected`.
- * Sends guests to login; wrong role to the other role’s tab home.
+ * Gate on persisted identity ONLY — never on JWT.
+ * Token is loaded lazily by apiFetch/authedFetch on first authenticated request.
  */
 export function useRequireRole(expected: AppRole): boolean {
   const router = useRouter();
-  const storeReady = usePersistStoreReady();
+  const hasHydrated = usePersistStoreReady();
   const user = useAppStore((s) => s.user);
-  const userId = user?.id;
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const role = user?.role;
-  const token = useAppStore((s) => s.token);
 
   useEffect(() => {
-    if (!storeReady) return;
-    if (!userId || !token) {
+    if (!hasHydrated) return;
+    if (!isAuthenticated || !user?.id) {
       router.replace('/(auth)/login');
       return;
     }
     if (role !== expected) {
       router.replace(OTHER_ROLE_HOME[expected] as any);
     }
-  }, [storeReady, userId, token, role, expected, router]);
+  }, [hasHydrated, isAuthenticated, user?.id, role, expected, router]);
 
-  return storeReady && !!userId && !!token && role === expected;
+  useEffect(() => {
+    if (!hasHydrated || !isAuthenticated || !user?.id) return;
+    if (expected !== 'driver' || role !== 'driver') return;
+    void import('@/src/utils/sessionRouting').then(({ markDriverOnboardingCached }) =>
+      markDriverOnboardingCached(user.id),
+    );
+  }, [hasHydrated, isAuthenticated, user?.id, role, expected]);
+
+  const allowed = hasHydrated && isAuthenticated && !!user?.id && role === expected;
+  if (allowed) {
+    console.log('[GATE_ALLOW]', { role: expected, hydrated: true });
+  }
+
+  return allowed;
 }

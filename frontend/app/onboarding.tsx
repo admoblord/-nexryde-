@@ -16,7 +16,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { OnboardingCabHero } from '@/src/components/onboarding/OnboardingCabHero';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 const { width } = Dimensions.get('window');
 
@@ -33,7 +32,7 @@ const SLIDES: Slide[] = [
   {
     id: '1',
     variant: 'cab',
-    iconColor: '#22C55E',
+    iconColor: '#00D084',
     title: 'Book your ride',
     description:
       'Set pickup and destination, pick your vehicle, and get matched with a nearby driver in seconds.',
@@ -61,20 +60,20 @@ const SLIDES: Slide[] = [
 export default function OnboardingScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const storeReady = usePersistStoreReady();
+  const hasHydrated = usePersistStoreReady();
   const user = useAppStore((s) => s.user);
-  const token = useAppStore((s) => s.token);
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (!storeReady) return;
-    if (!user?.id || !token) return;
+    if (!hasHydrated) return;
+    if (!user?.id || !isAuthenticated) return;
     router.replace(
       (user.role === 'driver' ? '/(driver-tabs)/driver-home' : '/(rider-tabs)/rider-home') as any,
     );
-  }, [storeReady, user?.id, user?.role, token, router]);
+  }, [hasHydrated, user?.id, user?.role, isAuthenticated, router]);
 
   const handleNext = async () => {
     if (currentIndex < SLIDES.length - 1) {
@@ -114,15 +113,15 @@ export default function OnboardingScreen() {
     </View>
   );
 
-  if (!storeReady || (user?.id && token)) {
-    return <AuthLoadingGate />;
+  if (!hasHydrated || (user?.id && isAuthenticated)) {
+    return null;
   }
 
   return (
     <View style={styles.container}>
-      <LinearGradient colors={['#020617', '#0B1223', '#020617']} style={StyleSheet.absoluteFillObject} />
+      <LinearGradient colors={['#0D1420', '#19253F', '#0D1420']} style={StyleSheet.absoluteFillObject} />
       <LinearGradient
-        colors={['rgba(52,245,184,0.06)', 'transparent']}
+        colors={['rgba(0,208,132,0.06)', 'transparent']}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 0.45 }}
         style={StyleSheet.absoluteFillObject}
@@ -170,7 +169,7 @@ export default function OnboardingScreen() {
           activeOpacity={0.92}
         >
           <LinearGradient
-            colors={['#4ADE80', '#22C55E', '#2563EB']}
+            colors={['#4ADE80', '#00D084', '#0066FF']}
             style={styles.nextGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 0 }}
@@ -178,7 +177,7 @@ export default function OnboardingScreen() {
             <Text style={styles.nextText}>
               {currentIndex === SLIDES.length - 1 ? 'Get started' : 'Next'}
             </Text>
-            <Ionicons name="arrow-forward" size={20} color="#022C22" />
+            <Ionicons name="arrow-forward" size={20} color="#061A0F" />
           </LinearGradient>
         </TouchableOpacity>
       </View>
@@ -187,7 +186,7 @@ export default function OnboardingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1, backgroundColor: '#0D1420' },
   skipBtn: { position: 'absolute', right: 20, zIndex: 10, padding: 8 },
   skipText: { color: '#94A3B8', fontSize: 16, fontWeight: '600', letterSpacing: 0.2 },
   slide: {
@@ -223,7 +222,7 @@ const styles = StyleSheet.create({
   kicker: {
     fontSize: 11,
     fontWeight: '800',
-    color: 'rgba(52,245,184,0.75)',
+    color: 'rgba(0,208,132,0.85)',
     letterSpacing: 3.2,
     marginBottom: 8,
   },
@@ -245,8 +244,8 @@ const styles = StyleSheet.create({
   },
   footer: { paddingHorizontal: 24, paddingTop: 8, alignItems: 'center', gap: 22 },
   dots: { flexDirection: 'row', gap: 8, alignItems: 'center' },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#334155' },
-  dotActive: { width: 26, backgroundColor: '#22C55E' },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.15)' },
+  dotActive: { width: 26, backgroundColor: '#00D084' },
   nextBtn: { width: '100%', maxWidth: 400, borderRadius: 16, overflow: 'hidden' },
   nextGradient: {
     flexDirection: 'row',
@@ -255,5 +254,5 @@ const styles = StyleSheet.create({
     paddingVertical: 17,
     gap: 10,
   },
-  nextText: { fontSize: 17, fontWeight: '800', color: '#022C22', letterSpacing: 0.2 },
+  nextText: { fontSize: 17, fontWeight: '800', color: '#061A0F', letterSpacing: 0.2 },
 });

@@ -354,6 +354,24 @@ export default function DriverTripCompletionPanel({
             <Text style={styles.earningsAmount}>{formatFare(payload.fare)}</Text>
             <View style={styles.earningsDivider} />
             <EarningsBreakdownGrid payload={payload} />
+            {/* Payment method / pending cash notice */}
+            {payload.paymentMethod ? (
+              <View style={[
+                styles.paymentMethodRow,
+                payload.paymentPending && styles.paymentMethodPending,
+              ]}>
+                <Ionicons
+                  name={payload.paymentMethod === 'wallet' ? 'wallet-outline' : 'cash-outline'}
+                  size={16}
+                  color={payload.paymentPending ? '#F59E0B' : NEON}
+                />
+                <Text style={[styles.paymentMethodTxt, payload.paymentPending && styles.paymentMethodPendingTxt]}>
+                  {payload.paymentPending
+                    ? `Cash payment pending — collect ₦${Math.round(payload.fare).toLocaleString()} from rider`
+                    : `Payment via ${payload.paymentMethod === 'wallet' ? 'wallet' : 'cash'} — complete`}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           {showRating ? (
@@ -654,15 +672,15 @@ const styles = StyleSheet.create({
     elevation: 14,
   },
   celebrationCheck: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
+    width: 88,
+    height: 88,
+    borderRadius: 44,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.25)',
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.3)',
   },
-  celebrationGreat: { fontSize: 16, fontWeight: '800', color: NEON, marginBottom: 2 },
+  celebrationGreat: { fontSize: 22, fontWeight: '900', color: NEON, marginBottom: 4, letterSpacing: -0.3 },
   celebrationDone: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', marginBottom: 14 },
   celebrationRiderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   celebrationAvatar: {
@@ -715,10 +733,10 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(34,197,94,0.3)',
   },
   earningsAmount: {
-    fontSize: 40,
+    fontSize: 48,
     fontWeight: '900',
-    color: '#FFFFFF',
-    letterSpacing: -1,
+    color: NEON,
+    letterSpacing: -1.5,
     marginBottom: 14,
   },
   earningsDivider: {
@@ -726,6 +744,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(148,163,184,0.35)',
     marginBottom: 14,
   },
+  paymentMethodRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 12,
+    paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: 'rgba(34,197,94,0.1)', borderWidth: 1,
+    borderColor: 'rgba(34,197,94,0.25)',
+  },
+  paymentMethodPending: {
+    backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.35)',
+  },
+  paymentMethodTxt: { fontSize: 12, fontWeight: '700', color: NEON, flex: 1 },
+  paymentMethodPendingTxt: { color: '#FBBF24' },
   earnGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   earnCol: { flex: 1, minWidth: 72, paddingHorizontal: 4, paddingVertical: 4 },
   earnColBorder: { borderLeftWidth: StyleSheet.hairlineWidth, borderLeftColor: 'rgba(148,163,184,0.3)' },
@@ -793,14 +822,14 @@ const styles = StyleSheet.create({
   },
   postRateNoteTxt: { flex: 1, fontSize: 13, fontWeight: '700', color: '#CBD5E1', lineHeight: 18 },
   ctaPrimary: {
-    borderRadius: 999,
+    borderRadius: 18,
     overflow: 'hidden',
     marginBottom: 10,
     shadowColor: NEON,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.45,
+    shadowRadius: 16,
+    elevation: 12,
   },
   ctaDisabled: { opacity: 0.65 },
   ctaPrimaryGrad: {
@@ -808,10 +837,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    paddingVertical: 16,
+    paddingVertical: 18,
     paddingHorizontal: 20,
+    minHeight: 62,
   },
-  ctaPrimaryTxt: { fontSize: 16, fontWeight: '900', color: '#022C22' },
+  ctaPrimaryTxt: { fontSize: 18, fontWeight: '900', color: '#022C22', letterSpacing: -0.2 },
   ctaSecondary: {
     flexDirection: 'row',
     alignItems: 'center',

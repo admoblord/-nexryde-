@@ -7,26 +7,36 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 export async function ensureAndroidPushChannels(): Promise<void> {
   if (Platform.OS !== 'android') return;
   await Notifications.setNotificationChannelAsync('default', {
-    name: 'NEXRYDE Notifications',
+    name: 'NexRyde Notifications',
     importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#FFD700',
+    showBadge: true,
   });
   await Notifications.setNotificationChannelAsync('rides', {
     name: 'Ride Updates',
-    importance: Notifications.AndroidImportance.HIGH,
+    importance: Notifications.AndroidImportance.MAX,
     vibrationPattern: [0, 500, 250, 500],
-    lightColor: '#00D26A',
+    lightColor: '#00D47E',
+    showBadge: true,
+    enableLights: true,
   });
   await Notifications.setNotificationChannelAsync('earnings', {
     name: 'Earnings Updates',
-    importance: Notifications.AndroidImportance.DEFAULT,
+    importance: Notifications.AndroidImportance.HIGH,
     lightColor: '#FFD700',
+    showBadge: true,
   });
-  await Notifications.setNotificationChannelAsync('marketing', {
-    name: 'Tips & offers',
-    importance: Notifications.AndroidImportance.DEFAULT,
-    lightColor: '#A78BFA',
+  // 'offers' channel: used by all scheduled daily engagement notifications.
+  // Must be importance HIGH or above — otherwise Android may drop it silently.
+  await Notifications.setNotificationChannelAsync('offers', {
+    name: 'NexRyde Offers and Tips',
+    importance: Notifications.AndroidImportance.HIGH,
+    vibrationPattern: [0, 300, 150, 300],
+    lightColor: '#00D47E',
+    enableLights: true,
+    enableVibrate: true,
+    showBadge: true,
   });
 }
 
@@ -226,6 +236,63 @@ class NotificationService {
   async clearAll() {
     await Notifications.dismissAllNotificationsAsync();
     await this.setBadgeCount(0);
+  }
+
+  async notifyHeatmapHotZone(zoneName: string, ridesWaiting: number): Promise<void> {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: `Hot zone: ${zoneName}`,
+          body: `${ridesWaiting} ride${ridesWaiting !== 1 ? 's' : ''} waiting nearby`,
+          sound: true,
+        },
+        trigger: null,
+      });
+    } catch { /* best-effort */ }
+  }
+
+  async scheduleMorningRush(): Promise<string | null> {
+    try {
+      return await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🌅 Morning Rush — Go Online Now',
+          body: 'Surge pricing is active. Drivers are earning 2× more right now. Tap to go online.',
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          data: { type: 'earnings_update', screen: '/(driver-tabs)/driver-home' },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: 6,
+          minute: 0,
+        },
+      });
+    } catch { return null; }
+  }
+
+  async scheduleEveningRush(): Promise<string | null> {
+    try {
+      return await Notifications.scheduleNotificationAsync({
+        content: {
+          title: '🌆 Evening Rush — High Demand',
+          body: 'Riders are waiting in your area. Go online now and start earning.',
+          sound: true,
+          priority: Notifications.AndroidNotificationPriority.HIGH,
+          data: { type: 'earnings_update', screen: '/(driver-tabs)/driver-home' },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DAILY,
+          hour: 17,
+          minute: 0,
+        },
+      });
+    } catch { return null; }
+  }
+
+  async cancelScheduledNotification(id: string): Promise<void> {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    } catch { /* best-effort */ }
   }
 }
 

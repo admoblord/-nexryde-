@@ -12,8 +12,6 @@ import {
   useWindowDimensions,
   Animated,
   Easing,
-  LayoutAnimation,
-  UIManager,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -36,10 +34,6 @@ const GREEN = '#22C55E';
 const RED = '#EF4444';
 const MUTED = '#9CA3AF';
 const INK = '#022C22';
-
-if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
-  UIManager.setLayoutAnimationEnabledExperimental(true);
-}
 
 export type DriverArrivedPickupDockProps = {
   expanded: boolean;
@@ -234,9 +228,9 @@ export default function DriverArrivedPickupDock({
   const expandedMaxH = Math.round(winH * 0.52);
   const resolvedPhoto = resolvePublicMediaUri(riderPhoto);
   const expandAnim = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const bodyMaxH = Math.max(0, expandedMaxH);
 
   useEffect(() => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     Animated.timing(expandAnim, {
       toValue: expanded ? 1 : 0,
       duration: 280,
@@ -244,6 +238,15 @@ export default function DriverArrivedPickupDock({
       useNativeDriver: false,
     }).start();
   }, [expanded, expandAnim]);
+
+  const expandedBodyHeight = expandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, bodyMaxH],
+  });
+  const expandedBodyOpacity = expandAnim.interpolate({
+    inputRange: [0, 0.15, 1],
+    outputRange: [0, 1, 1],
+  });
 
   const toggleExpand = () => {
     if (Platform.OS !== 'web') void Haptics.selectionAsync();
@@ -278,40 +281,38 @@ export default function DriverArrivedPickupDock({
         accessibilityLabel={expanded ? 'Collapse trip details' : 'Expand trip details'}
         accessibilityState={{ expanded }}
       >
-        <LinearGradient
-          colors={[...HANDLE_GRADIENT_DEFAULT]}
-          start={{ x: 0, y: 0.5 }}
-          end={{ x: 1, y: 0.5 }}
-          style={s.handleGrad}
-        />
+        <View style={s.handleGrad} />
         <View style={s.peekRow}>
           <View style={s.peekLeft}>
             <PulsingDot />
-            <View>
+            <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={s.peekStatus}>AT PICKUP</Text>
               {!expanded ? (
-                <Text style={s.peekHint}>Trip details · swipe up</Text>
+                <Text style={s.peekHint} numberOfLines={1}>{driverFirstName(riderName)} is waiting</Text>
               ) : null}
             </View>
           </View>
           <View style={s.peekTimeCol}>
-            <Ionicons name="time-outline" size={13} color={MUTED} />
-            <Text style={s.peekTime}>{waitLabel}</Text>
+            <Ionicons name="time-outline" size={13} color={waitingSec > 180 ? '#F87171' : waitingSec > 90 ? '#FBBF24' : MUTED} />
+            <Text style={[s.peekTime, waitingSec > 180 && { color: '#F87171' }, waitingSec > 90 && waitingSec <= 180 && { color: '#FBBF24' }]}>
+              {waitLabel}
+            </Text>
           </View>
           <Ionicons
             name={expanded ? 'chevron-down' : 'chevron-up'}
-            size={22}
-            color="#E2E8F0"
+            size={20}
+            color="#94A3B8"
           />
         </View>
       </TouchableOpacity>
 
-      {expanded ? (
+      <Animated.View style={{ maxHeight: expandedBodyHeight, opacity: expandedBodyOpacity, overflow: 'hidden' }}>
         <ScrollView
-          style={{ maxHeight: expandedMaxH }}
+          style={{ maxHeight: bodyMaxH }}
           contentContainerStyle={s.scrollInner}
           showsVerticalScrollIndicator={false}
-          bounces
+          bounces={false}
+          scrollEnabled={expanded}
         >
           <RouteMetrics distance={routeDistanceLabel} duration={routeDurationLabel} />
 
@@ -361,38 +362,40 @@ export default function DriverArrivedPickupDock({
             style={[s.verifyBtnOuter, tripActionBusy && s.btnDisabled]}
             onPress={primaryAction}
             disabled={!!tripActionBusy}
-            activeOpacity={0.92}
+            activeOpacity={0.9}
             accessibilityRole="button"
             accessibilityLabel={pickupCodeRequired ? 'Verify pickup code' : 'Start trip'}
           >
             <LinearGradient
-              colors={pickupCodeRequired ? ['#4ADE80', '#22C55E', '#16A34A'] : ['#60A5FA', '#3B82F6', '#2563EB']}
+              colors={pickupCodeRequired ? ['#00E087', '#00D47E', '#00B368'] : ['#60A5FA', '#3B82F6', '#2563EB']}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
               style={s.verifyBtn}
             >
               {tripActionBusy ? (
-                <ActivityIndicator color={INK} />
+                <ActivityIndicator color={INK} size="large" />
               ) : (
                 <>
                   <View style={s.verifyIconWrap}>
                     <Ionicons
-                      name={pickupCodeRequired ? 'keypad' : 'play'}
-                      size={22}
+                      name={pickupCodeRequired ? 'keypad-outline' : 'play-circle'}
+                      size={26}
                       color={INK}
                     />
                   </View>
                   <View style={s.verifyTextCol}>
                     <Text style={s.verifyTitle}>
-                      {pickupCodeRequired ? 'Verify pickup code' : 'Start trip'}
+                      {pickupCodeRequired ? 'Verify code & start' : 'Start trip now'}
                     </Text>
                     <Text style={s.verifySub}>
                       {pickupCodeRequired
-                        ? 'Enter the code from the rider\'s app'
-                        : 'Rider is ready — begin the metered ride'}
+                        ? 'Enter the 4-digit code from rider\'s app'
+                        : 'Begin metered ride to destination'}
                     </Text>
                   </View>
-                  <Ionicons name="chevron-forward" size={22} color="rgba(2,44,34,0.45)" />
+                  <View style={s.verifyArrow}>
+                    <Ionicons name="arrow-forward" size={18} color="rgba(2,44,34,0.6)" />
+                  </View>
                 </>
               )}
             </LinearGradient>
@@ -457,7 +460,8 @@ export default function DriverArrivedPickupDock({
             </TouchableOpacity>
           ) : null}
         </ScrollView>
-      ) : (
+      </Animated.View>
+      {!expanded ? (
         <View style={s.collapsedQuick}>
           {!pickupCodeRequired && onStartTrip ? (
             <TouchableOpacity
@@ -475,7 +479,7 @@ export default function DriverArrivedPickupDock({
             </Text>
           )}
         </View>
-      )}
+      ) : null}
     </View>
   );
 }
@@ -500,10 +504,11 @@ const s = StyleSheet.create({
   },
   handleGrad: {
     alignSelf: 'center',
-    width: 48,
-    height: 5,
-    borderRadius: 100,
-    marginBottom: 14,
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    marginBottom: 12,
   },
   peekRow: {
     flexDirection: 'row',
@@ -764,26 +769,35 @@ const s = StyleSheet.create({
     marginTop: 4,
   },
   verifyBtnOuter: {
-    borderRadius: 16,
+    borderRadius: 18,
     overflow: 'hidden',
     shadowColor: GREEN,
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 10,
   },
   verifyBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingVertical: 15,
-    paddingHorizontal: 14,
+    gap: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 16,
+    minHeight: 72,
   },
   verifyIconWrap: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 48,
+    height: 48,
+    borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.28)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  verifyArrow: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.22)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -792,17 +806,17 @@ const s = StyleSheet.create({
     minWidth: 0,
   },
   verifyTitle: {
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '900',
     color: INK,
-    letterSpacing: -0.2,
+    letterSpacing: -0.3,
   },
   verifySub: {
-    marginTop: 2,
+    marginTop: 3,
     fontSize: 12,
     fontWeight: '600',
     color: 'rgba(2,44,34,0.72)',
-    lineHeight: 16,
+    lineHeight: 17,
   },
   btnDisabled: {
     opacity: 0.55,

@@ -1,0 +1,145 @@
+##############################################################################
+# NexRyde Backend — Staging Cloud Run Service
+#
+# Deploy with:
+#   gcloud run services replace backend/cloudrun.staging.yaml \
+#     --region us-central1
+#
+# This service uses the same secrets as production but with:
+#   - Fewer instances (0-2)
+#   - NEXRYDE_ENV=staging
+#   - Separate MONGODB_URI pointing to a staging Atlas cluster (recommended)
+#   - /docs enabled (not hidden)
+##############################################################################
+
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: nexryde-backend-staging
+  annotations:
+    run.googleapis.com/ingress: all
+    run.googleapis.com/launch-stage: GA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "2"
+        run.googleapis.com/startup-cpu-boost: "true"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 300
+      containers:
+        - image: us-central1-docker.pkg.dev/nexryde-app/nexryde-backend/nexryde-backend:staging-latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: "500m"
+              memory: 256Mi
+
+          env:
+            - name: NEXRYDE_ENV
+              value: staging
+            - name: DB_NAME
+              value: nexryde_staging_db
+            - name: MONGO_MAX_POOL_SIZE
+              value: "10"
+            - name: JWT_EXPIRY_HOURS
+              value: "24"
+            - name: ADMIN_EMAIL
+              value: admin@admoblordgroup.com
+            - name: CORS_ORIGINS
+              value: "https://staging.nexryde.app,exp://,nexryde://"
+            - name: SQUAD_BASE_URL
+              value: "https://sandbox-api-d.squadco.com"
+            - name: SQUAD_CHECKOUT_BASE_URL
+              value: "https://sandbox-pay.squadco.com"
+            - name: NEXRYDE_PUBLIC_BACKEND_URL
+              value: "https://nexryde-backend-staging-993913300770.us-central1.run.app"
+            - name: TRUSTED_HOSTS
+              value: "nexryde-backend-staging-993913300770.us-central1.run.app,staging.nexryde.app"
+            # Staging shares secrets with production for now.
+            # Replace MONGODB_URI with a staging-specific Atlas cluster when available.
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: JWT_SECRET
+                  key: latest
+            - name: MONGODB_URI
+              valueFrom:
+                secretKeyRef:
+                  name: MONGODB_URI
+                  key: latest
+            - name: SQUAD_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_SECRET_KEY
+                  key: latest
+            - name: SQUAD_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_PUBLIC_KEY
+                  key: latest
+            - name: SQUAD_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: SQUAD_WEBHOOK_SECRET
+                  key: latest
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_PASSWORD
+                  key: latest
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: REDIS_URL
+                  key: latest
+            - name: BREVO_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: BREVO_API_KEY
+                  key: latest
+            - name: GOOGLE_MAPS_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: GOOGLE_MAPS_API_KEY
+                  key: latest
+            - name: NEXRYDE_OPS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: NEXRYDE_OPS_KEY
+                  key: latest
+            - name: ADMIN_OPS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: ADMIN_OPS_KEY
+                  key: latest
+
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /api/health/ready
+              port: 8080
+            periodSeconds: 10
+            failureThreshold: 3
+
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 12

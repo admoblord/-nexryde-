@@ -58,7 +58,7 @@ export default function ModernRiderHome() {
   const router = useRouter();
   const { canCallAuthedApi } = useAuthedApiReady();
   const { userId: riderId } = useAuthedUserId();
-  const { user, token, currentTrip, setCurrentTrip } = useAppStore();
+  const { user, currentTrip, setCurrentTrip } = useAppStore();
   const firstName =
     (user?.name && String(user.name).trim().split(/\s+/)[0]) || 'there';
   const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -286,7 +286,6 @@ export default function ModernRiderHome() {
   const riderTripWsEnabled = Boolean(
     riderId &&
       canCallAuthedApi &&
-      token &&
       currentTrip?.id &&
       ['pending', 'pending_driver_offers', 'accepted', 'arrived', 'ongoing', 'pending_payment'].includes(
         normalizedCurrentTripStatus
@@ -311,7 +310,6 @@ export default function ModernRiderHome() {
 
   useRiderTripRealtime({
     riderId,
-    token,
     enabled: riderTripWsEnabled,
     watchTripId: currentTrip?.id ?? null,
     onTripUpdate: handleRiderHomeTripWs,

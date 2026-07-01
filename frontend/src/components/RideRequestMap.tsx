@@ -441,7 +441,7 @@ export default function RideRequestMap({
           <Marker
             coordinate={{ latitude: pickupLat!, longitude: pickupLng! }}
             anchor={{ x: 0.5, y: 1 }}
-            tracksViewChanges={true}
+            tracksViewChanges={false}
           >
             <RiderAvatarMarker
               photo={riderPhoto}

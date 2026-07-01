@@ -29,7 +29,6 @@ import {
 import { useAppStore } from '@/src/store/appStore';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 
@@ -308,7 +307,7 @@ export default function NexrydeShieldScreen() {
   };
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   // ═══════════════════════════════════════════════════════════════════════════

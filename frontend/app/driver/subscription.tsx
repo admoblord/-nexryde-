@@ -13,15 +13,19 @@ import {
   Linking,
   AppState,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useResource } from '@/src/hooks/useResource';
+import { Skeleton } from '@/src/components/Skeleton';
+import { InlineError } from '@/src/components/InlineError';
+import { ScreenShell } from '@/src/components/ScreenShell';
 import {
-  getSubscriptionConfig,
-  getDriverSubscriptionStatus,
+  fetchSubscriptionScreenData,
+} from '@/src/services/subscriptionScreenData';
+import {
   initiateSubscriptionCheckout,
   verifyPendingSubscriptionCheckout,
   formatApiDetail,
@@ -32,67 +36,35 @@ import { openSquadCheckoutUrl } from '@/src/services/squadCheckoutOpen';
 import axios from 'axios';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 
-/** AsyncStorage key for persisting the pending checkout reference across app restarts. */
 const PENDING_SUB_REF_KEY = '@nexryde_pending_sub_checkout_ref';
 
-interface PricingData {
-  city_rider: {
-    current_price: number;
-    current_phase: string;
-    launch_slots_remaining: number;
-  };
-  road_warrior: {
-    current_price: number;
-    current_phase: string;
-    launch_slots_remaining: number;
-  };
-}
-
-interface SubscriptionStatus {
-  tier: 'city_rider' | 'road_warrior' | 'none';
-  status: 'none' | 'trial' | 'active' | 'expired' | 'pending_verification' | 'pending_payment' | 'grace_period';
-  monthly_price: number;
-  trial_active: boolean;
-  trial_trips_completed?: number;
-  trial_trips_remaining?: number;
-  trial_trips_target?: number;
-  trial_progress_pct?: number;
-  trial_extended?: boolean;
-  trial_extension_count?: number;
-  trial_completed?: boolean;
-  trial_urgency?: 'normal' | 'warning' | 'critical';
-  trial_message?: string;
-  days_remaining?: number;
-  can_upgrade: boolean;
-  upgrade_requirements?: {
-    rating_met: boolean;
-    trips_met: boolean;
-    current_rating: number;
-    current_trips: number;
-  };
-}
-
-interface VirtualAccountDetails {
-  account_number: string;
-  bank_name: string;
-  account_name: string;
-  reference?: string;
-  status?: string;
-  amount_expected?: number;
+function SubscriptionSkeleton() {
+  return (
+    <View style={{ padding: 16, gap: 16, flex: 1, backgroundColor: '#050D1A' }}>
+      <Skeleton height={150} radius={16} style={{ backgroundColor: '#1C2430' }} />
+      <Skeleton height={120} radius={16} style={{ backgroundColor: '#1C2430' }} />
+      <Skeleton height={120} radius={16} style={{ backgroundColor: '#1C2430' }} />
+    </View>
+  );
 }
 
 export default function SubscriptionScreen() {
   const router = useRouter();
   const { user, userId: driverId, canCallAuthedApi } = useAuthedUserId();
   const flow = useFlowLayout();
-  const [loading, setLoading] = useState(true);
-  const [pricing, setPricing] = useState<PricingData | null>(null);
-  const [subscription, setSubscription] = useState<SubscriptionStatus | null>(null);
+  const resourceKey = `driver-subscription:${driverId ?? 'none'}`;
+  const { data, loading, error, retry } = useResource(
+    resourceKey,
+    fetchSubscriptionScreenData,
+    { cache: true, enabled: canCallAuthedApi },
+  );
+  const pricing = data?.pricing ?? null;
+  const subscription = data?.subscription ?? null;
+
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [payingTier, setPayingTier] = useState<'city_rider' | 'road_warrior' | null>(null);
   const [verifyingPayment, setVerifyingPayment] = useState(false);
-  const [virtualAccount, setVirtualAccount] = useState<VirtualAccountDetails | null>(null);
   /** Latest Squad subscription checkout ref (ref avoids stale interval closures). */
   const pendingSubCheckoutRef = useRef<string | null>(null);
   const statusPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -105,29 +77,19 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     if (!canCallAuthedApi) return;
-    void initializeData();
-    
-    // Safety timeout for web - stop loading after 5 seconds
-    const timeout = setTimeout(() => {
-      setLoading(false);
-    }, 5000);
-    
-    // Entry animations
+
+    void (async () => {
+      const stored = await AsyncStorage.getItem(PENDING_SUB_REF_KEY);
+      if (stored) pendingSubCheckoutRef.current = stored;
+      await ensureDriverEligibleForActivation();
+    })();
+
     Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: 600,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 600,
-        useNativeDriver: true,
-      }),
+      Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true }),
     ]).start();
-    
+
     return () => {
-      clearTimeout(timeout);
       if (statusPollRef.current) {
         clearInterval(statusPollRef.current);
         statusPollRef.current = null;
@@ -135,23 +97,34 @@ export default function SubscriptionScreen() {
     };
   }, [canCallAuthedApi]);
 
-  const initializeData = async () => {
-    try {
-      // Restore any persisted pending ref (survives app restarts)
-      const stored = await AsyncStorage.getItem(PENDING_SUB_REF_KEY);
-      if (stored) {
-        pendingSubCheckoutRef.current = stored;
-      }
-      const eligible = await ensureDriverEligibleForActivation();
-      if (!eligible) return;
-      await Promise.all([fetchPricing(), fetchSubscriptionStatus()]);
-    } catch (error) {
-      if (__DEV__) console.warn('Error initializing subscription', error);
-      Alert.alert('Error', 'Failed to load subscription data');
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (!subscription) return;
+    const normalizedStatus = subscription.status;
+    const previous = lastKnownStatusRef.current;
+    if (
+      previous &&
+      ['pending_verification', 'pending_payment'].includes(previous) &&
+      ['active', 'trial', 'grace_period'].includes(normalizedStatus)
+    ) {
+      Alert.alert(
+        'Subscription Activated',
+        'Payment confirmed. You can now continue to your dashboard.',
+        [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+      );
     }
-  };
+    lastKnownStatusRef.current = normalizedStatus;
+
+    if (['active', 'trial', 'grace_period'].includes(normalizedStatus)) {
+      pendingSubCheckoutRef.current = null;
+      AsyncStorage.removeItem(PENDING_SUB_REF_KEY).catch(() => {});
+    }
+
+    if (normalizedStatus === 'pending_verification' || normalizedStatus === 'pending_payment') {
+      ensureStatusPolling();
+    } else {
+      stopStatusPolling();
+    }
+  }, [subscription?.status, router]);
 
   const ensureDriverEligibleForActivation = async () => {
     if (!driverId || !user) return true;
@@ -183,32 +156,6 @@ export default function SubscriptionScreen() {
     return true;
   };
 
-  const fetchPricing = async () => {
-    try {
-      const response = await getSubscriptionConfig();
-      const data = response.data || {};
-      setPricing({
-        city_rider: {
-          current_price: data.monthly_fee || data.current_price || 18000,
-          current_phase: data.current_phase || 'early',
-          launch_slots_remaining: data.launch_slots_remaining ?? 0,
-        },
-        road_warrior: {
-          current_price: data.road_warrior_price || 30000,
-          current_phase: data.current_phase || 'early',
-          launch_slots_remaining: data.road_warrior_launch_slots_remaining ?? 0,
-        },
-      });
-    } catch (error) {
-      if (__DEV__) console.warn('Error fetching pricing', error);
-      // Set default pricing
-      setPricing({
-        city_rider: { current_price: 18000, current_phase: 'early', launch_slots_remaining: 450 },
-        road_warrior: { current_price: 30000, current_phase: 'early', launch_slots_remaining: 180 },
-      });
-    }
-  };
-
   const stopStatusPolling = () => {
     if (statusPollRef.current) {
       clearInterval(statusPollRef.current);
@@ -219,7 +166,8 @@ export default function SubscriptionScreen() {
   const ensureStatusPolling = () => {
     if (statusPollRef.current) return;
     statusPollRef.current = setInterval(async () => {
-      if (lastKnownStatusRef.current === 'pending_payment') {
+      const s = lastKnownStatusRef.current;
+      if (s === 'pending_payment' || s === 'pending_verification') {
         try {
           await verifyPendingSubscriptionCheckout(
             pendingSubCheckoutRef.current || undefined,
@@ -228,99 +176,8 @@ export default function SubscriptionScreen() {
           /* non-fatal */
         }
       }
-      await fetchSubscriptionStatus();
-    }, 16000);
-  };
-
-  const fetchSubscriptionStatus = async () => {
-    if (!driverId) {
-      setSubscription({
-        tier: 'none',
-        status: 'expired',
-        monthly_price: 0,
-        trial_active: false,
-        can_upgrade: false,
-      });
-      return;
-    }
-
-    try {
-      const response = await getDriverSubscriptionStatus();
-      const data = response.data || {};
-      
-      // Map API response to expected format
-      const normalizedStatus: SubscriptionStatus['status'] = data.status || 'none';
-      const activeOrPending = ['trial', 'active', 'grace_period', 'pending_payment', 'pending_verification'].includes(normalizedStatus);
-      const tier = activeOrPending ? (data.tier || 'city_rider') : 'none';
-      if (data.virtual_account?.account_number && data.virtual_account?.bank_name) {
-        setVirtualAccount({
-          account_number: data.virtual_account.account_number,
-          bank_name: data.virtual_account.bank_name,
-          account_name: data.virtual_account.account_name || user?.name || 'Nexryde Driver',
-          reference: data.virtual_account.reference,
-          status: data.virtual_account.status,
-          amount_expected: data.virtual_account.amount_expected,
-        });
-      } else {
-        setVirtualAccount(null);
-      }
-      setSubscription({
-        tier,
-        status: normalizedStatus,
-        monthly_price: data.amount_expected || pricing?.city_rider?.current_price || 18000,
-        trial_active: data.trial_active || data.status === 'trial',
-        trial_trips_completed: data.trial_trips_completed ?? 0,
-        trial_trips_remaining: data.trial_trips_remaining,
-        trial_trips_target: data.trial_trips_target ?? 20,
-        trial_progress_pct: data.trial_progress_pct ?? 0,
-        trial_extended: data.trial_extended ?? false,
-        trial_extension_count: data.trial_extension_count ?? 0,
-        trial_completed: data.trial_completed ?? false,
-        trial_urgency: data.trial_urgency ?? 'normal',
-        trial_message: data.trial_message ?? '',
-        days_remaining: data.days_remaining,
-        can_upgrade: data.can_upgrade ?? (data.status === 'active' || data.status === 'trial'),
-        upgrade_requirements: data.upgrade_requirements,
-      });
-
-      // Keep checking while verification/payment is pending.
-      if (normalizedStatus === 'pending_verification' || normalizedStatus === 'pending_payment') {
-        ensureStatusPolling();
-      } else {
-        stopStatusPolling();
-      }
-
-      // Clear persisted ref once subscription is active
-      if (['active', 'trial', 'grace_period'].includes(normalizedStatus)) {
-        pendingSubCheckoutRef.current = null;
-        AsyncStorage.removeItem(PENDING_SUB_REF_KEY).catch(() => {});
-      }
-
-      // If status flips from pending to an active state, move driver straight to dashboard.
-      const previous = lastKnownStatusRef.current;
-      if (
-        previous &&
-        ['pending_verification', 'pending_payment'].includes(previous) &&
-        ['active', 'trial', 'grace_period'].includes(normalizedStatus)
-      ) {
-        Alert.alert(
-          'Subscription Activated',
-          'Payment confirmed. You can now continue to your dashboard.',
-          [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }]
-        );
-      }
-      lastKnownStatusRef.current = normalizedStatus;
-    } catch (error) {
-      if (__DEV__) console.warn('Error fetching subscription', error);
-      setSubscription({
-        tier: 'none',
-        status: 'expired',
-        monthly_price: 0,
-        trial_active: false,
-        can_upgrade: false,
-      });
-      stopStatusPolling();
-    }
+      void retry();
+    }, 12000);
   };
 
 
@@ -346,21 +203,21 @@ export default function SubscriptionScreen() {
 
       if (data.checkout_url && typeof data.checkout_url === 'string') {
         // Open in-app browser (Custom Tabs on Android, SFSafariViewController on iOS).
-        // Awaits until the browser is dismissed — no fire-and-forget external browser.
         await openSquadCheckoutUrl(data.checkout_url);
 
-        // Browser closed — silently verify with Squad backend and show a brief indicator
+        // Browser closed — verify with Squad. Show spinner so user knows work is happening.
         setVerifyingPayment(true);
-        await confirmPendingCheckoutRef.current({ silent: true });
+        await confirmPendingCheckoutRef.current({ silent: false });
         setVerifyingPayment(false);
       } else {
         Alert.alert(
-          'Checkout started',
-          `Reference: ${data.transaction_ref || '—'}\nAmount: ₦${data.amount_ngn?.toLocaleString() ?? '—'}\n\nTap "Verify Payment" below once you complete payment.`,
+          'Payment Started',
+          `Reference: ${data.transaction_ref || '—'}\nAmount: ₦${(data.amount_ngn ?? 0).toLocaleString()}\n\nComplete your payment, then tap "Verify Payment" below.`,
+          [{ text: 'OK' }],
         );
       }
 
-      await fetchSubscriptionStatus();
+      await retry();
     } catch (error: unknown) {
       const detail =
         (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
@@ -383,10 +240,14 @@ export default function SubscriptionScreen() {
       if (data.verified && (data.activated || data.duplicate || data.subscription_active)) {
         pendingSubCheckoutRef.current = null;
         AsyncStorage.removeItem(PENDING_SUB_REF_KEY).catch(() => {});
+        await retry();
         if (!silent) {
-          Alert.alert('Success', 'Subscription active. Payment confirmed with Squad.');
+          Alert.alert(
+            'Payment Confirmed',
+            'Your subscription is now active. You can go online and start taking trips.',
+            [{ text: 'Go to Dashboard', onPress: () => router.replace('/(driver-tabs)/driver-home') }],
+          );
         }
-        await fetchSubscriptionStatus();
       } else {
         const reasonCode = (data.reason as string | undefined) || '';
         const txStatus = (data.transaction_status as string | undefined) || '';
@@ -452,7 +313,7 @@ export default function SubscriptionScreen() {
         setVerifyingPayment(true);
         confirmPendingCheckoutRef.current({ silent: true }).finally(() => {
           setVerifyingPayment(false);
-          fetchSubscriptionStatus();
+          void retry();
         });
       }, 600);
     };
@@ -496,14 +357,22 @@ export default function SubscriptionScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#00D084" />
-        <Text style={styles.loadingText}>Loading subscription...</Text>
-      </View>
-    );
-  }
+  const helpHeader = (
+    <TouchableOpacity
+      style={styles.helpButton}
+      onPress={() => {
+        const crPrice = pricing?.city_rider?.current_price ?? 18000;
+        const rwPrice = pricing?.road_warrior?.current_price ?? 30000;
+        Alert.alert(
+          'Subscription Help',
+          `City Rider: unlimited city trips (max 50 km) for ₦${crPrice.toLocaleString()}/month.\n\nRoad Warrior: unlimited nationwide trips for ₦${rwPrice.toLocaleString()}/month. Requires 4.5★ rating + 50 completed trips.\n\nTap Subscribe to open the Squad secure checkout. Pay with card or USSD — your plan activates immediately after payment.\n\nContact support if you need help.`,
+          [{ text: 'OK' }],
+        );
+      }}
+    >
+      <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
+    </TouchableOpacity>
+  );
 
   const subscriptionIsActive = subscription ? ['trial', 'active', 'grace_period'].includes(subscription.status) : false;
   const subscriptionIsPending = subscription ? ['pending_payment', 'pending_verification'].includes(subscription.status) : false;
@@ -511,33 +380,30 @@ export default function SubscriptionScreen() {
   const tierConfig = getTierBadgeConfig(subscriptionIsActive ? (subscription?.tier || 'none') : 'none');
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={['#0F172A', '#1E293B', '#0F172A']}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={22} color="#FFFFFF" />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Subscription Tiers</Text>
-          <TouchableOpacity
-            style={styles.helpButton}
-            onPress={() => Alert.alert(
-              'Subscription Help',
-              'City Rider: unlimited city trips (max 50 km) for ₦18,000/month.\n\nRoad Warrior: unlimited nationwide trips for ₦30,000/month. Requires 4.5★ + 50 trips.\n\nPay with card via Squad for instant activation. Contact support if you need help.',
-              [{ text: 'OK' }]
-            )}
-          >
-            <Ionicons name="help-circle-outline" size={24} color="#94A3B8" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView 
-          showsVerticalScrollIndicator={false} 
+    <ScreenShell
+      title="Subscription Tiers"
+      headerRight={helpHeader}
+      scroll={false}
+    >
+      {!data && loading && <SubscriptionSkeleton />}
+      {!data && error && (
+        <InlineError message="Couldn't load plans. Check your connection." onRetry={retry} />
+      )}
+      {data && error && (
+        <TouchableOpacity
+          style={styles.staleBanner}
+          onPress={() => void retry()}
+          activeOpacity={0.85}
+        >
+          <Ionicons name="cloud-offline-outline" size={18} color="#F87171" />
+          <Text style={styles.staleBannerText}>Could not refresh — showing last saved plans</Text>
+          <Ionicons name="refresh" size={16} color="#F87171" />
+        </TouchableOpacity>
+      )}
+      {data && (
+      <ScrollView
+          style={{ flex: 1 }}
+          showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
             {
@@ -696,26 +562,18 @@ export default function SubscriptionScreen() {
             </Animated.View>
           )}
 
-          {/* Bank Transfer Fallback — only shown when VA was previously generated */}
-          {virtualAccount?.account_number && virtualAccount?.bank_name && (
-            <Animated.View style={[styles.vaCard, { opacity: fadeAnim }]}>
-              <View style={styles.vaHeader}>
-                <Ionicons name="card" size={18} color="#00D084" />
-                <Text style={styles.vaTitle}>Bank transfer option</Text>
+          {/* Squad payment info — shown only when no active subscription */}
+          {!subscriptionIsActive && (
+            <Animated.View style={[styles.squadInfoCard, { opacity: fadeAnim }]}>
+              <View style={styles.squadInfoRow}>
+                <Ionicons name="shield-checkmark" size={18} color="#00D084" />
+                <Text style={styles.squadInfoText}>
+                  Payments are processed securely by{' '}
+                  <Text style={{ fontWeight: '800', color: '#E2E8F0' }}>Squad</Text>.
+                  Pay with card, USSD, or bank transfer inside the Squad checkout page.
+                  Your plan activates instantly after payment confirmation.
+                </Text>
               </View>
-              <View style={styles.vaRow}>
-                <Text style={styles.vaLabel}>Bank</Text>
-                <Text style={styles.vaValue}>{virtualAccount.bank_name}</Text>
-              </View>
-              <View style={styles.vaRow}>
-                <Text style={styles.vaLabel}>Account Name</Text>
-                <Text style={styles.vaValue}>{virtualAccount.account_name || user?.name || 'Driver'}</Text>
-              </View>
-              <View style={[styles.vaRow, styles.vaRowHighlight]}>
-                <Text style={styles.vaLabel}>Account Number</Text>
-                <Text style={[styles.vaValue, { color: '#00D084', fontSize: 18, fontWeight: '900' }]}>{virtualAccount.account_number}</Text>
-              </View>
-              <Text style={styles.vaNote}>Transfer the exact tier amount. Activation is automatic once confirmed by the bank.</Text>
             </Animated.View>
           )}
 
@@ -944,8 +802,8 @@ export default function SubscriptionScreen() {
             </Animated.View>
           </View>
 
-          {/* Verify Payment Card — only shown when payment is pending or in-progress */}
-          {!subscriptionIsActive && (
+          {/* Verify Payment Card — only shown when payment is pending OR a checkout ref is stored */}
+          {(subscriptionIsPending || Boolean(pendingSubCheckoutRef.current)) && (
             <Animated.View style={[styles.verifyCard, { opacity: fadeAnim }]}>
               {verifyingPayment && (
                 <View style={styles.verifyingBanner}>
@@ -981,9 +839,9 @@ export default function SubscriptionScreen() {
 
           <View style={{ height: 40 }} />
         </ScrollView>
+      )}
 
-        {/* Upgrade Modal */}
-        <Modal visible={showUpgradeModal} animationType="fade" transparent>
+      <Modal visible={showUpgradeModal} animationType="fade" transparent>
           <View style={styles.upgradeModalOverlay}>
             <View style={styles.upgradeModalContainer}>
               <LinearGradient
@@ -1049,8 +907,7 @@ export default function SubscriptionScreen() {
             </View>
           </View>
         </Modal>
-      </SafeAreaView>
-    </View>
+    </ScreenShell>
   );
 }
 
@@ -1068,6 +925,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#0F172A',
+  },
+  staleBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.25)',
+  },
+  staleBannerText: {
+    flex: 1,
+    color: '#FCA5A5',
+    fontSize: 13,
+    fontWeight: '600',
   },
   loadingText: {
     marginTop: 12,
@@ -1689,14 +1566,35 @@ const styles = StyleSheet.create({
   },
 
   // Crypto Coming Soon
+  squadInfoCard: {
+    backgroundColor: 'rgba(0, 208, 132, 0.05)',
+    borderRadius: 14,
+    padding: 14,
+    marginTop: 8,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(0, 208, 132, 0.15)',
+  },
+  squadInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  squadInfoText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#94A3B8',
+    lineHeight: 18,
+  },
   vaCard: {
-    backgroundColor: 'rgba(0, 208, 132, 0.06)',
+    backgroundColor: 'rgba(56, 189, 248, 0.05)',
     borderRadius: 16,
     padding: 16,
     marginTop: 12,
     marginBottom: 4,
     borderWidth: 1,
-    borderColor: 'rgba(0, 208, 132, 0.2)',
+    borderColor: 'rgba(56, 189, 248, 0.18)',
   },
   vaHeader: {
     flexDirection: 'row',
@@ -1736,8 +1634,8 @@ const styles = StyleSheet.create({
   vaNote: {
     fontSize: 11,
     fontWeight: '600',
-    color: '#64748B',
-    marginTop: 10,
+    color: '#94A3B8',
+    marginBottom: 10,
     lineHeight: 16,
   },
   verifyCard: {

@@ -22,14 +22,14 @@ import { saveUserSession } from '@/utils/authStorage';
 import { useBottomInset } from '@/src/hooks/useBottomPad';
 import { useAuthedApiReady } from '@/src/hooks/useAuthedApiReady';
 import { useOnboardingSurfaces } from '@/src/hooks/useOnboardingSurfaces';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { setTokens } from '@/src/lib/tokenStore';
 
 export default function DriverProfileScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { storeReady, token, canCallAuthedApi } = useAuthedApiReady();
+  const { storeReady, canCallAuthedApi } = useAuthedApiReady();
   const surf = useOnboardingSurfaces();
-  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
   const { bottom } = useBottomInset();
   
   const [fullName, setFullName] = useState(params.name as string || '');
@@ -99,7 +99,7 @@ export default function DriverProfileScreen() {
       })
       .catch(() => { /* silent — form starts empty */ })
       .finally(() => setLoadingExisting(false));
-  }, [canCallAuthedApi, token, params.driver_id]);
+  }, [canCallAuthedApi, params.driver_id]);
 
   const VEHICLE_TYPES = [
     { id: 'economy', label: 'Economy', icon: 'car', desc: 'Standard vehicles' },
@@ -185,7 +185,9 @@ export default function DriverProfileScreen() {
       return;
     }
 
-    if (!token) {
+    const { getValidToken } = await import('@/src/lib/tokenStore');
+    const liveToken = await getValidToken();
+    if (!liveToken) {
       Alert.alert('Session expired', 'Please sign in again to save your profile.', [
         { text: 'Sign in', onPress: () => router.replace('/(auth)/login') },
       ]);
@@ -238,7 +240,7 @@ export default function DriverProfileScreen() {
 
         if (loggedInUser) {
           setUser(loggedInUser);
-          if (resolvedToken) setToken(resolvedToken);
+          if (resolvedToken) await setTokens(resolvedToken, data?.refresh_token);
           await saveUserSession({ ...loggedInUser, token: resolvedToken });
         }
         setIsAuthenticated(true);
@@ -271,7 +273,7 @@ export default function DriverProfileScreen() {
   };
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

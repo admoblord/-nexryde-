@@ -1,6 +1,10 @@
 // Fix for react-native-google-places-autocomplete web compatibility
 import 'react-native-get-random-values';
 
+// Register background GPS task before TaskManager can trigger it.
+import '@/src/tasks/backgroundLocationTask';
+
+import * as SplashScreen from 'expo-splash-screen';
 import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View, Text, Platform, useColorScheme } from 'react-native';
@@ -11,12 +15,25 @@ import { bootstrapThemeFromStorage } from '@/src/theme/appearanceTheme';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { OfflineBanner } from '@/src/components/OfflineBanner';
 import { LanguageProvider } from '@/src/i18n/LanguageContext';
+import { ErrorToastProvider } from '@/src/components/shared/ErrorToast';
 import { QueryProvider } from '@/src/providers/QueryProvider';
 import { useNotifications } from '@/src/hooks/useNotifications';
+import { useOfflineQueueFlush } from '@/src/hooks/useOfflineQueueFlush';
 import { useAppStore } from '@/src/store/appStore';
 import React, { useEffect, useRef } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import * as Linking from 'expo-linking';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { registerLoginNavigator } from '@/src/utils/sessionRefresh';
+import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
+import { warmBackendConnection } from '@/src/utils/warmBackend';
+import { initSentry, wrapWithSentry } from '@/src/utils/sentry';
+
+// Initialize crash reporting as early as possible — before the root component
+// mounts — so startup crashes (rider + driver) are captured. No-op without a DSN.
+initSentry();
+
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // ── Referral deep-link key ────────────────────────────────────────────────────
 export const REFERRAL_CODE_STORAGE_KEY = '@nexryde_pending_referral';
@@ -104,48 +121,63 @@ function extractActionKey(url: string): string | null {
   }
 }
 
-/**
- * Request App Tracking Transparency permission on iOS 14+.
- * Called once after the app is fully interactive to avoid blocking launch.
- * We don't collect cross-app tracking data, so we request as a best-practice
- * signal to the OS and declare NSPrivacyTracking=false in PrivacyInfo.xcprivacy.
- */
-async function requestATTIfNeeded() {
-  if (Platform.OS !== 'ios') return;
-  try {
-    // Dynamic import so Metro doesn't bundle this module on Android
-    const TrackingTransparency = await import('expo-tracking-transparency').catch(() => null);
-    if (!TrackingTransparency) return;
-    const { status } = await TrackingTransparency.getTrackingPermissionsAsync();
-    if (status === 'undetermined') {
-      await TrackingTransparency.requestTrackingPermissionsAsync();
-    }
-  } catch {
-    // expo-tracking-transparency not installed — safe to ignore
-  }
-}
-
-export default function RootLayout() {
+function RootLayout() {
   const router = useRouter();
-  const { user } = useAppStore();
-  const attRequested = useRef(false);
+  const { user, isAuthenticated } = useAppStore();
+  const hasHydrated = usePersistStoreReady();
+  const wasAuthenticated = useRef<boolean | null>(null);
   const colorScheme = useColorScheme();
   const isDark = colorScheme === 'dark';
   const stackBackground = isDark ? DARK_COLORS.background : LIGHT_COLORS.background;
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') {
+      warmBackendConnection(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      void SplashScreen.hideAsync().catch(() => {});
+      return;
+    }
+    if (hasHydrated) {
+      void SplashScreen.hideAsync().catch(() => {});
+    }
+  }, [hasHydrated]);
 
   // Restore last Light / Dark / Auto choice so hooks + StatusBar match immediately after splash
   useEffect(() => {
     void bootstrapThemeFromStorage();
   }, []);
 
-  // Request ATT on iOS after first render
+  // ── Register global login navigator (used by authedFetch outside React tree) ─
   useEffect(() => {
-    if (attRequested.current) return;
-    attRequested.current = true;
-    // Small delay so the app is interactive before the system dialog appears
-    const t = setTimeout(() => void requestATTIfNeeded(), 2000);
-    return () => clearTimeout(t);
-  }, []);
+    registerLoginNavigator(() => {
+      try { router.replace('/(auth)/login' as any); } catch { /* router not ready */ }
+    });
+  }, [router]);
+
+  // ── Auth-expiry watcher — navigate to login when session is force-logged-out ─
+  // Prevents the blank white screen that appears when authedFetch calls logout()
+  // after a failed token refresh (expired token + no refresh token).
+  useEffect(() => {
+    // Skip the very first render (null → initial value)
+    if (wasAuthenticated.current === null) {
+      wasAuthenticated.current = isAuthenticated;
+      return;
+    }
+    // Transition: was authenticated → now not authenticated = forced logout
+    if (wasAuthenticated.current && !isAuthenticated) {
+      wasAuthenticated.current = false;
+      // Replace current stack with login so the user sees a proper screen
+      try {
+        router.replace('/(auth)/login' as any);
+      } catch { /* router not ready yet */ }
+      return;
+    }
+    wasAuthenticated.current = isAuthenticated;
+  }, [isAuthenticated, router]);
 
   // ── Deep link listener ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -178,20 +210,38 @@ export default function RootLayout() {
     return () => sub.remove();
   }, [router, user?.id, user?.role]);
 
+  // Warm resume: restore JWT from SecureStore, then refresh if near expiry.
+  useEffect(() => {
+    const handleAppStateChange = (nextState: AppStateStatus) => {
+      if (nextState !== 'active') return;
+      void import('@/src/lib/tokenStore')
+        .then(({ warmTokenCache, getValidToken }) => warmTokenCache().then(() => getValidToken()))
+        .catch(() => {});
+    };
+    const sub = AppState.addEventListener('change', handleAppStateChange);
+    return () => sub.remove();
+  }, []);
+
+  // Hooks must be called unconditionally at the top level — not inside try/catch.
+  useNotifications();
+  useOfflineQueueFlush();
+
   try {
-    useNotifications();
     return (
       <GestureHandlerRootView style={styles.container}>
         <SafeAreaProvider>
           <ErrorBoundary>
             <QueryProvider>
               <LanguageProvider>
+                <ErrorToastProvider>
                 <StatusBar style={isDark ? 'light' : 'dark'} />
                 <OfflineBanner />
                 <Stack
                   screenOptions={{
                     headerShown: false,
-                    contentStyle: { backgroundColor: stackBackground },
+                    contentStyle: {
+                      backgroundColor: hasHydrated ? stackBackground : '#0D1420',
+                    },
                     // iOS: use native slide animation; Android: slide up from bottom
                     animation: Platform.OS === 'ios' ? 'default' : 'fade_from_bottom',
                     // iOS: gesture-back enabled everywhere
@@ -233,6 +283,7 @@ export default function RootLayout() {
                     }}
                   />
                 </Stack>
+                </ErrorToastProvider>
               </LanguageProvider>
             </QueryProvider>
           </ErrorBoundary>
@@ -257,5 +308,10 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0D1420',
   },
 });
+
+// Wrap the root layout with Sentry so its error boundary + navigation
+// instrumentation are active across both rider and driver experiences.
+export default wrapWithSentry(RootLayout);

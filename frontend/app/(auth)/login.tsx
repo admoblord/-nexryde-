@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
   View,
   Text,
@@ -25,12 +26,14 @@ import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
 import * as ImagePicker from 'expo-image-picker';
 import { useAppStore, type User } from '@/src/store/appStore';
-import { saveUserSession, getUserSession } from '@/utils/authStorage';
+import { getUserSession, isUserLoggedIn, saveUserSession } from '@/utils/authStorage';
+import { setTokens, warmTokenCache } from '@/src/lib/tokenStore';
 import { autoApplyPendingReferral } from '@/src/services/referralService';
-import { BACKEND_URL, postDriverFortressVerify, formatApiDetail } from '@/src/services/api';
+import { BACKEND_URL } from '@/src/services/api';
 import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { initiateEmailLogin, publicFetchErrorMessage } from '@/src/utils/publicApi';
+import { warmBackendConnection, warmBackendWhileWaiting } from '@/src/utils/warmBackend';
 
 // Colors based on NEXRYDE logo
 const COLORS = {
@@ -38,12 +41,12 @@ const COLORS = {
   primary: '#19253F',
   surface: '#19253F',
   surfaceLight: '#243654',
-  green: '#3AD173',
-  greenLight: '#80EE50',
-  greenSoft: 'rgba(58, 209, 115, 0.15)',
-  blue: '#3A8CD1',
-  blueDark: '#1A5AA6',
-  blueSoft: 'rgba(58, 140, 209, 0.15)',
+  green: '#00D084',
+  greenLight: '#4ADE80',
+  greenSoft: 'rgba(0,208,132,0.12)',
+  blue: '#0066FF',
+  blueDark: '#1A4FCC',
+  blueSoft: 'rgba(0,102,255,0.12)',
   white: '#FFFFFF',
   textSecondary: '#A8B8D0',
   textMuted: '#6B7A94',
@@ -56,80 +59,26 @@ const COLORS = {
   bankVeil: '#0E141C',
 };
 
-const FORTRESS_PHONE_DRAFT_KEY = 'nexryde_driver_fortress_phone_draft';
-
 export default function LoginScreen() {
+  const toast = useErrorToast();
   const router = useRouter();
   const params = useLocalSearchParams<{ flow?: string; role?: string }>();
   const requestedFlow = params.flow === 'register' ? 'register' : 'login';
   const requestedRole = params.role === 'driver' || params.role === 'rider' ? params.role : null;
   const [email, setEmail] = useState('');
   const [emailLoading, setEmailLoading] = useState(false);
-  const [authStep, setAuthStep] = useState<'email' | 'code'>('email');
-  const [emailOtp, setEmailOtp] = useState('');
-  const [emailOtpLoading, setEmailOtpLoading] = useState(false);
-  const [otpTargetEmail, setOtpTargetEmail] = useState('');
   const [biometricReady, setBiometricReady] = useState(false);
   const [biometricLoading, setBiometricLoading] = useState(false);
   const [deviceId, setDeviceId] = useState<string>('');
-  const [fortressChallengeId, setFortressChallengeId] = useState<string | null>(null);
-  const [fortressMaskedPhone, setFortressMaskedPhone] = useState<string>('');
-  const [fortressPhoneInput, setFortressPhoneInput] = useState('');
-  const [fortressPinInput, setFortressPinInput] = useState('');
-  const [fortressFaceImage, setFortressFaceImage] = useState<string>('');
-  const [fortressLoading, setFortressLoading] = useState(false);
-  const [pinSetupRequired, setPinSetupRequired] = useState(false);
-  const [loginError, setLoginError] = useState<{ type: 'sim_swap' | 'generic' | null; message: string }>({ type: null, message: '' });
-  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const [loginError, setLoginError] = useState<string>('');
+  const { setUser, setIsAuthenticated } = useAppStore();
   const canShowAuth = useRedirectIfAuthed();
 
-  const faceRingPulse = useRef(new Animated.Value(1)).current;
-
   useEffect(() => {
-    if (!fortressChallengeId) {
-      faceRingPulse.setValue(1);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(faceRingPulse, {
-          toValue: 1.045,
-          duration: 1600,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.timing(faceRingPulse, {
-          toValue: 1,
-          duration: 1600,
-          easing: Easing.inOut(Easing.quad),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [fortressChallengeId, faceRingPulse]);
-
-  useEffect(() => {
-    if (!fortressChallengeId) return;
-    let cancelled = false;
-    void SecureStore.getItemAsync(FORTRESS_PHONE_DRAFT_KEY).then((stored) => {
-      if (cancelled || !stored) return;
-      setFortressPhoneInput((prev) => (prev.trim().length > 0 ? prev : stored));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fortressChallengeId]);
-
-  useEffect(() => {
-    if (!fortressChallengeId) return;
-    const t = setTimeout(() => {
-      const v = fortressPhoneInput.trim();
-      if (v.length >= 10) void SecureStore.setItemAsync(FORTRESS_PHONE_DRAFT_KEY, v).catch(() => {});
-    }, 500);
-    return () => clearTimeout(t);
-  }, [fortressPhoneInput, fortressChallengeId]);
+    warmBackendConnection(true);
+    const interval = setInterval(warmBackendWhileWaiting, 10_000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     const checkBiometricLoginAvailability = async () => {
@@ -163,7 +112,6 @@ export default function LoginScreen() {
     void ensureDeviceId();
   }, []);
   
-  const getBackendUrl = () => BACKEND_URL;
   const openLegal = async (path: string) => {
     try {
       await Linking.openURL(`${BACKEND_URL}${path}`);
@@ -176,49 +124,72 @@ export default function LoginScreen() {
     await routeAuthedUser(router, loggedUser, resolvedToken);
   };
 
-  /** Passwordless email: request NEXRYDE code, then verify on next step. */
-  const handleRequestEmailCode = async () => {
+  /**
+   * Email-first auth: existing approved users sign in instantly; new users go
+   * straight to registration. Existing drivers on a new device get the identity
+   * fortress check (face + phone + PIN).
+   */
+  const handleEmailContinue = async () => {
     const normalizedEmail = email.trim().toLowerCase();
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail);
     if (!validEmail) {
-      Alert.alert('Invalid email', 'Please enter a valid email address.');
+      toast.show('Please enter a valid email address.', 'warning');
       return;
     }
 
     setEmailLoading(true);
-    const controller = new AbortController();
-    const t = setTimeout(() => {
-      controller.abort();
-      setEmailLoading(false);
-      Alert.alert('Connection Timeout', 'Could not reach server. Please try again.');
-    }, 15000);
-
     try {
-      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: normalizedEmail }),
-        signal: controller.signal,
+      const { res, data } = await initiateEmailLogin({
+        email: normalizedEmail,
+        device_id: deviceId || undefined,
       });
-      const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = data?.detail || data?.message || 'Please try again.';
-        setLoginError({ type: 'generic', message: String(detail) });
+        setLoginError(String(detail));
+        toast.show(String(detail), 'error');
         return;
       }
-      setLoginError({ type: null, message: '' });
-      setOtpTargetEmail(normalizedEmail);
-      setAuthStep('code');
-      setEmailOtp('');
-      if (Platform.OS !== 'web') {
-        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setLoginError('');
+
+      // Existing approved user → sign in instantly.
+      const resolvedToken = (data?.token ?? data?.access_token ?? (data?.user as Record<string, unknown> | undefined)?.token ?? null) as
+        | string
+        | null;
+      const resolvedRefreshToken = (data?.refresh_token ?? null) as string | null;
+      if (data?.user && resolvedToken) {
+        await setTokens(resolvedToken, resolvedRefreshToken);
+        setUser(data.user as User);
+        setIsAuthenticated(true);
+        await saveUserSession({
+          ...(data.user as User),
+          token: resolvedToken,
+          ...(resolvedRefreshToken ? { refresh_token: resolvedRefreshToken } : {}),
+        });
+        // Schedule daily offer/engagement notifications for this role
+        import('@/src/services/nexrydeScheduledNotifications')
+          .then(({ scheduleOfferNotificationsForRole }) =>
+            scheduleOfferNotificationsForRole((data.user as User).role as 'rider' | 'driver')
+          )
+          .catch(() => {});
+        if ((data.user as User).role !== 'driver') {
+          void autoApplyPendingReferral((data.user as User).id, resolvedToken);
+        }
+        if (Platform.OS !== 'web') {
+          void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
+        await routeVerifiedUser(data.user as User, resolvedToken);
+        return;
       }
+
+      // New user → straight to registration / onboarding.
+      const emailData = data?.email_data as Record<string, unknown> | undefined;
+      continueToOnboarding(
+        (emailData?.email as string) || normalizedEmail,
+        emailData?.name as string | undefined,
+      );
     } catch (e: unknown) {
-      if ((e as Error)?.name !== 'AbortError') {
-        Alert.alert('Connection Error', 'Unable to send verification email right now.');
-      }
+      toast.show(publicFetchErrorMessage(e), 'error');
     } finally {
-      clearTimeout(t);
       setEmailLoading(false);
     }
   };
@@ -226,7 +197,7 @@ export default function LoginScreen() {
   const continueToOnboarding = (verifiedEmail: string, suggestedName?: string) => {
     const newName = suggestedName || verifiedEmail.split('@')[0];
     if (requestedRole === 'driver') {
-      // Collect Nigerian phone on register before terms — driver accounts require a line for ops & payouts.
+      // Collect Nigerian phone on register before terms — stored for rider contact and NexRyde records.
       router.push({
         pathname: '/(auth)/register',
         params: {
@@ -240,8 +211,8 @@ export default function LoginScreen() {
     }
     if (requestedRole === 'rider') {
       router.push({
-        pathname: '/(auth)/rider-nin',
-        params: { email: verifiedEmail, name: newName },
+        pathname: '/(auth)/register',
+        params: { email: verifiedEmail, name: newName, auth_type: 'email', role: 'rider' },
       });
       return;
     }
@@ -251,156 +222,7 @@ export default function LoginScreen() {
     });
   };
 
-  const handleVerifyEmailOtp = async () => {
-    if (!otpTargetEmail || emailOtp.trim().length < 4) {
-      Alert.alert('Invalid code', 'Enter the verification code from your email.');
-      return;
-    }
-    setEmailOtpLoading(true);
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: otpTargetEmail,
-          otp: emailOtp.trim(),
-          device_id: deviceId || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        const detail = data?.detail || 'Could not verify code.';
-        const isSimSwap =
-          res.status === 423 || String(detail).toLowerCase().includes('sim swap');
-        setLoginError({
-          type: isSimSwap ? 'sim_swap' : 'generic',
-          message: isSimSwap
-            ? 'A SIM change was detected on your device. Your account has been temporarily secured for your protection.'
-            : String(detail),
-        });
-        return;
-      }
-      setLoginError({ type: null, message: '' });
-
-      if (data?.fortress_required) {
-        setFortressChallengeId(String(data.challenge_id || ''));
-        setFortressMaskedPhone(String(data.masked_phone || ''));
-        setPinSetupRequired(Boolean(data.pin_setup_required));
-        setFortressFaceImage('');
-        return;
-      }
-
-      const resolvedToken = (data?.token ?? data?.user?.token ?? null) as string | null;
-      if (data?.user && resolvedToken !== null && resolvedToken !== '') {
-        setUser(data.user);
-        setToken(resolvedToken);
-        setIsAuthenticated(true);
-        await saveUserSession({ ...data.user, token: resolvedToken });
-        if (data.user.role !== 'driver' && resolvedToken) {
-          void autoApplyPendingReferral(data.user.id, resolvedToken);
-        }
-        await routeVerifiedUser(data.user, resolvedToken);
-        return;
-      }
-
-      setEmailOtp('');
-      continueToOnboarding(
-        data?.email_data?.email || otpTargetEmail,
-        data?.email_data?.name,
-      );
-    } catch {
-      Alert.alert('Connection error', 'Unable to verify code right now.');
-    } finally {
-      setEmailOtpLoading(false);
-    }
-  };
-
-  const handleResendEmailOtp = async () => {
-    if (!otpTargetEmail) return;
-    try {
-      const res = await fetch(`${getBackendUrl()}/api/auth/email-otp/request`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: otpTargetEmail }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        Alert.alert('Resend failed', data?.detail || 'Please try again shortly.');
-        return;
-      }
-      Alert.alert('OTP sent', `A new code was sent to ${otpTargetEmail}.`);
-    } catch {
-      Alert.alert('Connection error', 'Unable to resend OTP right now.');
-    }
-  };
-
-  const handleCaptureFortressFace = async () => {
-    const permission = await ImagePicker.requestCameraPermissionsAsync();
-    if (permission.status !== 'granted') {
-      Alert.alert(
-        'Camera needed',
-        'NEXRYDE needs the camera to match your face to your saved profile—same as phone face unlock.',
-      );
-      return;
-    }
-    const capture = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: false,
-      quality: 0.92,
-      base64: true,
-      exif: false,
-      cameraType: ImagePicker.CameraType.front,
-    });
-    if (capture.canceled || !capture.assets?.[0]?.base64) return;
-    setFortressFaceImage(`data:image/jpeg;base64,${capture.assets[0].base64}`);
-    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-  };
-
-  const handleRetakeFortressFace = () => {
-    setFortressFaceImage('');
-  };
-
-  const handleVerifyFortress = async () => {
-    if (!fortressChallengeId) return;
-    if (!fortressPhoneInput.trim() || !fortressPinInput.trim() || !fortressFaceImage) {
-      Alert.alert('Almost there', 'Enter your phone, PIN, and take a clear selfie so we can match your face.');
-      return;
-    }
-    setFortressLoading(true);
-    try {
-      const { data } = await postDriverFortressVerify({
-        challenge_id: fortressChallengeId,
-        phone: fortressPhoneInput.trim(),
-        pin: fortressPinInput.trim(),
-        face_image: fortressFaceImage,
-      });
-      if (!data?.user) {
-        Alert.alert('Error', 'Unexpected response. Please try again.');
-        return;
-      }
-      const loggedIn = data.user as unknown as User;
-      const resolvedToken = data?.token || null;
-      setUser(loggedIn);
-      setToken(resolvedToken);
-      setIsAuthenticated(true);
-      await saveUserSession({ ...loggedIn, token: resolvedToken });
-      void SecureStore.deleteItemAsync(FORTRESS_PHONE_DRAFT_KEY).catch(() => {});
-      setFortressChallengeId(null);
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await routeVerifiedUser(loggedIn, resolvedToken);
-    } catch (e: unknown) {
-      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-      if (axios.isAxiosError(e)) {
-        const msg =
-          formatApiDetail(e.response?.data?.detail) || 'We could not verify you. Check phone, PIN, and try another selfie.';
-        Alert.alert('Face did not match', msg);
-        return;
-      }
-      Alert.alert('Connection error', 'Could not reach the server. Check your network and try again.');
-    } finally {
-      setFortressLoading(false);
-    }
-  };
+  // Fortress and SIM-swap verification removed — open access
 
   const handleBiometricSignIn = async () => {
     setBiometricLoading(true);
@@ -419,8 +241,8 @@ export default function LoginScreen() {
         return;
       }
 
+      await setTokens(saved?.token || '', saved?.refresh_token);
       setUser(saved);
-      setToken(saved?.token || null);
       setIsAuthenticated(true);
       await routeVerifiedUser(saved, saved?.token || null);
     } finally {
@@ -430,26 +252,27 @@ export default function LoginScreen() {
 
   const emailAuthCard = (
     <AuthEmailCardBody
-      authStep={authStep}
       email={email}
       setEmail={setEmail}
       emailLoading={emailLoading}
-      emailOtp={emailOtp}
-      setEmailOtp={setEmailOtp}
-      emailOtpLoading={emailOtpLoading}
-      otpTargetEmail={otpTargetEmail}
-      onRequestCode={handleRequestEmailCode}
-      onVerifyCode={() => void handleVerifyEmailOtp()}
-      onResend={() => void handleResendEmailOtp()}
-      onChangeEmail={() => {
-        setAuthStep('email');
-        setEmailOtp('');
-      }}
+      onContinue={handleEmailContinue}
     />
   );
 
   if (!canShowAuth) {
-    return <AuthLoadingGate />;
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={[COLORS.background, COLORS.primary, COLORS.background]}
+          style={StyleSheet.absoluteFillObject}
+        />
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.authHydrateShell}>
+            <ActivityIndicator size="large" color={COLORS.green} />
+          </View>
+        </SafeAreaView>
+      </View>
+    );
   }
 
   return (
@@ -465,7 +288,7 @@ export default function LoginScreen() {
       
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView 
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           style={styles.keyboardView}
         >
           <ScrollView 
@@ -507,208 +330,24 @@ export default function LoginScreen() {
               </Text>
 
               {/* ── Login Error Banner ────────────────────────────────── */}
-              {loginError.type === 'sim_swap' && (
-                <View style={styles.simSwapBanner}>
-                  <View style={styles.simSwapIconWrap}>
-                    <Ionicons name="shield-half" size={26} color="#EF4444" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.simSwapTitle}>Account Temporarily Secured</Text>
-                    <Text style={styles.simSwapText}>{loginError.message}</Text>
-                    <TouchableOpacity
-                      style={styles.simSwapCta}
-                      onPress={() => Linking.openURL('https://nexryde.app/support')}
-                    >
-                      <Ionicons name="headset" size={14} color="#FFF" />
-                      <Text style={styles.simSwapCtaText}>Contact Support</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity onPress={() => setLoginError({ type: null, message: '' })} style={{ alignSelf: 'flex-start' }}>
-                    <Ionicons name="close" size={18} color="rgba(255,255,255,0.5)" />
-                  </TouchableOpacity>
-                </View>
-              )}
-              {loginError.type === 'generic' && loginError.message && (
+              {!!loginError && (
                 <View style={styles.errorBanner}>
                   <Ionicons name="alert-circle" size={18} color="#EF4444" />
-                  <Text style={styles.errorBannerText} numberOfLines={3}>{loginError.message}</Text>
-                  <TouchableOpacity onPress={() => setLoginError({ type: null, message: '' })}>
+                  <Text style={styles.errorBannerText} numberOfLines={3}>{loginError}</Text>
+                  <TouchableOpacity onPress={() => setLoginError('')}>
                     <Ionicons name="close" size={16} color="#94A3B8" />
                   </TouchableOpacity>
                 </View>
               )}
 
               {/* Email / code — glass card */}
-              {!fortressChallengeId ? (
-                Platform.OS === 'web' ? (
-                  <View style={[styles.authGlass, styles.authGlassWeb]}>{emailAuthCard}</View>
-                ) : (
-                  <BlurView intensity={48} tint="dark" style={styles.authGlass}>
-                    {emailAuthCard}
-                  </BlurView>
-                )
-              ) : null}
-
-              {fortressChallengeId ? (
-                <View style={styles.bankVaultCard}>
-                  <LinearGradient
-                    colors={[COLORS.bankVeil, COLORS.bankInk]}
-                    style={StyleSheet.absoluteFillObject}
-                    start={{ x: 0.5, y: 0 }}
-                    end={{ x: 0.5, y: 1 }}
-                  />
-                  <View style={styles.bankVaultHeader}>
-                    <View style={styles.bankVaultBadge}>
-                      <Ionicons name="shield-half-outline" size={15} color={COLORS.bankGoldBright} />
-                      <Text style={styles.bankVaultBadgeText}>SECURE ACCESS</Text>
-                    </View>
-                    <Text style={styles.bankVaultTitle}>Verify it's you</Text>
-                    <Text style={styles.bankVaultBody}>
-                      New device detected. Capture your face like phone unlock, then confirm the credentials we have on file for{' '}
-                      <Text style={styles.bankVaultMasked}>{fortressMaskedPhone || 'your registered line'}</Text>.
-                    </Text>
-                  </View>
-
-                  <Animated.View style={[styles.bankFaceRingWrap, { transform: [{ scale: faceRingPulse }] }]}>
-                    <LinearGradient
-                      colors={[COLORS.greenLight, COLORS.bankGoldBright, COLORS.green]}
-                      start={{ x: 0.12, y: 0 }}
-                      end={{ x: 0.88, y: 1 }}
-                      style={styles.bankFaceOuterRing}
-                    >
-                      {fortressFaceImage ? (
-                        <View style={styles.bankFaceInnerCutout}>
-                          <Image source={{ uri: fortressFaceImage }} style={styles.bankFacePreviewImg} resizeMode="cover" />
-                          <TouchableOpacity
-                            style={styles.bankFaceRetakeFab}
-                            onPress={handleRetakeFortressFace}
-                            accessibilityRole="button"
-                            accessibilityLabel="Retake face photo"
-                            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                          >
-                            <Ionicons name="camera-reverse" size={18} color="#F8FAFC" />
-                          </TouchableOpacity>
-                        </View>
-                      ) : (
-                        <TouchableOpacity
-                          activeOpacity={0.9}
-                          onPress={() => void handleCaptureFortressFace()}
-                          accessibilityRole="button"
-                          accessibilityLabel="Open camera to capture your face"
-                          style={styles.bankFaceInnerCutout}
-                        >
-                          <View style={styles.bankFacePlaceholder}>
-                            <View style={styles.bankFaceScanIcon}>
-                              <Ionicons name="scan-outline" size={42} color="rgba(226,232,240,0.78)" />
-                            </View>
-                            <Text style={styles.bankFacePlaceholderTitle}>Align your face</Text>
-                            <Text style={styles.bankFacePlaceholderSub}>Tap to open camera · Bright room · Hold steady</Text>
-                          </View>
-                        </TouchableOpacity>
-                      )}
-                    </LinearGradient>
-                  </Animated.View>
-
-                  <View style={styles.bankTipRow}>
-                    {(
-                      [
-                        { icon: 'sunny-outline' as const, label: 'Good light' },
-                        { icon: 'person-outline' as const, label: 'Face forward' },
-                        { icon: 'hand-left-outline' as const, label: 'Hold still' },
-                      ] as const
-                    ).map((tip) => (
-                      <View key={tip.label} style={styles.bankTipChip}>
-                        <Ionicons name={tip.icon} size={14} color={COLORS.greenLight} />
-                        <Text style={styles.bankTipChipText}>{tip.label}</Text>
-                      </View>
-                    ))}
-                  </View>
-
-                  <View style={styles.bankFieldStack}>
-                    <View style={styles.bankFieldShell}>
-                      <View style={styles.bankFieldIconWrap}>
-                        <Ionicons name="call-outline" size={18} color="rgba(226,232,240,0.75)" />
-                      </View>
-                      <TextInput
-                        style={styles.bankFieldInput}
-                        placeholder="Registered phone (+234...)"
-                        placeholderTextColor={COLORS.textMuted}
-                        value={fortressPhoneInput}
-                        onChangeText={setFortressPhoneInput}
-                        keyboardType="phone-pad"
-                        autoCapitalize="none"
-                      />
-                    </View>
-                    <View style={styles.bankFieldShell}>
-                      <View style={styles.bankFieldIconWrap}>
-                        <Ionicons name="lock-closed-outline" size={18} color="rgba(226,232,240,0.75)" />
-                      </View>
-                      <TextInput
-                        style={styles.bankFieldInput}
-                        placeholder={pinSetupRequired ? 'Create account PIN (4-8 digits)' : 'Driver account PIN'}
-                        placeholderTextColor={COLORS.textMuted}
-                        value={fortressPinInput}
-                        onChangeText={setFortressPinInput}
-                        keyboardType="number-pad"
-                        secureTextEntry
-                        maxLength={8}
-                      />
-                    </View>
-                  </View>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.bankPrimaryOuter,
-                      (!fortressPhoneInput.trim() ||
-                        !fortressPinInput.trim() ||
-                        !fortressFaceImage ||
-                        fortressLoading) &&
-                        styles.bankPrimaryOuterDim,
-                    ]}
-                    onPress={() => void handleVerifyFortress()}
-                    disabled={
-                      fortressLoading ||
-                      !fortressPhoneInput.trim() ||
-                      !fortressPinInput.trim() ||
-                      !fortressFaceImage
-                    }
-                    activeOpacity={0.92}
-                    accessibilityLabel="Confirm identity and sign in"
-                  >
-                    {fortressLoading ? (
-                      <ActivityIndicator color="#F8FAFC" />
-                    ) : (
-                      <>
-                        <Ionicons
-                          name="shield-checkmark"
-                          size={22}
-                          color={
-                            fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
-                              ? COLORS.bankInk
-                              : COLORS.textMuted
-                          }
-                          style={{ marginRight: 10 }}
-                        />
-                        <Text
-                          style={[
-                            styles.bankPrimaryText,
-                            fortressPhoneInput.trim() && fortressPinInput.trim() && fortressFaceImage
-                              ? styles.bankPrimaryTextOn
-                              : styles.bankPrimaryTextDim,
-                          ]}
-                        >
-                          Confirm identity & sign in
-                        </Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-
-                  <Text style={styles.bankFootnote}>
-                    Your selfie is sent over TLS and verified against your registered driver profile — processed on Nexryde
-                    servers for security review.
-                  </Text>
-                </View>
-              ) : null}
+              {Platform.OS === 'web' ? (
+                <View style={[styles.authGlass, styles.authGlassWeb]}>{emailAuthCard}</View>
+              ) : (
+                <BlurView intensity={48} tint="dark" style={styles.authGlass}>
+                  {emailAuthCard}
+                </BlurView>
+              )}
 
               {biometricReady && (
                 <TouchableOpacity
@@ -760,167 +399,73 @@ export default function LoginScreen() {
 }
 
 type AuthEmailCardProps = {
-  authStep: 'email' | 'code';
   email: string;
   setEmail: (v: string) => void;
   emailLoading: boolean;
-  emailOtp: string;
-  setEmailOtp: (v: string) => void;
-  emailOtpLoading: boolean;
-  otpTargetEmail: string;
-  onRequestCode: () => void | Promise<void>;
-  onVerifyCode: () => void;
-  onResend: () => void;
-  onChangeEmail: () => void;
+  onContinue: () => void | Promise<void>;
 };
 
-function AuthEmailCardBody({
-  authStep,
-  email,
-  setEmail,
-  emailLoading,
-  emailOtp,
-  setEmailOtp,
-  emailOtpLoading,
-  otpTargetEmail,
-  onRequestCode,
-  onVerifyCode,
-  onResend,
-  onChangeEmail,
-}: AuthEmailCardProps) {
+function AuthEmailCardBody({ email, setEmail, emailLoading, onContinue }: AuthEmailCardProps) {
   const normalizedReady = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const codeReady = emailOtp.trim().length >= 4;
 
   return (
     <>
-      <View style={styles.stepRow}>
-        <View style={[styles.stepDot, authStep === 'email' && styles.stepDotActive]} />
+      <Text style={styles.authStepCaption}>Sign in or sign up</Text>
+      <Text style={styles.authHeadline}>Continue with email</Text>
+      <Text style={styles.authSubcopy}>
+        Enter your email — we’ll sign you straight in if you already have an account, or set you up
+        in seconds if you’re new.
+      </Text>
+      <View style={styles.emailFieldWrap}>
+        <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.emailFieldIcon} />
+        <TextInput
+          style={styles.emailInputInner}
+          placeholder="you@example.com"
+          placeholderTextColor={COLORS.textMuted}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={email}
+          onChangeText={setEmail}
+          returnKeyType="go"
+          onSubmitEditing={() => {
+            if (normalizedReady && !emailLoading) void onContinue();
+          }}
+        />
+      </View>
+      <TouchableOpacity
+        style={[styles.primaryCtaWrap, !normalizedReady && styles.primaryCtaWrapDim]}
+        onPress={() => void onContinue()}
+        disabled={emailLoading || !normalizedReady}
+        activeOpacity={0.92}
+      >
         <LinearGradient
-          colors={['rgba(58,209,115,0.35)', 'rgba(58,140,209,0.35)']}
+          colors={
+            normalizedReady && !emailLoading
+              ? [COLORS.greenLight, COLORS.green, COLORS.blue]
+              : [COLORS.gray700, COLORS.gray700]
+          }
+          style={styles.primaryCtaGradient}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 0 }}
-          style={styles.stepLine}
-        />
-        <View style={[styles.stepDot, authStep === 'code' && styles.stepDotActive]} />
-      </View>
-      <Text style={styles.authStepCaption}>
-        {authStep === 'email' ? '1 · Your email' : '2 · Enter code'}
-      </Text>
-
-      {authStep === 'email' ? (
-        <>
-          <Text style={styles.authHeadline}>Sign in without a password</Text>
-          <Text style={styles.authSubcopy}>
-            We’ll email you a one-time NEXRYDE code. New or returning — same smooth flow.
-          </Text>
-          <View style={styles.emailFieldWrap}>
-            <Ionicons name="mail-outline" size={20} color={COLORS.textMuted} style={styles.emailFieldIcon} />
-            <TextInput
-              style={styles.emailInputInner}
-              placeholder="you@example.com"
-              placeholderTextColor={COLORS.textMuted}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-              value={email}
-              onChangeText={setEmail}
-            />
-          </View>
-          <TouchableOpacity
-            style={[styles.primaryCtaWrap, !normalizedReady && styles.primaryCtaWrapDim]}
-            onPress={() => void onRequestCode()}
-            disabled={emailLoading || !normalizedReady}
-            activeOpacity={0.92}
-          >
-            <LinearGradient
-              colors={
-                normalizedReady && !emailLoading
-                  ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-                  : [COLORS.gray700, COLORS.gray700]
-              }
-              style={styles.primaryCtaGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              {emailLoading ? (
-                <ActivityIndicator color={COLORS.primary} />
-              ) : (
-                <>
-                  <Ionicons
-                    name="paper-plane"
-                    size={20}
-                    color={normalizedReady ? COLORS.primary : COLORS.textMuted}
-                    style={{ marginRight: 10 }}
-                  />
-                  <Text style={[styles.primaryCtaText, normalizedReady && styles.primaryCtaTextOn]}>
-                    Send verification code
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-        </>
-      ) : (
-        <>
-          <Text style={styles.authHeadline}>Check your inbox</Text>
-          <Text style={styles.authSubcopy}>
-            We sent a code to{' '}
-            <Text style={styles.emailHighlight}>{otpTargetEmail}</Text>
-          </Text>
-          <TouchableOpacity onPress={onChangeEmail} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Text style={styles.changeEmailLink}>Use a different email</Text>
-          </TouchableOpacity>
-          <View style={styles.codeFieldWrap}>
-            <TextInput
-              style={styles.codeInput}
-              placeholder="Enter code"
-              placeholderTextColor={COLORS.textMuted}
-              value={emailOtp}
-              onChangeText={setEmailOtp}
-              keyboardType="number-pad"
-              maxLength={8}
-              textContentType="oneTimeCode"
-              autoComplete="one-time-code"
-            />
-          </View>
-          <TouchableOpacity
-            style={[styles.primaryCtaWrap, !codeReady && styles.primaryCtaWrapDim]}
-            onPress={onVerifyCode}
-            disabled={emailOtpLoading || !codeReady}
-            activeOpacity={0.92}
-          >
-            <LinearGradient
-              colors={
-                codeReady && !emailOtpLoading
-                  ? [COLORS.greenLight, COLORS.green, COLORS.blue]
-                  : [COLORS.gray700, COLORS.gray700]
-              }
-              style={styles.primaryCtaGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              {emailOtpLoading ? (
-                <ActivityIndicator color={COLORS.primary} />
-              ) : (
-                <>
-                  <Ionicons
-                    name="shield-checkmark"
-                    size={20}
-                    color={codeReady ? COLORS.primary : COLORS.textMuted}
-                    style={{ marginRight: 10 }}
-                  />
-                  <Text style={[styles.primaryCtaText, codeReady && styles.primaryCtaTextOn]}>
-                    Verify & continue
-                  </Text>
-                </>
-              )}
-            </LinearGradient>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.resendRow} onPress={onResend} disabled={emailOtpLoading}>
-            <Text style={styles.resendText}>Didn’t get it? Resend code</Text>
-          </TouchableOpacity>
-        </>
-      )}
+        >
+          {emailLoading ? (
+            <ActivityIndicator color={COLORS.primary} />
+          ) : (
+            <>
+              <Ionicons
+                name="arrow-forward"
+                size={20}
+                color={normalizedReady ? COLORS.primary : COLORS.textMuted}
+                style={{ marginRight: 10 }}
+              />
+              <Text style={[styles.primaryCtaText, normalizedReady && styles.primaryCtaTextOn]}>
+                Continue
+              </Text>
+            </>
+          )}
+        </LinearGradient>
+      </TouchableOpacity>
     </>
   );
 }
@@ -966,6 +511,11 @@ const styles = StyleSheet.create({
   },
   keyboardView: {
     flex: 1,
+  },
+  authHydrateShell: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scrollContent: {
     flexGrow: 1,

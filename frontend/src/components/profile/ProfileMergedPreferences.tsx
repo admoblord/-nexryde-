@@ -54,7 +54,7 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
   const [biometricSupported, setBiometricSupported] = useState(false);
   const [womenOnly, setWomenOnly] = useState(false);
   const [womenOnlyLoading, setWomenOnlyLoading] = useState(false);
-  const [pickupCodeEnabled, setPickupCodeEnabled] = useState(true);
+  const [pickupCodeEnabled, setPickupCodeEnabled] = useState(false);
   const [pickupCodeSaving, setPickupCodeSaving] = useState(false);
 
   const showFemaleDriverRow =
@@ -340,8 +340,8 @@ export function ProfileMergedPreferences({ variant }: { variant: Variant }) {
             <Text style={[styles.menuText, { color: colors.text }]}>Pickup code</Text>
             <Text style={[styles.menuSubtext, { color: colors.textMuted }]}>
               {pickupCodeEnabled
-                ? 'Show a 4-digit code at pickup for your driver'
-                : 'Off — driver can start without a code'}
+                ? 'On — show a 4-digit code at pickup for extra security'
+                : 'Off — no code needed (recommended)'}
             </Text>
           </View>
           <Switch

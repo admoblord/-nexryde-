@@ -13,7 +13,7 @@ Strike system (30-day rolling window, non-cancellation violations):
   - 7 active strikes = permanent deactivation
   - Strikes age out after 30 days of clean behavior
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from typing import Optional, List
 from datetime import datetime, timezone, timedelta
@@ -22,6 +22,7 @@ import asyncio
 import uuid
 
 from database import db
+from auth_guard import require_authenticated
 
 logger = logging.getLogger(__name__)
 enforcement_router = APIRouter(prefix="/api", tags=["Enforcement"])
@@ -552,6 +553,20 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
     if not config:
         return {"action": "none", "message": "Unknown violation type"}
 
+    # A completed trip can NEVER be a cancellation. Guard against recording a
+    # cancellation violation (and the "Booking cancellation" notice) for a trip
+    # that already reached the terminal `completed` state.
+    if trip_id and violation_type in {"rider_cancellation", "driver_cancellation"}:
+        try:
+            ref_trip = await db.trips.find_one({"id": trip_id}, {"_id": 0, "status": 1})
+            if ref_trip and str(ref_trip.get("status") or "").lower() == "completed":
+                return {"action": "none", "message": "Trip already completed; no cancellation."}
+        except Exception:
+            pass
+
+    now = datetime.now(timezone.utc)
+    # Keep violations for retention_days (default 90 days) then auto-delete via TTL index.
+    retention_days = config.get("retention_days", 90)
     violation = {
         "user_id": user_id,
         "violation_type": violation_type,
@@ -560,7 +575,8 @@ async def record_violation(user_id: str, violation_type: str, trip_id: str = Non
         "reporter_id": reporter_id,
         "strikes": config["strikes"],
         "status": "active",
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": now.isoformat(),
+        "expires_at": now + timedelta(days=retention_days),
     }
     await db.violations.insert_one(violation)
 
@@ -834,28 +850,39 @@ async def apply_penalty(user_id: str, action: str, message: str, violation_type:
 
 async def check_user_status(user_id: str):
     """Check if a user is allowed to use the app (not suspended/deactivated)."""
-    user = await db.users.find_one({"id": user_id})
+    from user_lookup import find_user_by_id, QUERY_MAX_TIME_MS
+
+    user = await find_user_by_id(
+        user_id,
+        {
+            "_id": 0,
+            "id": 1,
+            "role": 1,
+            "is_deactivated": 1,
+            "verification_status": 1,
+            "suspended_until": 1,
+            "suspension_reason": 1,
+        },
+        max_time_ms=QUERY_MAX_TIME_MS,
+    )
     if not user:
         return {"allowed": False, "reason": "User not found"}
 
     if user.get("is_deactivated"):
         return {"allowed": False, "reason": "Account deactivated", "message": "Your account has been permanently deactivated due to policy violations. Contact support@nexryde.com to appeal."}
-    if user.get("role") == "driver" and user.get("ghost_driver_lock", {}).get("active"):
-        return {
-            "allowed": False,
-            "reason": "Ghost driver lock",
-            "message": "Ghost Driver Protection is active. Reconfirm identity to unlock your account.",
-        }
-    if user.get("role") == "driver" and user.get("sim_swap_lock", {}).get("active"):
-        return {
-            "allowed": False,
-            "reason": "SIM swap lock",
-            "message": "SIM Swap Protection is active. Complete secondary identity reconfirmation to unlock your account.",
-        }
 
     # Hard verification/compliance gates for drivers.
     if user.get("role") == "driver":
-        profile = await db.driver_profiles.find_one({"user_id": user_id}) or {}
+        profile = await db.driver_profiles.find_one(
+            {"user_id": user_id},
+            {
+                "_id": 0,
+                "verification_status": 1,
+                "documents_verified": 1,
+                "suspended_reason": 1,
+            },
+            max_time_ms=QUERY_MAX_TIME_MS,
+        ) or {}
         if user.get("verification_status") in {"recheck_required", "rejected"} or profile.get("verification_status") in {"recheck_required", "rejected"}:
             return {
                 "allowed": True,
@@ -942,29 +969,65 @@ async def check_user_status(user_id: str):
 # ==================== API ENDPOINTS ====================
 
 @enforcement_router.post("/enforcement/report")
-async def report_violation(request: ReportViolationRequest):
-    """Report a violation against a user."""
+async def report_violation(request: ReportViolationRequest, http_request: Request):
+    """Report a violation against a user. Caller must be authenticated."""
+    from security_advanced import verify_jwt_token
+    auth_header = http_request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        payload = verify_jwt_token(token)
+        caller_id = str(payload.get("sub") or "")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if not caller_id:
+        raise HTTPException(status_code=401, detail="Invalid token claims")
+    # reporter_id must match the authenticated caller (prevents impersonation)
+    if request.reporter_id and request.reporter_id != caller_id:
+        raise HTTPException(status_code=403, detail="reporter_id must match authenticated user")
     if request.violation_type not in VIOLATION_CONFIG:
         raise HTTPException(status_code=400, detail=f"Unknown violation type. Valid types: {', '.join(VIOLATION_CONFIG.keys())}")
     result = await record_violation(
         user_id=request.reported_user_id,
         violation_type=request.violation_type,
         trip_id=request.trip_id,
-        reporter_id=request.reporter_id,
+        reporter_id=caller_id,
         description=request.description,
     )
     return result
 
 
 @enforcement_router.get("/enforcement/status/{user_id}")
-async def get_enforcement_status(user_id: str):
-    """Check if user is allowed to use the app."""
+async def get_enforcement_status(user_id: str, http_request: Request):
+    """Check enforcement status. Users can only check their own status; admins can check any."""
+    from security_advanced import verify_jwt_token
+    auth_header = http_request.headers.get("Authorization", "")
+    token = auth_header.removeprefix("Bearer ").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    try:
+        payload = verify_jwt_token(token)
+        caller_id = str(payload.get("sub") or "")
+        caller_role = str(payload.get("role") or "rider")
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    if caller_role not in ("admin",) and caller_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only check your own enforcement status")
     return await check_user_status(user_id)
 
 
 @enforcement_router.get("/enforcement/book-status/{user_id}")
-async def get_book_status(user_id: str):
+async def get_book_status(user_id: str, http_request: Request):
     """Lightweight check — can this rider book right now? Returns countdown seconds if blocked."""
+    caller_id = require_authenticated(http_request)
+    try:
+        caller = await db.users.find_one({"id": caller_id}, {"role": 1})
+        caller_role = (caller or {}).get("role", "rider")
+    except Exception:
+        caller_role = "rider"
+    if caller_role not in ("admin",) and caller_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only check your own booking status")
     user = await db.users.find_one({"id": user_id}, {"_id": 0, "booking_blocked_until": 1, "block_reason": 1, "is_deactivated": 1, "suspended_until": 1})
     if not user:
         return {"can_book": True}
@@ -1005,8 +1068,16 @@ async def get_book_status(user_id: str):
 
 
 @enforcement_router.get("/enforcement/history/{user_id}")
-async def get_violation_history(user_id: str):
+async def get_violation_history(user_id: str, http_request: Request):
     """Get user's violation history."""
+    caller_id = require_authenticated(http_request)
+    try:
+        caller = await db.users.find_one({"id": caller_id}, {"role": 1})
+        caller_role = (caller or {}).get("role", "rider")
+    except Exception:
+        caller_role = "rider"
+    if caller_role not in ("admin",) and caller_id != user_id:
+        raise HTTPException(status_code=403, detail="You can only view your own violation history")
     violations = await db.violations.find(
         {"user_id": user_id}
     ).sort("created_at", -1).to_list(50)

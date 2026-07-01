@@ -152,43 +152,70 @@ def _flatten_data_for_expo(data: Optional[dict]) -> Optional[dict]:
     return out
 
 
+_EXPO_MAX_RETRIES = 2
+
+
 async def _send_expo_push(token: str, title: str, body: str, data: Optional[dict]) -> tuple[bool, bool]:
-    """Returns (success, should_invalidate_token)."""
+    """Returns (success, should_invalidate_token).
+
+    Retries transient network errors up to _EXPO_MAX_RETRIES times with
+    exponential back-off. Does NOT retry on definitive token errors.
+    """
     payload: dict = {
         "to": token,
         "title": title,
         "body": body,
         "sound": "default",
         "priority": "high",
+        "badge": 1,
     }
     if data:
         ch = data.get("channel_id") or data.get("android_channel")
         if ch:
             payload["channelId"] = str(ch)
+        # Forward badge count from data if explicitly set
+        badge_val = data.get("badge")
+        if badge_val is not None:
+            try:
+                payload["badge"] = int(badge_val)
+            except (TypeError, ValueError):
+                pass
         flat = _flatten_data_for_expo(data)
         if flat:
             payload["data"] = flat
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.post(EXPO_PUSH_URL, json=payload, timeout=15)
-            if resp.status_code != 200:
-                logger.warning("Expo push HTTP %s: %s", resp.status_code, resp.text[:200])
-                return False, False
-            body_json = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-            ticket_data = body_json.get("data") if isinstance(body_json, dict) else None
-            ticket = ticket_data if isinstance(ticket_data, dict) else {}
-            ticket_status = str(ticket.get("status") or "").lower()
-            ticket_details = ticket.get("details") if isinstance(ticket.get("details"), dict) else {}
-            if ticket_status == "error":
-                err = str(ticket.get("message") or "")
-                code = str(ticket_details.get("error") or "")
-                logger.warning("Expo ticket error: %s %s", err, code)
-                inv = code in {"DeviceNotRegistered", "InvalidCredentials"}
-                return False, inv
-            return True, False
-    except Exception as e:
-        logger.warning("Expo push error: %s", e)
-        return False, False
+
+    last_exc: Optional[Exception] = None
+    for attempt in range(_EXPO_MAX_RETRIES + 1):
+        if attempt > 0:
+            await asyncio.sleep(2 ** attempt)
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(EXPO_PUSH_URL, json=payload)
+                if resp.status_code != 200:
+                    logger.warning("Expo push HTTP %s attempt %s: %s", resp.status_code, attempt + 1, resp.text[:200])
+                    # 5xx — retryable; 4xx — not
+                    if resp.status_code < 500:
+                        return False, False
+                    last_exc = RuntimeError(f"HTTP {resp.status_code}")
+                    continue
+                body_json = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                ticket_data = body_json.get("data") if isinstance(body_json, dict) else None
+                ticket = ticket_data if isinstance(ticket_data, dict) else {}
+                ticket_status = str(ticket.get("status") or "").lower()
+                ticket_details = ticket.get("details") if isinstance(ticket.get("details"), dict) else {}
+                if ticket_status == "error":
+                    err = str(ticket.get("message") or "")
+                    code = str(ticket_details.get("error") or "")
+                    logger.warning("Expo ticket error: %s %s", err, code)
+                    inv = code in {"DeviceNotRegistered", "InvalidCredentials"}
+                    return False, inv
+                return True, False
+        except Exception as exc:
+            logger.warning("Expo push error attempt %s: %s", attempt + 1, exc)
+            last_exc = exc
+
+    logger.warning("Expo push failed after %s attempts: %s", _EXPO_MAX_RETRIES + 1, last_exc)
+    return False, False
 
 
 async def _send_fcm_native(token: str, title: str, body: str, data: Optional[dict]) -> bool:
@@ -251,6 +278,9 @@ async def send_to_token(
     return ok, "expo"
 
 
+_NOTIFICATION_EVENTS_TTL_DAYS = 30
+
+
 async def _record_event(
     user_id: str,
     title: str,
@@ -261,6 +291,8 @@ async def _record_event(
     extra: Optional[dict] = None,
 ) -> None:
     try:
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
         doc = {
             "id": str(uuid.uuid4()),
             "user_id": user_id,
@@ -269,7 +301,9 @@ async def _record_event(
             "body_preview": (body or "")[:160],
             "status": status,
             "source": source,
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": now.isoformat(),
+            # TTL index on this field: docs auto-deleted after 30 days.
+            "expires_at": now + timedelta(days=_NOTIFICATION_EVENTS_TTL_DAYS),
         }
         if extra:
             doc.update({k: v for k, v in extra.items() if v is not None})

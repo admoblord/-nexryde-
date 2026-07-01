@@ -33,6 +33,7 @@ export type RiderTripDisplayOpts = {
   paymentMethod?: string | null;
   paymentStatus?: string | null;
   tripStatus?: string | null;
+  financialPaymentPending?: boolean | null;
 };
 
 export function riderTripDisplayPhase(

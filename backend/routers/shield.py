@@ -253,7 +253,7 @@ async def admin_list_shield_disputes(
 ):
     """Admin: list all Shield cases, optionally filtered by status."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
     query: dict = {}
     if status and status in ("awaiting_response", "under_review", "resolved", "dismissed"):
         query["status"] = status
@@ -268,7 +268,7 @@ async def admin_list_shield_disputes(
 async def admin_get_shield_dispute(dispute_id: str, request: Request):
     """Admin: get single Shield case with full trip evidence."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
     d = await db.shield_disputes.find_one({"id": dispute_id}, {"_id": 0})
     if not d:
         raise HTTPException(status_code=404, detail="Case not found")
@@ -289,7 +289,7 @@ async def admin_resolve_shield_dispute(
 ):
     """Admin: record decision and resolve a Shield case."""
     from admin_guard import require_admin_request
-    require_admin_request(request)
+    await require_admin_request(request)
 
     if body.decision not in VALID_DECISIONS:
         raise HTTPException(status_code=400, detail=f"Invalid decision. Must be one of: {', '.join(sorted(VALID_DECISIONS))}")

@@ -6,7 +6,6 @@ import { FONT_SIZE, SHADOWS, tabIconActivePillBg, useThemeColors } from '@/src/c
 import { BRAND } from '@/src/constants/designSystem';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function TabLayout() {
   const storeReady = usePersistStoreReady();
@@ -41,7 +40,7 @@ export default function TabLayout() {
   );
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

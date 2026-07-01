@@ -24,7 +24,6 @@ import {
 } from '@/src/services/api';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 interface Message {
   id: string;
@@ -222,7 +221,7 @@ export default function AIAssistantScreen() {
   );
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Constants from 'expo-constants';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
+import { ProfileScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
 import {
   View,
   Text,
@@ -32,6 +34,7 @@ import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { DRIVER_TRIPS_TAB_HREF } from '@/src/constants/driverNavigation';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { sentryTestCrash } from '@/src/utils/sentry';
 
 const { width: W } = Dimensions.get('window');
 const TILE_W = (W - 48 - 12) / 2;
@@ -165,6 +168,7 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
    DRIVER PROFILE SCREEN
 ═══════════════════════════════════════════════════════════════ */
 export default function DriverProfileScreen() {
+  const toast = useErrorToast();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(16);
@@ -312,6 +316,16 @@ export default function DriverProfileScreen() {
   // Active vehicle
   const activeVehicle = driverVehicles.find(v => v.is_active || v.is_default) || driverVehicles[0] || null;
 
+  if (!user) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <StatusBar barStyle="light-content" backgroundColor="#060C14" />
+        <TabBrandStrip role="driver" />
+        <ProfileScreenSkeleton />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#060C14" />
@@ -436,23 +450,49 @@ export default function DriverProfileScreen() {
         </View>
 
         {/* ── SUBSCRIPTION STATUS CARD ── */}
-        <View style={[s.vehicleSection, { marginTop: 0 }]}>
-          <TouchableOpacity style={s.subCard} onPress={() => router.push('/driver/subscription')} activeOpacity={0.85}>
-            <LinearGradient
-              colors={isActiveSub ? ['rgba(251,191,36,0.08)', 'rgba(251,191,36,0.03)'] : ['rgba(100,116,139,0.06)', 'rgba(100,116,139,0.02)']}
-              style={s.subGrad}
-            >
-              <View style={[s.subIconWrap, { backgroundColor: isActiveSub ? 'rgba(251,191,36,0.12)' : 'rgba(71,85,105,0.12)' }]}>
-                <Ionicons name={isActiveSub ? 'star' : 'star-outline'} size={20} color={isActiveSub ? '#FBBF24' : '#475569'} />
-              </View>
-              <View style={s.subInfo}>
-                <Text style={s.subTitle}>{isActiveSub ? subLabel + ' · Active' : 'No Active Plan'}</Text>
-                <Text style={s.subSub}>{isActiveSub ? 'Tap to manage or upgrade plan' : 'Activate your driver plan'}</Text>
-              </View>
-              <Ionicons name="chevron-forward" size={16} color="#334155" />
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
+        {(() => {
+          const isOnTrial   = subStatus === 'trial' || (subscription as any)?.trial_active;
+          const trialDone   = Number((subscription as any)?.trial_trips_completed ?? (subscription as any)?.completed_trips ?? 0);
+          const trialTarget = Number((subscription as any)?.trial_trips_target ?? (subscription as any)?.trips_target ?? 20);
+          const trialLeft   = Math.max(0, trialTarget - trialDone);
+          const trialPct    = trialTarget > 0 ? Math.min(1, trialDone / trialTarget) : 0;
+          return (
+            <View style={[s.vehicleSection, { marginTop: 0 }]}>
+              <TouchableOpacity style={s.subCard} onPress={() => router.push('/driver/subscription')} activeOpacity={0.85}>
+                <LinearGradient
+                  colors={isActiveSub ? ['rgba(251,191,36,0.08)', 'rgba(251,191,36,0.03)'] : ['rgba(100,116,139,0.06)', 'rgba(100,116,139,0.02)']}
+                  style={s.subGrad}
+                >
+                  <View style={[s.subIconWrap, { backgroundColor: isActiveSub ? 'rgba(251,191,36,0.12)' : 'rgba(71,85,105,0.12)' }]}>
+                    <Ionicons name={isActiveSub ? 'star' : 'star-outline'} size={20} color={isActiveSub ? '#FBBF24' : '#475569'} />
+                  </View>
+                  <View style={s.subInfo}>
+                    <Text style={s.subTitle}>{isActiveSub ? subLabel + ' · Active' : 'No Active Plan'}</Text>
+                    {isOnTrial ? (
+                      <View style={{ gap: 4 }}>
+                        <Text style={[s.subSub, { color: '#FBBF24' }]}>
+                          Trial: {trialDone}/{trialTarget} trips · {trialLeft > 0 ? `${trialLeft} left` : 'Complete!'}
+                        </Text>
+                        {/* Trial progress bar */}
+                        <View style={{ height: 3, backgroundColor: 'rgba(251,191,36,0.2)', borderRadius: 2 }}>
+                          <View style={{
+                            height: 3,
+                            width: `${Math.round(trialPct * 100)}%` as any,
+                            backgroundColor: '#FBBF24',
+                            borderRadius: 2,
+                          }} />
+                        </View>
+                      </View>
+                    ) : (
+                      <Text style={s.subSub}>{isActiveSub ? 'Tap to manage or upgrade plan' : 'Activate your driver plan'}</Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#334155" />
+                </LinearGradient>
+              </TouchableOpacity>
+            </View>
+          );
+        })()}
 
         {/* ── QUICK ACTIONS GRID ── */}
         <View style={s.gridSection}>
@@ -462,7 +502,7 @@ export default function DriverProfileScreen() {
             <ActionTile icon="list" label="Trip History" gradColors={['#5B21B6', '#7C3AED']} onPress={() => router.push(DRIVER_TRIPS_TAB_HREF as any)} />
             <ActionTile icon="car-sport" label="My Vehicle" gradColors={['#065F46', '#059669']} onPress={() => router.push('/driver/vehicle')} />
             <ActionTile icon="document-text" label="Documents" gradColors={['#7C2D12', '#EA580C']} onPress={() => router.push('/driver/documents')} />
-            <ActionTile icon="wallet" label="Bank & Payout" gradColors={['#713F12', '#CA8A04']} onPress={() => router.push('/driver/bank')} />
+            <ActionTile icon="arrow-up-circle" label="Withdraw" gradColors={['#14532D', '#16A34A']} onPress={() => router.push('/driver/withdrawal')} />
             <ActionTile icon="analytics" label="Performance" gradColors={['#0C4A6E', '#0EA5E9']} onPress={() => router.push('/driver/performance')} />
           </View>
         </View>
@@ -570,8 +610,17 @@ export default function DriverProfileScreen() {
           <MenuRow icon="trash" gradColors={['#7f1d1d', '#991b1b']} title="Delete Account" subtitle="Permanently deactivate driver account" onPress={handleDelete} danger />
         </Section>
 
-        {/* ── VERSION & LOGOUT ── */}
-        <Text style={s.version}>NEXRYDE Driver v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        {/* ── VERSION & LOGOUT ── (long-press fires a deliberate Sentry test event) */}
+        <TouchableOpacity
+          activeOpacity={1}
+          delayLongPress={800}
+          onLongPress={() => {
+            const r = sentryTestCrash('driver');
+            Alert.alert(r.sent ? 'Sentry test sent' : 'Sentry not active', r.message);
+          }}
+        >
+          <Text style={s.version}>NEXRYDE Driver v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        </TouchableOpacity>
 
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
           <LinearGradient colors={['rgba(239,68,68,0.1)', 'rgba(239,68,68,0.05)']} style={s.logoutInner}>

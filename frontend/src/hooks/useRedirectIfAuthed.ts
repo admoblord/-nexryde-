@@ -5,29 +5,26 @@ import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
 
 /**
- * Auth screens (login, register): after persist hydration, send signed-in users
- * to the correct tab home or onboarding step instead of showing the form.
- *
- * @returns `true` when the screen should render (guest or still hydrating).
+ * Auth screens: after persist hydration, send signed-in users to home.
+ * Gates on identity only — never waits for JWT.
  */
 export function useRedirectIfAuthed(): boolean {
   const router = useRouter();
   const storeReady = usePersistStoreReady();
   const user = useAppStore((s) => s.user);
-  const token = useAppStore((s) => s.token);
   const isAuthenticated = useAppStore((s) => s.isAuthenticated);
   const redirectingRef = useRef(false);
 
   useEffect(() => {
-    if (!storeReady || !user?.id || !token || !isAuthenticated) return;
+    if (!storeReady || !user?.id || !isAuthenticated) return;
     if (redirectingRef.current) return;
     redirectingRef.current = true;
-    void routeAuthedUser(router, user, token).finally(() => {
+    void routeAuthedUser(router, user, null).finally(() => {
       redirectingRef.current = false;
     });
-  }, [storeReady, user?.id, user?.role, isAuthenticated, token, router]);
+  }, [storeReady, user?.id, user?.role, isAuthenticated, router]);
 
   if (!storeReady) return false;
-  if (user?.id && token && isAuthenticated) return false;
+  if (user?.id && isAuthenticated) return false;
   return true;
 }

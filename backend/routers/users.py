@@ -10,6 +10,8 @@ import base64
 import re
 
 from database import db
+from user_biometrics import save_user_biometrics, strip_blobs_from_user_update
+from user_lookup import find_user_by_id, PROFILE_API_PROJECTION, QUERY_MAX_TIME_MS
 from user_scores import build_trust_summary
 from nin_registry_verify import (
     verify_nin_with_full_name,
@@ -112,7 +114,7 @@ class RiderNinVerifyBody(BaseModel):
 @users_router.get("/users/{user_id}")
 async def get_user(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id})
+    user = await find_user_by_id(user_id, PROFILE_API_PROJECTION)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     user["_id"] = str(user["_id"])
@@ -122,7 +124,7 @@ async def get_user(user_id: str, request: Request):
 @users_router.get("/users/{user_id}/trust-summary")
 async def get_user_trust_summary(user_id: str, request: Request):
     verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id}, {"_id": 0})
+    user = await find_user_by_id(user_id, PROFILE_API_PROJECTION)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     driver_profile = None
@@ -440,11 +442,14 @@ async def upload_profile_picture(user_id: str, request: Request, body: ProfilePi
         raise HTTPException(status_code=404, detail="User not found")
     if not body.image:
         raise HTTPException(status_code=400, detail="Image data is required")
+    # Compress + normalise before persistence — saves ~70-85% MongoDB storage
+    from profile_image_compression import normalize_profile_image_upload
+    compressed_image = normalize_profile_image_upload(body.image)
     await db.users.update_one(
         {"id": user_id},
-        {"$set": {"profile_image": body.image, "profile_image_updated_at": datetime.now(timezone.utc).isoformat()}}
+        {"$set": {"profile_image": compressed_image, "profile_image_updated_at": datetime.now(timezone.utc).isoformat()}}
     )
-    return {"success": True, "message": "Profile picture updated successfully", "profile_image": body.image}
+    return {"success": True, "message": "Profile picture updated successfully", "profile_image": compressed_image}
 
 @users_router.get("/users/{user_id}/profile-picture")
 async def get_profile_picture(user_id: str, request: Request):
@@ -688,14 +693,19 @@ async def verify_face(user_id: str, payload: FaceVerificationRequest, http_reque
             raise HTTPException(status_code=400, detail="Could not complete biometric comparison.")
 
     now_iso = datetime.now(timezone.utc).isoformat()
-    set_doc = {
-        "face_image": payload.face_image,
+    await save_user_biometrics(
+        user_id,
+        face_image=payload.face_image,
+        face_liveness_score=liveness_score,
+        face_capture_meta=payload.capture_meta or {},
+        source="verify_face",
+    )
+    set_doc = strip_blobs_from_user_update({
         "face_verified": True,
         "face_verified_at": now_iso,
         "face_liveness_score": liveness_score,
-        "face_capture_meta": payload.capture_meta or {},
         "updated_at": now_iso,
-    }
+    })
 
     await db.users.update_one({"id": user_id}, {"$set": set_doc})
     return {

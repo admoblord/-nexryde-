@@ -10,7 +10,6 @@ import { updateUser } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -113,7 +112,7 @@ export default function EditProfileScreen() {
   };
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

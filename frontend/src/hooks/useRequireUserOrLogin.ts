@@ -4,20 +4,19 @@ import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 
 /**
- * Waits for persisted store rehydration, then requires `user.id`.
- * If missing after hydration, replaces with login.
- * @returns `true` when safe to render authenticated UI.
+ * Waits for persisted store rehydration, then requires identity.
+ * Token is loaded lazily by authedFetch — never gates render.
  */
 export function useRequireUserOrLogin(): boolean {
   const router = useRouter();
-  const storeReady = usePersistStoreReady();
+  const hasHydrated = usePersistStoreReady();
   const userId = useAppStore((s) => s.user?.id);
-  const token = useAppStore((s) => s.token);
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    if (!storeReady) return;
-    if (!userId || !token) router.replace('/(auth)/login');
-  }, [storeReady, userId, token, router]);
+    if (!hasHydrated) return;
+    if (!userId || !isAuthenticated) router.replace('/(auth)/login');
+  }, [hasHydrated, userId, isAuthenticated, router]);
 
-  return storeReady && !!userId && !!token;
+  return hasHydrated && !!userId && isAuthenticated;
 }

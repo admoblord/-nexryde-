@@ -18,7 +18,6 @@ import { useAppStore } from '@/src/store/appStore';
 import { getUserTrips, getUserLostItems, reportLostItem } from '@/src/services/api';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
 import { useRequireUserOrLogin } from '@/src/hooks/useRequireUserOrLogin';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function LostFoundScreen() {
   const router = useRouter();
@@ -98,7 +97,7 @@ export default function LostFoundScreen() {
   );
 
   if (!authed) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

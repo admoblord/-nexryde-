@@ -5,18 +5,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useThemeColors } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 export default function ProfileRedirectScreen() {
   const router = useRouter();
-  const storeReady = usePersistStoreReady();
+  const hasHydrated = usePersistStoreReady();
   const { colors } = useThemeColors();
   const user = useAppStore((s) => s.user);
-  const token = useAppStore((s) => s.token);
+  const isAuthenticated = useAppStore((s) => s.isAuthenticated);
 
   useEffect(() => {
-    if (!storeReady) return;
-    if (!user?.id || !token) {
+    if (!hasHydrated) return;
+    if (!user?.id || !isAuthenticated) {
       router.replace('/(auth)/login');
       return;
     }
@@ -25,11 +24,9 @@ export default function ProfileRedirectScreen() {
     } else {
       router.replace('/(rider-tabs)/rider-profile');
     }
-  }, [storeReady, user?.id, user?.role, token, router]);
+  }, [hasHydrated, user?.id, user?.role, isAuthenticated, router]);
 
-  if (!storeReady) {
-    return <AuthLoadingGate />;
-  }
+  if (!hasHydrated) return null;
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>

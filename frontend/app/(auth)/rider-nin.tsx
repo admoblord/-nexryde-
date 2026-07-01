@@ -14,8 +14,26 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+
+const D = {
+  bg: '#0D1420',
+  surface: '#19253F',
+  surfaceLight: '#243654',
+  green: '#00D084',
+  greenLight: '#4ADE80',
+  greenSoft: 'rgba(0,208,132,0.10)',
+  greenSoftBorder: 'rgba(0,208,132,0.30)',
+  blue: '#0066FF',
+  white: '#FFFFFF',
+  textPrimary: '#F0F4F8',
+  textSecondary: '#A8B8D0',
+  textMuted: '#6B7A94',
+  border: 'rgba(255,255,255,0.10)',
+  inputBg: 'rgba(13,20,32,0.70)',
+};
 import { useAppStore } from '@/src/store/appStore';
+import { setTokens } from '@/src/lib/tokenStore';
 import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { autoApplyPendingReferral, resolvePendingReferrer, type ReferrerInfo } from '@/src/services/referralService';
@@ -23,7 +41,7 @@ import { autoApplyPendingReferral, resolvePendingReferrer, type ReferrerInfo } f
 export default function RiderNINScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
-  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
   
   const [nin, setNin] = useState('');
   const [loading, setLoading] = useState(false);
@@ -79,7 +97,7 @@ export default function RiderNINScreen() {
       if (response.ok) {
         setUser(data.user);
         const resolvedToken = data?.token || data?.user?.token || null;
-        setToken(resolvedToken);
+        await setTokens(resolvedToken || '', data?.refresh_token);
         setIsAuthenticated(true);
         await saveUserSession({ ...data.user, token: resolvedToken });
         // Apply any deep-link referral after account creation (separate step)
@@ -131,19 +149,19 @@ export default function RiderNINScreen() {
             {/* Header */}
             <View style={styles.header}>
               <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-                <Ionicons name="arrow-back" size={24} color={COLORS.lightTextPrimary} />
+                <Ionicons name="arrow-back" size={24} color={D.textPrimary} />
               </TouchableOpacity>
             </View>
 
             {/* Icon */}
             <View style={styles.iconContainer}>
               <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                colors={[D.green, D.blue]}
                 style={styles.iconGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 1 }}
               >
-                <Ionicons name="shield-checkmark" size={48} color={COLORS.white} />
+                <Ionicons name="shield-checkmark" size={48} color={D.white} />
               </LinearGradient>
             </View>
 
@@ -184,7 +202,7 @@ export default function RiderNINScreen() {
 
             {/* Info Cards */}
             <View style={styles.infoCard}>
-              <Ionicons name="lock-closed" size={20} color={COLORS.accentGreen} />
+              <Ionicons name="lock-closed" size={20} color={D.green} />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoTitle}>Your data is secure</Text>
                 <Text style={styles.infoText}>
@@ -194,7 +212,7 @@ export default function RiderNINScreen() {
             </View>
 
             <View style={styles.infoCard}>
-              <Ionicons name="checkmark-circle" size={20} color={COLORS.accentGreen} />
+              <Ionicons name="checkmark-circle" size={20} color={D.green} />
               <View style={styles.infoTextContainer}>
                 <Text style={styles.infoTitle}>One-time verification</Text>
                 <Text style={styles.infoText}>
@@ -207,11 +225,11 @@ export default function RiderNINScreen() {
             <View style={styles.inputSection}>
               <Text style={styles.inputLabel}>National Identification Number (NIN)</Text>
               <View style={styles.inputContainer}>
-                <Ionicons name="card" size={20} color={COLORS.accentGreen} style={styles.inputIcon} />
+                <Ionicons name="card" size={20} color={D.green} style={styles.inputIcon} />
                 <TextInput
                   style={styles.textInput}
                   placeholder="Enter your 11-digit NIN"
-                  placeholderTextColor={COLORS.lightTextMuted}
+                  placeholderTextColor={D.textMuted}
                   value={nin}
                   onChangeText={(text) => setNin(formatNIN(text))}
                   keyboardType="number-pad"
@@ -227,19 +245,19 @@ export default function RiderNINScreen() {
             <View style={styles.whySection}>
               <Text style={styles.whyTitle}>Why do we need your NIN?</Text>
               <View style={styles.whyItem}>
-                <Ionicons name="shield-checkmark" size={16} color={COLORS.accentGreen} />
+                <Ionicons name="shield-checkmark" size={16} color={D.green} />
                 <Text style={styles.whyText}>Verify your identity as a Nigerian citizen</Text>
               </View>
               <View style={styles.whyItem}>
-                <Ionicons name="people" size={16} color={COLORS.accentGreen} />
+                <Ionicons name="people" size={16} color={D.green} />
                 <Text style={styles.whyText}>Build trust in the NEXRYDE community</Text>
               </View>
               <View style={styles.whyItem}>
-                <Ionicons name="warning" size={16} color={COLORS.accentGreen} />
+                <Ionicons name="warning" size={16} color={D.green} />
                 <Text style={styles.whyText}>Prevent fraud and enhance security</Text>
               </View>
               <View style={styles.whyItem}>
-                <Ionicons name="car" size={16} color={COLORS.accentGreen} />
+                <Ionicons name="car" size={16} color={D.green} />
                 <Text style={styles.whyText}>Comply with Nigerian ride-hailing regulations</Text>
               </View>
             </View>
@@ -253,7 +271,7 @@ export default function RiderNINScreen() {
               disabled={nin.length !== 11 || loading}
             >
               <LinearGradient
-                colors={nin.length !== 11 ? [COLORS.lightBorder, COLORS.lightBorder] : [COLORS.accentGreen, COLORS.accentBlue]}
+                colors={nin.length !== 11 ? ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.10)'] : [D.greenLight, D.green, D.blue]}
                 style={styles.continueGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -263,8 +281,8 @@ export default function RiderNINScreen() {
                 </Text>
               </LinearGradient>
             </TouchableOpacity>
-            <Text style={styles.secureText}>
-              <Ionicons name="lock-closed" size={12} color={COLORS.lightTextSecondary} />
+              <Text style={styles.secureText}>
+              <Ionicons name="lock-closed" size={12} color={D.textMuted} />
               {' '}Your information is encrypted and secure
             </Text>
           </View>
@@ -277,7 +295,7 @@ export default function RiderNINScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: D.bg,
   },
   safeArea: {
     flex: 1,
@@ -293,10 +311,14 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
   },
   backButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: D.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: D.border,
   },
   iconContainer: {
     alignItems: 'center',
@@ -312,13 +334,13 @@ const styles = StyleSheet.create({
   title: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     textAlign: 'center',
     marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     textAlign: 'center',
     marginBottom: SPACING.xl,
     lineHeight: 22,
@@ -326,11 +348,13 @@ const styles = StyleSheet.create({
   },
   infoCard: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
+    backgroundColor: D.surface,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.md,
     alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: D.border,
   },
   infoTextContainer: {
     flex: 1,
@@ -339,12 +363,12 @@ const styles = StyleSheet.create({
   infoTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     marginBottom: 2,
   },
   infoText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     lineHeight: 18,
   },
   inputSection: {
@@ -354,17 +378,17 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     marginBottom: SPACING.sm,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.white,
+    backgroundColor: D.inputBg,
     borderRadius: BORDER_RADIUS.xl,
     paddingHorizontal: SPACING.md,
     borderWidth: 2,
-    borderColor: COLORS.lightBorder,
+    borderColor: D.greenSoftBorder,
   },
   inputIcon: {
     marginRight: SPACING.sm,
@@ -374,25 +398,27 @@ const styles = StyleSheet.create({
     paddingVertical: SPACING.md,
     fontSize: FONT_SIZE.lg,
     fontWeight: '600',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     letterSpacing: 2,
   },
   helperText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextMuted,
+    color: D.textMuted,
     marginTop: SPACING.xs,
     marginLeft: SPACING.sm,
   },
   whySection: {
-    backgroundColor: COLORS.accentGreenSoft,
+    backgroundColor: D.greenSoft,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.lg,
     marginTop: SPACING.lg,
+    borderWidth: 1,
+    borderColor: D.greenSoftBorder,
   },
   whyTitle: {
     fontSize: FONT_SIZE.md,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     marginBottom: SPACING.md,
   },
   whyItem: {
@@ -402,24 +428,26 @@ const styles = StyleSheet.create({
   },
   whyText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     marginLeft: SPACING.sm,
     flex: 1,
   },
   bottomContainer: {
     paddingHorizontal: SPACING.lg,
     paddingVertical: SPACING.lg,
-    backgroundColor: COLORS.white,
+    backgroundColor: D.bg,
+    borderTopWidth: 1,
+    borderTopColor: D.border,
   },
   continueButton: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.sm,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowColor: D.green,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
   },
   continueButtonDisabled: {
     shadowOpacity: 0,
@@ -431,18 +459,18 @@ const styles = StyleSheet.create({
   },
   continueText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '800',
+    color: '#061A0F',
   },
   continueTextDisabled: {
-    color: COLORS.lightTextMuted,
+    color: D.textMuted,
   },
   secureText: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: D.textMuted,
     textAlign: 'center',
   },
-  // Invited-by banner
+  // Invited-by banner — purple referral, kept as-is (intentional accent)
   invitedByBanner: { marginTop: SPACING.lg, borderRadius: BORDER_RADIUS.xl, overflow: 'hidden' },
   invitedByGrad: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 14 },
   invitedByIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(167,139,250,0.2)', alignItems: 'center', justifyContent: 'center' },

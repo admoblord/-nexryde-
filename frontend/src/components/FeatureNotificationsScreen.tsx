@@ -248,9 +248,10 @@ export default function FeatureNotificationsScreen({ role }: Props) {
       </View>
 
       {loading ? (
-        <View style={styles.center}>
-          <ActivityIndicator size="large" color={COLORS.accentBlue} />
-        </View>
+        (() => {
+          const { TripHistorySkeleton } = require('@/src/components/shared/SkeletonLoader');
+          return <TripHistorySkeleton />;
+        })()
       ) : (
         <ScrollView
           contentContainerStyle={[

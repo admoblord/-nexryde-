@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useRedirectIfAuthed } from '@/src/hooks/useRedirectIfAuthed';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
   View,
   Text,
@@ -18,10 +18,32 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+import { SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
+
+// Dark brand palette — consistent with splash/login/onboarding
+const D = {
+  bg: '#0D1420',
+  surface: '#19253F',
+  surfaceLight: '#243654',
+  green: '#00D084',
+  greenLight: '#4ADE80',
+  greenSoft: 'rgba(0,208,132,0.10)',
+  greenSoftBorder: 'rgba(0,208,132,0.35)',
+  blue: '#0066FF',
+  gold: '#F59E0B',
+  goldSoft: 'rgba(245,158,11,0.10)',
+  goldSoftBorder: 'rgba(245,158,11,0.35)',
+  white: '#FFFFFF',
+  textPrimary: '#F0F4F8',
+  textSecondary: '#A8B8D0',
+  textMuted: '#6B7A94',
+  border: 'rgba(255,255,255,0.10)',
+  inputBg: 'rgba(13,20,32,0.70)',
+};
 import { DriverOnboardingProgress } from '@/src/components/DriverOnboardingProgress';
 
 export default function RegisterScreen() {
+  const toast = useErrorToast();
   const router = useRouter();
   const params = useLocalSearchParams();
   const canShowAuth = useRedirectIfAuthed();
@@ -55,7 +77,7 @@ export default function RegisterScreen() {
       const { BACKEND_URL } = await import('@/src/services/api');
       await Linking.openURL(`${BACKEND_URL}${path}`);
     } catch {
-      Alert.alert('Unable to open link', 'Please try again later.');
+      toast.show('Unable to open link. Please try again later.', 'error');
     }
   };
 
@@ -63,7 +85,7 @@ export default function RegisterScreen() {
 
   const handleContinue = () => {
     if (!name.trim()) {
-      Alert.alert('Almost there', 'Please enter your full name.');
+      toast.show('Please enter your full name.', 'warning');
       return;
     }
 
@@ -71,27 +93,23 @@ export default function RegisterScreen() {
     if (selectedRole === 'driver' && emailTrim) {
       const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailTrim);
       if (!valid) {
-        Alert.alert('Check email', 'That email address does not look valid. Fix it or clear the field to continue.');
+        toast.show('That email address does not look valid. Fix it or clear the field to continue.', 'warning');
         return;
       }
     }
     
     const isEmailAuth = authType === 'email';
     if (!isGoogleAuth && !isEmailAuth && !phoneNumber.trim()) {
-      // Phone OTP sign-up path — email-only sign-up uses email + OTP and does not require a line here.
-      Alert.alert('Phone required', 'Enter your Nigerian mobile number so we can reach your account.');
+      toast.show('Enter your Nigerian mobile number so we can reach your account.', 'warning');
       return;
     }
 
-    // Drivers: Nigerian phone is required before terms — account, safety, SMS recovery, and payouts.
+    // Drivers: Nigerian phone is required — stored for rider contact and NexRyde records.
     if (selectedRole === 'driver') {
       const rawPhone = (phone ? String(phone) : phoneNumber).trim();
       const np = normalizePhone(rawPhone);
       if (!/^\+234\d{10}$/.test(np)) {
-        Alert.alert(
-          'Phone required',
-          'Enter a valid Nigerian mobile number (10 digits after +234). This is part of driver registration.',
-        );
+        toast.show('Enter a valid Nigerian mobile number (10 digits after +234). This is part of driver registration.', 'warning');
         return;
       }
     }
@@ -126,7 +144,7 @@ export default function RegisterScreen() {
   };
 
   if (!canShowAuth) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (
@@ -149,12 +167,12 @@ export default function RegisterScreen() {
                 />
               ) : (
                 <LinearGradient
-                  colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                  colors={[D.green, D.blue]}
                   style={styles.logoGradient}
                   start={{ x: 0, y: 0 }}
                   end={{ x: 1, y: 1 }}
                 >
-                  <Ionicons name="car-sport" size={32} color={COLORS.white} />
+                  <Ionicons name="car-sport" size={32} color={D.white} />
                 </LinearGradient>
               )}
             </View>
@@ -225,7 +243,7 @@ export default function RegisterScreen() {
               <TextInput
                 style={styles.textInput}
                 placeholder="Enter your full name"
-                placeholderTextColor={COLORS.lightTextMuted}
+                placeholderTextColor={D.textMuted}
                 value={name}
                 onChangeText={setName}
               />
@@ -242,7 +260,7 @@ export default function RegisterScreen() {
                     <TextInput
                       style={styles.phoneInput}
                       placeholder="801 234 5678"
-                      placeholderTextColor={COLORS.lightTextMuted}
+                      placeholderTextColor={D.textMuted}
                       value={phoneNumber}
                       onChangeText={setPhoneNumber}
                       keyboardType="phone-pad"
@@ -259,7 +277,7 @@ export default function RegisterScreen() {
                   <TextInput
                     style={styles.textInput}
                     placeholder="Enter your email"
-                    placeholderTextColor={COLORS.lightTextMuted}
+                    placeholderTextColor={D.textMuted}
                     value={email}
                     onChangeText={setEmail}
                     keyboardType="email-address"
@@ -273,9 +291,9 @@ export default function RegisterScreen() {
                 <>
                   <Text style={styles.inputLabel}>Email</Text>
                   <View style={styles.readOnlyInput}>
-                    <Ionicons name="logo-google" size={18} color={COLORS.accentGreen} style={{ marginRight: 8 }} />
+                    <Ionicons name="logo-google" size={18} color={D.green} style={{ marginRight: 8 }} />
                     <Text style={styles.readOnlyText}>{googleEmail}</Text>
-                    <Ionicons name="checkmark-circle" size={18} color={COLORS.success} />
+                    <Ionicons name="checkmark-circle" size={18} color={D.green} />
                   </View>
                 </>
               )}
@@ -289,7 +307,7 @@ export default function RegisterScreen() {
               onPress={handleContinue}
             >
               <LinearGradient
-                colors={[COLORS.accentGreen, COLORS.accentBlue]}
+                colors={[D.greenLight, D.green, D.blue]}
                 style={styles.continueGradient}
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
@@ -314,7 +332,7 @@ export default function RegisterScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: COLORS.lightBackground,
+    backgroundColor: D.bg,
   },
   safeArea: {
     flex: 1,
@@ -342,18 +360,18 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     borderWidth: 3,
-    borderColor: COLORS.accentGreen,
+    borderColor: D.green,
   },
   title: {
     fontSize: FONT_SIZE.xxl,
     fontWeight: '800',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     textAlign: 'center',
     marginBottom: SPACING.xs,
   },
   subtitle: {
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     textAlign: 'center',
     marginBottom: SPACING.xl,
   },
@@ -364,25 +382,25 @@ const styles = StyleSheet.create({
   },
   roleCard: {
     flex: 1,
-    backgroundColor: COLORS.white,
+    backgroundColor: D.surface,
     borderRadius: BORDER_RADIUS.xxl,
     padding: SPACING.md,
     borderWidth: 2,
-    borderColor: COLORS.lightBorder,
+    borderColor: D.border,
   },
   roleCardActive: {
-    borderColor: COLORS.accentGreen,
-    backgroundColor: COLORS.accentGreenSoft,
+    borderColor: D.green,
+    backgroundColor: D.greenSoft,
   },
   roleCardDriver: {
-    borderColor: COLORS.gold,
-    backgroundColor: COLORS.warningSoft,
+    borderColor: D.gold,
+    backgroundColor: D.goldSoft,
   },
   premiumBadge: {
     position: 'absolute',
     top: SPACING.sm,
     right: SPACING.sm,
-    backgroundColor: COLORS.gold,
+    backgroundColor: D.gold,
     paddingHorizontal: SPACING.sm,
     paddingVertical: 2,
     borderRadius: BORDER_RADIUS.sm,
@@ -390,32 +408,32 @@ const styles = StyleSheet.create({
   premiumText: {
     fontSize: FONT_SIZE.xxs,
     fontWeight: '700',
-    color: COLORS.white,
+    color: '#061A0F',
   },
   radioOuter: {
     width: 24,
     height: 24,
     borderRadius: 12,
     borderWidth: 2,
-    borderColor: COLORS.lightBorder,
+    borderColor: D.border,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: SPACING.md,
   },
   radioOuterActive: {
-    borderColor: COLORS.accentGreen,
+    borderColor: D.green,
   },
   radioOuterDriver: {
-    borderColor: COLORS.gold,
+    borderColor: D.gold,
   },
   radioInner: {
     width: 12,
     height: 12,
     borderRadius: 6,
-    backgroundColor: COLORS.accentGreen,
+    backgroundColor: D.green,
   },
   radioInnerDriver: {
-    backgroundColor: COLORS.gold,
+    backgroundColor: D.gold,
   },
   roleInfo: {
     marginBottom: SPACING.sm,
@@ -423,37 +441,37 @@ const styles = StyleSheet.create({
   roleTitle: {
     fontSize: FONT_SIZE.lg,
     fontWeight: '700',
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
   },
   roleTitleActive: {
-    color: COLORS.accentGreen,
+    color: D.green,
   },
   roleTitleDriver: {
-    color: COLORS.gold,
+    color: D.gold,
   },
   rolePrice: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '700',
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
   },
   rolePriceActive: {
-    color: COLORS.accentGreen,
+    color: D.green,
   },
   rolePriceDriver: {
-    color: COLORS.gold,
+    color: D.gold,
   },
   roleFeatures: {
     gap: 4,
   },
   roleFeature: {
     fontSize: FONT_SIZE.xs,
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
   },
   roleFeatureActive: {
-    color: COLORS.accentGreenDark,
+    color: 'rgba(0,208,132,0.85)',
   },
   roleFeatureDriver: {
-    color: COLORS.warning,
+    color: 'rgba(245,158,11,0.85)',
   },
   inputSection: {
     marginBottom: SPACING.lg,
@@ -461,36 +479,36 @@ const styles = StyleSheet.create({
   inputLabel: {
     fontSize: FONT_SIZE.sm,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
     marginBottom: SPACING.sm,
   },
   textInput: {
-    backgroundColor: COLORS.white,
+    backgroundColor: D.inputBg,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: D.border,
     marginBottom: SPACING.md,
   },
   phoneInputContainer: {
     flexDirection: 'row',
-    backgroundColor: COLORS.white,
+    backgroundColor: D.inputBg,
     borderRadius: BORDER_RADIUS.xl,
     borderWidth: 1,
-    borderColor: COLORS.lightBorder,
+    borderColor: D.border,
     marginBottom: SPACING.md,
     overflow: 'hidden',
   },
   phonePrefixContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
+    backgroundColor: D.surface,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     borderRightWidth: 1,
-    borderRightColor: COLORS.lightBorder,
+    borderRightColor: D.border,
   },
   phoneFlag: {
     fontSize: 20,
@@ -499,41 +517,47 @@ const styles = StyleSheet.create({
   phonePrefix: {
     fontSize: FONT_SIZE.md,
     fontWeight: '600',
-    color: COLORS.lightTextSecondary,
+    color: D.textSecondary,
   },
   phoneInput: {
     flex: 1,
     paddingHorizontal: SPACING.md,
     paddingVertical: SPACING.md,
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
   },
   readOnlyInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.lightSurface,
+    backgroundColor: D.surfaceLight,
     borderRadius: BORDER_RADIUS.xl,
     padding: SPACING.md,
     marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: D.border,
   },
   readOnlyText: {
     flex: 1,
     fontSize: FONT_SIZE.md,
-    color: COLORS.lightTextPrimary,
+    color: D.textPrimary,
   },
   bottomContainer: {
     paddingHorizontal: SPACING.lg,
     paddingBottom: SPACING.lg,
+    backgroundColor: D.bg,
+    borderTopWidth: 1,
+    borderTopColor: D.border,
   },
   continueButton: {
     borderRadius: BORDER_RADIUS.xl,
     overflow: 'hidden',
     marginBottom: SPACING.md,
-    shadowColor: COLORS.accentGreen,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 6,
+    marginTop: SPACING.md,
+    shadowColor: D.green,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.35,
+    shadowRadius: 16,
+    elevation: 8,
   },
   continueGradient: {
     paddingVertical: SPACING.lg,
@@ -541,17 +565,17 @@ const styles = StyleSheet.create({
   },
   continueText: {
     fontSize: FONT_SIZE.md,
-    fontWeight: '700',
-    color: COLORS.white,
+    fontWeight: '800',
+    color: '#061A0F',
   },
   termsText: {
     fontSize: FONT_SIZE.sm,
-    color: COLORS.lightTextSecondary,
+    color: D.textMuted,
     textAlign: 'center',
     lineHeight: 20,
   },
   termsLink: {
-    color: COLORS.accentGreen,
+    color: D.green,
     fontWeight: '600',
   },
 });

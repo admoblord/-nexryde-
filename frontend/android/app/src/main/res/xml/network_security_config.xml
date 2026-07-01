@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  NexRyde Network Security Config
+  ================================
+  - All traffic MUST be HTTPS (no cleartext HTTP allowed in release builds)
+  - Only system-trusted CAs are accepted; user-installed CAs are rejected
+    (prevents MITM attacks on rooted/enterprise devices)
+  - Debug builds may still connect to localhost for Metro bundler
+-->
+<network-security-config>
+
+  <!-- Production: only system CAs, no cleartext -->
+  <base-config cleartextTrafficPermitted="false">
+    <trust-anchors>
+      <certificates src="system"/>
+    </trust-anchors>
+  </base-config>
+
+  <!-- Allow localhost HTTP only in debug builds (Metro / Expo dev server) -->
+  <debug-overrides>
+    <trust-anchors>
+      <certificates src="system"/>
+      <certificates src="user"/>
+    </trust-anchors>
+  </debug-overrides>
+
+  <!-- Expo dev tooling domains – cleartext only in debug, ignored in release -->
+  <domain-config cleartextTrafficPermitted="true">
+    <domain includeSubdomains="true">localhost</domain>
+    <domain includeSubdomains="true">10.0.2.2</domain>
+  </domain-config>
+
+</network-security-config>

@@ -17,9 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS } from '@/src/constants/theme';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders, formatApiDetail } from '@/src/services/api';
+import { setTokens } from '@/src/lib/tokenStore';
+import { formatApiDetail } from '@/src/services/api';
 import { saveUserSession } from '@/utils/authStorage';
 import { routeAuthedUser } from '@/src/utils/routeAuthedUser';
+import { postPublicJson, publicFetch, publicFetchErrorMessage } from '@/src/utils/publicApi';
+import { warmBackendConnection } from '@/src/utils/warmBackend';
 
 export default function VerifyScreen() {
   const router = useRouter();
@@ -27,7 +30,7 @@ export default function VerifyScreen() {
     phone: string; 
     pin_id: string;
   }>();
-  const { setUser, setToken, setIsAuthenticated } = useAppStore();
+  const { setUser, setIsAuthenticated } = useAppStore();
   
   const [otp, setOtp] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,6 +47,10 @@ export default function VerifyScreen() {
   };
 
   // Countdown timer for resend
+  useEffect(() => {
+    warmBackendConnection(true);
+  }, []);
+
   useEffect(() => {
     if (resendTimer > 0) {
       const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
@@ -64,60 +71,36 @@ export default function VerifyScreen() {
     }
 
     setLoading(true);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      setLoading(false);
-      Alert.alert('Connection Timeout', 'Verification request timed out. Please try again.');
-    }, 15000);
     try {
       const normalizedPhone = normalizePhone(phone || '');
-      const response = await fetch(`${BACKEND_URL}/api/auth/verify-otp`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ 
-          phone: normalizedPhone,
-          otp: otp,
-          pin_id: pin_id || undefined
-        }),
-        signal: controller.signal,
+      const { res, data } = await postPublicJson<Record<string, unknown>>('/auth/verify-otp', {
+        phone: normalizedPhone,
+        otp: otp,
+        pin_id: pin_id || undefined,
       });
 
-      const text = await response.text();
-      let data: any = {};
-      try {
-        data = text ? JSON.parse(text) : {};
-      } catch {
-        data = { detail: text || 'Invalid server response' };
-      }
-      
-      if (!response.ok) {
+      if (!res.ok) {
         const msg = formatApiDetail(data?.detail) || 'Verification failed';
         throw new Error(msg);
       }
       
       if (data.is_new_user) {
-        // New user - go to registration
         router.push({
           pathname: '/(auth)/register',
           params: { phone }
         });
       } else {
-        // Existing user - log them in
-        setUser(data.user);
-        const resolvedToken = data?.token || data?.user?.token || null;
-        setToken(resolvedToken);
+        setUser(data.user as import('@/src/store/appStore').User);
+        const resolvedToken = (data?.token || (data?.user as Record<string, unknown> | undefined)?.token || null) as string | null;
+        await setTokens(resolvedToken || '', data?.refresh_token as string | undefined);
         setIsAuthenticated(true);
-        await saveUserSession({ ...data.user, token: resolvedToken });
-        await routeVerifiedUser(data.user, resolvedToken);
+        await saveUserSession({ ...(data.user as object), token: resolvedToken });
+        await routeVerifiedUser(data.user as import('@/src/store/appStore').User, resolvedToken);
       }
-    } catch (error: any) {
-      if (error?.name === 'AbortError') {
-        return;
-      }
-      Alert.alert('Verification Failed', error.message || 'Please check the code and try again');
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : publicFetchErrorMessage(error);
+      Alert.alert('Verification Failed', message);
     } finally {
-      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
@@ -128,22 +111,14 @@ export default function VerifyScreen() {
     setCanResend(false);
     setResendTimer(60);
     
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-      setCanResend(true);
-      Alert.alert('Connection Timeout', 'Resend request timed out. Please try again.');
-    }, 15000);
-
     try {
       const normalizedPhone = normalizePhone(phone || '');
-      const response = await fetch(`${BACKEND_URL}/api/auth/send-otp`, {
+      const res = await publicFetch('/auth/send-otp', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: normalizedPhone }),
-        signal: controller.signal,
       });
-      const raw = await response.text();
+      const raw = await res.text();
       let data: Record<string, unknown> = {};
       try {
         data = raw ? JSON.parse(raw) : {};
@@ -151,21 +126,16 @@ export default function VerifyScreen() {
         data = {};
       }
 
-      if (response.ok) {
+      if (res.ok) {
         Alert.alert('Code sent', 'A new verification code was sent to your phone.');
       } else {
         const msg = formatApiDetail(data?.detail) || 'Could not resend the code. Try again shortly.';
         Alert.alert('Resend failed', msg);
         setCanResend(true);
       }
-    } catch (error: any) {
-      if (error?.name === 'AbortError') {
-        return;
-      }
-      Alert.alert('Error', 'Failed to resend code. Please try again.');
+    } catch (error: unknown) {
+      Alert.alert('Error', publicFetchErrorMessage(error));
       setCanResend(true);
-    } finally {
-      clearTimeout(timeoutId);
     }
   };
 

@@ -14,7 +14,11 @@ import {
 } from '@/src/constants/pushNotificationRouting';
 import { normalizeExpoPushData } from '@/src/utils/expoPushData';
 
-/** Single handler for foreground presentation (must stay one place — see `notifications.ts`). */
+/**
+ * Global foreground notification handler.
+ * ALL notifications show as banners in the notification bar.
+ * Sound plays for urgent ride events and engagement offers; silent for others.
+ */
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const data = normalizeExpoPushData(
@@ -22,12 +26,14 @@ Notifications.setNotificationHandler({
     );
     const t = typeof data?.type === 'string' ? data.type : '';
     const isPrayerAlert = typeof data?.prayerName === 'string';
+    // Engagement/offer notifications also play sound so they get attention
+    const isEngagement = t === 'earnings_update' || t === 'feature_update' || t === 'engagement';
     const urgent = URGENT_PUSH_TYPES.has(t) || isPrayerAlert;
     return {
       shouldShowAlert: true,
       shouldShowBanner: true,
       shouldShowList: true,
-      shouldPlaySound: urgent,
+      shouldPlaySound: urgent || isEngagement,
       shouldSetBadge: true,
     };
   },
@@ -69,6 +75,17 @@ export function useNotifications() {
         await syncAndNotifyNewFeatures(user?.role ?? 'rider');
       } catch {}
     })();
+
+    // Cold-start: handle tap on a notification that opened the app from terminated state
+    void Notifications.getLastNotificationResponseAsync().then((lastResponse) => {
+      if (!lastResponse) return;
+      const raw = normalizeExpoPushData(
+        lastResponse.notification.request.content.data as Record<string, unknown> | undefined
+      );
+      const u = userRef.current;
+      const target = raw ? resolvePushNotificationRoute(raw, { role: u?.role }) : null;
+      if (target) router.push(target as any);
+    });
 
     responseListener.current = Notifications.addNotificationResponseReceivedListener((response) => {
       const raw = normalizeExpoPushData(

@@ -14,7 +14,6 @@ import { askSupportVoiceBot, getSupportContacts, reportTripIssue } from '@/src/s
 import { useAppStore } from '@/src/store/appStore';
 import { usePersistStoreReady } from '@/src/hooks/usePersistStoreReady';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
-import { AuthLoadingGate } from '@/src/components/AuthLoadingGate';
 
 function SupportVoiceHandler({
   onListeningStart,
@@ -276,7 +275,7 @@ export default function SupportScreen() {
   };
 
   if (!storeReady) {
-    return <AuthLoadingGate />;
+    return null;
   }
 
   return (

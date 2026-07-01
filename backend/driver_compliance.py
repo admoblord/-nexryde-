@@ -14,6 +14,7 @@ import logging
 import asyncio
 
 from database import db
+from user_biometrics import get_reference_face_image
 from push_notifications import send_push_notification
 
 logger = logging.getLogger(__name__)
@@ -31,6 +32,11 @@ DOCUMENT_NAMES = {
     "road_worthiness": "Road Worthiness Certificate",
     "insurance": "Vehicle Insurance",
 }
+
+# Never pull base64 blobs — driver_documents can be multi-MB per driver.
+DOC_EXPIRY_PROJECTION: dict[str, int] = {"_id": 0}
+for _doc_key in DOCUMENT_NAMES:
+    DOC_EXPIRY_PROJECTION[f"documents.{_doc_key}.expiry_date"] = 1
 
 
 def parse_expiry(expiry_str: str) -> Optional[datetime]:
@@ -52,7 +58,13 @@ def parse_expiry(expiry_str: str) -> Optional[datetime]:
 
 async def check_driver_document_expiry(driver_id: str):
     """Check all documents for a driver and return expiry status."""
-    doc_record = await db.driver_documents.find_one({"driver_id": driver_id})
+    from user_lookup import QUERY_MAX_TIME_MS
+
+    doc_record = await db.driver_documents.find_one(
+        {"driver_id": driver_id},
+        DOC_EXPIRY_PROJECTION,
+        max_time_ms=QUERY_MAX_TIME_MS,
+    )
     if not doc_record:
         return {"compliant": False, "reason": "No documents on file", "expired": [], "expiring_soon": []}
 
@@ -296,7 +308,7 @@ async def live_face_verification(driver_id: str, request: MonthlyPhotoUpload):
     if not profile:
         raise HTTPException(status_code=404, detail="Driver profile not found")
 
-    stored_face = profile.get("face_image")
+    stored_face = await get_reference_face_image(driver_id)
     if not stored_face:
         now = datetime.now(timezone.utc)
         month_key = now.strftime("%Y-%m")

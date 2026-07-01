@@ -46,3 +46,18 @@ export function riderTripEtaFallbackPollMs(wsConnected: boolean): number {
 export function driverOffersFallbackPollIntervalMs(wsConnected: boolean): number {
   return wsConnected ? 90000 : 8000;
 }
+
+// ── Rider live-tracking display throttle constants ────────────────────────────
+// Consumed by LiveTrackingScreen and useRiderTrackingSession.
+
+/** Throttle interval for updating displayed ETA / distance on the tracking UI (ms). */
+export const RIDER_TRACKING_DISPLAY_THROTTLE_MS = 2000;
+
+/** Throttle interval for committing rider location to backend during a trip (ms). */
+export const RIDER_TRACKING_LOCATION_THROTTLE_MS = 4000;
+
+/** Duration after which a GPS fix is considered stale and triggers a warning (ms). */
+export const RIDER_TRACKING_GPS_STALE_MS = 15000;
+
+/** Client-side ETA countdown tick interval (ms). */
+export const RIDER_TRACKING_CLIENT_ETA_MS = 1000;

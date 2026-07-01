@@ -253,12 +253,12 @@ const NativeMap: React.FC<MapComponentProps> = ({
 };
 
 /* ─── Exported component ──────────────────────────────────────── */
-export const MapComponent: React.FC<MapComponentProps> = (props) => {
+export const MapComponent: React.FC<MapComponentProps> = React.memo((props) => {
   if (Platform.OS === 'web') {
     return <WebPlaceholder {...props} />;
   }
   return <NativeMap {...props} />;
-};
+});
 
 export const MapPlaceholder: React.FC<{ style?: any }> = ({ style }) => (
   <View style={[styles.placeholder, style]}>

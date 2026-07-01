@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { BACKEND_URL } from '@/src/services/api';
+import { getValidToken } from '@/src/lib/tokenStore';
 
 export function getBackendWsBaseUrl(): string {
   const url = BACKEND_URL.replace(/\/$/, '');
@@ -13,7 +14,6 @@ export type RiderTripWsMessage = {
   trip_id?: string;
   status?: string;
   trip?: Record<string, unknown>;
-  /** Present on some pushes when driver GPS was merged for the rider map. */
   driver_location?: {
     lat: number;
     lng: number;
@@ -33,21 +33,18 @@ export type RiderTripWsMessage = {
 
 type Options = {
   riderId: string | undefined;
-  token: string | null | undefined;
-  /** When false, socket is closed and reconnect timers cleared. */
+  /** @deprecated Token is resolved internally via getValidToken. */
+  token?: string | null;
   enabled: boolean;
-  /** If set, only `trip_update` messages for this trip id are delivered. */
   watchTripId?: string | null;
   onTripUpdate: (msg: RiderTripWsMessage) => void;
 };
 
 /**
- * Single WebSocket to `/api/ws/rider/trips/{riderId}` with JWT query param.
- * Exponential backoff reconnect while `enabled` stays true.
+ * WebSocket to `/api/ws/rider/trips/{riderId}` — token fetched lazily on connect.
  */
 export function useRiderTripRealtime({
   riderId,
-  token,
   enabled,
   watchTripId,
   onTripUpdate,
@@ -56,6 +53,7 @@ export function useRiderTripRealtime({
   const attemptRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const enabledRef = useRef(enabled);
   const watchRef = useRef(watchTripId);
   const cbRef = useRef(onTripUpdate);
@@ -64,7 +62,7 @@ export function useRiderTripRealtime({
   cbRef.current = onTripUpdate;
 
   useEffect(() => {
-    if (!enabled || !riderId || !token) {
+    if (!enabled || !riderId) {
       setConnected(false);
       if (timerRef.current) {
         clearTimeout(timerRef.current);
@@ -87,11 +85,11 @@ export function useRiderTripRealtime({
       if (cancelled || !enabledRef.current) return;
       const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(attemptRef.current, 6)));
       attemptRef.current += 1;
-      timerRef.current = setTimeout(() => connect(), delay);
+      timerRef.current = setTimeout(() => void connect(), delay);
     };
 
-    const connect = () => {
-      if (cancelled || !enabledRef.current || !riderId || !token) return;
+    const connect = async () => {
+      if (cancelled || !enabledRef.current || !riderId) return;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -105,8 +103,11 @@ export function useRiderTripRealtime({
         wsRef.current = null;
       }
 
+      const liveToken = await getValidToken();
+      if (!liveToken || cancelled || !enabledRef.current) return;
+
       const base = getBackendWsBaseUrl();
-      const wsUrl = `${base}/api/ws/rider/trips/${encodeURIComponent(riderId)}?token=${encodeURIComponent(token)}`;
+      const wsUrl = `${base}/api/ws/rider/trips/${encodeURIComponent(riderId)}?token=${encodeURIComponent(liveToken)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
@@ -114,6 +115,16 @@ export function useRiderTripRealtime({
         if (cancelled) return;
         attemptRef.current = 0;
         setConnected(true);
+        if (pingRef.current) clearInterval(pingRef.current);
+        pingRef.current = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            try {
+              ws.send(JSON.stringify({ type: 'ping' }));
+            } catch {
+              /* ignore */
+            }
+          }
+        }, 30_000);
       };
 
       ws.onmessage = (event) => {
@@ -129,6 +140,10 @@ export function useRiderTripRealtime({
       };
 
       ws.onclose = () => {
+        if (pingRef.current) {
+          clearInterval(pingRef.current);
+          pingRef.current = null;
+        }
         if (cancelled) return;
         setConnected(false);
         wsRef.current = null;
@@ -136,14 +151,17 @@ export function useRiderTripRealtime({
       };
     };
 
-    connect();
+    void connect();
 
     return () => {
       cancelled = true;
-      setConnected(false);
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
+      }
+      if (pingRef.current) {
+        clearInterval(pingRef.current);
+        pingRef.current = null;
       }
       if (wsRef.current) {
         try {
@@ -153,8 +171,9 @@ export function useRiderTripRealtime({
         }
         wsRef.current = null;
       }
+      setConnected(false);
     };
-  }, [enabled, riderId, token]);
+  }, [enabled, riderId]);
 
   return { connected };
 }

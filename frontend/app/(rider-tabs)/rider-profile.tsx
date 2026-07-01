@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import Constants from 'expo-constants';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
+import { ProfileScreenSkeleton } from '@/src/components/shared/SkeletonLoader';
 import {
   View,
   Text,
@@ -21,6 +23,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useAppStore } from '@/src/store/appStore';
 import { BACKEND_URL, deleteUserAccount, getUser, getUserTrustSummary, getAuthHeaders, updateUser } from '@/src/services/api';
 import { buildInviteUrl, buildShareMessage } from '@/src/services/referralService';
+import { sentryTestCrash } from '@/src/utils/sentry';
 import { shareTextViaWhatsApp } from '@/src/services/socialWhatsApp';
 import {
   buildAchievementWhatsAppMessage,
@@ -45,8 +48,8 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
 function StatChip({ value, label, color }: { value: string; label: string; color: string }) {
   return (
     <View style={s.statChip}>
-      <Text style={[s.statValue, { color }]}>{value}</Text>
-      <Text style={s.statLabel}>{label}</Text>
+      <Text style={[s.statValue, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.6}>{value}</Text>
+      <Text style={s.statLabel} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
@@ -175,7 +178,7 @@ function MenuRow({
       {badge ? (
         <View style={s.menuBadge}><Text style={s.menuBadgeText}>{badge}</Text></View>
       ) : (
-        <Ionicons name="chevron-forward" size={16} color="#334155" />
+        <Ionicons name="chevron-forward" size={16} color="#475569" />
       )}
     </TouchableOpacity>
   );
@@ -210,6 +213,7 @@ function ScoreBar({ label, value, color }: { label: string; value: number; color
    MAIN SCREEN
 ═══════════════════════════════════════════════════════════════ */
 export default function RiderProfileScreen() {
+  const toast = useErrorToast();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const tabPad = useTabBottomPad(16);
@@ -412,6 +416,16 @@ export default function RiderProfileScreen() {
     void shareTextViaWhatsApp(buildShareMessage(referralUsername || undefined, referralCode, displayName || undefined));
   };
 
+  if (!user) {
+    return (
+      <SafeAreaView style={s.root} edges={['top']}>
+        <StatusBar barStyle="light-content" backgroundColor="#080E17" />
+        <TabBrandStrip role="rider" />
+        <ProfileScreenSkeleton />
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.root} edges={['top']}>
       <StatusBar barStyle="light-content" backgroundColor="#080E17" />
@@ -430,32 +444,38 @@ export default function RiderProfileScreen() {
         ]}
       >
         {/* ── HERO ── */}
-        <LinearGradient colors={['#0A0F1A', '#111827', '#0A1628']} style={s.hero}>
-          {/* Top right settings shortcut */}
-          <TouchableOpacity
-            style={s.heroSettings}
-            onPress={() => router.push('/settings')}
-            accessibilityRole="button"
-            accessibilityLabel="Open settings"
-          >
-            <Ionicons name="settings-outline" size={20} color="#E2E8F0" />
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.heroEdit}
-            onPress={() => router.push('/edit-profile')}
-            accessibilityRole="button"
-            accessibilityLabel="Edit profile"
-          >
-            <Ionicons name="create-outline" size={20} color="#E2E8F0" />
-          </TouchableOpacity>
+        <LinearGradient colors={['#0A1628', '#0D1A2E', '#091320']} style={s.hero} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}>
+          {/* Green ambient glow behind avatar */}
+          <View style={s.heroGlow} />
 
+          {/* Top-right action buttons */}
+          <View style={s.heroActions}>
+            <TouchableOpacity
+              style={s.heroActionBtn}
+              onPress={() => router.push('/edit-profile')}
+              accessibilityRole="button"
+              accessibilityLabel="Edit profile"
+            >
+              <Ionicons name="create-outline" size={19} color="#CBD5E1" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.heroActionBtn}
+              onPress={() => router.push('/settings')}
+              accessibilityRole="button"
+              accessibilityLabel="Open settings"
+            >
+              <Ionicons name="settings-outline" size={19} color="#CBD5E1" />
+            </TouchableOpacity>
+          </View>
+
+          {/* Avatar */}
           <Animated.View style={[s.avatarWrap, { transform: [{ scale: avatarScale }] }]}>
-            <LinearGradient colors={['#00D46A', '#0EA5E9', '#8B5CF6']} style={s.avatarRing} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+            <LinearGradient colors={['#00D084', '#0EA5E9', '#7C3AED']} style={s.avatarRing} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
               <TouchableOpacity style={s.avatarInner} onPress={pickImage} activeOpacity={0.85}>
                 {profileImage ? (
                   <Image source={{ uri: profileImage }} style={s.avatarImg} />
                 ) : (
-                  <LinearGradient colors={['#1E3A5F', '#0D2644']} style={s.avatarFallback}>
+                  <LinearGradient colors={['#1A3050', '#0D2040']} style={s.avatarFallback}>
                     <Text style={s.avatarInitial}>{initial}</Text>
                   </LinearGradient>
                 )}
@@ -466,30 +486,48 @@ export default function RiderProfileScreen() {
             </LinearGradient>
           </Animated.View>
 
-          <Animated.View style={{ alignItems: 'center', opacity: fadeIn }}>
+          <Animated.View style={{ alignItems: 'center', opacity: fadeIn, width: '100%', paddingHorizontal: 20 }}>
+            {/* Name + verified */}
             <View style={s.nameRow}>
               <Text style={s.heroName}>{displayName}</Text>
               {isVerified ? (
                 <View style={s.verifiedBadge}>
-                  <Ionicons name="shield-checkmark" size={13} color="#00D46A" />
+                  <Ionicons name="shield-checkmark" size={14} color="#00D084" />
                 </View>
               ) : null}
             </View>
+
+            {/* Contact */}
             <Text style={s.heroPhone}>{user?.phone || user?.email || 'NEXRYDE Rider'}</Text>
 
             {/* Role badge */}
             <View style={s.roleBadge}>
-              <Ionicons name="bicycle" size={11} color="#60A5FA" />
+              <Ionicons name="bicycle-outline" size={12} color="#60A5FA" />
               <Text style={s.roleBadgeText}>Rider Account</Text>
             </View>
 
-            {/* Stats row */}
+            {/* Stats row — fixed columns, no flex wrapping */}
             <View style={s.statsGlass}>
-              <StatChip value={String(badgeStats.totalTrips)} label="Trips" color="#00D46A" />
+              <View style={s.statChip}>
+                <Text style={[s.statValue, { color: '#00D084' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                  {String(badgeStats.totalTrips)}
+                </Text>
+                <Text style={s.statLabel} numberOfLines={1}>Trips</Text>
+              </View>
               <View style={s.statsDivider} />
-              <StatChip value={`${badgeStats.rating.toFixed(1)}★`} label="Rating" color="#FBBF24" />
+              <View style={s.statChip}>
+                <Text style={[s.statValue, { color: '#FBBF24' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                  {`${badgeStats.rating.toFixed(1)}★`}
+                </Text>
+                <Text style={s.statLabel} numberOfLines={1}>Rating</Text>
+              </View>
               <View style={s.statsDivider} />
-              <StatChip value={String(memberYear)} label="Member" color="#60A5FA" />
+              <View style={s.statChip}>
+                <Text style={[s.statValue, { color: '#60A5FA' }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.65}>
+                  {String(memberYear)}
+                </Text>
+                <Text style={s.statLabel} numberOfLines={1}>Member</Text>
+              </View>
             </View>
           </Animated.View>
 
@@ -498,7 +536,7 @@ export default function RiderProfileScreen() {
             <View style={s.achievementsHeader}>
               <View style={s.achievementsHeaderLeft}>
                 <View style={s.achievementsIconWrap}>
-                  <Ionicons name="ribbon" size={16} color="#00D46A" />
+                  <Ionicons name="ribbon" size={16} color="#00D084" />
                 </View>
                 <Text style={s.achievementsTitle}>Achievements</Text>
               </View>
@@ -700,8 +738,17 @@ export default function RiderProfileScreen() {
           <MenuRow icon="trash" gradColors={['#7f1d1d', '#991b1b']} title="Delete Account" subtitle="Permanently deactivate this profile" onPress={handleDelete} danger />
         </Section>
 
-        {/* ── VERSION ── */}
-        <Text style={s.version}>NEXRYDE v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        {/* ── VERSION ── (long-press fires a deliberate Sentry test event) */}
+        <TouchableOpacity
+          activeOpacity={1}
+          delayLongPress={800}
+          onLongPress={() => {
+            const r = sentryTestCrash('rider');
+            Alert.alert(r.sent ? 'Sentry test sent' : 'Sentry not active', r.message);
+          }}
+        >
+          <Text style={s.version}>NEXRYDE v{Constants.expoConfig?.version ?? '1.0.0'}</Text>
+        </TouchableOpacity>
 
         {/* ── LOGOUT ── */}
         <TouchableOpacity style={s.logoutBtn} onPress={handleLogout} activeOpacity={0.8}>
@@ -749,131 +796,153 @@ const s = StyleSheet.create({
 
   /* Hero */
   hero: {
-    paddingTop: 24,
-    paddingBottom: 32,
+    paddingTop: 28,
+    paddingBottom: 28,
     alignItems: 'center',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.05)',
+    borderBottomColor: 'rgba(0,208,132,0.08)',
+    overflow: 'hidden',
+    position: 'relative',
   },
-  heroSettings: {
+  heroGlow: {
     position: 'absolute',
-    top: 16,
-    right: 16,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    top: -60,
+    alignSelf: 'center',
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    backgroundColor: 'rgba(0,208,132,0.07)',
+  },
+  heroActions: {
+    position: 'absolute',
+    top: 14,
+    right: 14,
+    flexDirection: 'row',
+    gap: 8,
+  },
+  heroActionBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255,255,255,0.07)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroEdit: {
-    position: 'absolute',
-    top: 16,
-    right: 64,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarWrap: { marginBottom: 16 },
+  avatarWrap: { marginBottom: 14 },
   avatarRing: {
-    width: 98,
-    height: 98,
-    borderRadius: 49,
+    width: 108,
+    height: 108,
+    borderRadius: 54,
     alignItems: 'center',
     justifyContent: 'center',
     padding: 3,
   },
   avatarInner: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: 102,
+    height: 102,
+    borderRadius: 51,
     overflow: 'hidden',
     position: 'relative',
   },
-  avatarImg: { width: 92, height: 92, borderRadius: 46 },
+  avatarImg: { width: 102, height: 102, borderRadius: 51 },
   avatarFallback: {
-    width: 92,
-    height: 92,
-    borderRadius: 46,
+    width: 102,
+    height: 102,
+    borderRadius: 51,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarInitial: { fontSize: 34, fontWeight: '900', color: '#FFF', letterSpacing: -1 },
+  avatarInitial: { fontSize: 38, fontWeight: '900', color: '#FFF', letterSpacing: -1 },
   avatarEditBadge: {
     position: 'absolute',
-    bottom: 4,
-    right: 4,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: '#00D46A',
+    bottom: 5,
+    right: 5,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#00D084',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#080E17',
   },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 4 },
   heroName: { fontSize: 24, fontWeight: '900', color: '#F1F5F9', letterSpacing: -0.5 },
   verifiedBadge: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(0,212,106,0.12)',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,208,132,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,212,106,0.3)',
+    borderColor: 'rgba(0,208,132,0.3)',
   },
-  heroPhone: { fontSize: 13, color: '#64748B', marginBottom: 10 },
+  heroPhone: { fontSize: 13, color: '#64748B', marginBottom: 12 },
   roleBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    backgroundColor: 'rgba(14,165,233,0.1)',
+    backgroundColor: 'rgba(14,165,233,0.10)',
     borderRadius: 20,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
     borderWidth: 1,
-    borderColor: 'rgba(14,165,233,0.2)',
+    borderColor: 'rgba(14,165,233,0.22)',
     marginBottom: 18,
   },
-  roleBadgeText: { fontSize: 11, fontWeight: '700', color: '#60A5FA' },
+  roleBadgeText: { fontSize: 11, fontWeight: '700', color: '#60A5FA', letterSpacing: 0.3 },
+
+  /* Stats */
   statsGlass: {
     flexDirection: 'row',
     alignItems: 'center',
     alignSelf: 'stretch',
-    marginHorizontal: 20,
-    marginTop: 4,
     paddingVertical: 14,
-    paddingHorizontal: 8,
-    borderRadius: 16,
+    paddingHorizontal: 12,
+    borderRadius: 18,
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.09)',
   },
-  statChip: { flex: 1, alignItems: 'center', paddingHorizontal: 8 },
-  statValue: { fontSize: 18, fontWeight: '900', letterSpacing: -0.3 },
-  statLabel: { fontSize: 11, color: '#475569', fontWeight: '600', marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
-  statsDivider: { width: 1, height: 30, backgroundColor: 'rgba(255,255,255,0.07)' },
+  statChip: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    minWidth: 0,
+  },
+  statValue: {
+    fontSize: 20,
+    fontWeight: '900',
+    letterSpacing: -0.3,
+    width: '100%',
+    textAlign: 'center',
+  },
+  statLabel: {
+    fontSize: 10,
+    color: '#475569',
+    fontWeight: '600',
+    marginTop: 3,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    width: '100%',
+    textAlign: 'center',
+  },
+  statsDivider: { width: 1, height: 32, backgroundColor: 'rgba(255,255,255,0.07)', marginHorizontal: 2 },
 
   achievementsPanel: {
     alignSelf: 'stretch',
-    marginTop: 18,
+    marginTop: 20,
     marginHorizontal: 16,
     paddingHorizontal: 14,
     paddingTop: 14,
-    paddingBottom: 12,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.22)',
+    paddingBottom: 14,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,208,132,0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.07)',
+    borderColor: 'rgba(0,208,132,0.12)',
   },
   achievementsHeader: {
     flexDirection: 'row',
@@ -886,11 +955,11 @@ const s = StyleSheet.create({
     width: 30,
     height: 30,
     borderRadius: 10,
-    backgroundColor: 'rgba(0,212,106,0.12)',
+    backgroundColor: 'rgba(0,208,132,0.14)',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(0,212,106,0.25)',
+    borderColor: 'rgba(0,208,132,0.28)',
   },
   achievementsTitle: { fontSize: 14, fontWeight: '800', color: '#E2E8F0', letterSpacing: -0.2 },
   achievementsCountPill: {
@@ -1041,7 +1110,7 @@ const s = StyleSheet.create({
 
   /* Grid */
   gridSection: { paddingTop: 24, paddingBottom: 4 },
-  gridTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 14 },
+  gridTitle: { fontSize: 11, fontWeight: '800', color: '#475569', letterSpacing: 1.5, marginBottom: 14 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
   actionTile: {
     backgroundColor: 'rgba(255,255,255,0.04)',
@@ -1063,12 +1132,12 @@ const s = StyleSheet.create({
 
   /* Section */
   section: { paddingTop: 24 },
-  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#334155', letterSpacing: 1.5, marginBottom: 10 },
+  sectionTitle: { fontSize: 11, fontWeight: '800', color: '#475569', letterSpacing: 1.5, marginBottom: 10 },
   sectionCard: {
-    backgroundColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.08)',
     overflow: 'hidden',
   },
 
@@ -1133,7 +1202,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 13,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.04)',
+    borderTopColor: 'rgba(255,255,255,0.06)',
     gap: 12,
   },
   menuIconWrap: {
@@ -1150,7 +1219,7 @@ const s = StyleSheet.create({
   menuBadgeText: { fontSize: 11, fontWeight: '800', color: '#F59E0B' },
 
   /* Version & logout */
-  version: { textAlign: 'center', fontSize: 11, color: '#1E293B', marginTop: 28, marginBottom: 12, fontWeight: '600', letterSpacing: 1 },
+  version: { textAlign: 'center', fontSize: 11, color: '#334155', marginTop: 28, marginBottom: 12, fontWeight: '600', letterSpacing: 1 },
   logoutBtn: { marginHorizontal: 20, borderRadius: 16, overflow: 'hidden', marginBottom: 8 },
   logoutInner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 16, borderWidth: 1, borderColor: 'rgba(239,68,68,0.15)', borderRadius: 16 },
   logoutText: { fontSize: 14, fontWeight: '800', color: '#F87171' },

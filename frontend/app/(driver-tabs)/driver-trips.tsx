@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,12 +17,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useAppStore } from '@/src/store/appStore';
-import { BACKEND_URL, getAuthHeaders } from '@/src/services/api';
 import { COLORS, SPACING, FONT_SIZE, BORDER_RADIUS, SHADOWS, CURRENCY } from '@/src/constants/theme';
 import { useTabBottomPad } from '@/src/hooks/useBottomPad';
 import { TabBrandStrip } from '@/src/components/flow/TabBrandStrip';
 import { useFlowLayout } from '@/src/constants/flowLayout';
 import { useAuthedUserId } from '@/src/hooks/useAuthedUserId';
+import { useResource } from '@/src/hooks/useResource';
+import { InlineError } from '@/src/components/InlineError';
+import { fetchDriverTripsScreenData, type DriverTripRecord } from '@/src/services/driverTripsScreenData';
 
 function formatEarnings(amount: number): string {
   if (amount >= 1_000_000) return `${(amount / 1_000_000).toFixed(1)}M`;
@@ -144,45 +146,30 @@ export default function DriverTripsTab() {
   const tabPad = useTabBottomPad(8);
   const flow = useFlowLayout();
 
-  const [trips, setTrips] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const resourceKey = `driver-trips:${driverId ?? 'none'}`;
+  const { data, loading, error, retry } = useResource(
+    resourceKey,
+    () => fetchDriverTripsScreenData(driverId!),
+    { cache: true, enabled: canCallAuthedApi && !!driverId },
+  );
+  const trips = (data ?? []) as DriverTripRecord[];
+
   const [refreshing, setRefreshing] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
-  const [loadError, setLoadError] = useState(false);
-
-  const loadTrips = useCallback(async () => {
-    if (!driverId || !canCallAuthedApi) { setLoading(false); return; }
-    setLoadError(false);
-    try {
-      const res = await fetch(
-        `${BACKEND_URL}/api/trips/user/${driverId}?role=driver`,
-        { headers: getAuthHeaders() },
-      );
-      if (!res.ok) throw new Error('Failed');
-      const data = await res.json();
-      setTrips(Array.isArray(data) ? data : []);
-    } catch {
-      setLoadError(true);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [canCallAuthedApi, driverId]);
 
   useEffect(() => {
-    if (!canCallAuthedApi) return;
-    void loadTrips();
-  }, [loadTrips, canCallAuthedApi]);
+    if (!loading) setRefreshing(false);
+  }, [loading]);
 
   const onRefresh = () => {
     setRefreshing(true);
-    void loadTrips();
+    void retry();
     void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
   const filteredTrips = useMemo(() => {
     if (filter === 'all') return trips;
-    if (filter === 'active') return trips.filter(t => isActive(t.status));
+    if (filter === 'active') return trips.filter(t => isActive(String(t.status ?? '')));
     if (filter === 'completed') return trips.filter(t => t.status === 'completed');
     if (filter === 'cancelled') return trips.filter(t => t.status === 'cancelled');
     return trips;
@@ -218,12 +205,13 @@ export default function DriverTripsTab() {
           void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
           if (active) {
             router.push('/(driver-tabs)/driver-home' as any);
-          } else {
-            // Show trip detail
-            router.push({ pathname: '/(driver-tabs)/driver-home' } as any);
+          } else if (status === 'completed') {
+            // Navigate to trip earnings / receipt detail
+            router.push({ pathname: '/driver/trip-detail', params: { tripId: item.id } } as any);
           }
+          // No action for cancelled trips on tap (actions are inline)
         }}
-        activeOpacity={0.88}
+        activeOpacity={active || status === 'completed' ? 0.88 : 1}
       >
         {/* Card header */}
         <View style={styles.cardHeader}>
@@ -326,6 +314,54 @@ export default function DriverTripsTab() {
             <Text style={styles.manageTripBtnText}>Manage Trip</Text>
           </TouchableOpacity>
         )}
+
+        {/* Action buttons for completed trips */}
+        {status === 'completed' && (
+          <>
+            <View style={styles.completedActions}>
+              <TouchableOpacity
+                style={styles.completedActionBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push({ pathname: '/driver/trip-detail', params: { tripId: item.id } } as any);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="receipt-outline" size={14} color="#2563EB" />
+                <Text style={[styles.completedActionTxt, { color: '#2563EB' }]}>Earnings</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.completedActionBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  const drop = item.dropoff_location;
+                  if (drop?.lat && drop?.lng) {
+                    const { promptExternalNavigation } = require('@/src/utils/openExternalNavigation');
+                    promptExternalNavigation({ lat: Number(drop.lat), lng: Number(drop.lng), label: drop.address || 'Destination' });
+                  }
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="navigate-outline" size={14} color="#16A34A" />
+                <Text style={[styles.completedActionTxt, { color: '#16A34A' }]}>Navigate</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.completedActionBtn}
+                onPress={(e) => {
+                  e.stopPropagation?.();
+                  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  router.push({ pathname: '/shield-disputes', params: { tripId: item.id, mode: 'report' } } as any);
+                }}
+                activeOpacity={0.85}
+              >
+                <Ionicons name="shield-outline" size={14} color="#EF4444" />
+                <Text style={[styles.completedActionTxt, { color: '#EF4444' }]}>Report</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
       </TouchableOpacity>
     );
   };
@@ -386,7 +422,7 @@ export default function DriverTripsTab() {
       <View style={styles.filterRow}>
         {FILTER_TABS.map(tab => {
           const count = tab.key === 'all' ? trips.length
-            : tab.key === 'active' ? trips.filter(t => isActive(t.status)).length
+            : tab.key === 'active' ? trips.filter(t => isActive(String(t.status ?? ''))).length
             : tab.key === 'completed' ? trips.filter(t => t.status === 'completed').length
             : trips.filter(t => t.status === 'cancelled').length;
           const active = filter === tab.key;
@@ -468,17 +504,23 @@ export default function DriverTripsTab() {
         </TouchableOpacity>
       </View>
 
-      {loadError && (
+      {error && !data?.length ? (
+        <View style={{ paddingHorizontal: flow.padH, paddingTop: flow.sectionGap }}>
+          <InlineError message="Could not load trips." onRetry={retry} />
+        </View>
+      ) : null}
+
+      {error && !!data?.length ? (
         <View style={[styles.errorBanner, { paddingHorizontal: flow.padH }]}>
           <Ionicons name="alert-circle-outline" size={16} color="#EF4444" />
-          <Text style={styles.errorText}>Could not load trips.</Text>
-          <TouchableOpacity onPress={() => { setLoading(true); void loadTrips(); }}>
+          <Text style={styles.errorText}>Could not refresh — showing last saved trips.</Text>
+          <TouchableOpacity onPress={() => void retry()}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
-      )}
+      ) : null}
 
-      {loading && !refreshing ? (
+      {loading && !data?.length && !refreshing ? (
         <View style={{ paddingHorizontal: flow.padH, paddingTop: flow.sectionGap }}>
           {[0, 1, 2, 3].map(i => <TripCardSkeleton key={i} />)}
         </View>
@@ -486,7 +528,7 @@ export default function DriverTripsTab() {
         <FlatList
           data={filteredTrips}
           renderItem={renderTripCard}
-          keyExtractor={item => item.id || item._id || Math.random().toString()}
+          keyExtractor={item => String(item.id || item._id || item.created_at || '')}
           ListHeaderComponent={renderHeader}
           ListEmptyComponent={renderEmpty}
           contentContainerStyle={[
@@ -726,6 +768,17 @@ const styles = StyleSheet.create({
     marginTop: SPACING.sm,
   },
   manageTripBtnText: { fontSize: FONT_SIZE.sm, fontWeight: '800', color: COLORS.white },
+  // Completed trip actions
+  completedActions: {
+    flexDirection: 'row', gap: SPACING.xs, marginTop: SPACING.xs,
+    paddingTop: SPACING.xs, borderTopWidth: 1, borderTopColor: '#F1F5F9',
+  },
+  completedActionBtn: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
+    paddingVertical: 8, borderRadius: BORDER_RADIUS.lg,
+    backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0',
+  },
+  completedActionTxt: { fontSize: 12, fontWeight: '800' },
   // Empty state
   emptyState: { alignItems: 'center', paddingVertical: 48, gap: SPACING.md, paddingHorizontal: SPACING.xl },
   emptyIconWrap: {
