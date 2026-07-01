@@ -282,17 +282,23 @@ export async function fetchGoogleDrivingRoutes(
   destLat: number,
   destLng: number,
   apiKey: string,
-  options?: { alternatives?: boolean },
+  options?: { alternatives?: boolean; stop?: { lat: number; lng: number } | null },
 ): Promise<{ routes: GoogleDrivingRouteOverview[] } | null> {
   if (!apiKey) return null;
 
   const alt = options?.alternatives ? '&alternatives=true' : '';
+  const stop = options?.stop;
+  const waypoint =
+    stop && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)
+      ? `&waypoints=${stop.lat},${stop.lng}`
+      : '';
   const base =
     `https://maps.googleapis.com/maps/api/directions/json` +
     `?origin=${originLat},${originLng}` +
     `&destination=${destLat},${destLng}` +
     `&mode=driving` +
     alt +
+    waypoint +
     `&key=${apiKey}`;
 
   const parse = (data: any): GoogleDrivingRouteOverview[] | null => {
@@ -300,13 +306,27 @@ export async function fetchGoogleDrivingRoutes(
       return null;
     }
     const routes: GoogleDrivingRouteOverview[] = data.routes.map((route: any) => {
-      const leg = route.legs?.[0];
+      const legs = Array.isArray(route.legs) ? route.legs : [];
+      const leg = legs[0];
       const pts = directionsRouteToMapCoordinates(route);
-      const dur = leg?.duration?.value ?? 0;
-      const dit = leg?.duration_in_traffic?.value;
+      const distanceM = legs.reduce(
+        (sum: number, l: any) => sum + Number(l?.distance?.value ?? 0),
+        0,
+      );
+      const durationSec = legs.reduce(
+        (sum: number, l: any) => sum + Number(l?.duration?.value ?? 0),
+        0,
+      );
+      const trafficSec = legs.reduce((sum: number, l: any) => {
+        const dit = l?.duration_in_traffic?.value;
+        const dur = l?.duration?.value ?? 0;
+        return sum + Number(dit != null ? dit : dur);
+      }, 0);
+      const dur = durationSec || Number(leg?.duration?.value ?? 0);
+      const dit = trafficSec || leg?.duration_in_traffic?.value;
       return {
         overview: pts,
-        distanceM: leg?.distance?.value ?? 0,
+        distanceM: distanceM || Number(leg?.distance?.value ?? 0),
         durationSec: dur,
         ...(typeof dit === 'number' && dit > 0 ? { durationInTrafficSec: dit } : {}),
       };

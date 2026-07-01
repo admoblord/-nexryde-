@@ -20,6 +20,7 @@ import base64
 from cryptography.fernet import Fernet
 
 from database import db
+from user_biometrics import get_reference_face_image
 from fare_estimate_cache import get_fare_estimate
 from face_match import face_match_confidence
 from smart_pricing import (
@@ -46,6 +47,8 @@ from wallet_trip_helpers import (
 )
 from wallet_ops import (
     assert_rider_wallet_covers_fare,
+    reserve_rider_wallet_fare,
+    release_rider_wallet_hold,
     apply_driver_wallet_ride_credit,
     apply_rider_wallet_ride_debit,
 )
@@ -92,21 +95,50 @@ def set_shared_functions(get_directions, calc_fare, calc_distance):
     _calculate_fare_fn = calc_fare
     _calculate_distance_fn = calc_distance
 
-async def get_directions_from_google(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, trip_id: str = None):
+async def get_directions_from_google(
+    pickup_lat,
+    pickup_lng,
+    dropoff_lat,
+    dropoff_lng,
+    trip_id: str = None,
+    stop_lat=None,
+    stop_lng=None,
+):
     """Cached wrapper — checks MongoDB + LRU before calling Google API."""
-    cached = await get_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-    if cached:
-        await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
-        return cached
+    has_stop = stop_lat is not None and stop_lng is not None
+    if not has_stop:
+        cached = await get_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+        if cached:
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+            return cached
 
     if _get_directions_fn:
-        result = await _get_directions_fn(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
-        if result:
+        if has_stop:
+            result = await _get_directions_fn(
+                pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat=stop_lat, stop_lng=stop_lng
+            )
+        else:
+            result = await _get_directions_fn(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+        if result and not has_stop:
             await store_cached_directions(db, pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, result)
+            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
+            return result
+        if result:
             await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
             return result
 
     # Fallback: Haversine estimate (zero API cost)
+    if has_stop:
+        leg1 = haversine_route_estimate(pickup_lat, pickup_lng, stop_lat, stop_lng)
+        leg2 = haversine_route_estimate(stop_lat, stop_lng, dropoff_lat, dropoff_lng)
+        return {
+            "distance_meters": int(leg1.get("distance_meters", 0)) + int(leg2.get("distance_meters", 0)),
+            "duration_seconds": int(leg1.get("duration_seconds", 0)) + int(leg2.get("duration_seconds", 0)),
+            "duration_in_traffic_seconds": int(leg1.get("duration_in_traffic_seconds", 0))
+            + int(leg2.get("duration_in_traffic_seconds", 0)),
+            "polyline": "",
+            "source": "haversine",
+        }
     return haversine_route_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
 
 def _normalize_service_type(service_type: Optional[str]) -> str:
@@ -167,16 +199,34 @@ def calculate_fare(
     )
 
 
-def _fare_estimate_coords_match(est: dict, pickup_lat: float, pickup_lng: float, drop_lat: float, drop_lng: float) -> bool:
+def _fare_estimate_coords_match(
+    est: dict,
+    pickup_lat: float,
+    pickup_lng: float,
+    drop_lat: float,
+    drop_lng: float,
+    stop_lat: Optional[float] = None,
+    stop_lng: Optional[float] = None,
+) -> bool:
     pu = est.get("pickup") or {}
     du = est.get("dropoff") or {}
+    su = est.get("stop")
     try:
         pul, pulg = float(pu["lat"]), float(pu["lng"])
         dul, dulg = float(du["lat"]), float(du["lng"])
-        return (
+        base_ok = (
             haversine_km(pul, pulg, float(pickup_lat), float(pickup_lng)) <= FARE_ESTIMATE_COORD_MAX_KM
             and haversine_km(dul, dulg, float(drop_lat), float(drop_lng)) <= FARE_ESTIMATE_COORD_MAX_KM
         )
+        if not base_ok:
+            return False
+        has_stop = stop_lat is not None and stop_lng is not None
+        if has_stop:
+            if not su:
+                return False
+            sl, slg = float(su["lat"]), float(su["lng"])
+            return haversine_km(sl, slg, float(stop_lat), float(stop_lng)) <= FARE_ESTIMATE_COORD_MAX_KM
+        return not su
     except (TypeError, ValueError, KeyError):
         return False
 
@@ -264,15 +314,15 @@ def _driver_location_snapshot_for_trip(
 
 
 def _rider_pickup_code_enabled(rider: Optional[dict]) -> bool:
-    """Rider preference — default on for existing accounts."""
+    """Rider preference — pickup code verification is optional (off by default)."""
     if not rider:
-        return True
-    return bool(rider.get("pickup_code_enabled", True))
+        return False
+    return bool(rider.get("pickup_code_enabled", False))
 
 
 def _trip_pickup_code_required(trip: dict) -> bool:
-    """Per-trip flag set at booking from rider preference."""
-    return bool(trip.get("pickup_code_required", True))
+    """Per-trip flag set at booking from rider preference — optional, defaults off."""
+    return bool(trip.get("pickup_code_required", False))
 
 
 def _pickup_security_fields_for_trip(*, pickup_code_required: bool) -> dict:
@@ -326,6 +376,7 @@ async def _emit_rider_trip_realtime(trip_id: str, *, throttle_location: bool = F
             speed_kmh=trip.get("current_speed_kmh"),
         )
     payload = {
+        "type": "trip_update",
         "trip_id": trip_id,
         "status": trip.get("status"),
         "trip": rider_trip_payload_from_doc(trip),
@@ -1039,10 +1090,45 @@ async def _get_eligible_drivers_for_trip(trip: dict, blocked_drivers: list[str])
     preferred_driver_id = trip.get("preferred_driver_id")
     service_type = trip.get("service_type")
 
-    profiles = await db.driver_profiles.find(
-        {"is_online": True, "verification_status": "approved"},
-        {"_id": 0},
-    ).to_list(500)
+    # Use $geoNear aggregation — fetch nearest 30 online approved drivers within 8 km.
+    # We cap at 30 candidates before the eligibility loop to bound the subsequent
+    # trip_offers + subscriptions queries (N+1 mitigation).
+    # If fewer than 3 qualify after filtering, we widen to 15 km automatically.
+    DISPATCH_RADIUS_M_NEAR = 8_000   # 8 km — first pass (cheap)
+    DISPATCH_RADIUS_M_FAR  = 15_000  # 15 km — fallback if too few nearby
+    DISPATCH_CANDIDATE_CAP = 30      # max profiles to evaluate in loop
+
+    def _geo_pipeline(radius_m: int, limit: int) -> list:
+        return [
+            {
+                "$geoNear": {
+                    "near": {"type": "Point", "coordinates": [pickup_lng, pickup_lat]},
+                    "distanceField": "_geo_dist",
+                    "maxDistance": radius_m,
+                    "spherical": True,
+                    "query": {"is_online": True, "verification_status": "approved"},
+                }
+            },
+            {"$project": {"_id": 0}},
+            {"$limit": limit},
+        ]
+
+    try:
+        profiles = await db.driver_profiles.aggregate(
+            _geo_pipeline(DISPATCH_RADIUS_M_NEAR, DISPATCH_CANDIDATE_CAP)
+        ).to_list(DISPATCH_CANDIDATE_CAP)
+
+        # Widen search when fewer than 5 candidates in the 8 km ring
+        if len(profiles) < 5:
+            profiles = await db.driver_profiles.aggregate(
+                _geo_pipeline(DISPATCH_RADIUS_M_FAR, DISPATCH_CANDIDATE_CAP)
+            ).to_list(DISPATCH_CANDIDATE_CAP)
+    except Exception:
+        # Fallback: geospatial index may not exist on older deployments
+        profiles = await db.driver_profiles.find(
+            {"is_online": True, "verification_status": "approved"},
+            {"_id": 0},
+        ).to_list(500)
 
     candidate_driver_ids = [
         p.get("user_id")
@@ -1551,6 +1637,9 @@ class TripRequest(BaseModel):
     dropoff_lat: float
     dropoff_lng: float
     dropoff_address: str
+    stop_lat: Optional[float] = None
+    stop_lng: Optional[float] = None
+    stop_address: Optional[str] = None
     service_type: Optional[str] = "economy"
     city: Optional[str] = "lagos"
     payment_method: str = "cash"
@@ -1564,6 +1653,9 @@ class TripRequest(BaseModel):
     # When no locked estimate: same semantics as POST /fare/estimate (omit demand_ratio for area estimate).
     demand_ratio: Optional[float] = None
     rain: Optional[bool] = None
+    # Client-generated idempotency key (UUID or similar). If provided and a trip
+    # with this key already exists, the original trip is returned immediately.
+    idempotency_key: Optional[str] = None
 
 
 class ComfortRatingRequest(BaseModel):
@@ -1645,11 +1737,37 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         raise HTTPException(status_code=403, detail=status_check.get("message", "Account restricted"))
     if status_check.get("can_book") is False:
         raise HTTPException(status_code=403, detail=status_check.get("message", "Booking temporarily disabled"))
+
+    # ── Idempotency: return existing trip if client re-sends same key ─────────
+    idem_key = (request.idempotency_key or "").strip()
+    if idem_key:
+        existing_idem = await db.trips.find_one(
+            {"rider_id": rider_id, "idempotency_key": idem_key},
+            {"_id": 0},
+        )
+        if existing_idem:
+            existing_idem.pop("_id", None)
+            return existing_idem
+
+    # ── Block rider with a non-terminal active trip ───────────────────────────
+    ACTIVE_TRIP_STATUSES = {"pending", "pending_driver_offers", "accepted", "arrived", "ongoing"}
+    active_trip = await db.trips.find_one(
+        {"rider_id": rider_id, "status": {"$in": list(ACTIVE_TRIP_STATUSES)}},
+        {"_id": 0, "id": 1, "status": 1},
+    )
+    if active_trip:
+        raise HTTPException(
+            status_code=409,
+            detail=f"You already have an active trip ({active_trip['id']}, status: {active_trip['status']}). Cancel it before requesting a new one.",
+        )
     
     normalized_service_type = _normalize_service_type(request.service_type)
     city = (request.city or "default").strip().lower()
     rider = await db.users.find_one({"id": rider_id})
     blocked_drivers = rider.get("blocked_drivers", []) if rider else []
+
+    stop_lat = request.stop_lat if request.stop_lat is not None and request.stop_lng is not None else None
+    stop_lng = request.stop_lng if stop_lat is not None else None
     
     fare_data = None
     raw_eid = getattr(request, "fare_estimate_id", None)
@@ -1686,6 +1804,8 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
             request.pickup_lng,
             request.dropoff_lat,
             request.dropoff_lng,
+            stop_lat=stop_lat,
+            stop_lng=stop_lng,
         ):
             raise HTTPException(
                 status_code=400,
@@ -1700,8 +1820,12 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
         polyline = fare_data.get("polyline")
     else:
         route_data = await get_directions_from_google(
-            request.pickup_lat, request.pickup_lng,
-            request.dropoff_lat, request.dropoff_lng
+            request.pickup_lat,
+            request.pickup_lng,
+            request.dropoff_lat,
+            request.dropoff_lng,
+            stop_lat=stop_lat,
+            stop_lng=stop_lng,
         )
         if not is_directions_road_route(route_data):
             raise HTTPException(status_code=503, detail=DRIVING_ROUTE_UNAVAILABLE_DETAIL)
@@ -1810,13 +1934,30 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
     trip_status = "pending_driver_offers" if request.offered_fare is not None else "pending"
     smart_priority = rider_meets_priority_threshold(final_fare, base_price)
 
-    await assert_rider_wallet_covers_fare(db, rider_id, request.payment_method, float(final_fare))
+    # Generate trip ID early so the wallet hold is keyed to this trip.
+    _new_trip_id = str(uuid4())
+
+    # Atomic fare reservation — deducts balance immediately to prevent double-spend.
+    # Released on cancel, finalized on payment confirmation.
+    await reserve_rider_wallet_fare(db, rider_id, _new_trip_id, request.payment_method, float(final_fare))
 
     trip_dict = {
-        "id": str(uuid4()),
+        "id": _new_trip_id,
         "rider_id": rider_id,
+        "idempotency_key": idem_key or None,
         "pickup_location": {"lat": request.pickup_lat, "lng": request.pickup_lng, "address": request.pickup_address},
         "dropoff_location": {"lat": request.dropoff_lat, "lng": request.dropoff_lng, "address": request.dropoff_address},
+        **(
+            {
+                "stop_location": {
+                    "lat": stop_lat,
+                    "lng": stop_lng,
+                    "address": (request.stop_address or "").strip() or "Stop",
+                }
+            }
+            if stop_lat is not None and stop_lng is not None
+            else {}
+        ),
         "distance_km": round(distance_km, 2),
         "duration_mins": duration_min,
         "base_fare": fare["base_fare"],
@@ -1870,6 +2011,12 @@ async def request_trip(rider_id: str, request: TripRequest, http_request: Reques
     
     await db.trips.insert_one(trip_dict)
     trip_dict.pop("_id", None)
+    # Track ride request metric
+    try:
+        from metrics_service import track_ride_request
+        track_ride_request(city=city)
+    except Exception:
+        pass
     offers = await _create_trip_offers(trip_dict, blocked_drivers)
     await _log_trip_event(
         trip_dict["id"],
@@ -2278,11 +2425,22 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     if not active_offer:
         raise HTTPException(status_code=403, detail="Trip offer expired or unavailable for this driver")
 
-    busy_trip = await db.trips.find_one(
-        {"driver_id": driver_id, "status": {"$in": ["accepted", "arrived", "ongoing"]}, "id": {"$ne": trip_id}},
-        {"_id": 0, "id": 1},
+    # Atomically lock the driver by setting active_trip_id only if they have no current one.
+    # This prevents two concurrent accepts from both succeeding (TOCTOU race).
+    dp_lock = await db.driver_profiles.find_one_and_update(
+        {
+            "user_id": driver_id,
+            "$or": [
+                {"active_trip_id": {"$exists": False}},
+                {"active_trip_id": None},
+                {"active_trip_id": ""},
+                {"active_trip_id": trip_id},
+            ],
+        },
+        {"$set": {"active_trip_id": trip_id}},
+        return_document=True,
     )
-    if busy_trip:
+    if not dp_lock:
         raise HTTPException(status_code=409, detail="You already have an active trip. Complete it before accepting another.")
 
     trip = await db.trips.find_one({"id": trip_id})
@@ -2326,9 +2484,25 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     if not subscription:
         raise HTTPException(status_code=403, detail="Active subscription required")
 
+    # For trial drivers: re-evaluate trip count — catches exhausted trials in real-time
+    subscription_status = subscription.get("status")
+    if subscription_status == "trial":
+        try:
+            from routers.payments import _evaluate_driver_trial
+            subscription = await _evaluate_driver_trial(driver_id, subscription)
+            subscription_status = subscription.get("status")
+            if subscription_status == "pending_payment":
+                raise HTTPException(
+                    status_code=403,
+                    detail="Your free trial trips are used up. Subscribe to a plan to accept rides."
+                )
+        except HTTPException:
+            raise
+        except Exception as trial_err:
+            logger.warning(f"Trial evaluation warning on accept for {driver_id}: {trial_err}")
+
     # Driver has subscription - enforce trial/tier inter-city restrictions
     subscription_tier = subscription.get("tier", "city_rider")
-    subscription_status = subscription.get("status")
 
     if subscription_status == "trial" and is_intercity:
         raise HTTPException(
@@ -2354,7 +2528,7 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
             "$set": {
                 "driver_id": driver_id,
                 "status": "accepted",
-                "accepted_at": datetime.utcnow(),
+                "accepted_at": datetime.now(timezone.utc).isoformat(),
                 "accepted_offer_id": active_offer["id"],
                 "fare": round(proposed_fare, 2),
                 "agreed_fare": round(proposed_fare, 2),
@@ -2364,8 +2538,13 @@ async def accept_trip(trip_id: str, request: dict, http_request: Request):
     )
     
     if result.modified_count == 0:
+        # Trip was grabbed by another driver — release our driver lock immediately
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id, "active_trip_id": trip_id},
+            {"$unset": {"active_trip_id": ""}},
+        )
         raise HTTPException(status_code=400, detail="Trip not available")
-    
+
     trip = await db.trips.find_one({"id": trip_id})
     if trip:
         r_opt = bool(trip.get("shield_recording_rider_opt_in") or trip.get("recording_enabled"))
@@ -2444,7 +2623,7 @@ async def verify_pickup_code(trip_id: str, request: dict, http_request: Request)
         raise HTTPException(status_code=404, detail="Trip not found.")
     if trip.get("driver_id") != driver_id:
         raise HTTPException(status_code=403, detail="You are not the driver for this trip.")
-    if trip["status"] not in ["accepted", "arrived"]:
+    if trip.get("status") not in ["accepted", "arrived"]:
         raise HTTPException(status_code=400, detail="Trip must be in accepted or arrived state.")
 
     if not _trip_pickup_code_required(trip):
@@ -2686,9 +2865,12 @@ async def fake_driver_alert_check(trip_id: str, request: FakeDriverAlertRequest,
     driver_id = trip.get("driver_id")
     if not driver_id:
         raise HTTPException(status_code=400, detail="No assigned driver yet")
-    driver_user = await db.users.find_one({"id": driver_id}, {"_id": 0, "name": 1, "face_image": 1, "phone": 1}) or {}
-    driver_profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"_id": 0, "face_image": 1, "vehicle_plate": 1}) or {}
-    reference_image = driver_profile.get("face_image") or driver_user.get("face_image")
+    driver_user = await db.users.find_one({"id": driver_id}, {"_id": 0, "name": 1, "phone": 1}) or {}
+    driver_profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "vehicle_plate": 1},
+    ) or {}
+    reference_image = await get_reference_face_image(driver_id)
     if not reference_image:
         raise HTTPException(status_code=400, detail="Driver has no registered face reference")
 
@@ -2753,8 +2935,8 @@ async def verify_rider_face_pickup(trip_id: str, request: RiderPickupFaceVerific
     if not request.observed_face_image or len(request.observed_face_image) < 100:
         raise HTTPException(status_code=400, detail="Live rider face image is required")
 
-    rider_user = await db.users.find_one({"id": rider_id}, {"_id": 0, "profile_image": 1, "face_image": 1}) or {}
-    reference_image = rider_user.get("face_image") or rider_user.get("profile_image")
+    rider_user = await db.users.find_one({"id": rider_id}, {"_id": 0, "profile_image": 1}) or {}
+    reference_image = await get_reference_face_image(rider_id) or rider_user.get("profile_image")
     if not reference_image:
         raise HTTPException(status_code=400, detail="No registered rider face on file. Complete rider verification first.")
 
@@ -2834,7 +3016,7 @@ async def verify_face_and_start_trip(trip_id: str, request: FaceVerificationRequ
         {"id": trip_id},
         {"$set": {
             "status": "ongoing",
-            "started_at": datetime.utcnow(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "face_verified_at_start": face_verified,
             "biometric_trip_lock_active": True,
             **shield_updates,
@@ -2876,15 +3058,21 @@ async def start_trip(trip_id: str, request: Request):
         {"id": trip_id, "status": {"$in": ["accepted", "arrived"]}},
         {"$set": {
             "status": "ongoing",
-            "started_at": datetime.utcnow(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
             # Mark face flags so downstream analytics don't break
             "face_verified_at_start": True,
             "rider_face_verified_at_pickup": trip.get("rider_face_verified_at_pickup", True),
             **shield_updates,
         }}
     )
-    
+
     if result.modified_count == 0:
+        # Idempotent Start: a double-tap on an already-started trip returns the
+        # current state instead of erroring.
+        existing = await db.trips.find_one({"id": trip_id})
+        if existing and existing.get("status") == "ongoing":
+            existing["_id"] = str(existing["_id"])
+            return existing
         raise HTTPException(status_code=400, detail="Cannot start trip")
     
     # Auto-lock vehicle data on trip start to prevent mid-trip plate swap
@@ -2907,6 +3095,15 @@ async def start_trip(trip_id: str, request: Request):
     trip = await db.trips.find_one({"id": trip_id})
     trip["_id"] = str(trip["_id"])
     await _log_trip_event(trip_id, "trip_started", trip.get("driver_id"), {})
+    # Push trip_started notification to rider
+    rider_id_for_push = trip.get("rider_id")
+    if rider_id_for_push:
+        await send_push_notification(
+            rider_id_for_push,
+            "Trip Started 🚗",
+            "Your driver has started the trip. Sit back and enjoy the ride!",
+            {"type": "trip_started", "trip_id": trip_id},
+        )
     await _emit_rider_trip_realtime(trip_id)
     return trip
 
@@ -3025,15 +3222,18 @@ async def arrive_at_pickup(trip_id: str, request: dict, http_request: Request):
     if trip.get("status") != "accepted":
         raise HTTPException(status_code=400, detail="Trip must be accepted before arrival")
 
-    await db.trips.update_one(
-        {"id": trip_id},
+    # Atomic guard: only transition from status=accepted
+    arrive_result = await db.trips.update_one(
+        {"id": trip_id, "driver_id": driver_id, "status": "accepted"},
         {"$set": {
             "status": "arrived",
-            "arrived_at": datetime.utcnow(),
+            "arrived_at": datetime.now(timezone.utc).isoformat(),
             "estate_gate_code_shared_at": datetime.now(timezone.utc).isoformat(),
             "estate_gate_code_expires_at": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat(),
-        }}
+        }},
     )
+    if arrive_result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Trip status has changed — refresh and try again")
     updated = await db.trips.find_one({"id": trip_id}, {"_id": 0})
     gate_access = await _build_estate_gate_access(updated or {}, driver_id) if updated else None
     await _log_trip_event(trip_id, "driver_arrived_pickup", driver_id, {
@@ -3069,6 +3269,34 @@ async def post_trip_location(trip_id: str, request: LocationUpdate, http_request
     return await _update_trip_location_impl(trip_id, request, http_request)
 
 
+# GPS write throttle — cluster-wide via Redis, in-process fallback if Redis unavailable.
+# Max write rate: 1 Mongo write / 3 s per trip across ALL instances.
+_GPS_WRITE_INTERVAL_S = 3.0
+_gps_last_write: dict[str, float] = {}  # in-process fallback
+
+
+async def _gps_throttle_should_skip(trip_id: str) -> bool:
+    """Return True if this GPS ping should skip the DB write (throttled).
+    Uses Redis SET NX EX for cluster-wide throttle; falls back to in-process dict."""
+    redis_key = f"gps:lw:{trip_id}"
+    try:
+        from redis_store import _redis_client
+        if _redis_client is not None:
+            # SET key 1 NX PX ttl_ms — only sets if key doesn't exist (atomic)
+            ttl_ms = int(_GPS_WRITE_INTERVAL_S * 1000)
+            acquired = await _redis_client.set(redis_key, "1", nx=True, px=ttl_ms)
+            return acquired is None  # None = key already existed → skip
+    except Exception:
+        pass
+    # In-process fallback
+    now_ep = time.time()
+    last = _gps_last_write.get(trip_id, 0.0)
+    if (now_ep - last) < _GPS_WRITE_INTERVAL_S:
+        return True
+    _gps_last_write[trip_id] = now_ep
+    return False
+
+
 async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http_request: Request):
     """Update trip route and run Trip Guardian safety monitoring."""
     from services.trip_tracking_service import compute_live_tracking, trip_tracking_target
@@ -3097,7 +3325,11 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
     actor_id = require_authenticated(http_request)
     if actor_id != trip.get("driver_id"):
         raise HTTPException(status_code=403, detail="Only the assigned driver can update trip location")
-    
+
+    # Cluster-wide GPS throttle: only write to Mongo if ≥ 3s since last write.
+    # Redis SET NX EX ensures a single write across all Cloud Run instances.
+    _skip_db_write = await _gps_throttle_should_skip(trip_id)
+
     actual_route = trip.get("actual_route", [])
     now = datetime.utcnow()
     route_deviation = False
@@ -3429,44 +3661,48 @@ async def _update_trip_location_impl(trip_id: str, request: LocationUpdate, http
             "live_tracking_updated_at": live_preview.get("updated_at"),
         }
 
-    await db.trips.update_one(
-        {"id": trip_id},
-        {
-            "$push": {"actual_route": {"$each": [location_point], "$slice": -240}},
-            "$set": {
-                "route_deviation_detected": route_deviation,
-                "abnormal_stop_detected": abnormal_stop,
-                "current_speed_kmh": round(current_speed_kmh, 1),
-                "guardian_alert": guardian_alert,
-                "geo_fence_trip_lock": geo_fence_lock,
-                "speed_spike_alert": speed_spike_alert,
-                "gps_spoofing_alert": gps_spoofing_alert,
-                "guardian_state": {
-                    "stationary_since": stationary_since,
-                    "pending_check_id": pending_check_id,
-                    "last_prompt_at": last_prompt_at,
-                    "last_moved_km": round(moved_km, 4),
-                    "updated_at": now.isoformat(),
+    # Throttled DB write — only persist to Mongo when throttle window has elapsed.
+    if not _skip_db_write:
+        await db.trips.update_one(
+            {"id": trip_id},
+            {
+                "$push": {"actual_route": {"$each": [location_point], "$slice": -240}},
+                "$set": {
+                    "route_deviation_detected": route_deviation,
+                    "abnormal_stop_detected": abnormal_stop,
+                    "current_speed_kmh": round(current_speed_kmh, 1),
+                    "guardian_alert": guardian_alert,
+                    "geo_fence_trip_lock": geo_fence_lock,
+                    "speed_spike_alert": speed_spike_alert,
+                    "gps_spoofing_alert": gps_spoofing_alert,
+                    "guardian_state": {
+                        "stationary_since": stationary_since,
+                        "pending_check_id": pending_check_id,
+                        "last_prompt_at": last_prompt_at,
+                        "last_moved_km": round(moved_km, 4),
+                        "updated_at": now.isoformat(),
+                    },
+                    **live_tracking_set,
                 },
-                **live_tracking_set,
             },
-        },
-    )
-    try:
-        drv = trip.get("driver_id")
-        if drv:
-            await db.driver_profiles.update_one(
-                {"user_id": drv},
-                {"$set": {
-                    "current_location": {
-                        "lat": float(request.latitude),
-                        "lng": float(request.longitude),
-                        "updated_at": location_point["timestamp"],
-                    }
-                }},
-            )
-    except Exception:
-        logger.debug("profile current_location sync from trip update skipped", exc_info=True)
+        )
+        try:
+            drv = trip.get("driver_id")
+            if drv:
+                await db.driver_profiles.update_one(
+                    {"user_id": drv},
+                    {"$set": {
+                        "current_location": {
+                            "lat": float(request.latitude),
+                            "lng": float(request.longitude),
+                            "type": "Point",
+                            "coordinates": [float(request.longitude), float(request.latitude)],
+                            "updated_at": location_point["timestamp"],
+                        }
+                    }},
+                )
+        except Exception:
+            logger.debug("profile current_location sync from trip update skipped", exc_info=True)
 
     await _log_trip_event(
         trip_id,
@@ -3687,10 +3923,13 @@ async def _build_trip_share_data(trip: dict, share_token: str) -> dict:
     distance_km = trip.get("live_distance_km") or trip.get("distance_km")
 
     if driver_id:
-        user = await db.users.find_one({"id": driver_id}) or {}
-        profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+        user = await db.users.find_one(
+            {"id": driver_id},
+            {"_id": 0, "name": 1, "profile_image": 1, "rating": 1},
+        ) or {}
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"face_image": 0}) or {}
         locked_v = trip.get("locked_vehicle") or {}
-        face_img = profile.get("face_image") or user.get("face_image")
+        face_img = await get_reference_face_image(driver_id)
         profile_img = user.get("profile_image")
         driver = {
             "name": str(user.get("name") or "Driver"),
@@ -3789,8 +4028,12 @@ async def get_trip_status(trip_id: str, request: Request):
 
     driver_id = trip.get("driver_id")
     if driver_id:
-        user = await db.users.find_one({"id": driver_id}) or {}
-        profile = await db.driver_profiles.find_one({"user_id": driver_id}) or {}
+        user = await db.users.find_one(
+            {"id": driver_id},
+            {"_id": 0, "name": 1, "phone": 1, "profile_image": 1, "rating": 1},
+        ) or {}
+        profile = await db.driver_profiles.find_one({"user_id": driver_id}, {"face_image": 0}) or {}
+        driver_face_image = await get_reference_face_image(driver_id)
         loc = profile.get("current_location") if isinstance(profile.get("current_location"), dict) else {}
         actual_route = trip.get("actual_route") or []
         if len(actual_route) >= 2:
@@ -3863,7 +4106,7 @@ async def get_trip_status(trip_id: str, request: Request):
             "avg_rating": float(profile.get("avg_rating") or user.get("rating") or 4.5),
             # Visual identity fields — critical for arrival verification
             "profile_image": user.get("profile_image") or None,
-            "face_image": profile.get("face_image") or user.get("face_image") or None,
+            "face_image": driver_face_image,
             # Vehicle identity
             "vehicle": live_model,
             "vehicle_model": live_model,
@@ -3885,6 +4128,17 @@ async def get_trip_status(trip_id: str, request: Request):
             "phone_masked": _mask_phone(driver_phone_raw),
             "phone_visible": phone_visible,
         }
+        # Face binary lives in private GCS — expose the authenticated URL, never the blob.
+        if trip.get("driver_face_key"):
+            driver_info["driver_face_image_url"] = f"/api/trips/{trip_id}/driver-face-image"
+
+    # Normalize lifecycle timestamps to ISO strings for frontend timers
+    def _iso(val):
+        if val is None:
+            return None
+        if hasattr(val, "isoformat"):
+            return val.isoformat() + ("Z" if not val.tzinfo else "")
+        return str(val)
 
     return {
         "success": True,
@@ -3892,6 +4146,16 @@ async def get_trip_status(trip_id: str, request: Request):
         "status": trip.get("status"),
         "payment_status": trip.get("payment_status"),
         "payment_method": trip.get("payment_method"),
+        # Lifecycle timestamps — required by rider/driver timers
+        "accepted_at": _iso(trip.get("accepted_at") or trip.get("assignment_accepted_at")),
+        "arrived_at": _iso(trip.get("arrived_at")),
+        "started_at": _iso(trip.get("started_at")),
+        "completed_at": _iso(trip.get("completed_at")),
+        # Pickup wait payload for rider wait timer
+        "pickup_wait": {
+            "arrived_at": _iso(trip.get("arrived_at")),
+            "free_wait_secs": int(trip.get("free_wait_seconds", 300)),
+        },
         "face_verified_at_start": bool(trip.get("face_verified_at_start")),
         "rider_face_verified_at_pickup": bool(trip.get("rider_face_verified_at_pickup")),
         "rider_face_match_confidence": trip.get("rider_face_match_confidence"),
@@ -3916,6 +4180,30 @@ async def get_trip_status(trip_id: str, request: Request):
         "mismatch_reported": bool(trip.get("mismatch_reported_at")),
     }
 
+@trips_router.get("/trips/{trip_id}/driver-face-image")
+async def get_trip_driver_face_image(trip_id: str, request: Request):
+    """Serve a trip's driver-face image from private GCS (legacy inline fallback).
+
+    Authenticated to trip participants — the driver face binary lives in the
+    private media bucket and is streamed by key, never embedded on the trip doc.
+    """
+    from fastapi.responses import Response as _Resp
+
+    trip = await db.trips.find_one(
+        {"id": trip_id},
+        {"_id": 0, "id": 1, "rider_id": 1, "driver_id": 1, "driver_face_key": 1, "driver_face_image": 1},
+    )
+    if not trip:
+        raise HTTPException(status_code=404, detail="Trip not found")
+    verify_trip_participant(request, trip)
+    from trip_face_storage import fetch_trip_driver_face
+
+    raw = await fetch_trip_driver_face(trip)
+    if raw is None:
+        raise HTTPException(status_code=404, detail="No driver face image for this trip")
+    return _Resp(content=raw, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+
 @trips_router.put("/trips/{trip_id}/complete")
 async def complete_trip(trip_id: str, request: Request):
     trip_before = await db.trips.find_one({"id": trip_id})
@@ -3925,7 +4213,9 @@ async def complete_trip(trip_id: str, request: Request):
     actor_id = require_authenticated(request)
     if actor_id != trip_before.get("driver_id"):
         raise HTTPException(status_code=403, detail="Only the assigned driver can complete this trip")
-    pm = trip_before.get("payment_method")
+    # Default payment method is cash (Uber/Bolt model). Cash is auto-settled the
+    # instant the driver ends the trip — the rider is never asked to confirm it.
+    pm = trip_before.get("payment_method") or "cash"
     needs_confirm = rider_must_confirm_payment(str(pm) if pm is not None else None)
     payment_status_after = "pending" if needs_confirm else "completed"
     completed_at = datetime.now(timezone.utc)
@@ -3952,6 +4242,7 @@ async def complete_trip(trip_id: str, request: Request):
     complete_set: dict = {
         "status": "completed",
         "completed_at": completed_at,
+        "payment_method": pm,
         "payment_status": payment_status_after,
         "safe_arrival_check": safe_arrival_check,
         **shield_updates,
@@ -3962,18 +4253,36 @@ async def complete_trip(trip_id: str, request: Request):
         {"id": trip_id, "status": "ongoing"},
         {"$set": complete_set},
     )
-    
+
     if result.modified_count == 0:
+        # Idempotent End trip: a retry / double-tap on an already-completed trip
+        # returns the same summary instead of erroring or double-settling.
+        # The $set above only ran once (the second call matches nothing), so there
+        # is no double-charge. Only a genuinely non-startable trip still 400s.
+        existing = await db.trips.find_one({"id": trip_id})
+        if existing and existing.get("status") == "completed":
+            existing["_id"] = str(existing["_id"])
+            return existing
         raise HTTPException(status_code=400, detail="Cannot complete trip")
-    
+
+    # Release the driver lock so they can accept new trips
+    driver_id_for_lock = trip_before.get("driver_id")
+    if driver_id_for_lock:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id_for_lock},
+            {"$unset": {"active_trip_id": ""}},
+        )
+
     trip = await db.trips.find_one({"id": trip_id})
-    
+
     # Update stats
     if trip.get("driver_id"):
         await db.users.update_one({"id": trip["driver_id"]}, {"$inc": {"total_trips": 1}})
         await db.users.update_one({"id": trip["driver_id"]}, {"$inc": {"streaks.current": 1}})
 
-    await db.users.update_one({"id": trip["rider_id"]}, {"$inc": {"total_trips": 1}})
+    rider_id_for_stats = trip.get("rider_id")
+    if rider_id_for_stats:
+        await db.users.update_one({"id": rider_id_for_stats}, {"$inc": {"total_trips": 1}})
 
     # Apply incentives (first-ride reward, referral, driver trial, mystery bonus).
     inc_res: dict = {}
@@ -4052,6 +4361,24 @@ async def complete_trip(trip_id: str, request: Request):
     # ────────────────────────────────────────────────────────────────────────
     
     trip["_id"] = str(trip["_id"])
+
+    # Track completion metric
+    try:
+        from metrics_service import track_ride_completed
+        track_ride_completed(fare_ngn=float(trip.get("fare") or 0))
+    except Exception:
+        pass
+
+    # Auto-finalize wallet holds for non-wallet payment methods (cash, card).
+    # Wallet payments require explicit rider confirmation (confirm-payment endpoint).
+    # This prevents holds being stuck for 48h when no confirmation ever comes.
+    if not is_wallet_payment_method(trip_before.get("payment_method")):
+        try:
+            from wallet_ops import release_rider_wallet_hold
+            await release_rider_wallet_hold(db, trip_before.get("rider_id") or "", trip_id)
+        except Exception as _wh_exc:
+            logger.warning("wallet hold release on complete failed trip=%s: %s", trip_id, _wh_exc)
+
     await _log_trip_event(trip_id, "trip_completed", trip.get("driver_id"), {"fare": trip.get("fare")})
     if trip.get("driver_id"):
         await _refresh_driver_visibility_score(trip["driver_id"])
@@ -4124,6 +4451,16 @@ async def confirm_trip_payment(trip_id: str, request: Request):
     if trip.get("payment_status") == "completed":
         return {"success": True, "payment_status": "completed", "message": "Payment already confirmed"}
 
+    # Atomic guard: only proceed if payment_status is still not "completed"
+    # Prevents double-credit from concurrent confirm requests.
+    result = await db.trips.find_one_and_update(
+        {"id": trip_id, "payment_status": {"$ne": "completed"}},
+        {"$set": {"payment_status": "completed", "paid_at": datetime.utcnow()}},
+        return_document=True,
+    )
+    if not result:
+        return {"success": True, "payment_status": "completed", "message": "Payment already confirmed"}
+
     if is_wallet_payment_method(trip.get("payment_method")):
         rider_id = trip.get("rider_id")
         amount = trip_fare_amount(trip)
@@ -4131,11 +4468,6 @@ async def confirm_trip_payment(trip_id: str, request: Request):
         driver_id = trip.get("driver_id")
         if driver_id:
             await apply_driver_wallet_ride_credit(db, driver_id, trip_id, amount)
-
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"payment_status": "completed", "paid_at": datetime.utcnow()}},
-    )
     await _log_trip_event(trip_id, "payment_confirmed", actor_id, {"payment_status": "completed"})
     schedule_trip_receipt_emails_after_payment(trip_id)
     await _emit_rider_trip_realtime(trip_id)
@@ -4150,13 +4482,45 @@ async def cancel_trip(trip_id: str, request: dict, http_request: Request):
         raise HTTPException(status_code=404, detail="Trip not found")
     verify_trip_participant(http_request, trip)
     
-    if trip["status"] in ["completed", "cancelled"]:
-        raise HTTPException(status_code=400, detail="Cannot cancel this trip")
-    
-    await db.trips.update_one(
-        {"id": trip_id},
-        {"$set": {"status": "cancelled", "cancelled_by": cancelled_by, "cancelled_at": datetime.utcnow()}}
+    # Uber-standard: a trip can only be cancelled BEFORE it starts. Once it is
+    # in_progress (ongoing) it can only complete — never be reclassified as a
+    # cancellation. Terminal states are likewise non-cancellable.
+    NON_CANCELLABLE_STATUSES = [
+        "completed", "cancelled",
+        "ongoing", "in_progress", "started", "picked_up",
+    ]
+    if trip["status"] in NON_CANCELLABLE_STATUSES:
+        if trip["status"] in ("completed", "cancelled"):
+            raise HTTPException(status_code=400, detail="Cannot cancel this trip")
+        raise HTTPException(
+            status_code=400,
+            detail="This trip has already started and can only be completed.",
+        )
+
+    # Atomic cancel: only transitions from a pre-start, non-terminal status.
+    cancel_result = await db.trips.update_one(
+        {"id": trip_id, "status": {"$nin": NON_CANCELLABLE_STATUSES}},
+        {"$set": {"status": "cancelled", "cancelled_by": cancelled_by, "cancelled_at": datetime.utcnow()}},
     )
+    if cancel_result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Trip already started, completed, or cancelled")
+
+    # Release wallet fare hold back to the rider
+    rider_id_for_refund = trip.get("rider_id")
+    if rider_id_for_refund:
+        try:
+            await release_rider_wallet_hold(db, rider_id_for_refund, trip_id)
+        except Exception as _we:
+            logger.warning(f"Wallet hold release failed on cancel trip={trip_id}: {_we}")
+
+    # Clear driver active_trip lock
+    driver_id_for_lock = trip.get("driver_id")
+    if driver_id_for_lock:
+        await db.driver_profiles.update_one(
+            {"user_id": driver_id_for_lock},
+            {"$unset": {"active_trip_id": ""}},
+        )
+
     await _log_trip_event(trip_id, "trip_cancelled", cancelled_by, {})
     await _emit_rider_trip_realtime(trip_id)
 
@@ -4190,9 +4554,13 @@ async def rate_trip(trip_id: str, rater_id: str, request: ComfortRatingRequest, 
     
     if trip["status"] != "completed":
         raise HTTPException(status_code=400, detail="Can only rate completed trips")
-    
+
     is_rider_rating = rater_id == trip["rider_id"]
     update_field = "driver_rating" if is_rider_rating else "rider_rating"
+
+    # Idempotency: reject if this party has already rated
+    if trip.get(update_field) is not None:
+        return {"message": "Already rated", "rating": trip[update_field]}
     rated_user_id = trip["driver_id"] if is_rider_rating else trip["rider_id"]
     
     update_data = {update_field: request.overall_rating}
@@ -4297,12 +4665,32 @@ async def rate_trip(trip_id: str, rater_id: str, request: ComfortRatingRequest, 
     return {"message": "Rating submitted"}
 
 @trips_router.get("/trips/user/{user_id}")
-async def get_user_trips(user_id: str, request: Request, role: str = "rider"):
+async def get_user_trips(user_id: str, request: Request, role: str = "rider", limit: int = 20):
     verify_owner_strict(request, user_id)
+    cap = max(1, min(int(limit), 50))
+    projection = {
+        "_id": 1,
+        "id": 1,
+        "status": 1,
+        "fare": 1,
+        "distance_km": 1,
+        "duration_mins": 1,
+        "pickup_location": 1,
+        "dropoff_location": 1,
+        "pickup_address": 1,
+        "dropoff_address": 1,
+        "rider_display_name": 1,
+        "rider_name": 1,
+        "created_at": 1,
+        "requested_at": 1,
+        "completed_at": 1,
+        "driver_id": 1,
+        "rider_id": 1,
+    }
     if role == "rider":
-        trips = await db.trips.find({"rider_id": user_id}).sort("created_at", -1).to_list(50)
+        trips = await db.trips.find({"rider_id": user_id}, projection).sort("created_at", -1).limit(cap).to_list(cap)
     else:
-        trips = await db.trips.find({"driver_id": user_id}).sort("created_at", -1).to_list(50)
+        trips = await db.trips.find({"driver_id": user_id}, projection).sort("created_at", -1).limit(cap).to_list(cap)
     
     for trip in trips:
         trip["_id"] = str(trip["_id"])

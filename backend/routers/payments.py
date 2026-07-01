@@ -34,6 +34,7 @@ from squad_checkout_parse import (
     build_squad_checkout_url,
 )
 from database import db
+from user_lookup import find_user_by_id, QUERY_MAX_TIME_MS
 from fare_estimate_cache import save_fare_estimate
 from fare_config import (
     FARE_CONFIG,
@@ -112,30 +113,59 @@ def set_payments_fare_estimate_store(store):
     global fare_estimate_store
     fare_estimate_store = store
 
-async def get_directions_from_google(p_lat, p_lng, d_lat, d_lng, trip_id: str = None):
+async def get_directions_from_google(
+    p_lat, p_lng, d_lat, d_lng, trip_id: str = None, stop_lat=None, stop_lng=None
+):
     """Cached wrapper — checks MongoDB + LRU before calling Google API."""
+    has_stop = stop_lat is not None and stop_lng is not None
     try:
-        cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
-        # Never serve haversine from cache — it blocks fare estimates when the client cannot
-        # supply Directions (e.g. Android-restricted Maps keys on device REST calls).
-        if cached and is_directions_road_route(cached):
-            await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
-            return cached
+        if not has_stop:
+            cached = await get_cached_directions(db, p_lat, p_lng, d_lat, d_lng)
+            # Never serve haversine from cache — it blocks fare estimates when the client cannot
+            # supply Directions (e.g. Android-restricted Maps keys on device REST calls).
+            if cached and is_directions_road_route(cached):
+                await log_api_call(db, call_type="directions", trip_id=trip_id, cached=True)
+                return cached
 
         if _get_directions_fn:
-            result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
+            if has_stop:
+                result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng, stop_lat=stop_lat, stop_lng=stop_lng)
+            else:
+                result = await _get_directions_fn(p_lat, p_lng, d_lat, d_lng)
             if result:
-                if is_directions_road_route(result):
+                if is_directions_road_route(result) and not has_stop:
                     await store_cached_directions(db, p_lat, p_lng, d_lat, d_lng, result)
                 await log_api_call(db, call_type="directions", trip_id=trip_id, cached=False)
                 return result
 
+        if has_stop:
+            leg1 = haversine_route_estimate(p_lat, p_lng, stop_lat, stop_lng)
+            leg2 = haversine_route_estimate(stop_lat, stop_lng, d_lat, d_lng)
+            return {
+                "distance_meters": int(leg1.get("distance_meters", 0)) + int(leg2.get("distance_meters", 0)),
+                "duration_seconds": int(leg1.get("duration_seconds", 0)) + int(leg2.get("duration_seconds", 0)),
+                "duration_in_traffic_seconds": int(leg1.get("duration_in_traffic_seconds", 0))
+                + int(leg2.get("duration_in_traffic_seconds", 0)),
+                "polyline": "",
+                "source": "haversine",
+            }
         return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
     except Exception:
         logger.warning(
             "get_directions_from_google failed; using haversine fallback",
             exc_info=True,
         )
+        if has_stop:
+            leg1 = haversine_route_estimate(p_lat, p_lng, stop_lat, stop_lng)
+            leg2 = haversine_route_estimate(stop_lat, stop_lng, d_lat, d_lng)
+            return {
+                "distance_meters": int(leg1.get("distance_meters", 0)) + int(leg2.get("distance_meters", 0)),
+                "duration_seconds": int(leg1.get("duration_seconds", 0)) + int(leg2.get("duration_seconds", 0)),
+                "duration_in_traffic_seconds": int(leg1.get("duration_in_traffic_seconds", 0))
+                + int(leg2.get("duration_in_traffic_seconds", 0)),
+                "polyline": "",
+                "source": "haversine",
+            }
         return haversine_route_estimate(p_lat, p_lng, d_lat, d_lng)
 
 def calculate_fare(
@@ -262,6 +292,9 @@ class FareEstimateRequest(BaseModel):
     pickup_lng: float
     dropoff_lat: float
     dropoff_lng: float
+    stop_lat: Optional[float] = None
+    stop_lng: Optional[float] = None
+    stop_address: Optional[str] = None
     service_type: Optional[str] = "economy"
     city: Optional[str] = "lagos"
     trip_type: Optional[str] = None
@@ -379,15 +412,19 @@ async def _get_dynamic_tier_price(tier: str) -> int:
 
 async def _assert_driver_account(driver_id: str):
     """Ensure subscription endpoints are only used by driver accounts."""
-    user = await db.users.find_one({"id": driver_id})
-    profile = await db.driver_profiles.find_one({"user_id": driver_id})
+    user = await find_user_by_id(driver_id, {"_id": 0, "id": 1, "role": 1})
+    profile = await db.driver_profiles.find_one(
+        {"user_id": driver_id},
+        {"_id": 0, "user_id": 1},
+        max_time_ms=QUERY_MAX_TIME_MS,
+    )
     if profile or (user and user.get("role") == "driver"):
         return
     raise HTTPException(status_code=403, detail="Driver account required")
 
 
 async def _assert_wallet_user_exists(user_id: str):
-    user = await db.users.find_one({"id": user_id})
+    user = await find_user_by_id(user_id, {"_id": 0, "id": 1})
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -748,7 +785,10 @@ async def _evaluate_driver_trial(driver_id: str, subscription: dict) -> dict:
     now = datetime.utcnow()
     target = int(subscription.get("trial_trips_target") or SUBSCRIPTION_CONFIG["trial_trips_target"])
     extension_count = int(subscription.get("trial_extension_count") or 0)
-    completed_trips = await db.trips.count_documents({"driver_id": driver_id, "status": "completed"})
+    completed_trips = await db.trips.count_documents(
+        {"driver_id": driver_id, "status": "completed"},
+        max_time_ms=QUERY_MAX_TIME_MS,
+    )
 
     sub = dict(subscription)
     sub["trial_trips_completed"] = completed_trips
@@ -1054,6 +1094,21 @@ async def _verify_squad_transaction(reference: str) -> dict:
     }
 
 
+async def _read_driver_subscription_flags(driver_id: str) -> dict:
+    """Read-only subscription flags for GET endpoints — no writes on read."""
+    user = await find_user_by_id(
+        driver_id,
+        {"_id": 0, "subscription_active": 1, "subscription_expiry": 1},
+    ) or {}
+    expiry = user.get("subscription_expiry")
+    if isinstance(expiry, datetime):
+        expiry = expiry.isoformat()
+    return {
+        "subscription_active": bool(user.get("subscription_active")),
+        "subscription_expiry": expiry,
+    }
+
+
 async def _sync_driver_subscription_flags(driver_id: str) -> dict:
     now = datetime.utcnow()
     subscription = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
@@ -1266,7 +1321,10 @@ async def _assert_driver_can_activate_subscription(driver_id: str):
 
 
 async def _road_warrior_upgrade_requirements(driver_id: str) -> dict:
-    user = await db.users.find_one({"id": driver_id}) or {}
+    user = await find_user_by_id(
+        driver_id,
+        {"_id": 0, "rating": 1, "total_trips": 1},
+    ) or {}
     rating = float(user.get("rating") or 0)
     trips = int(user.get("total_trips") or 0)
     return {
@@ -1290,9 +1348,32 @@ async def _assert_subscription_tier_allowed(driver_id: str, tier: str):
 
 @payments_router.get("/subscriptions/config")
 async def get_subscription_config():
-    """Get subscription configuration including bank details"""
+    """Get subscription configuration including dynamic tier pricing."""
+    city_rider_price = await _get_dynamic_tier_price("city_rider")
+    road_warrior_price = await _get_dynamic_tier_price("road_warrior")
+
+    # Determine phase + slot counts for display
+    config = await db.system_config.find_one({"key": "subscription_pricing"})
+    current_phase = (config or {}).get("current_phase", "early")
+    city_riders_count = int((config or {}).get("city_riders_count", 0))
+    road_warriors_count = int((config or {}).get("road_warriors_count", 0))
+    city_slots = max(0, CITY_RIDER_LAUNCH_LIMIT - city_riders_count)
+    road_slots = max(0, ROAD_WARRIOR_LAUNCH_LIMIT - road_warriors_count)
+
     return {
-        "monthly_fee": SUBSCRIPTION_CONFIG["monthly_fee"],
+        # Legacy field — kept so existing clients using city_rider price don't break
+        "monthly_fee": city_rider_price,
+        "current_price": city_rider_price,
+        "current_phase": current_phase,
+        "launch_slots_remaining": city_slots,
+        # Explicit per-tier pricing
+        "city_rider_price": city_rider_price,
+        "city_rider_phase": current_phase,
+        "city_rider_launch_slots_remaining": city_slots,
+        "road_warrior_price": road_warrior_price,
+        "road_warrior_phase": current_phase,
+        "road_warrior_launch_slots_remaining": road_slots,
+        # Trial settings
         "trial_trips_target": SUBSCRIPTION_CONFIG["trial_trips_target"],
         "trial_extension_days": SUBSCRIPTION_CONFIG["trial_extension_days"],
         "trial_extension_min_trips": SUBSCRIPTION_CONFIG["trial_extension_min_trips"],
@@ -2693,8 +2774,12 @@ async def get_subscription(driver_id: str, request: Request):
     await _assert_driver_account(driver_id)
     subscription = await _ensure_auto_trial_for_verified_driver(driver_id)
     if not subscription:
-        subscription = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
-    flag_state = await _sync_driver_subscription_flags(driver_id)
+        subscription = await db.subscriptions.find_one(
+            {"driver_id": driver_id},
+            sort=[("created_at", -1)],
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
+    flag_state = await _read_driver_subscription_flags(driver_id)
 
     if subscription:
         if subscription.get("_id") is not None:
@@ -2728,7 +2813,10 @@ async def get_subscription(driver_id: str, request: Request):
 
         subscription["bank_details"] = SUBSCRIPTION_CONFIG["bank_details"]
         subscription["monthly_fee"] = await _get_dynamic_tier_price(subscription.get("tier", "city_rider"))
-        subscription["subscription_active"] = flag_state["subscription_active"]
+        # An active trial / paid / grace subscription is always "active" for gating,
+        # even if the cached users.subscription_active flag is stale.
+        live_active = subscription.get("status") in {"trial", "active", "grace_period"}
+        subscription["subscription_active"] = flag_state["subscription_active"] or live_active
         subscription["subscription_expiry"] = flag_state["subscription_expiry"]
         return subscription
 
@@ -2752,22 +2840,55 @@ async def get_subscription(driver_id: str, request: Request):
 async def get_driver_subscription_status(request: Request):
     driver_id = require_authenticated(request)
     await _assert_driver_account(driver_id)
-    flag_state = await _sync_driver_subscription_flags(driver_id)
+
+    # ── Critical: resolve the real subscription FIRST (never masked by enrichment errors).
+    # An already-active trial must always report status="trial" so the app does not
+    # wrongly prompt the driver to activate/subscribe again.
     subscription = await _ensure_auto_trial_for_verified_driver(driver_id)
     if not subscription:
-        subscription = await db.subscriptions.find_one({"driver_id": driver_id}, sort=[("created_at", -1)])
+        subscription = await db.subscriptions.find_one(
+            {"driver_id": driver_id},
+            {"_id": 0},
+            sort=[("created_at", -1)],
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
 
-    # Live-evaluate trial state.
+    # Live-evaluate trial trip count. If this fails, keep the RAW trial status
+    # rather than collapsing the driver to "none" (which would show "Activate to Drive").
     if subscription and subscription.get("status") == "trial":
-        subscription = await _evaluate_driver_trial(driver_id, subscription)
+        try:
+            subscription = await _evaluate_driver_trial(driver_id, subscription)
+        except Exception as exc:
+            logger.warning("trial evaluation failed driver=%s (keeping raw status): %s", driver_id, exc)
 
-    virtual_account = await db.subscription_virtual_accounts.find_one({"driver_id": driver_id})
-    if virtual_account:
-        virtual_account.pop("_id", None)
-        virtual_account.pop("provider_response", None)
-    upgrade_requirements = await _road_warrior_upgrade_requirements(driver_id)
+    flag_state = await _read_driver_subscription_flags(driver_id)
     status = (subscription or {}).get("status", "none")
     tier = (subscription or {}).get("tier")
+
+    # ── Enrichment (best-effort — failures must NOT change the reported status).
+    virtual_account = None
+    try:
+        virtual_account = await db.subscription_virtual_accounts.find_one(
+            {"driver_id": driver_id},
+            {"_id": 0, "provider_response": 0},
+            max_time_ms=QUERY_MAX_TIME_MS,
+        )
+        if virtual_account:
+            virtual_account.pop("_id", None)
+    except Exception as exc:
+        logger.warning("subscription VA lookup failed driver=%s: %s", driver_id, exc)
+
+    upgrade_requirements = {
+        "rating_met": False,
+        "trips_met": False,
+        "current_rating": 0,
+        "current_trips": 0,
+    }
+    try:
+        upgrade_requirements = await _road_warrior_upgrade_requirements(driver_id)
+    except Exception as exc:
+        logger.warning("upgrade requirements failed driver=%s: %s", driver_id, exc)
+
     can_upgrade = (
         tier == "city_rider"
         and status in {"trial", "active", "grace_period"}
@@ -2783,13 +2904,12 @@ async def get_driver_subscription_status(request: Request):
 
     return {
         "driver_id": driver_id,
-        "subscription_active": flag_state["subscription_active"],
+        "subscription_active": flag_state["subscription_active"] or status in {"trial", "active", "grace_period"},
         "subscription_expiry": flag_state["subscription_expiry"],
         "status": status,
         "tier": tier,
         "amount_expected": sub.get("amount"),
         "days_remaining": sub.get("days_remaining", 0),
-        # Trial fields
         "trial_active": sub.get("trial_active", status == "trial"),
         "trial_trips_completed": trial_trips_completed,
         "trial_trips_remaining": trial_trips_remaining,
@@ -2800,7 +2920,6 @@ async def get_driver_subscription_status(request: Request):
         "trial_completed": sub.get("trial_completed", False),
         "trial_urgency": sub.get("trial_urgency", "normal"),
         "trial_message": sub.get("trial_message", ""),
-        # Navigation
         "can_upgrade": can_upgrade,
         "upgrade_requirements": upgrade_requirements,
         "virtual_account": virtual_account,
@@ -3149,8 +3268,8 @@ async def handle_squad_webhook(request: Request):
     signature = request.headers.get("x-squad-encrypted-body", "")
 
     if not SQUAD_WEBHOOK_SECRET:
-        logger.error("Squad webhook received but SQUAD_WEBHOOK_SECRET is not configured")
-        return {"received": False}
+        logger.error("Squad webhook received but SQUAD_WEBHOOK_SECRET is not configured — rejecting")
+        raise HTTPException(status_code=503, detail="Webhook processor not configured")
 
     expected_signature = hmac.new(
         SQUAD_WEBHOOK_SECRET.encode("utf-8"),
@@ -3678,8 +3797,12 @@ async def estimate_fare(request: FareEstimateRequest):
         demand_source = "area_estimate"
 
     route_data = await get_directions_from_google(
-        request.pickup_lat, request.pickup_lng,
-        request.dropoff_lat, request.dropoff_lng
+        request.pickup_lat,
+        request.pickup_lng,
+        request.dropoff_lat,
+        request.dropoff_lng,
+        stop_lat=request.stop_lat,
+        stop_lng=request.stop_lng,
     )
 
     straight_km = calculate_distance_haversine(
@@ -3855,6 +3978,11 @@ async def estimate_fare(request: FareEstimateRequest):
         "city": city,
         "pickup": {"lat": request.pickup_lat, "lng": request.pickup_lng},
         "dropoff": {"lat": request.dropoff_lat, "lng": request.dropoff_lng},
+        **(
+            {"stop": {"lat": request.stop_lat, "lng": request.stop_lng}}
+            if request.stop_lat is not None and request.stop_lng is not None
+            else {}
+        ),
         "created_at": _now_utc,
         "expires_at": _lock_until_utc,
         "base_price": base_price,
@@ -3955,7 +4083,7 @@ async def get_wallet_me(request: Request, limit: int = 25):
     """Authenticated user: balance + recent transactions (must be before /wallet/{user_id})."""
     user_id = require_authenticated(request)
     verify_owner_strict(request, user_id)
-    user = await db.users.find_one({"id": user_id})
+    user = await find_user_by_id(user_id, {"_id": 0, "wallet_balance": 1})
     safe_limit = max(1, min(limit, 100))
     rows = (
         await db.transactions.find({"user_id": user_id}, {"_id": 0})
@@ -4222,7 +4350,7 @@ async def topup_wallet_balance(user_id: str, request: dict, http_request: Reques
 @payments_router.post("/wallet/refund")
 async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Request):
     """Admin-only deterministic refund for completed wallet top-up transactions."""
-    require_admin_request(request)
+    await require_admin_request(request)
     user_id = body.user_id.strip()
     tx_id = body.transaction_id.strip()
     reason = body.reason.strip()
@@ -4231,10 +4359,21 @@ async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Requ
     source_tx = await db.transactions.find_one({"id": tx_id, "user_id": user_id}, {"_id": 0})
     if not source_tx:
         raise HTTPException(status_code=404, detail="Source transaction not found")
-    if str(source_tx.get("type") or "").lower() not in {"topup", "wallet_topup"}:
+
+    src_type = str(source_tx.get("type") or "").lower()
+    src_status = str(source_tx.get("status") or "").lower()
+    src_source = str(source_tx.get("source") or "").lower()
+
+    # Real Squad-funded top-ups are stored as type="credit"/status="success"
+    # (see _credit_wallet_for_squad_reference), while legacy/manual top-ups use
+    # type="topup"/status="completed". Accept both shapes so a genuinely funded
+    # balance can actually be refunded.
+    is_legacy_topup = src_type in {"topup", "wallet_topup"}
+    is_squad_credit = src_type == "credit" and src_source == "squad"
+    if not (is_legacy_topup or is_squad_credit):
         raise HTTPException(status_code=400, detail="Only completed wallet top-up transactions can be refunded")
-    if str(source_tx.get("status") or "").lower() != "completed":
-        raise HTTPException(status_code=400, detail="Source transaction is not in completed status")
+    if src_status not in {"completed", "success"}:
+        raise HTTPException(status_code=400, detail="Source transaction is not in a completed/success status")
 
     amount_ngn = _normalize_amount(source_tx.get("amount"))
     if amount_ngn is None or amount_ngn <= 0:
@@ -4297,6 +4436,19 @@ async def refund_wallet_transaction(body: WalletRefundRequestBody, request: Requ
         "refunded_amount": float(amount_ngn),
         "new_balance": float((updated_user or {}).get("wallet_balance") or 0),
     }
+
+
+@payments_router.get("/wallet/reconcile")
+async def wallet_reconcile(request: Request, tolerance: float = 1.0, limit: int = 1000):
+    """Admin-only: flag wallets whose stored balance diverges from the ledger.
+
+    Read-only — reports divergence, never writes corrections. Run periodically
+    (or before widening past the pilot) to catch double-credits/debits and the
+    stale db.wallets parallel store.
+    """
+    await require_admin_request(request)
+    from wallet_reconciliation import reconcile_wallets
+    return await reconcile_wallets(db, tolerance=float(tolerance), limit=int(limit))
 
 
 # ==================== SURGE PRICING ====================

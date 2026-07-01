@@ -32,6 +32,7 @@ export async function fetchDrivingRoute(
   pickupLng: number,
   dropoffLat: number,
   dropoffLng: number,
+  stop?: { lat: number; lng: number } | null,
 ): Promise<DrivingRouteResult | null> {
   const base = String(BACKEND_URL || '')
     .trim()
@@ -44,6 +45,10 @@ export async function fetchDrivingRoute(
     dropoff_lat: String(dropoffLat),
     dropoff_lng: String(dropoffLng),
   });
+  if (stop && Number.isFinite(stop.lat) && Number.isFinite(stop.lng)) {
+    q.set('stop_lat', String(stop.lat));
+    q.set('stop_lng', String(stop.lng));
+  }
 
   try {
     const res = await fetch(`${base}/api/places/driving-route?${q.toString()}`, {

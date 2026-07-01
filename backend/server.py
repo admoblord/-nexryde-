@@ -5,9 +5,83 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from typing import Set
-from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
+
+# ── Structured logging ────────────────────────────────────────────────────────
+import structlog
+
+_LOG_REDACT = {"password", "token", "otp", "code", "secret", "pin", "jwt", "credential"}
+
+def _redact_processor(logger, method, event_dict):
+    """Redact sensitive fields from every structured log entry."""
+    for key in list(event_dict.keys()):
+        if any(s in key.lower() for s in _LOG_REDACT):
+            event_dict[key] = "***REDACTED***"
+    return event_dict
+
+structlog.configure(
+    processors=[
+        structlog.contextvars.merge_contextvars,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.add_logger_name,
+        structlog.processors.TimeStamper(fmt="iso"),
+        _redact_processor,
+        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+    ],
+    wrapper_class=structlog.stdlib.BoundLogger,
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+_formatter = structlog.stdlib.ProcessorFormatter(
+    processor=structlog.processors.JSONRenderer(),
+)
+_handler = logging.StreamHandler()
+_handler.setFormatter(_formatter)
+root_logger = logging.getLogger()
+root_logger.handlers.clear()
+root_logger.addHandler(_handler)
+root_logger.setLevel(logging.INFO)
+
+# ── Sentry error tracking ─────────────────────────────────────────────────────
+def _valid_sentry_dsn(dsn: str) -> bool:
+    """Reject empty/placeholder DSNs. A real DSN is https://<key>@<host>/<project_id>
+    with a non-zero project id and an ingest host — never the .../0 placeholder."""
+    dsn = (dsn or "").strip()
+    if not dsn or "@" not in dsn:
+        return False
+    try:
+        project_id = dsn.rsplit("/", 1)[1]
+    except Exception:
+        return False
+    if not project_id.isdigit() or int(project_id) <= 0:
+        return False
+    return "sentry.io" in dsn or "ingest." in dsn
+
+
+_SENTRY_DSN = os.environ.get("SENTRY_DSN", "").strip()
+if _SENTRY_DSN and _valid_sentry_dsn(_SENTRY_DSN):
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.starlette import StarletteIntegration
+        sentry_sdk.init(
+            dsn=_SENTRY_DSN,
+            integrations=[StarletteIntegration(), FastApiIntegration()],
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+            environment=os.environ.get("NEXRYDE_ENV", "production"),
+            release=os.environ.get("K_REVISION") or None,
+        )
+        logging.getLogger(__name__).info("Sentry initialized")
+    except Exception as _sentry_exc:  # never let a bad DSN crash startup
+        _SENTRY_DSN = ""
+        logging.getLogger(__name__).warning("Sentry init failed; running without it: %s", _sentry_exc)
+elif _SENTRY_DSN:
+    # A value is set but it's a placeholder/malformed — disable rather than crash.
+    logging.getLogger(__name__).warning("SENTRY_DSN present but invalid/placeholder — Sentry disabled")
+    _SENTRY_DSN = ""
 from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -21,10 +95,7 @@ import json
 import asyncio
 import time
 from openai import OpenAI
-from slowapi.errors import RateLimitExceeded
-from slowapi import _rate_limit_exceeded_handler
-from slowapi.middleware import SlowAPIMiddleware
-from rate_limit import limiter
+# rate_limit (SlowAPI) removed — using security_advanced.RateLimiter
 from fare_config import FARE_CONFIG, SHORT_TRIP_KM_THRESHOLD, normalize_fare_city_key, resolve_fare_rate_card
 from nexryde_pricing import (
     core_components_from_rate_card,
@@ -84,10 +155,29 @@ ROOT_DIR = Path(__file__).parent
 ADMIN_DIR = ROOT_DIR / 'admin'  # admin folder is inside backend/
 load_dotenv(ROOT_DIR / '.env')
 
-# MongoDB connection
-mongo_url = os.environ.get('MONGODB_URI') or os.environ.get('MONGO_URL')
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ.get('DB_NAME', 'nexryde_db')]
+# ── Startup environment validation ────────────────────────────────────────────
+# Fail fast on missing critical vars rather than serving broken endpoints.
+_REQUIRED_ENV = {
+    "JWT_SECRET": "Authentication",
+    "MONGODB_URI": "Database",
+}
+_WARN_ENV = {
+    "REDIS_URL": "Rate limiting / WebSocket pub/sub",
+    "SQUAD_WEBHOOK_SECRET": "Payment webhook verification",
+    "BREVO_API_KEY": "Email OTP delivery",
+}
+_missing_critical = [k for k, _ in _REQUIRED_ENV.items() if not os.environ.get(k)]
+if _missing_critical and not os.environ.get("ALLOW_INSECURE_JWT_FOR_TESTS"):
+    for k in _missing_critical:
+        logging.getLogger(__name__).critical("STARTUP ABORT: Required env var %s (%s) is missing — refusing to start", k, _REQUIRED_ENV[k])
+    import sys as _sys
+    _sys.exit(1)
+for k, desc in _WARN_ENV.items():
+    if not os.environ.get(k):
+        logging.getLogger(__name__).warning("STARTUP: Optional env var %s (%s) not set — degraded functionality", k, desc)
+
+# MongoDB — use the single pooled client from database.py (no duplicate).
+from database import client, db  # noqa: E402 — after load_dotenv
 
 # Google Maps API Key
 GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
@@ -100,11 +190,30 @@ OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 EMERGENT_AUTH_URL = os.environ.get('EMERGENT_AUTH_URL', '')
 
 # Create the main app
-app = FastAPI(title="NEXRYDE API", version="2.0.0")
+app = FastAPI(title="NEXRYDE API", version="2.0.0", docs_url=None if os.environ.get("ENVIRONMENT") == "production" else "/docs")
 
-app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-app.add_middleware(SlowAPIMiddleware)
+# limiter removed (SlowAPI fully replaced by security_advanced.RateLimiter)
+
+
+@app.exception_handler(Exception)
+async def _global_exception_handler(request: Request, exc: Exception):
+    """Catch all unhandled 500s — log + Sentry capture, never expose traceback to clients."""
+    import traceback
+    logger = logging.getLogger(__name__)
+    logger.error(
+        "Unhandled exception path=%s method=%s error=%s",
+        request.url.path,
+        request.method,
+        type(exc).__name__,
+        exc_info=True,
+    )
+    if _SENTRY_DSN:
+        import sentry_sdk
+        sentry_sdk.capture_exception(exc)
+    return FJSONResponse(
+        status_code=500,
+        content={"detail": "An unexpected error occurred. Our team has been notified."},
+    )
 
 
 @app.get("/")
@@ -312,11 +421,6 @@ async def invite_redirect(identifier: str):
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
 logger = logging.getLogger(__name__)
 
 # ==================== CONFIGURATION ====================
@@ -363,8 +467,32 @@ DRIVER_CERTIFICATION_LEVELS = {
 ROUTE_DEVIATION_THRESHOLD = 0.5
 # Abnormal stop duration in seconds
 ABNORMAL_STOP_THRESHOLD = 300  # 5 minutes
-# Cache settings — in-memory acts as L1, MongoDB as persistent L2
-route_cache: Dict[str, Dict[str, Any]] = {}
+# Cache settings — in-memory LRU acts as L1, MongoDB as persistent L2.
+# Capped at 2 000 entries to prevent unbounded memory growth under load.
+from collections import OrderedDict as _OrderedDict
+
+class _LRUCache(dict):
+    """Simple in-process LRU cache capped at `maxsize` entries."""
+    def __init__(self, maxsize: int = 2000):
+        super().__init__()
+        self._maxsize = maxsize
+        self._order: _OrderedDict = _OrderedDict()
+
+    def __setitem__(self, key, value):
+        if key in self._order:
+            self._order.move_to_end(key)
+        self._order[key] = True
+        super().__setitem__(key, value)
+        while len(self._order) > self._maxsize:
+            oldest, _ = self._order.popitem(last=False)
+            super().pop(oldest, None)
+
+    def __getitem__(self, key):
+        if key in self._order:
+            self._order.move_to_end(key)
+        return super().__getitem__(key)
+
+route_cache: Dict[str, Dict[str, Any]] = _LRUCache(maxsize=2000)
 CACHE_TTL_SECONDS = 300          # L1 in-memory: 5 minutes
 PERSISTENT_CACHE_TTL_HOURS = 24  # L2 MongoDB: 24 hours
 # Fare lock duration
@@ -969,13 +1097,44 @@ class LostItemResponseRequest(BaseModel):
 
 ROUTE_ESTIMATE_VERSION = "v_last_month"
 
-def get_cache_key(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> str:
+def get_cache_key(
+    pickup_lat: float,
+    pickup_lng: float,
+    dropoff_lat: float,
+    dropoff_lng: float,
+    stop_lat: Optional[float] = None,
+    stop_lng: Optional[float] = None,
+) -> str:
+    stop_part = ""
+    if stop_lat is not None and stop_lng is not None:
+        stop_part = f"@{round(stop_lat, 4)},{round(stop_lng, 4)}"
     key_str = (
         f"{ROUTE_ESTIMATE_VERSION}:"
         f"{round(pickup_lat, 4)},{round(pickup_lng, 4)}-"
         f"{round(dropoff_lat, 4)},{round(dropoff_lng, 4)}"
+        f"{stop_part}"
     )
     return hashlib.md5(key_str.encode()).hexdigest()
+
+
+def _directions_route_from_google_response(route: dict) -> dict:
+    """Aggregate one or more legs from a Google Directions route."""
+    legs = route.get("legs") or []
+    if not legs:
+        raise ValueError("directions route missing legs")
+    distance_m = sum(int((leg.get("distance") or {}).get("value", 0)) for leg in legs)
+    duration_s = sum(int((leg.get("duration") or {}).get("value", 0)) for leg in legs)
+    traffic_s = 0
+    for leg in legs:
+        dit = (leg.get("duration_in_traffic") or {}).get("value")
+        traffic_s += int(dit if dit is not None else (leg.get("duration") or {}).get("value", 0))
+    return {
+        "distance_meters": distance_m,
+        "duration_seconds": duration_s,
+        "duration_in_traffic_seconds": traffic_s,
+        "polyline": (route.get("overview_polyline") or {}).get("points", ""),
+        "source": "google_directions_api",
+    }
 
 def is_cache_valid(cache_entry: dict) -> bool:
     if not cache_entry:
@@ -995,9 +1154,22 @@ def calculate_distance_haversine(lat1: float, lon1: float, lat2: float, lon2: fl
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
-def _haversine_estimate(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> dict:
+def _haversine_estimate(
+    pickup_lat: float,
+    pickup_lng: float,
+    dropoff_lat: float,
+    dropoff_lng: float,
+    stop_lat: Optional[float] = None,
+    stop_lng: Optional[float] = None,
+) -> dict:
     """Free estimate using Haversine — no API cost. Applies 1.35x road-factor for Nigerian roads."""
-    straight_km = calculate_distance_haversine(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    if stop_lat is not None and stop_lng is not None:
+        straight_km = (
+            calculate_distance_haversine(pickup_lat, pickup_lng, stop_lat, stop_lng)
+            + calculate_distance_haversine(stop_lat, stop_lng, dropoff_lat, dropoff_lng)
+        )
+    else:
+        straight_km = calculate_distance_haversine(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
     road_km = straight_km * 1.35
     avg_speed_kmh = 25
     duration_seconds = int((road_km / avg_speed_kmh) * 3600)
@@ -1049,21 +1221,73 @@ async def _get_route_from_db(cache_key: str) -> Optional[dict]:
         return None
 
 
-async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropoff_lat: float, dropoff_lng: float) -> dict:
-    cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+async def _redis_get_route(key: str) -> "dict | None":
+    """L1.5 — Redis route cache (cross-instance, 6-hour TTL)."""
+    try:
+        from redis_store import get_redis
+        r = get_redis()
+        if r is None:
+            return None
+        import json as _json
+        raw = r.get(f"route:{key}")
+        return _json.loads(raw) if raw else None
+    except Exception:
+        return None
+
+
+async def _redis_set_route(key: str, value: dict, ttl: int = 21600) -> None:
+    """Write to Redis route cache (default 6 h)."""
+    try:
+        from redis_store import get_redis
+        r = get_redis()
+        if r is None:
+            return
+        import json as _json
+        r.setex(f"route:{key}", ttl, _json.dumps(value, default=str))
+    except Exception:
+        pass
+
+
+def _driver_deviated(origin_lat: float, origin_lng: float,
+                     current_lat: float, current_lng: float,
+                     threshold_m: float = 150.0) -> bool:
+    """
+    Returns True only when the driver has moved >threshold_m from the
+    route origin — the threshold at which a new Directions API call
+    is worthwhile.  Avoids unnecessary recalculation during slow traffic.
+    """
+    return calculate_distance_haversine(origin_lat, origin_lng, current_lat, current_lng) * 1000 > threshold_m
+
+
+async def get_directions_from_google(
+    pickup_lat: float,
+    pickup_lng: float,
+    dropoff_lat: float,
+    dropoff_lng: float,
+    stop_lat: Optional[float] = None,
+    stop_lng: Optional[float] = None,
+) -> dict:
+    cache_key = get_cache_key(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng)
 
     # L1: in-memory cache (fastest, 5-minute TTL)
     if cache_key in route_cache and is_cache_valid(route_cache[cache_key]):
         return route_cache[cache_key]["data"]
 
+    # L1.5: Redis cross-instance cache (6-hour TTL)
+    redis_cached = await _redis_get_route(cache_key)
+    if redis_cached:
+        route_cache[cache_key] = {"data": redis_cached, "cached_at": datetime.utcnow()}
+        return redis_cached
+
     # L2: persistent MongoDB cache (survives restarts, 24-hour TTL)
     db_cached = await _get_route_from_db(cache_key)
     if db_cached:
         route_cache[cache_key] = {"data": db_cached, "cached_at": datetime.utcnow()}
+        await _redis_set_route(cache_key, db_cached)
         return db_cached
 
     if not GOOGLE_MAPS_API_KEY:
-        return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+        return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng)
 
     # L3: Google Directions API (primary for fare — road distance + traffic-aware ETA when available)
     try:
@@ -1075,21 +1299,23 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
             "key": GOOGLE_MAPS_API_KEY,
             "departure_time": "now",
         }
+        if stop_lat is not None and stop_lng is not None:
+            params["waypoints"] = f"{stop_lat},{stop_lng}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=10.0)
             data = response.json()
 
+        if data.get("status") != "OK":
+            async with httpx.AsyncClient() as client:
+                retry_params = {k: v for k, v in params.items() if k != "departure_time"}
+                response = await client.get(url, params=retry_params, timeout=10.0)
+                data = response.json()
+
         if data.get("status") == "OK":
             route = data["routes"][0]
-            leg = route["legs"][0]
-            result = {
-                "distance_meters": leg["distance"]["value"],
-                "duration_seconds": leg["duration"]["value"],
-                "duration_in_traffic_seconds": leg.get("duration_in_traffic", {}).get("value", leg["duration"]["value"]),
-                "polyline": route["overview_polyline"]["points"],
-                "source": "google_directions_api",
-            }
+            result = _directions_route_from_google_response(route)
             route_cache[cache_key] = {"data": result, "cached_at": datetime.utcnow()}
+            await _redis_set_route(cache_key, result)
             await _store_route_in_db(cache_key, result)
             return result
     except Exception as e:
@@ -1132,7 +1358,7 @@ async def get_directions_from_google(pickup_lat: float, pickup_lng: float, dropo
         logger.warning(f"Routes API failed: {e}")
 
     # L5: Haversine fallback (free, always works)
-    return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng)
+    return _haversine_estimate(pickup_lat, pickup_lng, dropoff_lat, dropoff_lng, stop_lat, stop_lng)
 
 def calculate_fare(
     distance_km: float,
@@ -1432,12 +1658,25 @@ async def health_check():
 
 @api_router.get("/health/ready")
 async def health_ready():
-    """Liveness: process up. Readiness: MongoDB ping (for orchestrators)."""
+    """Readiness check: MongoDB ping + optional Redis ping."""
+    checks: dict = {}
+    # MongoDB
     try:
         await db.command("ping")
-        return {"status": "ready", "database": "ok", "timestamp": datetime.utcnow().isoformat()}
+        checks["database"] = "ok"
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"database_unavailable: {exc}")
+    # Redis (optional — degraded but still ready if Redis is down)
+    try:
+        from redis_store import store as _redis_store
+        if _redis_store is not None:
+            await _redis_store.ping()
+            checks["redis"] = "ok"
+        else:
+            checks["redis"] = "unconfigured"
+    except Exception:
+        checks["redis"] = "degraded"
+    return {"status": "ready", **checks, "timestamp": datetime.utcnow().isoformat()}
 
 
 @api_router.get("/health/ops")
@@ -1461,6 +1700,79 @@ async def health_ops(request: Request):
         "realtime": "websocket",
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
+
+@api_router.get("/health/sentry")
+async def health_sentry():
+    """Report whether Sentry is actually wired in this running revision.
+
+    Safe to call publicly — never returns the DSN, only booleans so you can
+    tell 'configured in code' apart from 'a DSN is present and initialized'.
+    """
+    initialized = False
+    try:
+        import sentry_sdk  # type: ignore
+        client = sentry_sdk.Hub.current.client
+        initialized = client is not None and client.dsn is not None
+    except Exception:
+        initialized = False
+    return {
+        "sentry_dsn_present": bool(_SENTRY_DSN),
+        "sentry_initialized": initialized,
+        "revision": os.environ.get("K_REVISION", "unknown"),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@api_router.get("/debug/test-crash")
+async def debug_test_crash(request: Request):
+    """Deliberate crash to PROVE an event reaches Sentry.
+
+    Gated by X-NEXRYDE-OPS-KEY (same as /health/ops). Wrong/missing key -> 404.
+    On a correct key this raises an unhandled exception; if Sentry is wired the
+    event will land in the dashboard. If Sentry is NOT wired the request will
+    just 500 and nothing reaches Sentry — which is itself proof of the gap.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    raise RuntimeError(
+        "NEXRYDE deliberate test-crash: if you see this in Sentry, backend error reporting works."
+    )
+
+
+@api_router.post("/ops/migrate-driver-document-binaries")
+async def ops_migrate_driver_document_binaries(request: Request, dry_run: bool = True):
+    """One-shot, idempotent migration of driver_documents binaries → private GCS.
+
+    Runs in-process on Cloud Run where the service account credentials and the
+    GCS bucket are available. Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404).
+    Pass ?dry_run=false to actually move binaries. Safe to re-run.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from driver_doc_storage import run_document_binary_migration
+    summary = await run_document_binary_migration(dry_run=dry_run)
+    return summary
+
+
+@api_router.post("/ops/migrate-trip-face-binaries")
+async def ops_migrate_trip_face_binaries(request: Request, dry_run: bool = True):
+    """One-shot, idempotent migration of trips.driver_face_image → private GCS.
+
+    Gated by X-NEXRYDE-OPS-KEY (wrong/missing key → 404). Pass ?dry_run=false to
+    move binaries. Safe to re-run.
+    """
+    expected = (os.environ.get("NEXRYDE_OPS_KEY") or "").strip()
+    got = (request.headers.get("x-nexryde-ops-key") or "").strip()
+    if not expected or got != expected:
+        raise HTTPException(status_code=404, detail="Not found")
+    from trip_face_storage import run_trip_face_migration
+    summary = await run_trip_face_migration(dry_run=dry_run)
+    return summary
+
 
 @api_router.get("/route-cache/stats")
 async def route_cache_stats():
@@ -1537,6 +1849,13 @@ app.include_router(safety_router)
 app.include_router(safety_data_router)
 app.include_router(ai_router)
 app.include_router(admin_router)
+
+# Metrics + circuit breaker status
+try:
+    from metrics_service import metrics_router
+    app.include_router(metrics_router)
+except Exception as _me:
+    logger.warning("metrics_service load failed: %s", _me)
 app.include_router(admin_notifications_router, dependencies=[Depends(require_admin_access)])
 app.include_router(trips_router)
 app.include_router(auth_router)
@@ -1622,6 +1941,138 @@ async def _squad_webhook_dlq_autoreplay_loop():
         await asyncio.sleep(300)
 
 
+# ==================== BACKGROUND WATCHDOG LOOPS ====================
+
+async def _driver_heartbeat_watchdog_loop():
+    """
+    Every 3 minutes: auto-offline drivers whose last heartbeat is > 15 minutes old.
+    Prevents ghost-online drivers from receiving dispatch offers they can't accept.
+    """
+    await asyncio.sleep(60)
+    while True:
+        try:
+            cutoff = datetime.utcnow() - timedelta(minutes=15)
+            result = await db.driver_profiles.update_many(
+                {
+                    "is_online": True,
+                    "$or": [
+                        {"last_heartbeat": {"$lt": cutoff.isoformat()}},
+                        {"last_heartbeat": {"$exists": False}},
+                    ],
+                },
+                {"$set": {"is_online": False, "went_offline_reason": "heartbeat_timeout"}},
+            )
+            if result.modified_count:
+                logger.info("Heartbeat watchdog: auto-offlined %d ghost drivers", result.modified_count)
+        except Exception:
+            logger.exception("heartbeat_watchdog_tick")
+        await asyncio.sleep(180)
+
+
+async def _stranded_trip_cleanup_loop():
+    """
+    Every 5 minutes: expire trips stuck in pending/searching states for > 10 minutes.
+    Prevents orphaned trips from blocking rider booking.
+    """
+    await asyncio.sleep(90)
+    while True:
+        try:
+            cutoff = datetime.utcnow() - timedelta(minutes=10)
+            stale_statuses = [
+                "pending", "pending_driver_offers", "searching",
+            ]
+            result = await db.trips.update_many(
+                {
+                    "status": {"$in": stale_statuses},
+                    "created_at": {"$lt": cutoff.isoformat()},
+                },
+                {
+                    "$set": {
+                        "status": "expired",
+                        "expired_at": datetime.utcnow().isoformat(),
+                        "expired_reason": "no_driver_found_timeout",
+                    }
+                },
+            )
+            if result.modified_count:
+                logger.info("Stranded trip cleanup: expired %d stuck trips", result.modified_count)
+
+            # Also close stale trip_offers
+            offer_cutoff = datetime.utcnow() - timedelta(minutes=6)
+            await db.trip_offers.update_many(
+                {
+                    "status": "pending",
+                    "created_at": {"$lt": offer_cutoff.isoformat()},
+                },
+                {"$set": {"status": "expired"}},
+            )
+        except Exception:
+            logger.exception("stranded_trip_cleanup_tick")
+        await asyncio.sleep(300)
+
+
+async def _subscription_expiry_watchdog_loop():
+    """
+    Every 2 minutes: find drivers whose subscription has lapsed while they are online
+    and force them offline so they stop receiving trip offers.
+    """
+    await asyncio.sleep(120)
+    while True:
+        try:
+            now_iso = datetime.utcnow().isoformat()
+            # Find subscriptions that have expired
+            expired_subs = await db.subscriptions.find(
+                {
+                    "status": {"$in": ["active", "grace_period"]},
+                    "expires_at": {"$lt": now_iso},
+                }
+            ).to_list(500)
+
+            for sub in expired_subs:
+                driver_id = sub.get("driver_id")
+                if not driver_id:
+                    continue
+                # Mark subscription expired
+                await db.subscriptions.update_one(
+                    {"_id": sub["_id"]},
+                    {"$set": {"status": "expired"}},
+                )
+                # Force driver offline
+                result = await db.driver_profiles.update_one(
+                    {"user_id": driver_id, "is_online": True},
+                    {"$set": {"is_online": False, "went_offline_reason": "subscription_expired"}},
+                )
+                if result.modified_count:
+                    logger.info("subscription_expiry_watchdog: driver %s offlined (subscription lapsed)", driver_id)
+                    # Push realtime notification to driver
+                    try:
+                        from routers.realtime_dispatch import driver_offer_hub
+                        await driver_offer_hub.send_json(driver_id, {
+                            "type": "subscription_expired",
+                            "message": "Your subscription has expired. Please renew to continue receiving rides.",
+                        })
+                    except Exception:
+                        pass
+
+        except Exception:
+            logger.exception("subscription_expiry_watchdog_tick")
+        await asyncio.sleep(120)
+
+
+async def _engagement_push_loop():
+    """Every 5 minutes: fire engagement push notifications for any active time slot."""
+    await asyncio.sleep(60)  # brief warm-up delay after startup
+    while True:
+        try:
+            from engagement_push_service import tick_engagement_pushes
+            sent = await tick_engagement_pushes()
+            if sent:
+                logger.info("Engagement pushes sent: %d", sent)
+        except Exception:
+            logger.exception("engagement_push_loop error")
+        await asyncio.sleep(300)  # check every 5 minutes
+
+
 # ==================== SEED ON STARTUP ====================
 async def _deferred_startup():
     """
@@ -1668,6 +2119,10 @@ async def _deferred_startup():
 
         start_notification_scheduler()
         asyncio.create_task(_squad_webhook_dlq_autoreplay_loop())
+        asyncio.create_task(_driver_heartbeat_watchdog_loop())
+        asyncio.create_task(_stranded_trip_cleanup_loop())
+        asyncio.create_task(_subscription_expiry_watchdog_loop())
+        asyncio.create_task(_engagement_push_loop())
         # One-time migration: lift all monthly_verification_overdue suspensions
         # so verified drivers are never hard-blocked by this soft reminder system
         try:
@@ -1702,6 +2157,17 @@ async def seed_promo_codes():
     set_payments_shared_functions(get_directions_from_google, calculate_fare, calculate_distance_haversine)
     set_payments_fare_estimate_store(fare_estimate_store)
     asyncio.create_task(_deferred_startup())
+    asyncio.create_task(_mongo_keepalive_loop())
+
+
+async def _mongo_keepalive_loop():
+    """Ping Mongo every 45s so Atlas idle disconnects don't stall the first login."""
+    from db_resilience import ensure_mongo_warm
+
+    await asyncio.sleep(2)
+    while True:
+        await ensure_mongo_warm()
+        await asyncio.sleep(45)
 
 # Browser CORS: default deny-all-open; set CORS_ORIGINS=* for local dev, or comma-separated list.
 _DEFAULT_CORS_ORIGINS = (
@@ -1718,12 +2184,16 @@ if _cors_raw == "*":
 else:
     ALLOWED_ORIGINS = [o.strip() for o in _cors_raw.split(",") if o.strip()]
 
+# allow_credentials=True is only safe when origins are explicitly whitelisted.
+# Wildcard "*" with credentials is a CORS security misconfiguration (browsers block it anyway,
+# but we prevent it server-side as defence in depth).
+_cors_credentials = ALLOWED_ORIGINS != ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
+    allow_credentials=_cors_credentials,
     allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-NEXRYDE-OPS-KEY"],
 )
 
 # Auth middleware - validates JWT on protected routes
@@ -1750,9 +2220,6 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if has_bearer:
                 try:
                     payload = verify_jwt_token(raw_token)
-                    request.state.user_id = payload.get("sub")
-                    request.state.user_role = payload.get("role")
-                    return await call_next(request)
                 except Exception:
                     # Admin session tokens are Bearer but are not JWTs — let /api/admin/* handlers validate.
                     if admin_ns:
@@ -1761,6 +2228,9 @@ class AuthMiddleware(BaseHTTPMiddleware):
                         status_code=401,
                         content={"detail": "Token expired or invalid"},
                     )
+                request.state.user_id = payload.get("sub")
+                request.state.user_role = payload.get("role")
+                return await call_next(request)
             if admin_ns:
                 return await call_next(request)
             return JSONResponse(status_code=401, content={"detail": "Authentication required"})
@@ -1809,6 +2279,42 @@ class RequestIdMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class InputSanitizationMiddleware(BaseHTTPMiddleware):
+    """
+    Block requests with suspiciously large payloads and basic SQLi/NoSQLi patterns.
+    Acts as a last-resort guard; validation in Pydantic models is the primary layer.
+    """
+    _MAX_BODY = 10 * 1024 * 1024  # 10 MB hard limit
+    _NOSQL_RE = __import__("re").compile(
+        r"(\$where|\$gt|\$lt|\$ne|\$regex|\$in|\$nin|__proto__|constructor\.prototype)",
+        __import__("re").IGNORECASE,
+    )
+
+    async def dispatch(self, request: Request, call_next):
+        # Block oversized bodies before they hit route handlers
+        cl = int(request.headers.get("content-length", 0) or 0)
+        if cl > self._MAX_BODY:
+            from fastapi.responses import JSONResponse
+            return JSONResponse({"detail": "Request body too large"}, status_code=413)
+
+        # For JSON bodies, check for NoSQLi patterns.
+        # request.body() caches result in request._body, so downstream handlers
+        # can safely call request.body() again without re-reading the ASGI stream.
+        ct = request.headers.get("content-type", "")
+        if "application/json" in ct and cl > 0:
+            try:
+                body_bytes = await request.body()  # caches in request._body
+                body_text = body_bytes.decode("utf-8", errors="ignore")
+                if self._NOSQL_RE.search(body_text):
+                    from fastapi.responses import JSONResponse as _JR
+                    return _JR({"detail": "Invalid request"}, status_code=400)
+            except Exception:
+                pass  # Do not break legitimate requests on parse errors
+
+        return await call_next(request)
+
+
+app.add_middleware(InputSanitizationMiddleware)
 app.add_middleware(AuthMiddleware)
 app.add_middleware(ResponseTimingMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
@@ -1816,8 +2322,14 @@ app.add_middleware(RequestIdMiddleware)
 _trusted_hosts_raw = os.environ.get("TRUSTED_HOSTS", "").strip()
 if _trusted_hosts_raw:
     _trusted_hosts = [h.strip() for h in _trusted_hosts_raw.split(",") if h.strip()]
+    # Always allow: localhost, Cloud Run internal probe network (169.254.x.x),
+    # and the Cloud Run service URL itself (used by health probes without a Host header).
+    _probe_hosts = ["localhost", "127.0.0.1", "169.254.169.126", "*.run.internal"]
     if _trusted_hosts:
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=_trusted_hosts)
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=_trusted_hosts + _probe_hosts,
+        )
 
 # Mount admin static files (only if directory exists)
 if ADMIN_DIR.exists():

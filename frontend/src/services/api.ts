@@ -1,4 +1,5 @@
 import axios, { AxiosHeaders } from 'axios';
+import { getCachedToken, getValidToken } from '@/src/lib/tokenStore';
 import Constants from 'expo-constants';
 import { SECURITY_HEADERS, validateApiUrl } from './securityConfig';
 
@@ -70,28 +71,62 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-api.interceptors.request.use((config) => {
+api.interceptors.request.use(async (config) => {
   try {
-    const { useAppStore } = require('@/src/store/appStore');
-    const token = useAppStore.getState().token;
+    const token = (await getValidToken()) ?? getCachedToken();
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-  } catch {}
+  } catch {
+    /* non-fatal */
+  }
   return config;
 });
 
+let axiosRefreshInFlight: Promise<boolean> | null = null;
+
 api.interceptors.response.use(
   (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      const detail = error.response?.data?.detail || '';
-      const isTokenError = detail === 'Token expired' || detail === 'Invalid token';
+  async (error) => {
+    const originalRequest = error.config;
+    if (
+      error.response?.status === 401 &&
+      !originalRequest?._retried
+    ) {
+      const detail = String(error.response?.data?.detail || '').toLowerCase();
+      const isTokenError =
+        detail.includes('token expired') ||
+        detail.includes('invalid token') ||
+        detail.includes('token expired or invalid');
+
       if (isTokenError) {
+        originalRequest._retried = true;
+        try {
+          if (!axiosRefreshInFlight) {
+            const { forceRefresh } = require('@/src/lib/tokenStore');
+            axiosRefreshInFlight = forceRefresh().then((t: string | null) => !!t).finally(() => {
+              axiosRefreshInFlight = null;
+            });
+          }
+          const ok = await axiosRefreshInFlight;
+          if (ok) {
+            const { getCachedToken } = require('@/src/lib/tokenStore');
+            const newToken = getCachedToken();
+            if (newToken) {
+              originalRequest.headers = {
+                ...originalRequest.headers,
+                Authorization: `Bearer ${newToken}`,
+              };
+            }
+            return api(originalRequest);
+          }
+        } catch {
+          /* refresh failed — fall through to logout */
+        }
+        // Refresh failed: sign the user out
         try {
           const { useAppStore } = require('@/src/store/appStore');
-          const { isAuthenticated } = useAppStore.getState();
-          if (isAuthenticated) {
+          if (useAppStore.getState().isAuthenticated) {
             useAppStore.getState().logout();
           }
         } catch {}
@@ -106,13 +141,10 @@ export const getAuthHeaders = (): Record<string, string> => {
     'Content-Type': 'application/json',
     ...SECURITY_HEADERS,
   };
-  try {
-    const { useAppStore } = require('@/src/store/appStore');
-    const token = useAppStore.getState().token;
-    if (token) {
-      base.Authorization = `Bearer ${token}`;
-    }
-  } catch {}
+  const token = getCachedToken();
+  if (token) {
+    base.Authorization = `Bearer ${token}`;
+  }
   return base;
 };
 
@@ -299,7 +331,7 @@ export const verifyRiderNin = (userId: string, nin: string, fullName: string) =>
 
 export const completeRiderVerification = (
   userId: string,
-  data: { name: string; phone: string; address: string; nin: string }
+  data: { name: string; phone: string; address: string; nin?: string }
 ) => api.post(`/users/${userId}/complete-rider-verification`, data);
 
 export const deleteUserAccount = (userId: string) =>
@@ -428,6 +460,9 @@ export interface FareEstimateRequest {
   rain?: boolean;
   pickup_address?: string;
   dropoff_address?: string;
+  stop_lat?: number;
+  stop_lng?: number;
+  stop_address?: string;
   /** Leg from Google Directions on device — used when server route is haversine-only. */
   google_route_distance_meters?: number;
   google_route_duration_seconds?: number;

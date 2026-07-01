@@ -1,6 +1,14 @@
 """
 Google Places API Proxy Service
-Handles autocomplete and place details from backend to avoid CORS issues
+Handles autocomplete and place details from backend to avoid CORS issues.
+
+Caching strategy (cost optimisation):
+  L1 — Redis (hot, TTL 24 h for geocode / 7 days for place details)
+  L2 — MongoDB google_places_cache (warm, TTL via expireAfterSeconds index)
+  L3 — Google API (charged)
+
+A two-level cache means a cache-warm deployment with 500 drivers pays
+~0 geocoding/autocomplete dollars per day for repeated queries.
 """
 
 from fastapi import APIRouter, HTTPException, Query
@@ -12,9 +20,83 @@ import json
 import hashlib
 from datetime import datetime, timedelta, timezone
 import re
+import time
 from urllib.parse import quote
 
+# Circuit breaker — prevents cascading failures when Google Maps degrades
+try:
+    from circuit_breaker import google_maps_cb, CircuitBreakerOpen
+    _CB_AVAILABLE = True
+except ImportError:
+    _CB_AVAILABLE = False
+    google_maps_cb = None  # type: ignore[assignment]
+    CircuitBreakerOpen = Exception  # type: ignore[assignment,misc]
+
 from database import db
+
+# ── In-process LRU (L1-lite for single-instance or warm pods) ───────────────
+# 2 048 slots, ~400 KB RAM — negligible, saves round-trips even inside Redis.
+import functools
+
+_LRU_SIZE = 2048
+
+class _LRUCache:
+    """Simple thread-safe LRU using an ordered dict."""
+    def __init__(self, maxsize: int = _LRU_SIZE):
+        from collections import OrderedDict
+        self._cache: "OrderedDict[str, tuple[object, float]]" = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str, ttl: float) -> "object | None":
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        value, stored_at = entry
+        if time.monotonic() - stored_at > ttl:
+            del self._cache[key]
+            return None
+        self._cache.move_to_end(key)
+        return value
+
+    def set(self, key: str, value: object) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = (value, time.monotonic())
+        if len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)
+
+_lru: _LRUCache = _LRUCache()
+
+
+async def _redis_get(key: str) -> "dict | None":
+    """L1 Redis lookup; silently returns None if Redis unavailable."""
+    try:
+        from redis_store import get_redis
+        r = get_redis()
+        if r is None:
+            return None
+        raw = await r.get(key) if hasattr(r, "get") else r.get(key)
+        if raw is None:
+            return None
+        return json.loads(raw if isinstance(raw, str) else raw.decode())
+    except Exception:
+        return None
+
+
+async def _redis_set(key: str, value: dict, ttl_seconds: int) -> None:
+    """L1 Redis write; silently no-ops if Redis unavailable."""
+    try:
+        from redis_store import get_redis
+        r = get_redis()
+        if r is None:
+            return
+        payload = json.dumps(value, default=str)
+        if hasattr(r, "setex"):
+            r.setex(key, ttl_seconds, payload)
+        else:
+            await r.setex(key, ttl_seconds, payload)
+    except Exception:
+        pass
 
 
 def _strip_directions_html(html: str) -> str:
@@ -103,28 +185,50 @@ def _cache_key(prefix: str, payload: dict) -> str:
     return f"{prefix}:{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
 
 
-async def _get_cache(key: str):
+async def _get_cache(key: str) -> "dict | None":
+    """3-level read: in-process LRU → Redis → MongoDB."""
+    # L1: in-process
+    lru_hit = _lru.get(key, ttl=86400)
+    if lru_hit is not None:
+        return {"response": lru_hit}
+
+    # L2: Redis
+    redis_hit = await _redis_get(f"places:{key}")
+    if redis_hit is not None:
+        _lru.set(key, redis_hit)
+        return {"response": redis_hit}
+
+    # L3: MongoDB
     now = datetime.now(timezone.utc)
-    return await db.google_places_cache.find_one(
+    doc = await db.google_places_cache.find_one(
         {"cache_key": key, "expires_at": {"$gt": now}},
         {"_id": 0, "response": 1},
     )
+    if doc:
+        _lru.set(key, doc["response"])
+    return doc
 
 
-async def _set_cache(key: str, response: dict, ttl_seconds: int):
+async def _set_cache(key: str, response: dict, ttl_seconds: int) -> None:
+    """3-level write: in-process LRU + Redis + MongoDB (fire-and-forget for Mongo)."""
+    _lru.set(key, response)
+    await _redis_set(f"places:{key}", response, ttl_seconds)
     now = datetime.now(timezone.utc)
-    await db.google_places_cache.update_one(
-        {"cache_key": key},
-        {
-            "$set": {
-                "cache_key": key,
-                "response": response,
-                "cached_at": now,
-                "expires_at": now + timedelta(seconds=ttl_seconds),
-            }
-        },
-        upsert=True,
-    )
+    try:
+        await db.google_places_cache.update_one(
+            {"cache_key": key},
+            {
+                "$set": {
+                    "cache_key": key,
+                    "response": response,
+                    "cached_at": now,
+                    "expires_at": now + timedelta(seconds=ttl_seconds),
+                }
+            },
+            upsert=True,
+        )
+    except Exception:
+        pass  # best-effort persistence — Redis hit is sufficient
 
 class PlacePrediction(BaseModel):
     place_id: str
@@ -471,6 +575,8 @@ async def driving_route(
     pickup_lng: float = Query(...),
     dropoff_lat: float = Query(...),
     dropoff_lng: float = Query(...),
+    stop_lat: Optional[float] = Query(None),
+    stop_lng: Optional[float] = Query(None),
 ):
     """
     Server-side Google Directions leg for fare + map (distance, duration, polyline).
@@ -491,6 +597,11 @@ async def driving_route(
                 "plng": round(pickup_lng, 5),
                 "dlat": round(dropoff_lat, 5),
                 "dlng": round(dropoff_lng, 5),
+                **(
+                    {"slat": round(stop_lat, 5), "slng": round(stop_lng, 5)}
+                    if stop_lat is not None and stop_lng is not None
+                    else {}
+                ),
             },
         )
         cached = await _get_cache(key)
@@ -505,6 +616,8 @@ async def driving_route(
             "key": GOOGLE_MAPS_API_KEY,
             "departure_time": "now",
         }
+        if stop_lat is not None and stop_lng is not None:
+            params["waypoints"] = f"{stop_lat},{stop_lng}"
         async with httpx.AsyncClient() as client:
             response = await client.get(url, params=params, timeout=12.0)
             data = response.json()
@@ -533,36 +646,44 @@ async def driving_route(
             )
 
         route = data["routes"][0]
-        leg = route["legs"][0]
-        dit = leg.get("duration_in_traffic", {}).get("value")
-        if dit is None:
-            dit = leg["duration"]["value"]
+        legs = route.get("legs") or []
+        if not legs:
+            raise HTTPException(status_code=503, detail="Google Directions unavailable: no legs")
+        distance_m = sum(int((leg.get("distance") or {}).get("value", 0)) for leg in legs)
+        duration_s = sum(int((leg.get("duration") or {}).get("value", 0)) for leg in legs)
+        traffic_s = sum(
+            int((leg.get("duration_in_traffic") or {}).get("value") or (leg.get("duration") or {}).get("value", 0))
+            for leg in legs
+        )
+        leg = legs[0]
+        dit = traffic_s
 
         steps_out: list[dict] = []
-        for step in leg.get("steps") or []:
-            try:
-                sl = step.get("start_location") or {}
-                el = step.get("end_location") or {}
-                dist = step.get("distance") or {}
-                dur = step.get("duration") or {}
-                pl = step.get("polyline") or {}
-                steps_out.append(
-                    {
-                        "instruction": _strip_directions_html(str(step.get("html_instructions") or "")),
-                        "distance_meters": int(dist.get("value", 0)),
-                        "duration_seconds": int(dur.get("value", 0)),
-                        "start_location": {"lat": float(sl["lat"]), "lng": float(sl["lng"])},
-                        "end_location": {"lat": float(el["lat"]), "lng": float(el["lng"])},
-                        "polyline": str(pl.get("points") or ""),
-                        "maneuver": str(step.get("maneuver") or ""),
-                    }
-                )
-            except (TypeError, ValueError, KeyError):
-                continue
+        for route_leg in legs:
+            for step in route_leg.get("steps") or []:
+                try:
+                    sl = step.get("start_location") or {}
+                    el = step.get("end_location") or {}
+                    dist = step.get("distance") or {}
+                    dur = step.get("duration") or {}
+                    pl = step.get("polyline") or {}
+                    steps_out.append(
+                        {
+                            "instruction": _strip_directions_html(str(step.get("html_instructions") or "")),
+                            "distance_meters": int(dist.get("value", 0)),
+                            "duration_seconds": int(dur.get("value", 0)),
+                            "start_location": {"lat": float(sl["lat"]), "lng": float(sl["lng"])},
+                            "end_location": {"lat": float(el["lat"]), "lng": float(el["lng"])},
+                            "polyline": str(pl.get("points") or ""),
+                            "maneuver": str(step.get("maneuver") or ""),
+                        }
+                    )
+                except (TypeError, ValueError, KeyError):
+                    continue
 
         response_payload = {
-            "distance_meters": int(leg["distance"]["value"]),
-            "duration_seconds": int(leg["duration"]["value"]),
+            "distance_meters": int(distance_m),
+            "duration_seconds": int(duration_s),
             "duration_in_traffic_seconds": int(dit),
             "polyline": route.get("overview_polyline", {}).get("points") or "",
             "steps": steps_out,

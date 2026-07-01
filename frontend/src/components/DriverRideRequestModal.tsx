@@ -216,8 +216,10 @@ export default function DriverRideRequestModal({
   /* ── Locations ── */
   const pl = trip?.pickup_location;
   const dl = trip?.dropoff_location;
+  const sl = (trip as { stop_location?: unknown })?.stop_location;
   let { lat: pLat, lng: pLng } = readLatLng(pl);
   let { lat: dLat, lng: dLng } = readLatLng(dl);
+  const { lat: sLat, lng: sLng } = readLatLng(sl);
   const rawTrip = trip as Record<string, unknown> | undefined;
   if (pLat == null || pLng == null) {
     const fb = readLatLng(rawTrip?.pickup_coordinates);
@@ -255,6 +257,10 @@ export default function DriverRideRequestModal({
     }
   }
   const pickupLine = typeof pl === 'string' ? pl : (pl as { address?: string })?.address || 'Pickup location';
+  const stopLine =
+    typeof sl === 'string'
+      ? sl
+      : (sl as { address?: string } | undefined)?.address || '';
   const dropLine =
     typeof dl === 'string'
       ? dl
@@ -287,7 +293,12 @@ export default function DriverRideRequestModal({
       return;
     }
     let cancelled = false;
-    fetchGoogleDrivingRoutes(pLat, pLng, dLat, dLng, directionsApiKey)
+    fetchGoogleDrivingRoutes(pLat, pLng, dLat, dLng, directionsApiKey, {
+      stop:
+        sLat != null && sLng != null && Number.isFinite(sLat) && Number.isFinite(sLng)
+          ? { lat: sLat, lng: sLng }
+          : null,
+    })
       .then((res) => {
         if (cancelled || !res?.routes?.length) return;
         setGoogleTripRoutes(res.routes);
@@ -298,7 +309,7 @@ export default function DriverRideRequestModal({
     return () => {
       cancelled = true;
     };
-  }, [visible, trip?.id, directionsApiKey, pLat, pLng, dLat, dLng]);
+  }, [visible, trip?.id, directionsApiKey, pLat, pLng, dLat, dLng, sLat, sLng]);
 
   const rideRequestRouteCoords = useMemo(() => {
     const prev =
@@ -611,6 +622,26 @@ export default function DriverRideRequestModal({
                     )}
                   </View>
                 </View>
+
+                {stopLine ? (
+                  <>
+                    <View style={s.connRow}>
+                      <View style={s.connDashes} />
+                      <View style={s.connLabel}>
+                        <Ionicons name="ellipse" size={8} color="#f59e0b" />
+                        <Text style={s.connLabelText}>Stop</Text>
+                      </View>
+                      <View style={s.connDashes} />
+                    </View>
+                    <View style={s.routeRow}>
+                      <View style={[s.dotA, { backgroundColor: '#f59e0b' }]} />
+                      <View style={s.routeText}>
+                        <Text style={[s.routeLabel, { color: '#f59e0b' }]}>STOP</Text>
+                        <Text style={s.routeAddr} numberOfLines={2}>{stopLine}</Text>
+                      </View>
+                    </View>
+                  </>
+                ) : null}
 
                 {/* Connector */}
                 <View style={s.connRow}>

@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "Nexryde",
+    "name": "NexRyde",
     "slug": "nexryde",
-    "version": "1.3.23",
+    "version": "1.3.28",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "nexryde",
@@ -19,9 +19,9 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.nexryde.app",
       "config": {
-        "googleMapsApiKey": "AIzaSyCg8_VB5ikbOzQHTJ1wVg1zGMdjTwCBSYs"
+        "googleMapsApiKey": ""
       },
-      "buildNumber": "44",
+      "buildNumber": "49",
       "associatedDomains": [
         "applinks:nexryde.app",
         "webcredentials:nexryde.app"
@@ -31,7 +31,7 @@
       "infoPlist": {
         "CFBundleDisplayName": "Nexryde",
         "CFBundleName": "Nexryde",
-        "CFBundleShortVersionString": "1.3.23",
+        "CFBundleShortVersionString": "1.3.24",
         "CFBundleVersion": "44",
         "NSLocationWhenInUseUsageDescription": "NEXRYDE uses your location to show nearby drivers, estimate pickup times, and track your trip in real time.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "NEXRYDE uses your location in the background so drivers can share their position with riders and receive new trip requests while the app is minimised.",
@@ -44,7 +44,6 @@
         "NSFaceIDUsageDescription": "NEXRYDE uses Face ID to verify your identity for secure login and biometric withdrawals.",
         "NSContactsUsageDescription": "NEXRYDE reads your contacts so you can quickly book a ride for someone else.",
         "NSMotionUsageDescription": "NEXRYDE uses device motion sensors for the emergency shake-to-alert safety feature.",
-        "NSUserTrackingUsageDescription": "NEXRYDE uses limited data to improve the app experience and show relevant offers. You can opt out at any time in Settings.",
         "UIBackgroundModes": [
           "location",
           "fetch",
@@ -64,7 +63,7 @@
       }
     },
     "android": {
-      "versionCode": 91,
+      "versionCode": 148,
       "config": {
         "googleMaps": {
           "apiKey": "GOOGLE_MAPS_KEY_REDACTED"
@@ -79,6 +78,7 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
         "CAMERA",
         "RECORD_AUDIO",
         "POST_NOTIFICATIONS"
@@ -169,12 +169,6 @@
         {
           "photosPermission": "NEXRYDE needs access to your photos to let you upload a profile picture or driver documents.",
           "cameraPermission": "NEXRYDE uses the camera for driver document verification, profile photos, and biometric withdrawal confirmation."
-        }
-      ],
-      [
-        "expo-tracking-transparency",
-        {
-          "userTrackingPermission": "NEXRYDE uses limited data to improve the app experience and show relevant offers. You can opt out at any time in Settings."
         }
       ],
       "@react-native-community/datetimepicker",

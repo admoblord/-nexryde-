@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { useErrorToast } from '@/src/components/shared/ErrorToast';
 import {
   View,
   Text,
@@ -76,6 +77,7 @@ import MapComponent from '@/src/components/MapComponent';
 import { ErrorBoundary } from '@/src/components/ErrorBoundary';
 import { RiderPostRequestOverlay, type RiderMatchedDriver } from '@/src/components/rider/RiderPostRequestOverlay';
 import { getRecentLocations, cacheRecentLocation } from '@/src/services/offlineMode';
+import { authedFetch } from '@/src/utils/sessionRefresh';
 import * as Haptics from 'expo-haptics';
 import { geocodeAddressForRider } from '@/src/services/riderSavedPlaces';
 import { useFlowLayout } from '@/src/constants/flowLayout';
@@ -294,6 +296,24 @@ const bookingMapStyles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fff',
   },
+  stopHalo: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: 'rgba(245,158,11,0.22)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.45)',
+  },
+  stopCore: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#F59E0B',
+    borderWidth: 2,
+    borderColor: '#fff',
+  },
   driverCar: {
     width: 22,
     height: 22,
@@ -376,9 +396,11 @@ const bookingMapStyles = StyleSheet.create({
 function BookingRideMapNative(props: {
   pickupCoords: { lat: number; lng: number };
   destinationCoords: { lat: number; lng: number } | null;
+  stopCoords?: { lat: number; lng: number } | null;
   routePolyline: { latitude: number; longitude: number }[];
   pickup: string;
   destination: string;
+  stop?: string;
   /** True while fetching road-snapped path (optional subtle indicator). */
   routeLoading?: boolean;
   /** Subtle breathing scale on dropoff halo until rider dismisses (e.g. scrolls sheet). */
@@ -449,13 +471,14 @@ function BookingRideMapNative(props: {
             animated: true,
           });
         } else if (props.destinationCoords) {
-          m.fitToCoordinates(
-            [
-              { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
-              { latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng },
-            ],
-            { edgePadding: pad, animated: true },
-          );
+          const coordsFit = [
+            { latitude: props.pickupCoords.lat, longitude: props.pickupCoords.lng },
+            ...(props.stopCoords
+              ? [{ latitude: props.stopCoords.lat, longitude: props.stopCoords.lng }]
+              : []),
+            { latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng },
+          ];
+          m.fitToCoordinates(coordsFit, { edgePadding: pad, animated: true });
         } else {
           m.animateToRegion(
             {
@@ -655,6 +678,19 @@ function BookingRideMapNative(props: {
             </View>
           </View>
         </Marker>
+        {props.stopCoords ? (
+          <Marker
+            coordinate={{ latitude: props.stopCoords.lat, longitude: props.stopCoords.lng }}
+            title="Stop"
+            description={props.stop || 'Stop'}
+            anchor={{ x: 0.5, y: 0.5 }}
+            tracksViewChanges={false}
+          >
+            <View style={bookingMapStyles.stopHalo}>
+              <View style={bookingMapStyles.stopCore} />
+            </View>
+          </Marker>
+        ) : null}
         {props.destinationCoords && (
           <Marker
             coordinate={{ latitude: props.destinationCoords.lat, longitude: props.destinationCoords.lng }}
@@ -735,6 +771,7 @@ function BookingRideMapNative(props: {
 }
 
 function BookInDriveStyle() {
+  const toast = useErrorToast();
   const router = useRouter();
   const params = useLocalSearchParams<{
     requestedDriverId?: string;
@@ -752,7 +789,7 @@ function BookInDriveStyle() {
   const setCurrentTrip = useAppStore((s) => s.setCurrentTrip);
   const currentTrip = useAppStore((s) => s.currentTrip);
   const hasActiveTrip = useRiderHasActiveTrip();
-  const { user, userId: riderId, token, canCallAuthedApi } = useAuthedUserId();
+  const { user, userId: riderId, canCallAuthedApi } = useAuthedUserId();
   const requestedDriverId = params.requestedDriverId || null;
   const requestedDriverName = params.driverName || null;
   const insets = useSafeAreaInsets();
@@ -760,8 +797,10 @@ function BookInDriveStyle() {
 
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
+  const [stop, setStop] = useState('');
   const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [stopCoords, setStopCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [currentLocation, setCurrentLocation] = useState<any>(null);
   const [gpsStatus, setGpsStatus] = useState<'detecting' | 'locked' | 'error'>('detecting');
 
@@ -782,7 +821,7 @@ function BookInDriveStyle() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [editingField, setEditingField] = useState<'pickup' | 'destination'>('pickup');
+  const [editingField, setEditingField] = useState<'pickup' | 'destination' | 'stop'>('pickup');
   const [showVehicleModal, setShowVehicleModal] = useState(false);
 
   const [searchingForDriver, setSearchingForDriver] = useState(false);
@@ -808,7 +847,11 @@ function BookInDriveStyle() {
     at: number;
     pickup: { lat: number; lng: number };
     drop: { lat: number; lng: number };
+    stop?: { lat: number; lng: number } | null;
   } | null>(null);
+  /** Bumps whenever pickup, destination, or stop changes — stale fare/route responses are ignored. */
+  const pricingEpochRef = useRef(0);
+  const fareDetailsEpochRef = useRef(0);
   const ROUTE_DRIFT_KM = 1.0;
 
   const [fareExplainModal, setFareExplainModal] = useState<
@@ -869,6 +912,32 @@ function BookInDriveStyle() {
     }
     return base;
   }, [user?.gender]);
+
+  const routeStopFields = useMemo(() => {
+    if (
+      stopCoords &&
+      Number.isFinite(stopCoords.lat) &&
+      Number.isFinite(stopCoords.lng)
+    ) {
+      return {
+        stop_lat: stopCoords.lat,
+        stop_lng: stopCoords.lng,
+        stop_address: stop?.trim() || undefined,
+      };
+    }
+    return {};
+  }, [stopCoords?.lat, stopCoords?.lng, stop]);
+
+  const invalidateRoutePricing = useCallback(() => {
+    pricingEpochRef.current += 1;
+    setFareDetails(null);
+    setCurrentFare(0);
+    setFareMatrix({});
+    setFareMatrixOriginal({});
+    setBookingRouteEtaMin(null);
+    setBookingRouteLoading(true);
+    setOptimizedRoute(null);
+  }, []);
 
   /** Only real road geometry — never a pickup→drop straight segment. */
   const routeForMapDisplay = useMemo(() => {
@@ -1009,6 +1078,19 @@ function BookInDriveStyle() {
       setShowLocationModal(true);
     });
   }, []);
+
+  const openStopSearch = useCallback(() => {
+    requestAnimationFrame(() => {
+      setEditingField('stop');
+      setShowLocationModal(true);
+    });
+  }, []);
+
+  const clearStop = useCallback(() => {
+    setStop('');
+    setStopCoords(null);
+    invalidateRoutePricing();
+  }, [invalidateRoutePricing]);
 
   const openPickupEditor = useCallback(() => {
     requestAnimationFrame(() => {
@@ -1635,16 +1717,38 @@ function BookInDriveStyle() {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }, []);
 
-  const syncFareLockSnapshot = useCallback((pLat: number, pLng: number, dLat: number, dLng: number) => {
-    fareLockSnapshotRef.current = {
-      at: Date.now(),
-      pickup: { lat: pLat, lng: pLng },
-      drop: { lat: dLat, lng: dLng },
-    };
-  }, []);
+  const syncFareLockSnapshot = useCallback(
+    (
+      pLat: number,
+      pLng: number,
+      dLat: number,
+      dLng: number,
+      sLat?: number | null,
+      sLng?: number | null,
+    ) => {
+      fareLockSnapshotRef.current = {
+        at: Date.now(),
+        pickup: { lat: pLat, lng: pLng },
+        drop: { lat: dLat, lng: dLng },
+        stop:
+          sLat != null && sLng != null && Number.isFinite(sLat) && Number.isFinite(sLng)
+            ? { lat: sLat, lng: sLng }
+            : null,
+      };
+    },
+    [],
+  );
 
   const lockedFareEstimateId = useCallback(
-    (fd: FareEstimateResponse | null, pLat: number, pLng: number, dLat: number, dLng: number): string | undefined => {
+    (
+      fd: FareEstimateResponse | null,
+      pLat: number,
+      pLng: number,
+      dLat: number,
+      dLng: number,
+      sLat?: number | null,
+      sLng?: number | null,
+    ): string | undefined => {
       if (!fd) return undefined;
       const raw = fd as unknown as Record<string, unknown>;
       const eid =
@@ -1660,11 +1764,19 @@ function BookInDriveStyle() {
       // When we have a geo snapshot, require pickup/drop to match (same rule as server drift).
       // When snapshot is missing (race / restore), still send lock id if TTL valid — server validates coords.
       if (snap) {
+        const hasStop = sLat != null && sLng != null;
+        const snapHasStop = Boolean(snap.stop);
+        if (hasStop !== snapHasStop) return undefined;
         if (
           haversineKm(snap.pickup.lat, snap.pickup.lng, pLat, pLng) > ROUTE_DRIFT_KM ||
           haversineKm(snap.drop.lat, snap.drop.lng, dLat, dLng) > ROUTE_DRIFT_KM
         ) {
           return undefined;
+        }
+        if (hasStop && snap.stop) {
+          if (haversineKm(snap.stop.lat, snap.stop.lng, sLat!, sLng!) > ROUTE_DRIFT_KM) {
+            return undefined;
+          }
         }
       }
       return eid;
@@ -1677,6 +1789,9 @@ function BookInDriveStyle() {
     pickup_lng: number;
     dropoff_lat: number;
     dropoff_lng: number;
+    stop_lat?: number;
+    stop_lng?: number;
+    stop_address?: string;
     service_type: string;
     city: string;
     pickup_address?: string;
@@ -1687,12 +1802,20 @@ function BookInDriveStyle() {
     const mapsKey = resolveGoogleDirectionsApiKey();
     let googleDm: number | undefined;
     let googleDs: number | undefined;
+    const routeStop =
+      payload.stop_lat != null &&
+      payload.stop_lng != null &&
+      Number.isFinite(payload.stop_lat) &&
+      Number.isFinite(payload.stop_lng)
+        ? { lat: payload.stop_lat, lng: payload.stop_lng }
+        : null;
 
     const serverRoute = await fetchDrivingRoute(
       payload.pickup_lat,
       payload.pickup_lng,
       payload.dropoff_lat,
       payload.dropoff_lng,
+      routeStop,
     );
     if (serverRoute) {
       googleDm = serverRoute.distanceMeters;
@@ -1712,6 +1835,7 @@ function BookInDriveStyle() {
           payload.dropoff_lat,
           payload.dropoff_lng,
           mapsKey,
+          { stop: routeStop },
         );
         const leg = gr?.routes?.[0];
         if (leg && leg.distanceM >= 80 && leg.durationSec >= 10) {
@@ -1732,6 +1856,13 @@ function BookInDriveStyle() {
         pickup_lng: payload.pickup_lng,
         dropoff_lat: payload.dropoff_lat,
         dropoff_lng: payload.dropoff_lng,
+        ...(routeStop
+          ? {
+              stop_lat: routeStop.lat,
+              stop_lng: routeStop.lng,
+              stop_address: payload.stop_address,
+            }
+          : {}),
         service_type: payload.service_type,
         city: payload.city,
         pickup_address: payload.pickup_address,
@@ -1754,10 +1885,17 @@ function BookInDriveStyle() {
   // Google Directions on device — curved road line + ETA as soon as pickup & dropoff are set.
   useEffect(() => {
     let cancelled = false;
+    const epoch = pricingEpochRef.current;
     const pLat = pickupCoords?.lat;
     const pLng = pickupCoords?.lng;
     const dLat = destinationCoords?.lat;
     const dLng = destinationCoords?.lng;
+    const sLat = stopCoords?.lat;
+    const sLng = stopCoords?.lng;
+    const routeStop =
+      sLat != null && sLng != null && Number.isFinite(sLat) && Number.isFinite(sLng)
+        ? { lat: sLat, lng: sLng }
+        : null;
     if (
       !Number.isFinite(Number(pLat)) ||
       !Number.isFinite(Number(pLng)) ||
@@ -1770,11 +1908,50 @@ function BookInDriveStyle() {
       return undefined;
     }
 
+    const applyRouteMetrics = (
+      overview: Array<{ latitude: number; longitude: number }> | undefined,
+      durationSec: number,
+      durationInTrafficSec?: number,
+    ) => {
+      if (cancelled || epoch !== pricingEpochRef.current) return;
+      if (overview && overview.length >= 2) {
+        setBookingRouteCoords(overview);
+      }
+      const sec = Math.max(
+        durationSec || 0,
+        typeof durationInTrafficSec === 'number' && durationInTrafficSec > 0
+          ? durationInTrafficSec
+          : durationSec || 0,
+      );
+      if (sec >= 60) {
+        setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
+      }
+    };
+
     const mapsKey = resolveGoogleDirectionsApiKey();
 
     setBookingRouteLoading(true);
     void (async () => {
       try {
+        // With a stop, always trust backend Directions (waypoint-aware, same key as fare).
+        if (routeStop) {
+          const srv = await fetchDrivingRoute(
+            Number(pLat),
+            Number(pLng),
+            Number(dLat),
+            Number(dLng),
+            routeStop,
+          );
+          if (srv && epoch === pricingEpochRef.current && !cancelled) {
+            applyRouteMetrics(
+              srv.overviewMapCoords,
+              srv.durationSeconds,
+              srv.durationInTrafficSeconds,
+            );
+            return;
+          }
+        }
+
         let leg: GoogleDrivingRouteOverview | null = null;
         if (mapsKey) {
           const gr = await fetchGoogleDrivingRoutes(
@@ -1783,45 +1960,55 @@ function BookInDriveStyle() {
             Number(dLat),
             Number(dLng),
             mapsKey,
+            { stop: routeStop },
           );
           leg = gr?.routes?.[0] ?? null;
         }
-        if (!cancelled && leg?.overview && leg.overview.length >= 2) {
-          setBookingRouteCoords(leg.overview);
+        if (!cancelled && epoch === pricingEpochRef.current && leg?.overview && leg.overview.length >= 2) {
           const trafficSec =
             typeof leg.durationInTrafficSec === 'number' && leg.durationInTrafficSec > 0
               ? leg.durationInTrafficSec
               : leg.durationSec;
-          const sec = Math.max(leg.durationSec || 0, trafficSec || 0);
-          setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
+          applyRouteMetrics(leg.overview, leg.durationSec, trafficSec);
           return;
         }
-        const srv = await fetchDrivingRoute(Number(pLat), Number(pLng), Number(dLat), Number(dLng));
-        if (cancelled || !srv?.overviewMapCoords?.length || srv.overviewMapCoords.length < 2) return;
-        setBookingRouteCoords(srv.overviewMapCoords);
-        const sec = Math.max(
-          srv.durationSeconds,
-          typeof srv.durationInTrafficSeconds === 'number' && srv.durationInTrafficSeconds > 0
-            ? srv.durationInTrafficSeconds
-            : srv.durationSeconds,
+        const srv = await fetchDrivingRoute(
+          Number(pLat),
+          Number(pLng),
+          Number(dLat),
+          Number(dLng),
+          routeStop,
         );
-        setBookingRouteEtaMin(Math.max(1, Math.ceil(sec / 60)));
+        if (cancelled || epoch !== pricingEpochRef.current || !srv) return;
+        applyRouteMetrics(
+          srv.overviewMapCoords,
+          srv.durationSeconds,
+          srv.durationInTrafficSeconds,
+        );
       } catch {
         /* wait for fare polyline */
       } finally {
-        if (!cancelled) setBookingRouteLoading(false);
+        if (!cancelled && epoch === pricingEpochRef.current) setBookingRouteLoading(false);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [pickupCoords?.lat, pickupCoords?.lng, destinationCoords?.lat, destinationCoords?.lng]);
+  }, [
+    pickupCoords?.lat,
+    pickupCoords?.lng,
+    destinationCoords?.lat,
+    destinationCoords?.lng,
+    stopCoords?.lat,
+    stopCoords?.lng,
+  ]);
 
   // When estimate returns encoded polyline, use it so the drawn path matches server / fare distance.
   useEffect(() => {
     const fd = fareDetails;
     if (!fd) return;
+    if (fareDetailsEpochRef.current !== pricingEpochRef.current) return;
 
     const etaCandidate = Number(
       fd.pricing_route_minutes ??
@@ -1864,6 +2051,7 @@ function BookInDriveStyle() {
   ]);
 
   const calculateAllVehiclePrices = async () => {
+    const epoch = pricingEpochRef.current;
     try {
       let pLat = pickupCoords?.lat || currentLocation?.lat;
       let pLng = pickupCoords?.lng || currentLocation?.lng;
@@ -1902,6 +2090,7 @@ function BookInDriveStyle() {
               pickup_lng: pLng!,
               dropoff_lat: dLat!,
               dropoff_lng: dLng!,
+              ...routeStopFields,
               service_type: vehicle.id,
               city,
               pickup_address: pickup?.trim() || undefined,
@@ -1915,6 +2104,8 @@ function BookInDriveStyle() {
           }
         })
       );
+
+      if (epoch !== pricingEpochRef.current) return;
 
       const nextMatrix = Object.fromEntries(results.map(([id, price]) => [id, price]));
       const nextOrig: Record<string, number> = {};
@@ -1943,17 +2134,43 @@ function BookInDriveStyle() {
       const detail = row?.[2];
       const vehPrice = Number(nextMatrix[veh] ?? 0);
       if (detail) {
+        fareDetailsEpochRef.current = epoch;
         setFareDetails(detail);
-        syncFareLockSnapshot(pLat!, pLng!, dLat!, dLng!);
+        const etaFromEstimate = Number(
+          detail.duration_min ??
+            detail.estimated_time_minutes ??
+            detail.traffic_duration_min ??
+            detail.pricing_route_minutes ??
+            0,
+        );
+        if (Number.isFinite(etaFromEstimate) && etaFromEstimate > 0) {
+          setBookingRouteEtaMin(Math.round(etaFromEstimate));
+        }
+        syncFareLockSnapshot(
+          pLat!,
+          pLng!,
+          dLat!,
+          dLng!,
+          routeStopFields.stop_lat,
+          routeStopFields.stop_lng,
+        );
         const minP = Math.round(Number(detail.min_price ?? 0));
         const maxP = Math.round(Number(detail.max_price ?? 1e15));
         const sug = Math.round(Number(detail.base_price ?? detail.total_fare ?? row?.[1] ?? 0));
         setCurrentFare((prev) => {
+          if (epoch !== pricingEpochRef.current) return prev;
           if (prev >= minP && prev <= maxP) return prev;
           return Math.max(minP, sug || vehPrice || 0);
         });
       } else if (vehPrice > 0) {
-        syncFareLockSnapshot(pLat!, pLng!, dLat!, dLng!);
+        syncFareLockSnapshot(
+          pLat!,
+          pLng!,
+          dLat!,
+          dLng!,
+          routeStopFields.stop_lat,
+          routeStopFields.stop_lng,
+        );
         setCurrentFare(vehPrice);
       }
     } catch {
@@ -1965,6 +2182,10 @@ function BookInDriveStyle() {
     if (calculateInFlightRef.current) return;
     if (!pickup || !destination) {
       Alert.alert('Missing', 'Please select pickup and destination');
+      return;
+    }
+    if (stop?.trim() && !routeStopFields.stop_lat) {
+      Alert.alert('Stop location', 'Pick your stop from search suggestions so we can price the full route.');
       return;
     }
     const effectiveVehicle = vehicleOverride || selectedVehicle;
@@ -2020,6 +2241,7 @@ function BookInDriveStyle() {
         pickup_lng: pLng,
         dropoff_lat: dLat,
         dropoff_lng: dLng,
+        ...routeStopFields,
         service_type: serviceType,
         city: inferredCity,
         pickup_address: pickup?.trim() || undefined,
@@ -2052,8 +2274,16 @@ function BookInDriveStyle() {
         const hi = data.max_price != null ? Math.round(Number(data.max_price)) : rounded;
         const clamped = Math.min(Math.max(rounded, lo), Math.max(lo, hi));
         setCurrentFare(clamped);
+        fareDetailsEpochRef.current = pricingEpochRef.current;
         setFareDetails({ ...data, service_type: serviceType, city: inferredCity });
-        syncFareLockSnapshot(pLat, pLng, dLat, dLng);
+        syncFareLockSnapshot(
+          pLat,
+          pLng,
+          dLat,
+          dLng,
+          routeStopFields.stop_lat,
+          routeStopFields.stop_lng,
+        );
         let routes: TrafficRoute[] = [];
         try {
           routes = await TrafficAI.getOptimizedRoutes(
@@ -2067,17 +2297,14 @@ function BookInDriveStyle() {
         const first = routes[0];
         setOptimizedRoute(first ? TrafficAI.normalizeTrafficRoute(first) : null);
       } else {
-        Alert.alert(
-          'Fare Error',
-          toStr(
-            (data as { detail?: unknown; message?: unknown })?.detail ||
-              (data as { message?: unknown })?.message,
-            'Could not calculate fare. Please try again.',
-          ),
-        );
+        toast.show(toStr(
+          (data as { detail?: unknown; message?: unknown })?.detail ||
+            (data as { message?: unknown })?.message,
+          'Could not calculate fare. Please try again.',
+        ), 'error');
       }
     } catch (error: any) {
-      Alert.alert('Connection Error', toStr(error, 'Network error. Check your connection and try again.'));
+      toast.show(toStr(error, 'Network error. Check your connection and try again.'), 'error');
     } finally {
       calculateInFlightRef.current = false;
       setIsLoading(false);
@@ -2107,6 +2334,10 @@ function BookInDriveStyle() {
     pickupCoords?.lng,
     destinationCoords?.lat,
     destinationCoords?.lng,
+    stopCoords?.lat,
+    stopCoords?.lng,
+    routeStopFields.stop_lat,
+    routeStopFields.stop_lng,
     selectedVehicle,
     availableVehicles,
     // Re-run when on-device Directions finishes so client leg metrics reach /fare/estimate.
@@ -2203,6 +2434,10 @@ function BookInDriveStyle() {
       Alert.alert('Pin locations', 'Pick addresses from search suggestions or use GPS so we have coordinates for drivers.');
       return;
     }
+    if (stop?.trim() && !routeStopFields.stop_lat) {
+      Alert.alert('Stop location', 'Pick your stop from search suggestions so we can route through it.');
+      return;
+    }
 
     const cityEarly =
       inferCityFromCoords(pLatEarly, pLngEarly) ||
@@ -2212,7 +2447,15 @@ function BookInDriveStyle() {
     const normalizedServiceEarly = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
 
     let fareForBid: FareEstimateResponse | null = fareDetails ? normalizeFareEstimatePayload(fareDetails) : null;
-    let lockIdEarly = lockedFareEstimateId(fareForBid, pLatEarly, pLngEarly, dLatEarly, dLngEarly);
+    let lockIdEarly = lockedFareEstimateId(
+      fareForBid,
+      pLatEarly,
+      pLngEarly,
+      dLatEarly,
+      dLngEarly,
+      routeStopFields.stop_lat,
+      routeStopFields.stop_lng,
+    );
 
     if (!lockIdEarly) {
       try {
@@ -2221,6 +2464,7 @@ function BookInDriveStyle() {
           pickup_lng: pLngEarly,
           dropoff_lat: dLatEarly,
           dropoff_lng: dLngEarly,
+          ...routeStopFields,
           service_type: normalizedServiceEarly,
           city: cityEarly,
           pickup_address: pickup?.trim() || undefined,
@@ -2229,9 +2473,25 @@ function BookInDriveStyle() {
           preferred_driver_id: requestedDriverId || undefined,
         });
         fareForBid = fresh;
+        fareDetailsEpochRef.current = pricingEpochRef.current;
         setFareDetails(fresh);
-        syncFareLockSnapshot(pLatEarly, pLngEarly, dLatEarly, dLngEarly);
-        lockIdEarly = lockedFareEstimateId(fresh, pLatEarly, pLngEarly, dLatEarly, dLngEarly);
+        syncFareLockSnapshot(
+          pLatEarly,
+          pLngEarly,
+          dLatEarly,
+          dLngEarly,
+          routeStopFields.stop_lat,
+          routeStopFields.stop_lng,
+        );
+        lockIdEarly = lockedFareEstimateId(
+          fresh,
+          pLatEarly,
+          pLngEarly,
+          dLatEarly,
+          dLngEarly,
+          routeStopFields.stop_lat,
+          routeStopFields.stop_lng,
+        );
       } catch {
         /* fall through to messaging below */
       }
@@ -2308,9 +2568,17 @@ function BookInDriveStyle() {
         'default';
       const normalizedService = selectedVehicle === 'standard' ? 'economy' : selectedVehicle;
 
-      const res = await fetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
+      const idempotencyKey = (() => {
+        try {
+          const c = globalThis.crypto as Crypto | undefined;
+          return c?.randomUUID ? c.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        } catch {
+          return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        }
+      })();
+
+      const res = await authedFetch(`${BACKEND_URL}/api/trips/request?rider_id=${riderId}`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({
           pickup_lat: pLat,
           pickup_lng: pLng,
@@ -2318,6 +2586,7 @@ function BookInDriveStyle() {
           dropoff_lat: dLat,
           dropoff_lng: dLng,
           dropoff_address: destination.trim(),
+          ...routeStopFields,
           service_type: normalizedService,
           city,
           payment_method: payMethod,
@@ -2325,6 +2594,7 @@ function BookInDriveStyle() {
           recommended_fare:
             Number(fareForBid?.base_price || fareForBid?.total_fare || 0) || undefined,
           fare_estimate_id: lockId,
+          idempotency_key: idempotencyKey,
           ...(fareForBid?.demand_ratio != null && Number.isFinite(Number(fareForBid.demand_ratio))
             ? { demand_ratio: Number(fareForBid.demand_ratio) }
             : {}),
@@ -2394,10 +2664,10 @@ function BookInDriveStyle() {
         }, 1000);
         pollForDriver(tid);
       } else {
-        Alert.alert('Could not request ride', toStr(result?.detail || result?.message, 'Please try again in a moment.'));
+        toast.show(toStr(result?.detail || result?.message, 'Could not request ride. Please try again in a moment.'), 'error');
       }
     } catch {
-      Alert.alert('Error', 'Could not reach server.');
+      toast.show('Could not reach server. Check your connection.', 'error');
     } finally {
       offerInFlightRef.current = false;
       setIsLoading(false);
@@ -2407,9 +2677,8 @@ function BookInDriveStyle() {
   const cancelPendingTrip = async (id: string | null) => {
     if (!id || !riderId || !canCallAuthedApi) return;
     try {
-      await fetch(`${BACKEND_URL}/api/trips/${id}/cancel`, {
+      await authedFetch(`${BACKEND_URL}/api/trips/${id}/cancel`, {
         method: 'PUT',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ cancelled_by: riderId }),
       });
     } catch {}
@@ -2456,8 +2725,8 @@ function BookInDriveStyle() {
     driverPollRef.current = setInterval(async () => {
       attempts++;
       try {
-        const res = await fetch(`${BACKEND_URL}/api/trips/${id}/status`, {
-          headers: getAuthHeaders(),
+        const res = await authedFetch(`${BACKEND_URL}/api/trips/${id}/status`, {
+          method: 'GET',
         });
         const data = await res.json();
         if (data.success && isRiderMapLiveTripStatus(String(data.status || '')) && data.driver_info) {
@@ -2566,7 +2835,15 @@ function BookInDriveStyle() {
         Alert.alert('Trip cancelled', 'This ride request was cancelled.');
         return;
       }
-      if (st === 'completed' || st === 'pending_payment') {
+      if (st === 'pending_payment') {
+        // Trip done but payment not yet settled — send to tracking payment screen
+        clearDriverPoll();
+        setSearchingForDriver(false);
+        setDriverFound(null);
+        router.replace({ pathname: '/rider/tracking', params: { tripId: id } } as any);
+        return;
+      }
+      if (st === 'completed') {
         clearDriverPoll();
         setSearchingForDriver(false);
         setDriverFound(null);
@@ -2583,8 +2860,7 @@ function BookInDriveStyle() {
 
   useRiderTripRealtime({
     riderId,
-    token,
-    enabled: Boolean(searchingForDriver && tripId && canCallAuthedApi && riderId && token),
+    enabled: Boolean(searchingForDriver && tripId && canCallAuthedApi && riderId),
     watchTripId: tripId,
     onTripUpdate: handleRiderTripWs,
   });
@@ -2816,14 +3092,7 @@ function BookInDriveStyle() {
       <StatusBar barStyle="light-content" backgroundColor="#0D1420" />
       {/* MAP SECTION */}
       <View
-        style={[
-          s.mapArea,
-          searchingForDriver && {
-            height: Math.min(winH * 0.52, winH * 0.56),
-            borderBottomWidth: StyleSheet.hairlineWidth,
-            borderBottomColor: 'rgba(34,229,160,0.28)',
-          },
-        ]}
+        style={s.mapArea}
       >
         {pickupCoords ? (
           !useNativeBookingMap ? (
@@ -2853,9 +3122,11 @@ function BookInDriveStyle() {
             <BookingRideMapNative
               pickupCoords={pickupCoords}
               destinationCoords={destinationCoords}
+              stopCoords={stopCoords}
               routePolyline={routeForMapDisplay}
               pickup={pickup}
               destination={destination}
+              stop={stop}
               routeLoading={bookingRouteLoading}
               pulseDropoffHalo={Boolean(destinationCoords && !bookingSheetScrolled)}
               searchMode={searchingForDriver}
@@ -2982,6 +3253,17 @@ function BookInDriveStyle() {
                   {pickup?.trim() || 'Pickup'}
                 </Text>
               </View>
+              {stopCoords ? (
+                <>
+                  <View style={s.mapBidLine} />
+                  <View style={s.mapBidRow}>
+                    <View style={[s.mapBidDot, { backgroundColor: '#F59E0B' }]} />
+                    <Text style={s.mapBidTxt} numberOfLines={1}>
+                      {stop?.trim() || 'Stop'}
+                    </Text>
+                  </View>
+                </>
+              ) : null}
               <View style={s.mapBidLine} />
               <View style={s.mapBidRow}>
                 <View style={[s.mapBidDot, { backgroundColor: '#F87171' }]} />
@@ -3015,7 +3297,11 @@ function BookInDriveStyle() {
 
       {/* BOTTOM SHEET */}
       <Animated.View
-        style={[s.sheet, { transform: [{ translateY: sheetSlide }], opacity: searchingForDriver ? 0 : 1 }]}
+        style={[
+          s.sheet,
+          searchingForDriver && s.sheetHidden,
+          { transform: [{ translateY: sheetSlide }] },
+        ]}
         pointerEvents={searchingForDriver ? 'none' : 'auto'}
       >
         <ScrollView
@@ -3144,6 +3430,44 @@ function BookInDriveStyle() {
               <Text style={s.bookFlowLaterLabel}>Later</Text>
             </TouchableOpacity>
           </View>
+
+          {destination?.trim() ? (
+            stopCoords ? (
+              <View style={s.bookFlowStopRow}>
+                <TouchableOpacity
+                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                  onPress={openStopSearch}
+                  activeOpacity={0.88}
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit stop"
+                >
+                  <View style={s.bookFlowStopDot} />
+                  <Text style={s.bookFlowStopText} numberOfLines={1}>
+                    {stop?.trim() || 'Stop'}
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={clearStop}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                  accessibilityLabel="Remove stop"
+                  accessibilityRole="button"
+                >
+                  <Ionicons name="close-circle" size={20} color={COLORS.dim} />
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={s.bookFlowAddStopBtn}
+                onPress={openStopSearch}
+                activeOpacity={0.88}
+                accessibilityRole="button"
+                accessibilityLabel="Add stop"
+              >
+                <Ionicons name="add-circle-outline" size={18} color={COLORS.blue} />
+                <Text style={s.bookFlowAddStopText}>Add stop</Text>
+              </TouchableOpacity>
+            )
+          ) : null}
 
           <View style={s.bookFlowRecentBlock}>
             <Text style={s.bookFlowRecentHeading}>Recent</Text>
@@ -3849,7 +4173,13 @@ function BookInDriveStyle() {
             <TouchableOpacity onPress={() => setShowLocationModal(false)}>
               <Ionicons name="close" size={28} color={COLORS.white} />
             </TouchableOpacity>
-            <Text style={s.modalTitle}>{editingField === 'pickup' ? 'Pickup' : 'Where to?'}</Text>
+            <Text style={s.modalTitle}>
+              {editingField === 'pickup'
+                ? 'Pickup'
+                : editingField === 'stop'
+                  ? 'Add stop'
+                  : 'Where to?'}
+            </Text>
             <View style={{ width: 28 }} />
           </View>
           <KeyboardAvoidingView
@@ -3859,10 +4189,24 @@ function BookInDriveStyle() {
           >
             <View style={s.modalBody}>
             <LocationAutocomplete
-              placeholder={editingField === 'pickup' ? 'Search pickup…' : 'Search destination…'}
-              value={editingField === 'pickup' ? pickup : destination}
+              placeholder={
+                editingField === 'pickup'
+                  ? 'Search pickup…'
+                  : editingField === 'stop'
+                    ? 'Search stop…'
+                    : 'Search destination…'
+              }
+              value={
+                editingField === 'pickup'
+                  ? pickup
+                  : editingField === 'stop'
+                    ? stop
+                    : destination
+              }
               onChangeText={(text) => {
-                editingField === 'pickup' ? setPickup(text) : setDestination(text);
+                if (editingField === 'pickup') setPickup(text);
+                else if (editingField === 'stop') setStop(text);
+                else setDestination(text);
               }}
               onPlaceSelected={async (loc) => {
                 try {
@@ -3898,6 +4242,18 @@ function BookInDriveStyle() {
                       Alert.alert(
                         'Could not pin pickup',
                         'Pick a suggestion from the list or type a fuller address so we can show the map at your pickup.',
+                      );
+                      return;
+                    }
+                  } else if (field === 'stop') {
+                    setStop(desc);
+                    if (coords) {
+                      setStopCoords(coords);
+                      invalidateRoutePricing();
+                    } else {
+                      Alert.alert(
+                        'Could not pin stop',
+                        'Pick a suggestion from the list or type a fuller address for your stop.',
                       );
                       return;
                     }
@@ -4343,6 +4699,46 @@ const s = StyleSheet.create({
     minWidth: 88,
   },
   bookFlowLaterLabel: { fontSize: 15, fontWeight: '900', color: COLORS.bg },
+  bookFlowAddStopBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  bookFlowAddStopText: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: COLORS.blue,
+  },
+  bookFlowStopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(245,158,11,0.28)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    marginTop: -4,
+    marginBottom: 4,
+  },
+  bookFlowStopDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: '#F59E0B',
+  },
+  bookFlowStopText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.white,
+  },
   bookFlowRecentBlock: { marginBottom: 18 },
   bookFlowRecentHeading: {
     fontSize: 13,
@@ -4407,6 +4803,7 @@ const s = StyleSheet.create({
   preferredText: { fontSize: 13, fontWeight: '800', color: '#FCA5A5' },
   preferredSub: { marginTop: 3, fontSize: 11, fontWeight: '600', color: 'rgba(252,211,231,0.85)', lineHeight: 15 },
   sheet: { flex: 1, backgroundColor: COLORS.bg, borderTopLeftRadius: 30, borderTopRightRadius: 30, marginTop: -24, paddingTop: 10 },
+  sheetHidden: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 0, overflow: 'hidden', opacity: 0, marginTop: 0, paddingTop: 0 },
   sheetContent: { flexGrow: 1 },
   scheduledCard: {
     backgroundColor: '#10213A',
